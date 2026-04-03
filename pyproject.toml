@@ -1,3 +1,10 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["backend"]
+
 [project]
 name = "vela"
 version = "0.1.0"
@@ -5,6 +12,8 @@ description = "Container deployment platform — orchestrate, build, and manage 
 requires-python = ">=3.12"
 dependencies = [
     "pydantic>=2.0,<3.0",
+    "fastapi>=0.115,<1.0",
+    "uvicorn[standard]>=0.34,<1.0",
 ]
 
 [project.optional-dependencies]
