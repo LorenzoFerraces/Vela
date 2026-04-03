@@ -13,3 +13,8 @@ venv/
 node_modules/
 frontend/dist/
 *.local
+
+# Playwright
+playwright-report/
+test-results/
+blob-report/
