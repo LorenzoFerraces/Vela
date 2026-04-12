@@ -11,6 +11,7 @@ version = "0.1.0"
 description = "Container deployment platform — orchestrate, build, and manage containers from a single interface."
 requires-python = ">=3.12"
 dependencies = [
+    "docker>=7.0,<8.0",
     "pydantic>=2.0,<3.0",
     "fastapi>=0.115,<1.0",
     "uvicorn[standard]>=0.34,<1.0",

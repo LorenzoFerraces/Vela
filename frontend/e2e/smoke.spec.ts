@@ -27,8 +27,14 @@ test('navbar navigates to placeholder sections', async ({ page }) => {
     await expect(
       page.getByRole('heading', { name: title, level: 1 })
     ).toBeVisible()
-    await expect(
-      page.getByText('Esta sección estará disponible pronto.')
-    ).toBeVisible()
+    if (path === '/containers') {
+      await expect(
+        page.getByLabel(/Docker image reference or Git clone URL/i)
+      ).toBeVisible()
+    } else {
+      await expect(
+        page.getByText('Esta sección estará disponible pronto.')
+      ).toBeVisible()
+    }
   }
 })

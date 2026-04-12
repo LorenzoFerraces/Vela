@@ -33,7 +33,9 @@ from app.core.models import (
     ProjectSource,
 )
 from app.core.builder import ImageBuilder
+from app.core.docker_orchestrator import DockerOrchestrator
 from app.core.orchestrator import ContainerOrchestrator
+from app.core.smoke import SMOKE_DEPLOY
 
 __all__ = [
     "BuildResult",
@@ -49,6 +51,7 @@ __all__ = [
     "ContainerStats",
     "ContainerStatus",
     "DeployConfig",
+    "DockerOrchestrator",
     "DockerfileGenerationError",
     "HealthCheckConfig",
     "HealthResult",
@@ -63,6 +66,7 @@ __all__ = [
     "ProviderConnectionError",
     "ResourceLimitError",
     "RestartPolicy",
+    "SMOKE_DEPLOY",
     "SupportedLanguage",
     "UnsupportedLanguageError",
     "VelaError",

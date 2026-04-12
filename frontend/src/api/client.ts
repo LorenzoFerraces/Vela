@@ -36,6 +36,17 @@ async function parseJson<T>(response: Response): Promise<T> {
   return JSON.parse(text) as T
 }
 
+async function readEmptyOk(response: Response): Promise<void> {
+  if (!response.ok) {
+    const body = await response.text()
+    throw new ApiError(
+      `Request failed: ${response.status} ${response.statusText}`,
+      response.status,
+      body
+    )
+  }
+}
+
 export async function apiRequest<T>(
   path: string,
   init: RequestInit = {}
@@ -76,6 +87,90 @@ export async function apiPost<TResponse, TBody = unknown>(
   })
 }
 
+export async function apiDelete(path: string): Promise<void> {
+  const url = `${getApiBaseUrl()}${path.startsWith('/') ? path : `/${path}`}`
+  const response = await fetch(url, {
+    method: 'DELETE',
+    headers: {
+      Accept: 'application/json',
+    },
+  })
+  await readEmptyOk(response)
+}
+
 export async function getHealth(): Promise<HealthResponse> {
   return apiGet<HealthResponse>('/api/health')
+}
+
+// --- Containers (Docker orchestrator) ---
+
+export type ContainerStatus =
+  | 'created'
+  | 'running'
+  | 'paused'
+  | 'restarting'
+  | 'stopped'
+  | 'dead'
+  | 'unknown'
+
+export interface PortMapping {
+  host_port: number
+  container_port: number
+  protocol: string
+}
+
+export interface ContainerInfo {
+  id: string
+  name: string
+  image: string
+  status: ContainerStatus
+  created_at: string
+  ports: PortMapping[]
+  labels: Record<string, string>
+  health: string
+}
+
+export interface RunFromSourceRequest {
+  source: string
+  container_name?: string | null
+  host_port?: number | null
+  container_port?: number
+  git_branch?: string
+}
+
+export interface RunFromSourceResponse {
+  container: ContainerInfo
+  kind: 'image' | 'git'
+  image: string
+}
+
+export async function listContainers(): Promise<ContainerInfo[]> {
+  return apiGet<ContainerInfo[]>('/api/containers/')
+}
+
+export async function runContainerFromSource(
+  body: RunFromSourceRequest
+): Promise<RunFromSourceResponse> {
+  return apiPost<RunFromSourceResponse, RunFromSourceRequest>(
+    '/api/containers/run',
+    body
+  )
+}
+
+export async function startContainer(containerId: string): Promise<ContainerInfo> {
+  return apiPost<ContainerInfo>(`/api/containers/${encodeURIComponent(containerId)}/start`, {})
+}
+
+export async function stopContainer(containerId: string): Promise<ContainerInfo> {
+  return apiPost<ContainerInfo>(`/api/containers/${encodeURIComponent(containerId)}/stop`, {})
+}
+
+export async function removeContainer(
+  containerId: string,
+  force = false
+): Promise<void> {
+  const q = force ? '?force=true' : ''
+  await apiDelete(
+    `/api/containers/${encodeURIComponent(containerId)}${q}`
+  )
 }
