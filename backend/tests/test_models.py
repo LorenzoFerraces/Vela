@@ -128,6 +128,16 @@ def test_project_source_branch_default() -> None:
     assert src.local_path is None
 
 
+def test_project_source_rejects_both_git_and_local() -> None:
+    with pytest.raises(ValueError, match="exactly one"):
+        ProjectSource(git_url="https://example.com/repo.git", local_path="/tmp/x")
+
+
+def test_project_source_rejects_neither() -> None:
+    with pytest.raises(ValueError, match="exactly one"):
+        ProjectSource()
+
+
 def test_project_info_minimal() -> None:
     pi = ProjectInfo(language=SupportedLanguage.PYTHON)
     assert pi.has_dockerfile is False

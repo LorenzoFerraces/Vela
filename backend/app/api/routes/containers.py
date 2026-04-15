@@ -2,15 +2,12 @@
 
 from __future__ import annotations
 
-import tempfile
 import uuid
-from pathlib import Path
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, Response, status
 
-from app.api.deps import get_orchestrator, get_traffic_router
-from app.api.git_ops import git_shallow_clone, rm_tree
+from app.api.deps import get_image_builder, get_orchestrator, get_traffic_router
 from app.api.route_wiring import (
     backend_port_for_route,
     register_route_for_deployed_container,
@@ -26,13 +23,15 @@ from app.core.public_route_host import (
     build_public_url,
     read_public_route_settings,
 )
-from app.core.enums import ContainerStatus
+from app.core.enums import ContainerStatus, RestartPolicy
+from app.core.default_image_builder import DefaultImageBuilder
 from app.core.models import (
     ContainerInfo,
     ContainerStats,
     DeployConfig,
     HealthResult,
     PortMapping,
+    ProjectSource,
 )
 from app.core.orchestrator import ContainerOrchestrator
 from app.core.traffic_router import TrafficRouter
@@ -133,13 +132,15 @@ async def run_from_user_source(
     body: RunFromSourceRequest,
     orchestrator: Annotated[ContainerOrchestrator, Depends(get_orchestrator)],
     traffic_router: Annotated[TrafficRouter, Depends(get_traffic_router)],
+    image_builder: Annotated[DefaultImageBuilder, Depends(get_image_builder)],
 ) -> RunFromSourceResponse:
     """Pull or build an image from ``source``, then deploy a container.
 
     * **Image** — registry reference (e.g. ``nginx:alpine``). The image is
       pulled if missing, then a container is started.
-    * **Git URL** — shallow clone and ``docker build`` in the repo root; then
-      a container is started from the new image tag.
+    * **Git URL** — shallow clone, ensure a ``Dockerfile`` (existing or
+      generated from ``package.json`` / Python / Go markers), ``docker build``,
+      then start a container from the new image tag.
     """
     kind, source = _infer_source_kind(body.source)
 
@@ -169,22 +170,20 @@ async def run_from_user_source(
             public_url=public_url,
         )
 
-    tmp_root = Path(tempfile.mkdtemp(prefix="vela-git-"))
-    clone_dest = tmp_root / "repo"
     tag = f"vela/gitbuild:{uuid.uuid4().hex[:12]}"
-    try:
-        await git_shallow_clone(url=source, branch=body.git_branch, dest=clone_dest)
-        await orchestrator.build_image(str(clone_dest), tag=tag)
-    finally:
-        rm_tree(tmp_root)
+    build_result = await image_builder.build_from_source(
+        ProjectSource(git_url=source, branch=body.git_branch),
+        tag=tag,
+    )
 
     cfg = _deploy_config_for_image(
-        image=tag,
+        image=build_result.image_tag,
         container_name=body.container_name,
         host_port=body.host_port,
         container_port=body.container_port,
     ).model_copy(
         update={
+            "restart_policy": RestartPolicy.UNLESS_STOPPED,
             "route_host": None if body.public_route else body.route_host,
             "route_path_prefix": body.route_path_prefix,
             "route_tls": body.route_tls if not body.public_route else False,
@@ -198,7 +197,7 @@ async def run_from_user_source(
     return RunFromSourceResponse(
         container=info,
         kind="git",
-        image=tag,
+        image=build_result.image_tag,
         route_wired=route_wired,
         public_url=public_url,
     )

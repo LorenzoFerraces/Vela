@@ -37,6 +37,11 @@ VELA_MANAGED_VALUE = "true"
 _NS_PER_SEC = 1_000_000_000
 
 
+def _is_vela_local_build_tag(image_ref: str) -> bool:
+    """True for tags produced by :meth:`DockerOrchestrator.build_image` in this app."""
+    return image_ref.strip().lower().startswith("vela/gitbuild:")
+
+
 def _docker_daemon_unreachable_message(exc: BaseException) -> str:
     """Turn docker-py's generic connection errors into actionable text."""
     msg = str(exc).strip()
@@ -250,9 +255,13 @@ class DockerOrchestrator(ContainerOrchestrator):
         return bindings
 
     def _ensure_image_sync(self, image_ref: str) -> None:
+        """Resolve ``image_ref`` locally; pull from a registry only when appropriate."""
         try:
             self._client.images.get(image_ref)
         except docker.errors.ImageNotFound:
+            # Local-only tags from ``docker build`` (e.g. vela/gitbuild:*) are not on a registry.
+            if _is_vela_local_build_tag(image_ref):
+                raise ImageNotFoundError(image_ref) from None
             self._client.images.pull(image_ref)
 
     def _remove_managed_name_conflict_sync(self, name: str) -> None:
@@ -600,12 +609,14 @@ class DockerOrchestrator(ContainerOrchestrator):
             log_parts: list[str] = []
             image_obj = None
             try:
+                # decode=False: ImageCollection.build() always runs json_stream() on the
+                # API stream; decode=True yields dicts and breaks json_stream (dict has no decode).
                 image_obj, build_logs = self._client.images.build(
                     path=path,
                     tag=tag,
                     dockerfile=dockerfile,
                     rm=True,
-                    decode=True,
+                    decode=False,
                 )
             except docker.errors.BuildError as e:
                 log = getattr(e, "build_log", None) or []

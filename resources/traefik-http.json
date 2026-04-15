@@ -15,6 +15,36 @@
         "rule": "Host(`vela-7a8e01b9314ad2cd.velaunq.ddns.net`)",
         "service": "vela_test-engine_svc",
         "tls": {}
+      },
+      "vela_test-uis-3_w": {
+        "entryPoints": [
+          "web"
+        ],
+        "rule": "Host(`vela-983c1419216671a2.velaunq.ddns.net`)",
+        "service": "vela_test-uis-3_svc"
+      },
+      "vela_test-uis-3_ws": {
+        "entryPoints": [
+          "websecure"
+        ],
+        "rule": "Host(`vela-983c1419216671a2.velaunq.ddns.net`)",
+        "service": "vela_test-uis-3_svc",
+        "tls": {}
+      },
+      "vela_test-uis-4_w": {
+        "entryPoints": [
+          "web"
+        ],
+        "rule": "Host(`vela-30bcbe642a664a6a.velaunq.ddns.net`)",
+        "service": "vela_test-uis-4_svc"
+      },
+      "vela_test-uis-4_ws": {
+        "entryPoints": [
+          "websecure"
+        ],
+        "rule": "Host(`vela-30bcbe642a664a6a.velaunq.ddns.net`)",
+        "service": "vela_test-uis-4_svc",
+        "tls": {}
       }
     },
     "services": {
@@ -23,6 +53,24 @@
           "servers": [
             {
               "url": "http://test-engine:80"
+            }
+          ]
+        }
+      },
+      "vela_test-uis-3_svc": {
+        "loadBalancer": {
+          "servers": [
+            {
+              "url": "http://test-uis-3:80"
+            }
+          ]
+        }
+      },
+      "vela_test-uis-4_svc": {
+        "loadBalancer": {
+          "servers": [
+            {
+              "url": "http://test-uis-4:80"
             }
           ]
         }

@@ -66,6 +66,13 @@ class UnsupportedLanguageError(BuilderError):
         )
 
 
+class UnsupportedProjectError(VelaError):
+    """No Dockerfile and no recognized project markers (e.g. package.json)."""
+
+    def __init__(self, message: str) -> None:
+        super().__init__(message)
+
+
 class CloneError(BuilderError):
     def __init__(self, git_url: str, message: str) -> None:
         self.git_url = git_url

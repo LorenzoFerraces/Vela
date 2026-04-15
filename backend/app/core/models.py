@@ -1,6 +1,8 @@
+from __future__ import annotations
+
 from datetime import datetime
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.core.enums import (
     BuildStrategy,
@@ -108,6 +110,16 @@ class ProjectSource(BaseModel):
     git_url: str | None = None
     local_path: str | None = None
     branch: str = "main"
+
+    @model_validator(mode="after")
+    def exactly_one_source(self) -> ProjectSource:
+        gu = (self.git_url or "").strip() or None
+        lp = (self.local_path or "").strip() or None
+        if (gu is None) == (lp is None):
+            raise ValueError("Set exactly one of git_url or local_path")
+        self.git_url = gu
+        self.local_path = lp
+        return self
 
 
 class ProjectInfo(BaseModel):

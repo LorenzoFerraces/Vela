@@ -47,8 +47,17 @@ Important variables for local dev:
 | `VELA_PUBLIC_ROUTE_DOMAIN` | Optional. Base domain for **generated** hostnames when the UI/API sends `public_route: true` (e.g. `apps.example.com`). Point **wildcard DNS** `*.apps.example.com` at your public Traefik (or LB). |
 | `VELA_PUBLIC_URL_SCHEME` | `https` (default) or `http`. Drives Traefik TLS on the generated router and the `public_url` returned by the API. |
 | `VELA_PUBLIC_ROUTE_HOST_PREFIX` | Optional. First label prefix before the random segment (default `vela-`). |
+| `VELA_ALLOWED_BUILD_ROOT` | Optional. When set, **local** build paths (`ProjectSource.local_path`, **POST `/api/images/build`** `context_path`, **POST `/api/builder/analyze`** `project_path`) must resolve under this directory. |
 
 `backend/.env` is loaded automatically when the API starts ([backend/app/bootstrap_env.py](backend/app/bootstrap_env.py)). See [backend/.env.example](backend/.env.example) for a template.
+
+### Building images without a pre-built registry image
+
+**POST `/api/containers/run`** with a **Git URL** shallow-clones the repo and runs `docker build`. If there is no `Dockerfile` at the context root, Vela writes one when it recognizes markers: **`package.json`** (Node; `tsconfig.json` or a TypeScript dependency → TypeScript image), **`requirements.txt`** / **`pyproject.toml`** (Python), or **`go.mod`** (Go). If nothing matches, the API responds with **400** and a short message asking for a Dockerfile or supported markers. Generated Node images try **`npm run start`**, then **`dev`**, then **`preview`** (Vite-style repos often have no `start` script). Git-built runs use **`restart: unless-stopped`** so a crash loop can recover after you fix the app.
+
+**POST `/api/builder/build`** runs the same clone-or-local → Dockerfile bootstrap → build pipeline and returns a **`BuildResult`** (without starting a container). Body shape: `{ "source": { "git_url": "https://...", "branch": "main" } }` or `{ "source": { "local_path": "C:/path/to/repo" } }`, plus **`tag`**.
+
+**POST `/api/images/build`** builds from a **server-local** `context_path` (subject to **`VELA_ALLOWED_BUILD_ROOT`** when set). **GET `/api/images/`** lists tags on the Docker host; **POST `/api/images/pull`** pulls a registry image.
 
 ### Public URLs (customers, no manual hosts)
 

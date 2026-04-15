@@ -6,6 +6,7 @@ import os
 from functools import lru_cache
 from pathlib import Path
 
+from app.core.default_image_builder import DefaultImageBuilder
 from app.core.docker_orchestrator import DockerOrchestrator
 from app.core.exceptions import TrafficRouterError
 from app.core.kubernetes_traffic_router import KubernetesTrafficRouter
@@ -17,6 +18,12 @@ from app.core.traefik_file_traffic_router import TraefikFileTrafficRouter
 def get_orchestrator() -> DockerOrchestrator:
     """Shared Docker-backed orchestrator (one client per process)."""
     return DockerOrchestrator()
+
+
+@lru_cache(maxsize=1)
+def get_image_builder() -> DefaultImageBuilder:
+    """Git/local clone + Dockerfile bootstrap + ``docker build``."""
+    return DefaultImageBuilder(orchestrator=get_orchestrator())
 
 
 def _traffic_router_from_env() -> TrafficRouter:

@@ -7,6 +7,7 @@ from app.core.exceptions import (
     AnalysisError,
     BuilderError,
     CloneError,
+    UnsupportedProjectError,
     ContainerAlreadyRunningError,
     ContainerNotFoundError,
     ContainerNotRunningError,
@@ -46,6 +47,15 @@ def register_exception_handlers(app) -> None:
 
     @app.exception_handler(ResourceLimitError)
     async def bad_request_handler(_request: Request, exc: VelaError) -> JSONResponse:
+        return JSONResponse(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            content={"detail": str(exc)},
+        )
+
+    @app.exception_handler(UnsupportedProjectError)
+    async def unsupported_project_handler(
+        _request: Request, exc: UnsupportedProjectError
+    ) -> JSONResponse:
         return JSONResponse(
             status_code=status.HTTP_400_BAD_REQUEST,
             content={"detail": str(exc)},

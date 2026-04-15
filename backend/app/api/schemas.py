@@ -6,7 +6,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
 
-from app.core.models import ContainerInfo
+from app.core.models import ContainerInfo, ProjectSource
 
 
 class RunFromSourceRequest(BaseModel):
@@ -83,6 +83,24 @@ class RunFromSourceResponse(BaseModel):
         default=None,
         description="Canonical URL when public_route was used and the route was wired.",
     )
+
+
+class BuilderBuildRequest(BaseModel):
+    """POST /api/builder/build body."""
+
+    source: ProjectSource
+    tag: str = Field(
+        ...,
+        min_length=1,
+        max_length=256,
+        description="Image reference to assign to the built image (e.g. vela/myapp:dev).",
+    )
+
+
+class BuilderAnalyzeRequest(BaseModel):
+    """POST /api/builder/analyze body (local directory on the server)."""
+
+    project_path: str = Field(..., min_length=1, max_length=4096)
 
 
 class ContainerDeployResponse(BaseModel):

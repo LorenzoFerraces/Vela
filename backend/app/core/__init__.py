@@ -22,6 +22,7 @@ from app.core.exceptions import (
     RouteNotFoundError,
     TrafficRouterError,
     UnsupportedLanguageError,
+    UnsupportedProjectError,
     VelaError,
 )
 from app.core.models import (
@@ -38,6 +39,7 @@ from app.core.models import (
 from app.core.traffic_models import RouteInfo, RouteSpec
 from app.core.traffic_router import NoopTrafficRouter, TrafficRouter
 from app.core.builder import ImageBuilder
+from app.core.default_image_builder import DefaultImageBuilder
 from app.core.docker_orchestrator import DockerOrchestrator
 from app.core.kubernetes_traffic_router import KubernetesTrafficRouter
 from app.core.traefik_file_traffic_router import TraefikFileTrafficRouter
@@ -57,6 +59,7 @@ __all__ = [
     "ContainerOrchestrator",
     "ContainerStats",
     "ContainerStatus",
+    "DefaultImageBuilder",
     "DeployConfig",
     "DockerOrchestrator",
     "DockerfileGenerationError",
@@ -85,5 +88,6 @@ __all__ = [
     "KubernetesTrafficRouter",
     "NoopTrafficRouter",
     "UnsupportedLanguageError",
+    "UnsupportedProjectError",
     "VelaError",
 ]
