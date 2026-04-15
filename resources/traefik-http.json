@@ -1,0 +1,32 @@
+{
+  "http": {
+    "routers": {
+      "vela_test-engine_w": {
+        "entryPoints": [
+          "web"
+        ],
+        "rule": "Host(`vela-7a8e01b9314ad2cd.velaunq.ddns.net`)",
+        "service": "vela_test-engine_svc"
+      },
+      "vela_test-engine_ws": {
+        "entryPoints": [
+          "websecure"
+        ],
+        "rule": "Host(`vela-7a8e01b9314ad2cd.velaunq.ddns.net`)",
+        "service": "vela_test-engine_svc",
+        "tls": {}
+      }
+    },
+    "services": {
+      "vela_test-engine_svc": {
+        "loadBalancer": {
+          "servers": [
+            {
+              "url": "http://test-engine:80"
+            }
+          ]
+        }
+      }
+    }
+  }
+}

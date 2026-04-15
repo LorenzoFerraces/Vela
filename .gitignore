@@ -9,6 +9,9 @@ build/
 .venv/
 venv/
 
+.env
+backend/.env
+
 # Frontend
 node_modules/
 frontend/dist/

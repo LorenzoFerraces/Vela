@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from app.core.enums import (
     BuildStrategy,
@@ -41,6 +41,33 @@ class DeployConfig(BaseModel):
     labels: dict[str, str] = Field(default_factory=dict)
     command: list[str] | None = None
     health_check: HealthCheckConfig | None = None
+    route_host: str | None = Field(
+        default=None,
+        description="If set, register a Traefik file-provider route to this host after deploy.",
+    )
+    route_path_prefix: str = Field(
+        default="/",
+        description="Path prefix for the edge route (ignored by the Docker engine).",
+    )
+    route_tls: bool = Field(
+        default=False,
+        description="Whether the generated Traefik router enables TLS (entrypoints must match).",
+    )
+    public_route: bool = Field(
+        default=False,
+        description=(
+            "If true, allocate route_host under VELA_PUBLIC_ROUTE_DOMAIN and set route_tls from "
+            "VELA_PUBLIC_URL_SCHEME; client-supplied route_host is ignored."
+        ),
+    )
+
+    @field_validator("route_path_prefix")
+    @classmethod
+    def route_path_prefix_must_start_with_slash(cls, value: str) -> str:
+        if not value.startswith("/"):
+            msg = "route_path_prefix must start with '/'"
+            raise ValueError(msg)
+        return value
 
 
 class ContainerInfo(BaseModel):

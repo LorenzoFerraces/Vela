@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from app.core.models import ContainerInfo
 
@@ -40,9 +40,60 @@ class RunFromSourceRequest(BaseModel):
         max_length=256,
         description="Branch to clone when source is a Git URL.",
     )
+    route_host: str | None = Field(
+        default=None,
+        max_length=253,
+        description="If set, register a Traefik route for this hostname after the container starts.",
+    )
+    route_path_prefix: str = Field(
+        default="/",
+        max_length=512,
+        description="URL path prefix for the Traefik route.",
+    )
+    route_tls: bool = Field(
+        default=False,
+        description="Enable TLS on the generated Traefik router (matches static entrypoints).",
+    )
+    public_route: bool = Field(
+        default=False,
+        description=(
+            "If true, server allocates a hostname under VELA_PUBLIC_ROUTE_DOMAIN; "
+            "route_host from this request is ignored."
+        ),
+    )
+
+    @field_validator("route_path_prefix")
+    @classmethod
+    def route_path_prefix_must_start_with_slash(cls, value: str) -> str:
+        if not value.startswith("/"):
+            msg = "route_path_prefix must start with '/'"
+            raise ValueError(msg)
+        return value
 
 
 class RunFromSourceResponse(BaseModel):
     container: ContainerInfo
     kind: Literal["image", "git"]
     image: str
+    route_wired: bool = Field(
+        default=False,
+        description="True if a Traefik route was registered for this deploy.",
+    )
+    public_url: str | None = Field(
+        default=None,
+        description="Canonical URL when public_route was used and the route was wired.",
+    )
+
+
+class ContainerDeployResponse(BaseModel):
+    """Result of POST /containers/deploy with optional edge route metadata."""
+
+    container: ContainerInfo
+    route_wired: bool = Field(
+        default=False,
+        description="True if a Traefik route was registered for this deploy.",
+    )
+    public_url: str | None = Field(
+        default=None,
+        description="Canonical URL when public_route was used and the route was wired.",
+    )

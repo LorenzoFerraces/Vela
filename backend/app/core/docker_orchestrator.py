@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import re
 import sys
 from collections.abc import Callable
@@ -206,8 +207,17 @@ class DockerOrchestrator(ContainerOrchestrator):
         self,
         *,
         client: docker.DockerClient | None = None,
+        default_network: str | None = None,
         **kwargs: Any,
     ) -> None:
+        """Create the orchestrator.
+
+        Args:
+            client: Optional Docker client (for tests); otherwise built from the environment.
+            default_network: Attach new containers to this Docker network at create time.
+                If ``None``, uses ``VELA_DOCKER_NETWORK`` from the environment when set.
+                Pass ``""`` to force default engine networking even when the env var is set.
+        """
         if client is not None:
             self._client = client
         else:
@@ -215,6 +225,10 @@ class DockerOrchestrator(ContainerOrchestrator):
                 self._client = docker.from_env(**kwargs)
             except docker.errors.DockerException as e:
                 raise ProviderConnectionError(_docker_daemon_unreachable_message(e)) from e
+        if default_network is None:
+            self._default_network = os.environ.get("VELA_DOCKER_NETWORK", "").strip() or None
+        else:
+            self._default_network = default_network.strip() or None
 
     async def _to_thread(self, fn: Callable[[], T]) -> T:
         return await asyncio.to_thread(fn)
@@ -294,6 +308,8 @@ class DockerOrchestrator(ContainerOrchestrator):
                 kwargs["nano_cpus"] = nano_cpus
             if hc is not None:
                 kwargs["healthcheck"] = hc
+            if self._default_network:
+                kwargs["network"] = self._default_network
 
             try:
                 container = self._client.containers.create(config.image, **kwargs)

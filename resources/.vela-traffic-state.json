@@ -1,0 +1,16 @@
+{
+  "routes": [
+    {
+      "backend_host": "test-engine",
+      "backend_port": 80,
+      "entrypoints": [
+        "web",
+        "websecure"
+      ],
+      "host": "vela-7a8e01b9314ad2cd.velaunq.ddns.net",
+      "path_prefix": "/",
+      "route_id": "test-engine",
+      "tls_enabled": true
+    }
+  ]
+}

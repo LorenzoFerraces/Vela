@@ -18,6 +18,9 @@ from app.core.exceptions import (
     OrchestratorError,
     ProviderConnectionError,
     ResourceLimitError,
+    RouteConfigurationError,
+    RouteNotFoundError,
+    TrafficRouterError,
     UnsupportedLanguageError,
     VelaError,
 )
@@ -32,8 +35,12 @@ from app.core.models import (
     ProjectInfo,
     ProjectSource,
 )
+from app.core.traffic_models import RouteInfo, RouteSpec
+from app.core.traffic_router import NoopTrafficRouter, TrafficRouter
 from app.core.builder import ImageBuilder
 from app.core.docker_orchestrator import DockerOrchestrator
+from app.core.kubernetes_traffic_router import KubernetesTrafficRouter
+from app.core.traefik_file_traffic_router import TraefikFileTrafficRouter
 from app.core.orchestrator import ContainerOrchestrator
 from app.core.smoke import SMOKE_DEPLOY
 
@@ -66,8 +73,17 @@ __all__ = [
     "ProviderConnectionError",
     "ResourceLimitError",
     "RestartPolicy",
+    "RouteConfigurationError",
+    "RouteInfo",
+    "RouteNotFoundError",
+    "RouteSpec",
     "SMOKE_DEPLOY",
     "SupportedLanguage",
+    "TrafficRouter",
+    "TrafficRouterError",
+    "TraefikFileTrafficRouter",
+    "KubernetesTrafficRouter",
+    "NoopTrafficRouter",
     "UnsupportedLanguageError",
     "VelaError",
 ]

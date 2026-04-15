@@ -9,6 +9,12 @@ import {
   stopContainer,
 } from '../api/client'
 
+type FormMessage = {
+  type: 'ok' | 'err'
+  text: string
+  publicUrl?: string
+}
+
 function formatApiError(e: unknown): string {
   if (e instanceof ApiError) {
     try {
@@ -31,17 +37,18 @@ export default function ContainersPage() {
   const [hostPort, setHostPort] = useState('')
   const [containerPort, setContainerPort] = useState('80')
   const [gitBranch, setGitBranch] = useState('main')
+  const [routeHost, setRouteHost] = useState('')
+  const [routePathPrefix, setRoutePathPrefix] = useState('/')
+  const [routeTls, setRouteTls] = useState(false)
+  const [publicRoute, setPublicRoute] = useState(false)
   const [busy, setBusy] = useState(false)
-  const [message, setMessage] = useState<{ type: 'ok' | 'err'; text: string } | null>(
-    null
-  )
+  const [message, setMessage] = useState<FormMessage | null>(null)
   const [rows, setRows] = useState<ContainerInfo[]>([])
   const [listLoading, setListLoading] = useState(true)
   const [rowBusy, setRowBusy] = useState<string | null>(null)
 
   const refresh = useCallback(async () => {
     setListLoading(true)
-    setMessage(null)
     try {
       const data = await listContainers()
       setRows(data)
@@ -86,10 +93,22 @@ export default function ContainersPage() {
         host_port: host ?? null,
         container_port: cport,
         git_branch: gitBranch.trim() || 'main',
+        route_host: publicRoute ? null : routeHost.trim() || null,
+        route_path_prefix: routePathPrefix.trim() || '/',
+        route_tls: publicRoute ? false : routeTls,
+        public_route: publicRoute,
       })
+      const routeNote = res.route_wired
+        ? ' Traefik route registered.'
+        : ''
+      const publicUrl =
+        typeof res.public_url === 'string' && res.public_url.length > 0
+          ? res.public_url
+          : undefined
       setMessage({
         type: 'ok',
-        text: `Started (${res.kind}) as ${res.container.name} — image ${res.image}`,
+        text: `Started (${res.kind}) as ${res.container.name} — image ${res.image}.${routeNote}`,
+        publicUrl,
       })
       setSource('')
       await refresh()
@@ -193,6 +212,73 @@ export default function ContainersPage() {
           </div>
         </div>
 
+        <label className="containers-form__label containers-form__checkbox-label">
+          <input
+            type="checkbox"
+            checked={publicRoute}
+            onChange={(e) => setPublicRoute(e.target.checked)}
+          />{' '}
+          Public URL — server allocates a hostname under{' '}
+          <code className="containers-form__code">VELA_PUBLIC_ROUTE_DOMAIN</code> (no manual DNS).
+        </label>
+
+        <div className="containers-form__grid">
+          <div>
+            <label className="containers-form__label" htmlFor="route-host-input">
+              Traefik hostname (optional)
+            </label>
+            <input
+              id="route-host-input"
+              className="containers-form__input"
+              type="text"
+              value={routeHost}
+              onChange={(e) => setRouteHost(e.target.value)}
+              placeholder="myapp.localhost"
+              autoComplete="off"
+              disabled={publicRoute}
+            />
+            <p className="containers-form__hint" id="route-host-hint">
+              {publicRoute ? (
+                <>
+                  Custom hostname is disabled while <strong>Public URL</strong> is on. Set{' '}
+                  <code className="containers-form__code">VELA_PUBLIC_ROUTE_DOMAIN</code> on the API
+                  host and point wildcard DNS at your Traefik edge.
+                </>
+              ) : (
+                <>
+                  Use a name like <strong>myapp.localhost</strong> so the browser resolves to
+                  127.0.0.1 without editing hosts. Or use public DNS, e.g.{' '}
+                  <strong>myapp.127.0.0.1.nip.io</strong> (must match this field exactly in Traefik).
+                </>
+              )}
+            </p>
+          </div>
+          <div>
+            <label className="containers-form__label" htmlFor="route-path-input">
+              Route path prefix
+            </label>
+            <input
+              id="route-path-input"
+              className="containers-form__input"
+              type="text"
+              value={routePathPrefix}
+              onChange={(e) => setRoutePathPrefix(e.target.value)}
+              placeholder="/"
+            />
+          </div>
+        </div>
+
+        <label className="containers-form__label containers-form__checkbox-label">
+          <input
+            type="checkbox"
+            checked={routeTls}
+            onChange={(e) => setRouteTls(e.target.checked)}
+            disabled={publicRoute}
+          />{' '}
+          Traefik TLS on this route (requires matching entrypoints in Traefik static config). When{' '}
+          <strong>Public URL</strong> is on, TLS follows <code className="containers-form__code">VELA_PUBLIC_URL_SCHEME</code>.
+        </label>
+
         <div className="containers-form__grid containers-form__grid--ports">
           <div>
             <label className="containers-form__label" htmlFor="host-port-input">
@@ -231,7 +317,10 @@ export default function ContainersPage() {
           <button
             type="button"
             className="btn btn--ghost"
-            onClick={() => void refresh()}
+            onClick={() => {
+              setMessage(null)
+              void refresh()
+            }}
             disabled={listLoading || busy}
           >
             Refresh list
@@ -240,7 +329,7 @@ export default function ContainersPage() {
       </form>
 
       {message && (
-        <p
+        <div
           className={
             message.type === 'ok'
               ? 'containers-banner containers-banner--ok'
@@ -248,8 +337,27 @@ export default function ContainersPage() {
           }
           role="alert"
         >
-          {message.text}
-        </p>
+          <p className="containers-banner__text">{message.text}</p>
+          {message.type === 'ok' && message.publicUrl ? (
+            <div className="containers-public-url">
+              <a
+                className="containers-public-url__link"
+                href={message.publicUrl}
+                target="_blank"
+                rel="noreferrer"
+              >
+                {message.publicUrl}
+              </a>
+              <button
+                type="button"
+                className="btn btn--ghost btn--sm"
+                onClick={() => void navigator.clipboard.writeText(message.publicUrl!)}
+              >
+                Copy URL
+              </button>
+            </div>
+          ) : null}
+        </div>
       )}
 
       <h2 className="containers-page__subtitle">Running workloads</h2>

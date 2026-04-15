@@ -16,6 +16,9 @@ from app.core.exceptions import (
     OrchestratorError,
     ProviderConnectionError,
     ResourceLimitError,
+    RouteConfigurationError,
+    RouteNotFoundError,
+    TrafficRouterError,
     UnsupportedLanguageError,
     VelaError,
 )
@@ -24,6 +27,7 @@ from app.core.exceptions import (
 def register_exception_handlers(app) -> None:
     """Register handlers for Vela domain errors."""
 
+    @app.exception_handler(RouteNotFoundError)
     @app.exception_handler(ContainerNotFoundError)
     @app.exception_handler(ImageNotFoundError)
     async def not_found_handler(_request: Request, exc: VelaError) -> JSONResponse:
@@ -47,11 +51,15 @@ def register_exception_handlers(app) -> None:
             content={"detail": str(exc)},
         )
 
+    @app.exception_handler(RouteConfigurationError)
     @app.exception_handler(ImageBuildError)
-    async def image_build_handler(_request: Request, exc: ImageBuildError) -> JSONResponse:
+    async def image_build_handler(_request: Request, exc: VelaError) -> JSONResponse:
+        payload: dict = {"detail": str(exc)}
+        if isinstance(exc, ImageBuildError):
+            payload["build_log"] = exc.build_log or None
         return JSONResponse(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            content={"detail": str(exc), "build_log": exc.build_log or None},
+            content=payload,
         )
 
     @app.exception_handler(ProviderConnectionError)
@@ -77,6 +85,13 @@ def register_exception_handlers(app) -> None:
     async def builder_handler(_request: Request, exc: BuilderError) -> JSONResponse:
         return JSONResponse(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            content={"detail": str(exc)},
+        )
+
+    @app.exception_handler(TrafficRouterError)
+    async def traffic_router_handler(_request: Request, exc: TrafficRouterError) -> JSONResponse:
+        return JSONResponse(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             content={"detail": str(exc)},
         )
 

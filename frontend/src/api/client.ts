@@ -136,12 +136,18 @@ export interface RunFromSourceRequest {
   host_port?: number | null
   container_port?: number
   git_branch?: string
+  route_host?: string | null
+  route_path_prefix?: string
+  route_tls?: boolean
+  public_route?: boolean
 }
 
 export interface RunFromSourceResponse {
   container: ContainerInfo
   kind: 'image' | 'git'
   image: string
+  route_wired: boolean
+  public_url?: string | null
 }
 
 export async function listContainers(): Promise<ContainerInfo[]> {

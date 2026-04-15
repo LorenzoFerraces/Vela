@@ -9,9 +9,23 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, Response, status
 
-from app.api.deps import get_orchestrator
+from app.api.deps import get_orchestrator, get_traffic_router
 from app.api.git_ops import git_shallow_clone, rm_tree
-from app.api.schemas import RunFromSourceRequest, RunFromSourceResponse
+from app.api.route_wiring import (
+    backend_port_for_route,
+    register_route_for_deployed_container,
+    remove_route_for_container_name,
+)
+from app.api.schemas import (
+    ContainerDeployResponse,
+    RunFromSourceRequest,
+    RunFromSourceResponse,
+)
+from app.core.public_route_host import (
+    apply_public_route_to_deploy_config,
+    build_public_url,
+    read_public_route_settings,
+)
 from app.core.enums import ContainerStatus
 from app.core.models import (
     ContainerInfo,
@@ -21,8 +35,42 @@ from app.core.models import (
     PortMapping,
 )
 from app.core.orchestrator import ContainerOrchestrator
+from app.core.traffic_router import TrafficRouter
 
 router = APIRouter()
+
+
+async def _deploy_and_maybe_wire_route(
+    orchestrator: ContainerOrchestrator,
+    traffic_router: TrafficRouter,
+    config: DeployConfig,
+) -> tuple[ContainerInfo, bool, str | None]:
+    """Deploy then register Traefik route; roll back the container if wiring fails."""
+    info = await orchestrator.deploy(config)
+    route_host = (config.route_host or "").strip()
+    if not route_host:
+        return info, False, None
+    try:
+        await register_route_for_deployed_container(
+            traffic_router=traffic_router,
+            container_info=info,
+            route_host=route_host,
+            path_prefix=config.route_path_prefix,
+            backend_port=backend_port_for_route(config),
+            tls_enabled=config.route_tls,
+        )
+    except Exception:
+        await orchestrator.remove(info.id, force=True)
+        raise
+    public_url = None
+    if config.public_route:
+        _, scheme, _ = read_public_route_settings()
+        public_url = build_public_url(
+            scheme=scheme,
+            host=route_host,
+            path_prefix=config.route_path_prefix,
+        )
+    return info, True, public_url
 
 
 def _infer_source_kind(source: str) -> tuple[str, str]:
@@ -62,19 +110,29 @@ async def list_containers(
     return await orchestrator.list(status=container_status)
 
 
-@router.post("/deploy", response_model=ContainerInfo)
+@router.post("/deploy", response_model=ContainerDeployResponse)
 async def deploy(
     config: DeployConfig,
     orchestrator: Annotated[ContainerOrchestrator, Depends(get_orchestrator)],
-) -> ContainerInfo:
+    traffic_router: Annotated[TrafficRouter, Depends(get_traffic_router)],
+) -> ContainerDeployResponse:
     """Create and start a container from configuration."""
-    return await orchestrator.deploy(config)
+    config = await apply_public_route_to_deploy_config(config, traffic_router)
+    info, route_wired, public_url = await _deploy_and_maybe_wire_route(
+        orchestrator, traffic_router, config
+    )
+    return ContainerDeployResponse(
+        container=info,
+        route_wired=route_wired,
+        public_url=public_url,
+    )
 
 
 @router.post("/run", response_model=RunFromSourceResponse)
 async def run_from_user_source(
     body: RunFromSourceRequest,
     orchestrator: Annotated[ContainerOrchestrator, Depends(get_orchestrator)],
+    traffic_router: Annotated[TrafficRouter, Depends(get_traffic_router)],
 ) -> RunFromSourceResponse:
     """Pull or build an image from ``source``, then deploy a container.
 
@@ -91,9 +149,25 @@ async def run_from_user_source(
             container_name=body.container_name,
             host_port=body.host_port,
             container_port=body.container_port,
+        ).model_copy(
+            update={
+                "route_host": None if body.public_route else body.route_host,
+                "route_path_prefix": body.route_path_prefix,
+                "route_tls": body.route_tls if not body.public_route else False,
+                "public_route": body.public_route,
+            }
         )
-        info = await orchestrator.deploy(cfg)
-        return RunFromSourceResponse(container=info, kind="image", image=source)
+        cfg = await apply_public_route_to_deploy_config(cfg, traffic_router)
+        info, route_wired, public_url = await _deploy_and_maybe_wire_route(
+            orchestrator, traffic_router, cfg
+        )
+        return RunFromSourceResponse(
+            container=info,
+            kind="image",
+            image=source,
+            route_wired=route_wired,
+            public_url=public_url,
+        )
 
     tmp_root = Path(tempfile.mkdtemp(prefix="vela-git-"))
     clone_dest = tmp_root / "repo"
@@ -109,9 +183,25 @@ async def run_from_user_source(
         container_name=body.container_name,
         host_port=body.host_port,
         container_port=body.container_port,
+    ).model_copy(
+        update={
+            "route_host": None if body.public_route else body.route_host,
+            "route_path_prefix": body.route_path_prefix,
+            "route_tls": body.route_tls if not body.public_route else False,
+            "public_route": body.public_route,
+        }
     )
-    info = await orchestrator.deploy(cfg)
-    return RunFromSourceResponse(container=info, kind="git", image=tag)
+    cfg = await apply_public_route_to_deploy_config(cfg, traffic_router)
+    info, route_wired, public_url = await _deploy_and_maybe_wire_route(
+        orchestrator, traffic_router, cfg
+    )
+    return RunFromSourceResponse(
+        container=info,
+        kind="git",
+        image=tag,
+        route_wired=route_wired,
+        public_url=public_url,
+    )
 
 
 @router.get("/{container_id}", response_model=ContainerInfo)
@@ -156,9 +246,15 @@ async def restart_container(
 async def remove_container(
     container_id: str,
     orchestrator: Annotated[ContainerOrchestrator, Depends(get_orchestrator)],
+    traffic_router: Annotated[TrafficRouter, Depends(get_traffic_router)],
     force: bool = False,
 ) -> Response:
-    """Remove a container."""
+    """Remove a container and drop any Traefik route keyed by its name."""
+    info = await orchestrator.get(container_id)
+    await remove_route_for_container_name(
+        traffic_router=traffic_router,
+        container_name=info.name,
+    )
     await orchestrator.remove(container_id, force=force)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 

@@ -50,6 +50,19 @@ def test_deploy_config_minimal() -> None:
     assert d.ports == []
     assert d.restart_policy is RestartPolicy.NEVER
     assert d.health_check is None
+    assert d.route_host is None
+    assert d.route_path_prefix == "/"
+    assert d.route_tls is False
+    assert d.public_route is False
+
+
+def test_deploy_config_route_path_prefix_validation() -> None:
+    with pytest.raises(ValidationError):
+        DeployConfig(
+            image="nginx:alpine",
+            route_host="app.test",
+            route_path_prefix="api",
+        )
 
 
 def test_deploy_config_rejects_missing_image() -> None:
