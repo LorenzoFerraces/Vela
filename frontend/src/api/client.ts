@@ -24,6 +24,26 @@ export class ApiError extends Error {
   }
 }
 
+/** User-facing text from a failed API call (`detail` / optional `build_log` when JSON). */
+export function formatApiError(error: unknown): string {
+  if (!(error instanceof ApiError)) {
+    return String(error)
+  }
+  try {
+    const parsed = JSON.parse(error.body) as {
+      detail?: string
+      build_log?: string
+    }
+    const detail = parsed.detail ?? error.message
+    if (parsed.build_log) {
+      return `${detail}\n\n${parsed.build_log.slice(-2000)}`
+    }
+    return detail
+  } catch {
+    return error.message
+  }
+}
+
 export interface HealthResponse {
   status: string
 }

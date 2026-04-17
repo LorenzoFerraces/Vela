@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import {
-  ApiError,
   type ContainerInfo,
+  formatApiError,
   listContainers,
   removeContainer,
   runContainerFromSource,
@@ -13,22 +13,6 @@ type FormMessage = {
   type: 'ok' | 'err'
   text: string
   publicUrl?: string
-}
-
-function formatApiError(e: unknown): string {
-  if (e instanceof ApiError) {
-    try {
-      const j = JSON.parse(e.body) as { detail?: string; build_log?: string }
-      const detail = j.detail ?? e.message
-      if (j.build_log) {
-        return `${detail}\n\n${j.build_log.slice(-2000)}`
-      }
-      return detail
-    } catch {
-      return e.message
-    }
-  }
-  return String(e)
 }
 
 /** Matches backend `_infer_source_kind` in `app/api/routes/containers.py`. */
@@ -59,8 +43,8 @@ export default function ContainersPage() {
     try {
       const data = await listContainers()
       setRows(data)
-    } catch (e) {
-      setMessage({ type: 'err', text: formatApiError(e) })
+    } catch (error) {
+      setMessage({ type: 'err', text: formatApiError(error) })
     } finally {
       setListLoading(false)
     }
@@ -105,8 +89,8 @@ export default function ContainersPage() {
       })
       setSource('')
       await refresh()
-    } catch (err) {
-      setMessage({ type: 'err', text: formatApiError(err) })
+    } catch (error) {
+      setMessage({ type: 'err', text: formatApiError(error) })
     } finally {
       setBusy(false)
     }
@@ -118,8 +102,8 @@ export default function ContainersPage() {
     try {
       await startContainer(id)
       await refresh()
-    } catch (err) {
-      setMessage({ type: 'err', text: formatApiError(err) })
+    } catch (error) {
+      setMessage({ type: 'err', text: formatApiError(error) })
     } finally {
       setRowBusy(null)
     }
@@ -131,8 +115,8 @@ export default function ContainersPage() {
     try {
       await stopContainer(id)
       await refresh()
-    } catch (err) {
-      setMessage({ type: 'err', text: formatApiError(err) })
+    } catch (error) {
+      setMessage({ type: 'err', text: formatApiError(error) })
     } finally {
       setRowBusy(null)
     }
@@ -145,8 +129,8 @@ export default function ContainersPage() {
     try {
       await removeContainer(id, true)
       await refresh()
-    } catch (err) {
-      setMessage({ type: 'err', text: formatApiError(err) })
+    } catch (error) {
+      setMessage({ type: 'err', text: formatApiError(error) })
     } finally {
       setRowBusy(null)
     }
@@ -156,8 +140,7 @@ export default function ContainersPage() {
     <section className="containers-page">
       <h1 className="containers-page__title">Containers</h1>
       <p className="containers-page__lead">
-        Image or Git URL → build and run on the Vela network. Public URL uses{' '}
-        <code className="containers-form__code">VELA_PUBLIC_ROUTE_DOMAIN</code> (see README).
+        Image or Git URL → build and run on the Vela network.
       </p>
 
       <form className="containers-form" onSubmit={onSubmit}>
