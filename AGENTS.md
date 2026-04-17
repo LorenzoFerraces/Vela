@@ -28,6 +28,14 @@ Conventions for tooling, dependencies, naming, and Python style. Follow this fil
 - **Avoid `instanceof` when practical.** Prefer discriminated unions, narrow with `typeof` / `in`, small type-predicate helpers, or parsing/validation (e.g. Zod) so behavior does not depend on prototype chains or cross-realm objects.
 - Use `instanceof` only where it is clearly the best tool (e.g. a well-owned `Error` subclass in the same bundle) and document why if it is non-obvious.
 
+## UI and forms (user experience)
+
+- **Prioritize user experience** when designing and building interfaces: flows should feel clear, fast, and respectful of attention.
+- **Keep form fields short and concise** (labels, placeholders, helper text). Prefer tight copy over verbose prose.
+- **Avoid long explanations** inline on the form; if something needs detail, link to docs or a collapsible help pattern rather than wall-of-text above fields.
+- **Long forms are fine to split**: use **multi-step flows** or **modals** (and related patterns) so users are not overwhelmed by a single scrolling page of inputs.
+- **Containers** (`frontend/src/pages/ContainersPage.tsx`): the run form always uses **public routes** (`public_route: true`), fixed **container port 80**, no host port mapping, and shows **Git branch** only when the source looks like a Git URL (same `git@` / `http(s)://` / `ssh://` prefix rules as `POST /api/containers/run` on the server).
+
 ## Errors shown to users (frontend and API)
 
 - **Surface client-facing messages**, not raw implementation details. Do not let low-level or library errors reach the UI unchanged when a clearer explanation is possible.
