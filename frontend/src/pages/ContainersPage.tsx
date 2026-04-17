@@ -31,21 +31,28 @@ function formatApiError(e: unknown): string {
   return String(e)
 }
 
+/** Matches backend `_infer_source_kind` in `app/api/routes/containers.py`. */
+function sourceLooksLikeGitUrl(source: string): boolean {
+  const trimmed = source.trim()
+  return (
+    trimmed.startsWith('git@') ||
+    trimmed.startsWith('http://') ||
+    trimmed.startsWith('https://') ||
+    trimmed.startsWith('ssh://')
+  )
+}
+
 export default function ContainersPage() {
   const [source, setSource] = useState('')
   const [containerName, setContainerName] = useState('')
-  const [hostPort, setHostPort] = useState('')
-  const [containerPort, setContainerPort] = useState('80')
   const [gitBranch, setGitBranch] = useState('main')
-  const [routeHost, setRouteHost] = useState('')
-  const [routePathPrefix, setRoutePathPrefix] = useState('/')
-  const [routeTls, setRouteTls] = useState(false)
-  const [publicRoute, setPublicRoute] = useState(false)
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState<FormMessage | null>(null)
   const [rows, setRows] = useState<ContainerInfo[]>([])
   const [listLoading, setListLoading] = useState(true)
   const [rowBusy, setRowBusy] = useState<string | null>(null)
+
+  const showGitBranch = sourceLooksLikeGitUrl(source)
 
   const refresh = useCallback(async () => {
     setListLoading(true)
@@ -73,30 +80,16 @@ export default function ContainersPage() {
     setBusy(true)
     setMessage(null)
     try {
-      let host: number | undefined
-      if (hostPort.trim() !== '') {
-        const parsed = Number.parseInt(hostPort, 10)
-        if (Number.isNaN(parsed)) {
-          setMessage({ type: 'err', text: 'Host port must be a number.' })
-          return
-        }
-        host = parsed
-      }
-      const cport = Number.parseInt(containerPort, 10)
-      if (Number.isNaN(cport)) {
-        setMessage({ type: 'err', text: 'Container port must be a number.' })
-        return
-      }
       const res = await runContainerFromSource({
         source: trimmed,
         container_name: containerName.trim() || null,
-        host_port: host ?? null,
-        container_port: cport,
+        host_port: null,
+        container_port: 80,
         git_branch: gitBranch.trim() || 'main',
-        route_host: publicRoute ? null : routeHost.trim() || null,
-        route_path_prefix: routePathPrefix.trim() || '/',
-        route_tls: publicRoute ? false : routeTls,
-        public_route: publicRoute,
+        route_host: null,
+        route_path_prefix: '/',
+        route_tls: false,
+        public_route: true,
       })
       const routeNote = res.route_wired
         ? ' Traefik route registered.'
@@ -163,9 +156,8 @@ export default function ContainersPage() {
     <section className="containers-page">
       <h1 className="containers-page__title">Containers</h1>
       <p className="containers-page__lead">
-        Enter a <strong>Docker image</strong> (e.g. <code>nginx:alpine</code>) or a{' '}
-        <strong>Git URL</strong> to clone and build with Docker, then run a managed
-        container.
+        Image or Git URL → build and run on the Vela network. Public URL uses{' '}
+        <code className="containers-form__code">VELA_PUBLIC_ROUTE_DOMAIN</code> (see README).
       </p>
 
       <form className="containers-form" onSubmit={onSubmit}>
@@ -183,8 +175,37 @@ export default function ContainersPage() {
           aria-label="Docker image reference or Git clone URL"
         />
 
-        <div className="containers-form__grid">
-          <div>
+        {showGitBranch ? (
+          <div className="containers-form__grid">
+            <div>
+              <label className="containers-form__label" htmlFor="name-input">
+                Container name (optional)
+              </label>
+              <input
+                id="name-input"
+                className="containers-form__input"
+                type="text"
+                value={containerName}
+                onChange={(e) => setContainerName(e.target.value)}
+                placeholder="my-service"
+              />
+            </div>
+            <div>
+              <label className="containers-form__label" htmlFor="branch-input">
+                Git branch
+              </label>
+              <input
+                id="branch-input"
+                className="containers-form__input"
+                type="text"
+                value={gitBranch}
+                onChange={(e) => setGitBranch(e.target.value)}
+                placeholder="main"
+              />
+            </div>
+          </div>
+        ) : (
+          <>
             <label className="containers-form__label" htmlFor="name-input">
               Container name (optional)
             </label>
@@ -196,123 +217,12 @@ export default function ContainersPage() {
               onChange={(e) => setContainerName(e.target.value)}
               placeholder="my-service"
             />
-          </div>
-          <div>
-            <label className="containers-form__label" htmlFor="branch-input">
-              Git branch (Git URLs only)
-            </label>
-            <input
-              id="branch-input"
-              className="containers-form__input"
-              type="text"
-              value={gitBranch}
-              onChange={(e) => setGitBranch(e.target.value)}
-              placeholder="main"
-            />
-          </div>
-        </div>
-
-        <label className="containers-form__label containers-form__checkbox-label">
-          <input
-            type="checkbox"
-            checked={publicRoute}
-            onChange={(e) => setPublicRoute(e.target.checked)}
-          />{' '}
-          Public URL — server allocates a hostname under{' '}
-          <code className="containers-form__code">VELA_PUBLIC_ROUTE_DOMAIN</code> (no manual DNS).
-        </label>
-
-        <div className="containers-form__grid">
-          <div>
-            <label className="containers-form__label" htmlFor="route-host-input">
-              Traefik hostname (optional)
-            </label>
-            <input
-              id="route-host-input"
-              className="containers-form__input"
-              type="text"
-              value={routeHost}
-              onChange={(e) => setRouteHost(e.target.value)}
-              placeholder="myapp.localhost"
-              autoComplete="off"
-              disabled={publicRoute}
-            />
-            <p className="containers-form__hint" id="route-host-hint">
-              {publicRoute ? (
-                <>
-                  Custom hostname is disabled while <strong>Public URL</strong> is on. Set{' '}
-                  <code className="containers-form__code">VELA_PUBLIC_ROUTE_DOMAIN</code> on the API
-                  host and point wildcard DNS at your Traefik edge.
-                </>
-              ) : (
-                <>
-                  Use a name like <strong>myapp.localhost</strong> so the browser resolves to
-                  127.0.0.1 without editing hosts. Or use public DNS, e.g.{' '}
-                  <strong>myapp.127.0.0.1.nip.io</strong> (must match this field exactly in Traefik).
-                </>
-              )}
-            </p>
-          </div>
-          <div>
-            <label className="containers-form__label" htmlFor="route-path-input">
-              Route path prefix
-            </label>
-            <input
-              id="route-path-input"
-              className="containers-form__input"
-              type="text"
-              value={routePathPrefix}
-              onChange={(e) => setRoutePathPrefix(e.target.value)}
-              placeholder="/"
-            />
-          </div>
-        </div>
-
-        <label className="containers-form__label containers-form__checkbox-label">
-          <input
-            type="checkbox"
-            checked={routeTls}
-            onChange={(e) => setRouteTls(e.target.checked)}
-            disabled={publicRoute}
-          />{' '}
-          Traefik TLS on this route (requires matching entrypoints in Traefik static config). When{' '}
-          <strong>Public URL</strong> is on, TLS follows <code className="containers-form__code">VELA_PUBLIC_URL_SCHEME</code>.
-        </label>
-
-        <div className="containers-form__grid containers-form__grid--ports">
-          <div>
-            <label className="containers-form__label" htmlFor="host-port-input">
-              Host port (optional)
-            </label>
-            <input
-              id="host-port-input"
-              className="containers-form__input"
-              type="text"
-              inputMode="numeric"
-              value={hostPort}
-              onChange={(e) => setHostPort(e.target.value)}
-              placeholder="e.g. 18080"
-            />
-          </div>
-          <div>
-            <label className="containers-form__label" htmlFor="ctr-port-input">
-              Container port
-            </label>
-            <input
-              id="ctr-port-input"
-              className="containers-form__input"
-              type="text"
-              inputMode="numeric"
-              value={containerPort}
-              onChange={(e) => setContainerPort(e.target.value)}
-              placeholder="80"
-            />
-          </div>
-        </div>
+          </>
+        )}
 
         <div className="containers-form__actions">
           <button type="submit" className="btn btn--primary" disabled={busy}>
-            {busy ? 'Working…' : 'Pull / build & run'}
+            {busy ? 'Building…' : 'Build'}
           </button>
           <button
             type="button"
