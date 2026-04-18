@@ -1,6 +1,7 @@
 import { Route, Routes } from 'react-router-dom'
 import Layout from './components/Layout'
 import Home from './pages/Home'
+import ContainersPage from './pages/ContainersPage'
 import PlaceholderPage from './pages/PlaceholderPage'
 
 export default function App() {
@@ -12,10 +13,7 @@ export default function App() {
           path="/dashboard"
           element={<PlaceholderPage title="Dashboard" />}
         />
-        <Route
-          path="/containers"
-          element={<PlaceholderPage title="Containers" />}
-        />
+        <Route path="/containers" element={<ContainersPage />} />
         <Route
           path="/builder"
           element={<PlaceholderPage title="Builder" />}

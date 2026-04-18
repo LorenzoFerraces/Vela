@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { ApiError, getHealth } from '../api/client'
+import { formatApiError, getHealth } from '../api/client'
 
 export default function Home() {
   const [apiStatus, setApiStatus] = useState<
@@ -16,12 +16,10 @@ export default function Home() {
           setApiStatus('ok')
           setApiDetail(h.status)
         }
-      } catch (e) {
+      } catch (error) {
         if (!cancelled) {
           setApiStatus('error')
-          setApiDetail(
-            e instanceof ApiError ? `${e.status}: ${e.message}` : String(e)
-          )
+          setApiDetail(formatApiError(error))
         }
       }
     })()

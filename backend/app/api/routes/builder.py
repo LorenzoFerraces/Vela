@@ -1,29 +1,35 @@
-"""Image builder API (stubs until a concrete builder exists)."""
+"""Image builder API (clone / local path → Dockerfile bootstrap → docker build)."""
 
-from fastapi import APIRouter, HTTPException, status
+from __future__ import annotations
 
-from app.core.models import ProjectSource
+from typing import Annotated
+
+from pathlib import Path
+
+from fastapi import APIRouter, Depends
+
+from app.api.deps import get_image_builder
+from app.api.schemas import BuilderAnalyzeRequest, BuilderBuildRequest
+from app.core.default_image_builder import DefaultImageBuilder, validate_local_build_context
+from app.core.models import BuildResult, ProjectInfo
 
 router = APIRouter()
 
 
-def _not_implemented() -> None:
-    raise HTTPException(
-        status_code=status.HTTP_501_NOT_IMPLEMENTED,
-        detail="Not implemented yet — no concrete image builder is wired.",
-    )
-
-
-@router.post("/build")
+@router.post("/build", response_model=BuildResult)
 async def build_from_source(
-    source: ProjectSource,
-    tag: str,
-) -> None:
-    """Full pipeline: clone → analyse → generate/detect Dockerfile → build."""
-    _not_implemented()
+    body: BuilderBuildRequest,
+    image_builder: Annotated[DefaultImageBuilder, Depends(get_image_builder)],
+) -> BuildResult:
+    """Full pipeline: clone or local path → ensure Dockerfile → ``docker build``."""
+    return await image_builder.build_from_source(body.source, tag=body.tag)
 
 
-@router.post("/analyze")
-async def analyze(project_path: str) -> None:
-    """Inspect a local project directory and detect its characteristics."""
-    _not_implemented()
+@router.post("/analyze", response_model=ProjectInfo)
+async def analyze(
+    body: BuilderAnalyzeRequest,
+    image_builder: Annotated[DefaultImageBuilder, Depends(get_image_builder)],
+) -> ProjectInfo:
+    """Inspect a local project directory (subject to ``VELA_ALLOWED_BUILD_ROOT`` when set)."""
+    ctx = validate_local_build_context(Path(body.project_path))
+    return await image_builder.analyze(str(ctx))

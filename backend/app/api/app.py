@@ -1,10 +1,14 @@
 """FastAPI application factory."""
 
+from __future__ import annotations
+
+import app.bootstrap_env  # noqa: F401 — loads backend/.env before other app imports.
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.errors import register_exception_handlers
-from app.api.routes import builder, containers, images
+from app.api.routes import builder, containers, images, traffic
 
 API_PREFIX = "/api"
 
@@ -43,6 +47,11 @@ def create_app() -> FastAPI:
         images.router,
         prefix=f"{API_PREFIX}/images",
         tags=["images"],
+    )
+    application.include_router(
+        traffic.router,
+        prefix=API_PREFIX,
+        tags=["traffic"],
     )
 
     @application.get(f"{API_PREFIX}/health", tags=["health"])

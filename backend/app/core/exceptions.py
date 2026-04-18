@@ -66,6 +66,13 @@ class UnsupportedLanguageError(BuilderError):
         )
 
 
+class UnsupportedProjectError(VelaError):
+    """No Dockerfile and no recognized project markers (e.g. package.json)."""
+
+    def __init__(self, message: str) -> None:
+        super().__init__(message)
+
+
 class CloneError(BuilderError):
     def __init__(self, git_url: str, message: str) -> None:
         self.git_url = git_url
@@ -84,3 +91,25 @@ class DockerfileGenerationError(BuilderError):
         super().__init__(
             f"Dockerfile generation failed for {language}: {message}"
         )
+
+
+# ---------------------------------------------------------------------------
+# Traffic / edge routing errors
+# ---------------------------------------------------------------------------
+
+
+class TrafficRouterError(VelaError):
+    """Edge HTTP routing failures (misconfiguration, I/O, unsupported backend)."""
+
+
+class RouteNotFoundError(VelaError):
+    def __init__(self, route_id: str) -> None:
+        self.route_id = route_id
+        super().__init__(f"Route not found: {route_id}")
+
+
+class RouteConfigurationError(VelaError):
+    """Invalid route specification (client-facing)."""
+
+    def __init__(self, message: str) -> None:
+        super().__init__(message)
