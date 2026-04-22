@@ -15,6 +15,7 @@ from app.core.exceptions import (
     ImageBuildError,
     ImageNotFoundError,
     OrchestratorError,
+    RegistryAccessDeniedError,
     ProviderConnectionError,
     ResourceLimitError,
     RouteConfigurationError,
@@ -28,9 +29,26 @@ from app.core.exceptions import (
 def register_exception_handlers(app) -> None:
     """Register handlers for Vela domain errors."""
 
+    @app.exception_handler(ImageNotFoundError)
+    async def image_not_found_handler(
+        _request: Request, exc: ImageNotFoundError
+    ) -> JSONResponse:
+        return JSONResponse(
+            status_code=status.HTTP_404_NOT_FOUND,
+            content=exc.api_response_content(),
+        )
+
+    @app.exception_handler(RegistryAccessDeniedError)
+    async def registry_access_denied_handler(
+        _request: Request, exc: RegistryAccessDeniedError
+    ) -> JSONResponse:
+        return JSONResponse(
+            status_code=status.HTTP_403_FORBIDDEN,
+            content=exc.api_response_content(),
+        )
+
     @app.exception_handler(RouteNotFoundError)
     @app.exception_handler(ContainerNotFoundError)
-    @app.exception_handler(ImageNotFoundError)
     async def not_found_handler(_request: Request, exc: VelaError) -> JSONResponse:
         return JSONResponse(
             status_code=status.HTTP_404_NOT_FOUND,

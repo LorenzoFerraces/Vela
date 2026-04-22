@@ -38,7 +38,11 @@ def _traffic_router_from_env() -> TrafficRouter:
                     "VELA_TRAFFIC_ROUTER=traefik_file requires VELA_TRAEFIK_DYNAMIC_FILE "
                     "(absolute path to the dynamic JSON file Traefik loads)."
                 )
-            return TraefikFileTrafficRouter(traefik_dynamic_file=Path(path_str))
+            reload_container = os.environ.get("VELA_TRAEFIK_RELOAD_CONTAINER", "").strip()
+            return TraefikFileTrafficRouter(
+                traefik_dynamic_file=Path(path_str),
+                reload_container=reload_container or None,
+            )
         case "kubernetes":
             return KubernetesTrafficRouter()
         case _:

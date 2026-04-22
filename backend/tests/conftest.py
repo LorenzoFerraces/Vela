@@ -50,6 +50,7 @@ def mock_orchestrator(sample_container: ContainerInfo) -> MagicMock:
     orch.pull_image = AsyncMock(return_value=None)
     orch.build_image = AsyncMock(return_value="sha256:deadbeef")
     orch.list_images = AsyncMock(return_value=["nginx:alpine"])
+    orch.verify_image_reference_available = AsyncMock(return_value=None)
 
     orch.get_stats = AsyncMock(
         return_value=ContainerStats(

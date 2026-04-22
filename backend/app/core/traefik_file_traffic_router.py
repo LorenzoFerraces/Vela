@@ -4,16 +4,19 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
+import logging
 import re
-import tempfile
 from pathlib import Path
 
+import docker
+import docker.errors
 from pydantic import ValidationError
 
 from app.core.exceptions import RouteConfigurationError, RouteNotFoundError, TrafficRouterError
 from app.core.traffic_models import RouteInfo, RouteSpec
 from app.core.traffic_router import TrafficRouter
+
+logger = logging.getLogger(__name__)
 
 _STATE_SUFFIX = ".vela-traffic-state.json"
 # Traefik object names are capped in practice; reserve room for TLS split suffixes.
@@ -111,20 +114,36 @@ def _build_traefik_document(route_specs: list[RouteSpec]) -> dict[str, object]:
 
 
 def _atomic_write_bytes(target: Path, data: bytes) -> None:
+    """Write ``data`` to ``target`` in place so Docker single-file bind mounts stay valid.
+
+    Temp file + rename breaks the mount inode; Traefik then misses updates (file provider docs).
+    """
     target.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp_path_str = tempfile.mkstemp(
-        dir=str(target.parent),
-        prefix=f".{target.name}.",
-        suffix=".tmp",
-    )
-    tmp_path = Path(tmp_path_str)
+    target.write_bytes(data)
+
+
+def _reload_traefik_container_sighup(container_name: str) -> None:
+    """Ask Traefik to re-read the file provider without restarting the container.
+
+    Traefik watches files with fsnotify; bind mounts (especially on Docker Desktop)
+    often never emit events. Traefik also reloads dynamic file config on **SIGHUP**,
+    which avoids relying on the watcher (see Traefik ``pkg/provider/file``).
+    """
     try:
-        with os.fdopen(fd, "wb") as tmp_file:
-            tmp_file.write(data)
-        os.replace(tmp_path, target)
-    except OSError:
-        tmp_path.unlink(missing_ok=True)
-        raise
+        client = docker.from_env()
+        container = client.containers.get(container_name)
+        container.kill(signal="SIGHUP")
+    except docker.errors.NotFound:
+        logger.warning(
+            "VELA_TRAEFIK_RELOAD_CONTAINER: no container named %r; Traefik may stay stale",
+            container_name,
+        )
+    except docker.errors.DockerException as exc:
+        logger.warning(
+            "VELA_TRAEFIK_RELOAD_CONTAINER: could not SIGHUP %r: %s",
+            container_name,
+            exc,
+        )
 
 
 class TraefikFileTrafficRouter(TrafficRouter):
@@ -134,9 +153,13 @@ class TraefikFileTrafficRouter(TrafficRouter):
         self,
         *,
         traefik_dynamic_file: Path,
+        reload_container: str | None = None,
     ) -> None:
         self._traefik_file = traefik_dynamic_file.resolve()
         self._state_file = self._traefik_file.parent / _STATE_SUFFIX
+        self._reload_container = (
+            reload_container.strip() if reload_container and reload_container.strip() else None
+        )
         self._lock = asyncio.Lock()
 
     def _load_state_unlocked(self) -> dict[str, RouteSpec]:
@@ -179,6 +202,8 @@ class TraefikFileTrafficRouter(TrafficRouter):
             _atomic_write_bytes(self._traefik_file, traefik_bytes)
         except OSError as exc:
             raise TrafficRouterError(f"Failed to write Traefik dynamic file: {exc}") from exc
+        if self._reload_container:
+            _reload_traefik_container_sighup(self._reload_container)
 
     async def upsert_route(self, spec: RouteSpec) -> RouteInfo:
         async with self._lock:

@@ -33,7 +33,11 @@ class RunFromSourceRequest(BaseModel):
         default=80,
         ge=1,
         le=65535,
-        description="Container port to expose when host_port is set.",
+        description=(
+            "Port the application listens on inside the container. When host_port is set, "
+            "Docker publishes host_port→this port. When host_port is omitted, Traefik still "
+            "forwards to this port on the container network."
+        ),
     )
     git_branch: str = Field(
         default="main",
@@ -69,6 +73,43 @@ class RunFromSourceRequest(BaseModel):
             msg = "route_path_prefix must start with '/'"
             raise ValueError(msg)
         return value
+
+
+class ImageAvailabilityResponse(BaseModel):
+    """Result of checking whether a registry image reference can be resolved."""
+
+    ref: str = Field(..., description="Trimmed image reference that was checked.")
+    available: bool = Field(
+        ...,
+        description="True when the image exists locally or the registry reports the manifest.",
+    )
+    checked: bool = Field(
+        default=True,
+        description="False for Git clone URLs; the client should not gate deploy on this result.",
+    )
+    detail: str | None = Field(
+        default=None,
+        description="Set when ``available`` is false or the check could not complete usefully.",
+    )
+    error_code: str | None = Field(
+        default=None,
+        description="Stable machine-readable code when the image is missing (e.g. ``image_not_found``).",
+    )
+    hints: list[str] | None = Field(
+        default=None,
+        description="Actionable suggestions when the image cannot be resolved.",
+    )
+    registry_detail: str | None = Field(
+        default=None,
+        description="Short message from Docker or the registry when available.",
+    )
+    can_attempt_deploy: bool = Field(
+        default=True,
+        description=(
+            "When ``available`` is false: false means the reference is missing; true means the "
+            "registry denied lookup (401/403) so deploy may still succeed after ``docker login``."
+        ),
+    )
 
 
 class RunFromSourceResponse(BaseModel):

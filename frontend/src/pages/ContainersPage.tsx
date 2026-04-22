@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   type ContainerInfo,
   formatApiError,
+  getImageAvailability,
   listContainers,
   removeContainer,
   runContainerFromSource,
@@ -14,6 +15,20 @@ type FormMessage = {
   text: string
   publicUrl?: string
 }
+
+type ImageRefCheckState =
+  | { status: 'idle' }
+  | { status: 'checking' }
+  | { status: 'ok'; ref: string }
+  | {
+      status: 'unavailable'
+      ref: string
+      /** When true, registry returned 401/403; user may still try Build after `docker login`. */
+      canAttemptDeploy: boolean
+    }
+  | { status: 'error'; detail: string }
+
+const IMAGE_REF_CHECK_DEBOUNCE_MS = 600
 
 /** Matches backend `_infer_source_kind` in `app/api/routes/containers.py`. */
 function sourceLooksLikeGitUrl(source: string): boolean {
@@ -30,13 +45,28 @@ export default function ContainersPage() {
   const [source, setSource] = useState('')
   const [containerName, setContainerName] = useState('')
   const [gitBranch, setGitBranch] = useState('main')
+  /** App listen port inside the container (Traefik target when not publishing host ports). */
+  const [containerPort, setContainerPort] = useState('80')
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState<FormMessage | null>(null)
   const [rows, setRows] = useState<ContainerInfo[]>([])
   const [listLoading, setListLoading] = useState(true)
   const [rowBusy, setRowBusy] = useState<string | null>(null)
+  const [imageRefCheck, setImageRefCheck] = useState<ImageRefCheckState>({
+    status: 'idle',
+  })
+  const sourceTrimmedRef = useRef('')
+  sourceTrimmedRef.current = source.trim()
 
   const showGitBranch = sourceLooksLikeGitUrl(source)
+
+  useEffect(() => {
+    if (showGitBranch) {
+      setContainerPort((p) => (p === '80' ? '5173' : p))
+    } else {
+      setContainerPort((p) => (p === '5173' ? '80' : p))
+    }
+  }, [showGitBranch])
 
   const refresh = useCallback(async () => {
     setListLoading(true)
@@ -54,6 +84,51 @@ export default function ContainersPage() {
     void refresh()
   }, [refresh])
 
+  const runImageRefAvailabilityCheck = useCallback(async (ref: string) => {
+    setImageRefCheck({ status: 'checking' })
+    try {
+      const result = await getImageAvailability(ref)
+      if (sourceTrimmedRef.current !== ref) {
+        return
+      }
+      if (!result.checked) {
+        setImageRefCheck({ status: 'idle' })
+        return
+      }
+      if (result.available) {
+        setImageRefCheck({ status: 'ok', ref: result.ref })
+      } else {
+        setImageRefCheck({
+          status: 'unavailable',
+          ref: result.ref,
+          canAttemptDeploy: result.can_attempt_deploy === true,
+        })
+      }
+    } catch (error) {
+      if (sourceTrimmedRef.current !== ref) {
+        return
+      }
+      setImageRefCheck({
+        status: 'error',
+        detail: formatApiError(error),
+      })
+    }
+  }, [])
+
+  useEffect(() => {
+    const trimmed = source.trim()
+    if (!trimmed || sourceLooksLikeGitUrl(trimmed)) {
+      setImageRefCheck({ status: 'idle' })
+      return
+    }
+    const handle = window.setTimeout(() => {
+      void runImageRefAvailabilityCheck(trimmed)
+    }, IMAGE_REF_CHECK_DEBOUNCE_MS)
+    return () => {
+      window.clearTimeout(handle)
+    }
+  }, [source, runImageRefAvailabilityCheck])
+
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault()
     const trimmed = source.trim()
@@ -61,14 +136,48 @@ export default function ContainersPage() {
       setMessage({ type: 'err', text: 'Enter a Docker image or a Git URL.' })
       return
     }
+    if (!sourceLooksLikeGitUrl(trimmed)) {
+      const alreadyOkForRef =
+        imageRefCheck.status === 'ok' && imageRefCheck.ref === trimmed
+      if (!alreadyOkForRef) {
+        try {
+          const availability = await getImageAvailability(trimmed)
+          if (availability.checked && !availability.available) {
+            const canTry = availability.can_attempt_deploy === true
+            const notFoundMessage = 'Image not found.'
+            setImageRefCheck({
+              status: 'unavailable',
+              ref: availability.ref,
+              canAttemptDeploy: canTry,
+            })
+            if (!canTry) {
+              setMessage({ type: 'err', text: notFoundMessage })
+              return
+            }
+          }
+          if (availability.checked && availability.available) {
+            setImageRefCheck({ status: 'ok', ref: availability.ref })
+          }
+        } catch (error) {
+          setMessage({ type: 'err', text: formatApiError(error) })
+          return
+        }
+      }
+    }
     setBusy(true)
     setMessage(null)
     try {
+      const parsedPort = parseInt(containerPort.trim(), 10)
+      const container_port = Number.isNaN(parsedPort)
+        ? showGitBranch
+          ? 5173
+          : 80
+        : parsedPort
       const res = await runContainerFromSource({
         source: trimmed,
         container_name: containerName.trim() || null,
         host_port: null,
-        container_port: 80,
+        container_port,
         git_branch: gitBranch.trim() || 'main',
         route_host: null,
         route_path_prefix: '/',
@@ -155,8 +264,64 @@ export default function ContainersPage() {
           placeholder="nginx:alpine or https://github.com/org/repo.git"
           value={source}
           onChange={(e) => setSource(e.target.value)}
+          onBlur={() => {
+            const trimmed = source.trim()
+            if (trimmed && !sourceLooksLikeGitUrl(trimmed)) {
+              void runImageRefAvailabilityCheck(trimmed)
+            }
+          }}
           aria-label="Docker image reference or Git clone URL"
+          aria-invalid={
+            !showGitBranch &&
+            imageRefCheck.status === 'unavailable' &&
+            !imageRefCheck.canAttemptDeploy
+              ? true
+              : undefined
+          }
+          aria-describedby={
+            !showGitBranch && imageRefCheck.status !== 'idle'
+              ? 'source-input-status'
+              : undefined
+          }
         />
+        {!showGitBranch && imageRefCheck.status === 'checking' ? (
+          <p
+            id="source-input-status"
+            className="containers-source-check containers-source-check--muted"
+          >
+            Checking registry…
+          </p>
+        ) : null}
+        {!showGitBranch && imageRefCheck.status === 'ok' ? (
+          <p
+            id="source-input-status"
+            className="containers-source-check containers-source-check--ok"
+          >
+            Image reference found.
+          </p>
+        ) : null}
+        {!showGitBranch && imageRefCheck.status === 'unavailable' ? (
+          <p
+            id="source-input-status"
+            className={
+              imageRefCheck.canAttemptDeploy
+                ? 'containers-source-check containers-source-check--warn'
+                : 'containers-source-check containers-source-check--err'
+            }
+            role="alert"
+          >
+            Image not found.
+          </p>
+        ) : null}
+        {!showGitBranch && imageRefCheck.status === 'error' ? (
+          <p
+            id="source-input-status"
+            className="containers-source-check containers-source-check--warn"
+            role="alert"
+          >
+            Could not verify image: {imageRefCheck.detail}
+          </p>
+        ) : null}
 
         {showGitBranch ? (
           <div className="containers-form__grid">
@@ -186,6 +351,29 @@ export default function ContainersPage() {
                 placeholder="main"
               />
             </div>
+            <div>
+              <label
+                className="containers-form__label"
+                htmlFor="container-port-input"
+              >
+                Container port
+              </label>
+              <input
+                id="container-port-input"
+                className="containers-form__input"
+                type="number"
+                min={1}
+                max={65535}
+                value={containerPort}
+                onChange={(e) => setContainerPort(e.target.value)}
+                placeholder="5173"
+                aria-describedby="container-port-hint"
+              />
+              <p id="container-port-hint" className="containers-muted containers-form__hint">
+                Must match the dev server port (e.g. Vite 5173, or{' '}
+                <code>server.port</code> in vite.config).
+              </p>
+            </div>
           </div>
         ) : (
           <>
@@ -200,11 +388,44 @@ export default function ContainersPage() {
               onChange={(e) => setContainerName(e.target.value)}
               placeholder="my-service"
             />
+            <label
+              className="containers-form__label"
+              htmlFor="container-port-input"
+            >
+              Container port
+            </label>
+            <input
+              id="container-port-input"
+              className="containers-form__input"
+              type="number"
+              min={1}
+              max={65535}
+              value={containerPort}
+              onChange={(e) => setContainerPort(e.target.value)}
+              placeholder="80"
+              aria-describedby="container-port-hint-image"
+            />
+            <p
+              id="container-port-hint-image"
+              className="containers-muted containers-form__hint"
+            >
+              Port your app listens on inside the container (Traefik target when using a
+              public URL without host port publish).
+            </p>
           </>
         )}
 
         <div className="containers-form__actions">
-          <button type="submit" className="btn btn--primary" disabled={busy}>
+          <button
+            type="submit"
+            className="btn btn--primary"
+            disabled={
+              busy ||
+              (!showGitBranch &&
+                imageRefCheck.status === 'unavailable' &&
+                !imageRefCheck.canAttemptDeploy)
+            }
+          >
             {busy ? 'Building…' : 'Build'}
           </button>
           <button

@@ -19,7 +19,7 @@ export default function Home() {
       } catch (error) {
         if (!cancelled) {
           setApiStatus('error')
-          setApiDetail(formatApiError(error))
+          setApiDetail(formatApiError(error, 'es'))
         }
       }
     })()
@@ -48,7 +48,7 @@ export default function Home() {
         {apiStatus === 'error' && (
           <>
             <span className="hero__status-dot hero__status-dot--err" />
-            API no disponible ({apiDetail})
+            {apiDetail}
           </>
         )}
       </div>

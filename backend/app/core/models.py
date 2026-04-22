@@ -37,6 +37,16 @@ class DeployConfig(BaseModel):
     name: str | None = None
     env_vars: dict[str, str] = Field(default_factory=dict)
     ports: list[PortMapping] = Field(default_factory=list)
+    container_listen_port: int = Field(
+        default=80,
+        ge=1,
+        le=65535,
+        description=(
+            "TCP port the app listens on inside the container. Used as the Traefik backend "
+            "target when ``ports`` is empty; if host ports are published, the first mapping's "
+            "``container_port`` is used instead."
+        ),
+    )
     cpu_limit: float | None = None
     memory_limit: int | None = None
     restart_policy: RestartPolicy = RestartPolicy.NEVER

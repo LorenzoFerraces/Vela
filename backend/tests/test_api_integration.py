@@ -15,6 +15,7 @@ from app.api.app import create_app
 from app.api.deps import get_image_builder, get_orchestrator, get_traffic_router
 from app.core.default_image_builder import DefaultImageBuilder
 from app.core.enums import BuildStrategy, SupportedLanguage
+from app.core.exceptions import ImageNotFoundError, RegistryAccessDeniedError
 from app.core.models import BuildResult, ProjectInfo
 from app.core.orchestrator import ContainerOrchestrator
 from app.core.traffic_router import NoopTrafficRouter
@@ -40,6 +41,89 @@ def test_list_containers_filter_status(api_client: TestClient) -> None:
     response = api_client.get("/api/containers/", params={"status": "running"})
     assert response.status_code == 200
     assert len(response.json()) == 1
+
+
+def test_image_availability_ok(api_client: TestClient) -> None:
+    response = api_client.get(
+        "/api/containers/image/availability", params={"ref": "nginx:alpine"}
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["available"] is True
+    assert body["checked"] is True
+    assert body["ref"] == "nginx:alpine"
+    assert body["detail"] is None
+
+
+def test_image_availability_not_found() -> None:
+    orch = MagicMock(spec=ContainerOrchestrator)
+    orch.verify_image_reference_available = AsyncMock(
+        side_effect=ImageNotFoundError("bad:missing")
+    )
+    app = create_app()
+    app.dependency_overrides[get_orchestrator] = lambda: orch
+    with TestClient(app) as client:
+        response = client.get(
+            "/api/containers/image/availability", params={"ref": "bad:missing"}
+        )
+    app.dependency_overrides.clear()
+    assert response.status_code == 200
+    body = response.json()
+    assert body["available"] is False
+    assert body["checked"] is True
+    assert body["ref"] == "bad:missing"
+    assert body["error_code"] == "image_not_found"
+    assert body["can_attempt_deploy"] is False
+    assert body["detail"] == "Image not found."
+
+
+def test_image_availability_registry_access_denied() -> None:
+    orch = MagicMock(spec=ContainerOrchestrator)
+    orch.verify_image_reference_available = AsyncMock(
+        side_effect=RegistryAccessDeniedError("ngin", registry_message="denied")
+    )
+    app = create_app()
+    app.dependency_overrides[get_orchestrator] = lambda: orch
+    with TestClient(app) as client:
+        response = client.get(
+            "/api/containers/image/availability", params={"ref": "ngin"}
+        )
+    app.dependency_overrides.clear()
+    assert response.status_code == 200
+    body = response.json()
+    assert body["available"] is False
+    assert body["checked"] is True
+    assert body["error_code"] == "registry_access_denied"
+    assert body["can_attempt_deploy"] is True
+    assert body["detail"] == "Image not found."
+
+
+def test_image_not_found_exception_has_structured_api_content() -> None:
+    exc = ImageNotFoundError("foo:bar", registry_message="manifest unknown")
+    content = exc.api_response_content()
+    assert content["error_code"] == "image_not_found"
+    assert content["image_ref"] == "foo:bar"
+    assert content["detail"] == "Image not found."
+    assert "registry_detail" not in content
+    assert "hints" not in content
+
+
+def test_image_availability_git_url_not_checked() -> None:
+    orch = MagicMock(spec=ContainerOrchestrator)
+    orch.verify_image_reference_available = AsyncMock()
+    app = create_app()
+    app.dependency_overrides[get_orchestrator] = lambda: orch
+    with TestClient(app) as client:
+        response = client.get(
+            "/api/containers/image/availability",
+            params={"ref": "https://github.com/org/repo.git"},
+        )
+    app.dependency_overrides.clear()
+    assert response.status_code == 200
+    body = response.json()
+    assert body["checked"] is False
+    assert body["available"] is True
+    orch.verify_image_reference_available.assert_not_called()
 
 
 def test_get_container(api_client: TestClient) -> None:

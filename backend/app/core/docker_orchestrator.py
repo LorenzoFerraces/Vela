@@ -21,6 +21,7 @@ from app.core.exceptions import (
     ImageNotFoundError,
     OrchestratorError,
     ProviderConnectionError,
+    RegistryAccessDeniedError,
 )
 from app.core.models import (
     ContainerInfo,
@@ -78,6 +79,17 @@ def _image_pull_reference(image: str, tag: str) -> str:
     if "@" in image or re.search(r":[^/]+$", image):
         return image
     return f"{image}:{tag}"
+
+
+def _docker_registry_error_text(exc: BaseException) -> str | None:
+    """Short text from docker-py for registry or engine errors (for client-facing detail)."""
+    if isinstance(exc, docker.errors.APIError):
+        text = (getattr(exc, "explanation", None) or str(exc)).strip()
+        if len(text) > 500:
+            text = text[:500] + "…"
+        return text or None
+    message = str(exc).strip()
+    return message or None
 
 
 def _parse_created(created: str) -> datetime:
@@ -262,7 +274,56 @@ class DockerOrchestrator(ContainerOrchestrator):
             # Local-only tags from ``docker build`` (e.g. vela/gitbuild:*) are not on a registry.
             if _is_vela_local_build_tag(image_ref):
                 raise ImageNotFoundError(image_ref) from None
-            self._client.images.pull(image_ref)
+            try:
+                self._client.images.pull(image_ref)
+            except docker.errors.APIError as exc:
+                if exc.status_code in (401, 403):
+                    raise RegistryAccessDeniedError(
+                        image_ref, registry_message=_docker_registry_error_text(exc)
+                    ) from exc
+                raise
+
+    def _verify_image_reference_sync(self, image_ref: str) -> None:
+        """Raise :class:`ImageNotFoundError` if ``image_ref`` is absent locally and on the registry."""
+        try:
+            self._client.images.get(image_ref)
+        except docker.errors.ImageNotFound:
+            pass
+        else:
+            return
+        if _is_vela_local_build_tag(image_ref):
+            raise ImageNotFoundError(image_ref) from None
+        try:
+            self._client.api.inspect_distribution(image_ref)
+        except docker.errors.NotFound as exc:
+            raise ImageNotFoundError(
+                image_ref, registry_message=_docker_registry_error_text(exc)
+            ) from exc
+        except docker.errors.APIError as exc:
+            if exc.status_code == 404:
+                raise ImageNotFoundError(
+                    image_ref, registry_message=_docker_registry_error_text(exc)
+                ) from exc
+            if exc.status_code in (401, 403):
+                raise RegistryAccessDeniedError(
+                    image_ref, registry_message=_docker_registry_error_text(exc)
+                ) from exc
+            raise
+
+    def _container_env(self, config: DeployConfig) -> dict[str, str]:
+        """Merge deploy env with Vite dev defaults when a Traefik ``route_host`` is set.
+
+        Vite 6+ validates the ``Host`` header; behind Traefik the browser sends the public
+        hostname. ``__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS`` appends that host to
+        ``server.allowedHosts`` (see vitejs/vite#19325).
+        """
+        env = dict(config.env_vars)
+        if "__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS" in env:
+            return env
+        host = (config.route_host or "").strip()
+        if host:
+            env["__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS"] = host.lower()
+        return env
 
     def _remove_managed_name_conflict_sync(self, name: str) -> None:
         try:
@@ -302,7 +363,7 @@ class DockerOrchestrator(ContainerOrchestrator):
                 raise ProviderConnectionError(str(e)) from e
 
             kwargs: dict[str, Any] = {
-                "environment": config.env_vars,
+                "environment": self._container_env(config),
                 "labels": labels,
                 "ports": ports,
                 "restart_policy": restart,
@@ -326,7 +387,9 @@ class DockerOrchestrator(ContainerOrchestrator):
                 container.reload()
                 data = container.attrs
             except docker.errors.ImageNotFound as e:
-                raise ImageNotFoundError(config.image) from e
+                raise ImageNotFoundError(
+                    config.image, registry_message=_docker_registry_error_text(e)
+                ) from e
             except docker.errors.NotFound as e:
                 raise ContainerNotFoundError(str(e)) from e
             except requests.exceptions.RequestException as e:
@@ -596,11 +659,43 @@ class DockerOrchestrator(ContainerOrchestrator):
         try:
             await self._to_thread(sync)
         except docker.errors.ImageNotFound as e:
-            raise ImageNotFoundError(ref) from e
+            raise ImageNotFoundError(
+                ref, registry_message=_docker_registry_error_text(e)
+            ) from e
+        except docker.errors.APIError as exc:
+            if exc.status_code in (401, 403):
+                raise RegistryAccessDeniedError(
+                    ref, registry_message=_docker_registry_error_text(exc)
+                ) from exc
+            raise ProviderConnectionError(str(exc)) from exc
         except requests.exceptions.RequestException as e:
             raise ProviderConnectionError(str(e)) from e
         except docker.errors.DockerException as e:
             raise ProviderConnectionError(str(e)) from e
+
+    async def verify_image_reference_available(self, image_ref: str) -> None:
+        def sync() -> None:
+            try:
+                self._verify_image_reference_sync(image_ref.strip())
+            except ImageNotFoundError:
+                raise
+            except RegistryAccessDeniedError:
+                raise
+            except docker.errors.APIError as exc:
+                raise ProviderConnectionError(str(exc)) from exc
+            except requests.exceptions.RequestException as exc:
+                raise ProviderConnectionError(str(exc)) from exc
+
+        try:
+            await self._to_thread(sync)
+        except ImageNotFoundError:
+            raise
+        except RegistryAccessDeniedError:
+            raise
+        except ProviderConnectionError:
+            raise
+        except docker.errors.DockerException as exc:
+            raise ProviderConnectionError(str(exc)) from exc
 
     async def build_image(
         self, path: str, *, tag: str, dockerfile: str = "Dockerfile"

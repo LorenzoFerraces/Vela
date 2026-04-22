@@ -16,7 +16,7 @@ def backend_port_for_route(config: DeployConfig) -> int:
     """Pick the container port Traefik should forward to."""
     if config.ports:
         return config.ports[0].container_port
-    return 80
+    return config.container_listen_port
 
 
 async def register_route_for_deployed_container(

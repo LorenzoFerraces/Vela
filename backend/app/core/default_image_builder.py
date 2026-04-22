@@ -75,7 +75,9 @@ class DefaultImageBuilder(ImageBuilder):
             raise AnalysisError("", "ProjectSource requires git_url or local_path")
 
         try:
-            strategy, info = ensure_dockerfile_for_build(Path(project_path))
+            strategy, info = ensure_dockerfile_for_build(
+                Path(project_path), from_git_clone=source.git_url is not None
+            )
             image_id = await self._orchestrator.build_image(
                 project_path, tag=tag, dockerfile="Dockerfile"
             )

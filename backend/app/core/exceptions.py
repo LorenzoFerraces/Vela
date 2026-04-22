@@ -1,3 +1,7 @@
+from app.core.image_not_found_payload import image_not_found_api_content
+from app.core.registry_access_payload import registry_access_denied_api_content
+
+
 class VelaError(Exception):
     """Base exception for all Vela errors."""
 
@@ -18,9 +22,35 @@ class ContainerNotFoundError(OrchestratorError):
 
 
 class ImageNotFoundError(OrchestratorError):
-    def __init__(self, image: str) -> None:
+    """Raised when an image reference cannot be resolved locally or on a registry."""
+
+    def __init__(self, image: str, *, registry_message: str | None = None) -> None:
         self.image = image
-        super().__init__(f"Image not found: {image}")
+        self.registry_message = registry_message
+        self._api_content = image_not_found_api_content(
+            image, registry_detail=registry_message
+        )
+        super().__init__(str(self._api_content["detail"]))
+
+    def api_response_content(self) -> dict[str, object]:
+        """Structured fields for JSON error responses (404)."""
+        return dict(self._api_content)
+
+
+class RegistryAccessDeniedError(OrchestratorError):
+    """Raised when the registry returns 401/403 for a manifest or pull (auth / rate limit / policy)."""
+
+    def __init__(self, image: str, *, registry_message: str | None = None) -> None:
+        self.image = image
+        self.registry_message = registry_message
+        self._api_content = registry_access_denied_api_content(
+            image, registry_detail=registry_message
+        )
+        super().__init__(str(self._api_content["detail"]))
+
+    def api_response_content(self) -> dict[str, object]:
+        """Structured fields for JSON error responses (403)."""
+        return dict(self._api_content)
 
 
 class ContainerAlreadyRunningError(OrchestratorError):

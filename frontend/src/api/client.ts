@@ -24,10 +24,39 @@ export class ApiError extends Error {
   }
 }
 
+const networkErrorMessages: Record<'en' | 'es', string> = {
+  en: 'Unable to reach the server. Check your connection and try again.',
+  es: 'No se pudo conectar con el servidor. Comprueba tu conexión o que la API esté en marcha.',
+}
+
+function isLikelyNetworkFailure(error: unknown): boolean {
+  if (!(error instanceof Error)) {
+    return false
+  }
+  if (error instanceof ApiError) {
+    return false
+  }
+  if (error.name === 'AbortError') {
+    return false
+  }
+  const message = error.message.toLowerCase()
+  return (
+    message === 'failed to fetch' ||
+    message.includes('networkerror') ||
+    (error.name === 'TypeError' && message.includes('fetch'))
+  )
+}
+
 /** User-facing text from a failed API call (`detail` / optional `build_log` when JSON). */
-export function formatApiError(error: unknown): string {
+export function formatApiError(
+  error: unknown,
+  locale: 'en' | 'es' = 'en'
+): string {
+  if (isLikelyNetworkFailure(error)) {
+    return networkErrorMessages[locale]
+  }
   if (!(error instanceof ApiError)) {
-    return String(error)
+    return error instanceof Error ? error.message : String(error)
   }
   try {
     const parsed = JSON.parse(error.body) as {
@@ -168,6 +197,26 @@ export interface RunFromSourceResponse {
   image: string
   route_wired: boolean
   public_url?: string | null
+}
+
+export interface ImageAvailabilityResponse {
+  ref: string
+  available: boolean
+  checked: boolean
+  detail: string | null
+  can_attempt_deploy?: boolean
+  error_code?: string | null
+  hints?: string[] | null
+  registry_detail?: string | null
+}
+
+export async function getImageAvailability(
+  ref: string
+): Promise<ImageAvailabilityResponse> {
+  const query = new URLSearchParams({ ref })
+  return apiGet<ImageAvailabilityResponse>(
+    `/api/containers/image/availability?${query.toString()}`
+  )
 }
 
 export async function listContainers(): Promise<ContainerInfo[]> {

@@ -15,6 +15,7 @@ from app.api.route_wiring import (
 )
 from app.api.schemas import (
     ContainerDeployResponse,
+    ImageAvailabilityResponse,
     RunFromSourceRequest,
     RunFromSourceResponse,
 )
@@ -24,6 +25,7 @@ from app.core.public_route_host import (
     read_public_route_settings,
 )
 from app.core.enums import ContainerStatus, RestartPolicy
+from app.core.exceptions import ImageNotFoundError, RegistryAccessDeniedError
 from app.core.default_image_builder import DefaultImageBuilder
 from app.core.models import (
     ContainerInfo,
@@ -94,6 +96,7 @@ def _deploy_config_for_image(
         image=image,
         name=container_name,
         ports=ports,
+        container_listen_port=container_port,
     )
 
 
@@ -107,6 +110,53 @@ async def list_containers(
 ) -> list[ContainerInfo]:
     """List Vela-managed containers, optionally filtered by status."""
     return await orchestrator.list(status=container_status)
+
+
+@router.get("/image/availability", response_model=ImageAvailabilityResponse)
+async def image_availability(
+    ref: Annotated[str, Query(min_length=1, max_length=2048, description="Docker image reference.")],
+    orchestrator: Annotated[ContainerOrchestrator, Depends(get_orchestrator)],
+) -> ImageAvailabilityResponse:
+    """Check whether a registry image reference exists (local engine or remote manifest).
+
+    Git clone URLs are returned with ``checked=false`` so the UI can skip gating.
+    """
+    stripped = ref.strip()
+    kind, source = _infer_source_kind(stripped)
+    if kind == "git":
+        return ImageAvailabilityResponse(
+            ref=source,
+            available=True,
+            checked=False,
+            detail=None,
+        )
+    try:
+        await orchestrator.verify_image_reference_available(source)
+    except ImageNotFoundError as exc:
+        content = exc.api_response_content()
+        return ImageAvailabilityResponse(
+            ref=source,
+            available=False,
+            checked=True,
+            can_attempt_deploy=False,
+            detail=str(content["detail"]),
+            error_code=str(content["error_code"]),
+            hints=None,
+            registry_detail=None,
+        )
+    except RegistryAccessDeniedError as exc:
+        content = exc.api_response_content()
+        return ImageAvailabilityResponse(
+            ref=source,
+            available=False,
+            checked=True,
+            can_attempt_deploy=True,
+            detail=str(content["detail"]),
+            error_code=str(content["error_code"]),
+            hints=None,
+            registry_detail=None,
+        )
+    return ImageAvailabilityResponse(ref=source, available=True, checked=True, detail=None)
 
 
 @router.post("/deploy", response_model=ContainerDeployResponse)

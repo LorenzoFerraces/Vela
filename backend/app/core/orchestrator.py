@@ -97,3 +97,13 @@ class ContainerOrchestrator(ABC):
     @abstractmethod
     async def list_images(self) -> list[str]:
         """List available image tags on the host."""
+
+    @abstractmethod
+    async def verify_image_reference_available(self, image_ref: str) -> None:
+        """Confirm ``image_ref`` exists locally or on a registry.
+
+        Raises:
+            ImageNotFoundError: The reference is not present locally and not found on the registry.
+            RegistryAccessDeniedError: The registry returned 401/403 for the manifest lookup.
+            ProviderConnectionError: The runtime or registry could not be reached.
+        """
