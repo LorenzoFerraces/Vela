@@ -143,17 +143,14 @@ export default function ContainersPage() {
         try {
           const availability = await getImageAvailability(trimmed)
           if (availability.checked && !availability.available) {
-            const canTry = availability.can_attempt_deploy === true
             const notFoundMessage = 'Image not found.'
             setImageRefCheck({
               status: 'unavailable',
               ref: availability.ref,
-              canAttemptDeploy: canTry,
+              canAttemptDeploy: availability.can_attempt_deploy === true,
             })
-            if (!canTry) {
-              setMessage({ type: 'err', text: notFoundMessage })
-              return
-            }
+            setMessage({ type: 'err', text: notFoundMessage })
+            return
           }
           if (availability.checked && availability.available) {
             setImageRefCheck({ status: 'ok', ref: availability.ref })
@@ -272,9 +269,7 @@ export default function ContainersPage() {
           }}
           aria-label="Docker image reference or Git clone URL"
           aria-invalid={
-            !showGitBranch &&
-            imageRefCheck.status === 'unavailable' &&
-            !imageRefCheck.canAttemptDeploy
+            !showGitBranch && imageRefCheck.status === 'unavailable'
               ? true
               : undefined
           }
@@ -421,9 +416,7 @@ export default function ContainersPage() {
             className="btn btn--primary"
             disabled={
               busy ||
-              (!showGitBranch &&
-                imageRefCheck.status === 'unavailable' &&
-                !imageRefCheck.canAttemptDeploy)
+              (!showGitBranch && imageRefCheck.status === 'unavailable')
             }
           >
             {busy ? 'Building…' : 'Build'}
