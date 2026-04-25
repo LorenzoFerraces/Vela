@@ -25,7 +25,10 @@ def create_app() -> FastAPI:
         allow_origins=[
             "http://localhost:5173",
             "http://127.0.0.1:5173",
+            "http://velaunq.ddns.net:5173",
+            "https://velaunq.ddns.net:5173",
         ],
+        allow_origin_regex=r"^https?://[^/]+:5173$",
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],

@@ -1,15 +1,22 @@
 /**
  * Thin HTTP client for the Vela FastAPI backend.
- * Base URL: `VITE_API_BASE_URL` or http://localhost:8000
+ * Base URL: `VITE_API_BASE_URL` or `window.location.hostname:8000`
  */
 
-const defaultBaseUrl = 'http://localhost:8000'
+function getDefaultBaseUrl(): string {
+  if (typeof window === 'undefined') {
+    return 'http://localhost:8000'
+  }
+
+  const protocol = window.location.protocol === 'https:' ? 'https:' : 'http:'
+  return `${protocol}//${window.location.hostname}:8000`
+}
 
 export function getApiBaseUrl(): string {
   const fromEnv = import.meta.env.VITE_API_BASE_URL
   return typeof fromEnv === 'string' && fromEnv.length > 0
     ? fromEnv.replace(/\/$/, '')
-    : defaultBaseUrl
+    : getDefaultBaseUrl()
 }
 
 export class ApiError extends Error {
