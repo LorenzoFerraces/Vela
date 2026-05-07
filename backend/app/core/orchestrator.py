@@ -56,9 +56,12 @@ class ContainerOrchestrator(ABC):
 
     @abstractmethod
     async def list(
-        self, *, status: ContainerStatus | None = None
+        self,
+        *,
+        status: ContainerStatus | None = None,
+        owner_id: str | None = None,
     ) -> list[ContainerInfo]:
-        """List all managed containers, optionally filtered by status."""
+        """List all managed containers, optionally filtered by status and owner."""
 
     @abstractmethod
     async def logs(self, container_id: str, *, tail: int = 100) -> str:

@@ -5,6 +5,7 @@ from fastapi.responses import JSONResponse
 
 from app.core.exceptions import (
     AnalysisError,
+    AuthError,
     BuilderError,
     CloneError,
     UnsupportedProjectError,
@@ -12,8 +13,11 @@ from app.core.exceptions import (
     ContainerNotFoundError,
     ContainerNotRunningError,
     DockerfileGenerationError,
+    EmailAlreadyRegisteredError,
     ImageBuildError,
     ImageNotFoundError,
+    InvalidCredentialsError,
+    NotAuthenticatedError,
     OrchestratorError,
     RegistryAccessDeniedError,
     ProviderConnectionError,
@@ -128,6 +132,32 @@ def register_exception_handlers(app) -> None:
         return JSONResponse(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             content={"detail": str(exc)},
+        )
+
+    @app.exception_handler(EmailAlreadyRegisteredError)
+    async def email_already_registered_handler(
+        _request: Request, exc: EmailAlreadyRegisteredError
+    ) -> JSONResponse:
+        return JSONResponse(
+            status_code=status.HTTP_409_CONFLICT,
+            content={"detail": str(exc)},
+        )
+
+    @app.exception_handler(InvalidCredentialsError)
+    @app.exception_handler(NotAuthenticatedError)
+    async def auth_unauthorized_handler(_request: Request, exc: AuthError) -> JSONResponse:
+        return JSONResponse(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            content={"detail": str(exc)},
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    @app.exception_handler(AuthError)
+    async def auth_handler(_request: Request, exc: AuthError) -> JSONResponse:
+        return JSONResponse(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            content={"detail": str(exc)},
+            headers={"WWW-Authenticate": "Bearer"},
         )
 
     @app.exception_handler(VelaError)

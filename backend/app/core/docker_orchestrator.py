@@ -35,6 +35,7 @@ from app.core.orchestrator import ContainerOrchestrator
 
 VELA_MANAGED_LABEL = "vela.managed"
 VELA_MANAGED_VALUE = "true"
+VELA_OWNER_LABEL = "vela.owner_id"
 _NS_PER_SEC = 1_000_000_000
 
 
@@ -517,14 +518,19 @@ class DockerOrchestrator(ContainerOrchestrator):
             raise ProviderConnectionError(str(e)) from e
 
     async def list(
-        self, *, status: ContainerStatus | None = None
+        self,
+        *,
+        status: ContainerStatus | None = None,
+        owner_id: str | None = None,
     ) -> list[ContainerInfo]:
-        label_filter = f"{VELA_MANAGED_LABEL}={VELA_MANAGED_VALUE}"
+        label_filters = [f"{VELA_MANAGED_LABEL}={VELA_MANAGED_VALUE}"]
+        if owner_id is not None:
+            label_filters.append(f"{VELA_OWNER_LABEL}={owner_id}")
 
         def sync() -> list[ContainerInfo]:
             containers = self._client.containers.list(
                 all=True,
-                filters={"label": [label_filter]},
+                filters={"label": label_filters},
             )
             out: list[ContainerInfo] = []
             for c in containers:
