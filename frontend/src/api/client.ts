@@ -19,6 +19,57 @@ export function getApiBaseUrl(): string {
     : getDefaultBaseUrl()
 }
 
+// --- Access token storage ---
+
+const ACCESS_TOKEN_STORAGE_KEY = 'vela.access_token'
+
+export function getAccessToken(): string | null {
+  if (typeof window === 'undefined') return null
+  try {
+    return window.localStorage.getItem(ACCESS_TOKEN_STORAGE_KEY)
+  } catch {
+    return null
+  }
+}
+
+export function setAccessToken(token: string): void {
+  if (typeof window === 'undefined') return
+  try {
+    window.localStorage.setItem(ACCESS_TOKEN_STORAGE_KEY, token)
+  } catch {
+    // localStorage is unavailable (private mode, etc.); silently skip persistence.
+  }
+}
+
+export function clearAccessToken(): void {
+  if (typeof window === 'undefined') return
+  try {
+    window.localStorage.removeItem(ACCESS_TOKEN_STORAGE_KEY)
+  } catch {
+    // see setAccessToken
+  }
+}
+
+type UnauthorizedListener = () => void
+const unauthorizedListeners = new Set<UnauthorizedListener>()
+
+export function onUnauthorized(listener: UnauthorizedListener): () => void {
+  unauthorizedListeners.add(listener)
+  return () => {
+    unauthorizedListeners.delete(listener)
+  }
+}
+
+function notifyUnauthorized(): void {
+  unauthorizedListeners.forEach((listener) => {
+    try {
+      listener()
+    } catch {
+      // listener errors must not break the request pipeline
+    }
+  })
+}
+
 export class ApiError extends Error {
   status: number
   body: string
@@ -95,6 +146,10 @@ async function parseJson<T>(response: Response): Promise<T> {
 async function readEmptyOk(response: Response): Promise<void> {
   if (!response.ok) {
     const body = await response.text()
+    if (response.status === 401) {
+      clearAccessToken()
+      notifyUnauthorized()
+    }
     throw new ApiError(
       `Request failed: ${response.status} ${response.statusText}`,
       response.status,
@@ -103,22 +158,42 @@ async function readEmptyOk(response: Response): Promise<void> {
   }
 }
 
+export interface ApiRequestOptions {
+  /** Skip attaching the bearer token and the 401 reset (used for /api/auth/login). */
+  skipAuth?: boolean
+}
+
+function buildHeaders(initHeaders: HeadersInit | undefined, skipAuth: boolean): Headers {
+  const headers = new Headers(initHeaders ?? {})
+  if (!headers.has('Accept')) headers.set('Accept', 'application/json')
+  if (!headers.has('Content-Type')) headers.set('Content-Type', 'application/json')
+  if (!skipAuth) {
+    const token = getAccessToken()
+    if (token && !headers.has('Authorization')) {
+      headers.set('Authorization', `Bearer ${token}`)
+    }
+  }
+  return headers
+}
+
 export async function apiRequest<T>(
   path: string,
-  init: RequestInit = {}
+  init: RequestInit = {},
+  options: ApiRequestOptions = {}
 ): Promise<T> {
   const url = `${getApiBaseUrl()}${path.startsWith('/') ? path : `/${path}`}`
+  const skipAuth = options.skipAuth === true
   const response = await fetch(url, {
     ...init,
-    headers: {
-      Accept: 'application/json',
-      'Content-Type': 'application/json',
-      ...init.headers,
-    },
+    headers: buildHeaders(init.headers, skipAuth),
   })
 
   if (!response.ok) {
     const body = await response.text()
+    if (response.status === 401 && !skipAuth) {
+      clearAccessToken()
+      notifyUnauthorized()
+    }
     throw new ApiError(
       `Request failed: ${response.status} ${response.statusText}`,
       response.status,
@@ -135,21 +210,26 @@ export async function apiGet<T>(path: string): Promise<T> {
 
 export async function apiPost<TResponse, TBody = unknown>(
   path: string,
-  body: TBody
+  body: TBody,
+  options: ApiRequestOptions = {}
 ): Promise<TResponse> {
-  return apiRequest<TResponse>(path, {
-    method: 'POST',
-    body: JSON.stringify(body),
-  })
+  return apiRequest<TResponse>(
+    path,
+    { method: 'POST', body: JSON.stringify(body) },
+    options
+  )
 }
 
 export async function apiDelete(path: string): Promise<void> {
   const url = `${getApiBaseUrl()}${path.startsWith('/') ? path : `/${path}`}`
+  const headers = new Headers({ Accept: 'application/json' })
+  const token = getAccessToken()
+  if (token) {
+    headers.set('Authorization', `Bearer ${token}`)
+  }
   const response = await fetch(url, {
     method: 'DELETE',
-    headers: {
-      Accept: 'application/json',
-    },
+    headers,
   })
   await readEmptyOk(response)
 }
@@ -255,4 +335,48 @@ export async function removeContainer(
   await apiDelete(
     `/api/containers/${encodeURIComponent(containerId)}${q}`
   )
+}
+
+// --- Auth ---
+
+export interface UserPublic {
+  id: string
+  email: string
+  created_at: string
+}
+
+export interface TokenResponse {
+  access_token: string
+  token_type: 'bearer'
+  user: UserPublic
+}
+
+export interface RegisterRequest {
+  email: string
+  password: string
+}
+
+export interface LoginRequest {
+  email: string
+  password: string
+}
+
+export async function registerUser(
+  body: RegisterRequest
+): Promise<TokenResponse> {
+  return apiPost<TokenResponse, RegisterRequest>(
+    '/api/auth/register',
+    body,
+    { skipAuth: true }
+  )
+}
+
+export async function login(body: LoginRequest): Promise<TokenResponse> {
+  return apiPost<TokenResponse, LoginRequest>('/api/auth/login', body, {
+    skipAuth: true,
+  })
+}
+
+export async function getMe(): Promise<UserPublic> {
+  return apiGet<UserPublic>('/api/auth/me')
 }

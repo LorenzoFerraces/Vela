@@ -1,12 +1,13 @@
 # Vela
 
-FastAPI backend, Vite/React frontend, and optional Traefik as an edge proxy.
+FastAPI backend, Vite/React frontend, optional Traefik as an edge proxy, and PostgreSQL for users and related data.
 
 ## Prerequisites
 
 - Python **3.12+** and `pip`
 - Node.js **20+** and **npm**
 - Docker Desktop (or Docker Engine)
+- **PostgreSQL 16+** (or use the repo’s Docker Compose file for a local instance)
 - Git (if you build from Git URLs)
 
 ## Layout
@@ -14,7 +15,9 @@ FastAPI backend, Vite/React frontend, and optional Traefik as an edge proxy.
 | Path | Role |
 |------|------|
 | `backend/` | API (`python run.py`) |
+| `backend/alembic/` | Database migrations (Alembic) |
 | `frontend/` | UI (`npm run dev`) |
+| `docker-compose.dev.yml` | Optional local Postgres for development |
 
 ## Backend
 
@@ -25,10 +28,40 @@ python -m venv .venv
 pip install -e ".[dev]"
 ```
 
+### Database (PostgreSQL)
+
+Point `VELA_DATABASE_URL` in `backend/.env` at a running Postgres instance. Example URL shape:
+
+`postgresql+asyncpg://USER:PASSWORD@HOST:15432/DATABASE`
+
+To start Postgres locally with Docker:
+
+```powershell
+docker compose -f docker-compose.dev.yml up -d
+```
+
+`docker-compose.dev.yml` maps **host port 15432** to **container port 5432** (Postgres’s default inside the image), so it does not use **5432** or **5433** on your machine. Use **`127.0.0.1:15432`** in `VELA_DATABASE_URL`, with user/password/database matching `POSTGRES_*` in that file (defaults: `vela` / `vela` / `Vela`).
+
+**`FATAL: password authentication failed for user "vela"`** — if `VELA_DATABASE_URL` matches compose, check that connection code does not use `str(sqlalchemy.engine.url.URL)` for live DSNs: SQLAlchemy **2.x masks passwords as `***` in `str(URL)`**, so drivers would send the wrong password. This repo’s `app/db/engine.py` uses `render_as_string(hide_password=False)` when rewriting the URL. Separately, a **stale Postgres data volume** from older `POSTGRES_*` values can cause real auth failures; the compose volume name `vela_postgres_dev_data` avoids reusing an old init, or run `docker compose -f docker-compose.dev.yml down -v` then `up -d`.
+
+Then apply the schema:
+
+```powershell
+cd backend
+alembic upgrade head
+```
+
+Alembic uses the **sync** driver `postgresql+psycopg` (see `sync_database_url_for_alembic` in `app/db/engine.py`) because `asyncpg` + `asyncio` often fails on **Windows** with Docker-hosted Postgres even when `psql` works. The API runtime still uses **`postgresql+asyncpg`** in `VELA_DATABASE_URL`.
+
+### Environment variables
+
 Create `backend/.env` as needed. Common variables:
 
 | Variable | Notes |
 |----------|--------|
+| `VELA_DATABASE_URL` | Async SQLAlchemy URL (e.g. `postgresql+asyncpg://vela:vela@127.0.0.1:15432/Vela` when using this repo’s Compose port) |
+| `VELA_AUTH_SECRET` | Long random secret used to sign JWT access tokens |
+| `VELA_AUTH_ACCESS_TOKEN_TTL_MINUTES` | Optional; access token lifetime in minutes (default sensible if omitted) |
 | `VELA_TRAFFIC_ROUTER` | `noop` (default), `traefik_file`, or `kubernetes` |
 | `VELA_TRAEFIK_DYNAMIC_FILE` | Absolute path to the JSON file Traefik loads (if using `traefik_file`) |
 | `VELA_TRAEFIK_RELOAD_CONTAINER` | Optional Docker **container name** (as in `docker ps`) for Traefik; after each route write, Vela sends **SIGHUP** so Traefik reloads the file when fsnotify misses changes (typical on Docker Desktop) |
@@ -41,7 +74,15 @@ Create `backend/.env` as needed. Common variables:
 python run.py
 ```
 
-API: **http://127.0.0.1:8000** — health: `GET /api/health`
+API: **http://127.0.0.1:8000** — health: `GET /api/health` (no auth).
+
+### Authentication
+
+- `POST /api/auth/register` — create an account; returns `{ access_token, token_type, user }`.
+- `POST /api/auth/login` — email + password; same response shape.
+- `GET /api/auth/me` — current user; requires `Authorization: Bearer <access_token>`.
+
+Most **`/api/containers/**`** routes require that bearer token. Containers are scoped per user (Docker label `vela.owner_id`).
 
 ## Traefik (optional)
 
@@ -61,11 +102,14 @@ Open **http://127.0.0.1:5173**. Override the API base URL in `frontend/.env.loca
 VITE_API_BASE_URL=http://127.0.0.1:8000
 ```
 
+**Sign-in:** use **Register** (`/register`) or **Log in** (`/login`). After a successful register or login, the UI stores the access token in **localStorage** under `vela.access_token` and sends it on API requests. Protected app routes redirect to `/login` when you are not signed in.
+
 ## Useful commands
 
 | Action | Command |
 |--------|---------|
 | Backend tests | `cd backend` → `python -m pytest tests -q` |
+| DB migrations (apply) | `cd backend` → `alembic upgrade head` |
 | Frontend build | `cd frontend` → `npm run build` |
 
 ## Troubleshooting
@@ -76,3 +120,7 @@ VITE_API_BASE_URL=http://127.0.0.1:8000
 | Traefik hot reload / stale routes | Set **`VELA_TRAEFIK_RELOAD_CONTAINER`** to the Traefik container name. Also prefer **mounting the parent directory** for the dynamic file; ensure `providers.file.watch` is true. |
 | API vs Docker | Docker running; socket reachable |
 | UI vs API | `VITE_API_BASE_URL`; backend on port 8000; CORS |
+| `401` on container or image routes | Register or log in; ensure requests send `Authorization: Bearer …` (the UI does this when a token is stored) |
+| Database connection errors | Postgres is running; `VELA_DATABASE_URL` matches your instance; run **`alembic upgrade head`** from `backend/` |
+| `WinError 64` / `ConnectionDoesNotExistError` from the **API** (asyncpg) on Windows | Docker Desktop / `localhost` / timing: prefer **`127.0.0.1`** in `VELA_DATABASE_URL` (the app maps `localhost` → `127.0.0.1` on Windows). `alembic upgrade` uses **sync psycopg** and is usually unaffected. |
+| `FATAL: password authentication failed` for user `vela` | `VELA_DATABASE_URL` must match **`POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB`** and the **published host port** in `docker-compose.dev.yml` (currently **15432**). If you changed those env vars **after** the first `up`, remove the volume and recreate: `docker compose -f docker-compose.dev.yml down -v` then `up -d`. Compose must map **`15432:5432`** (host:container), not `HOST:HOST`. |

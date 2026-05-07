@@ -6,14 +6,14 @@ Orchestrator / image builder are mocked so tests do not require Docker.
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from fastapi.testclient import TestClient
 
 from app.api.app import create_app
-from app.api.deps import get_image_builder, get_orchestrator, get_traffic_router
 from app.core.default_image_builder import DefaultImageBuilder
+from app.core.docker_orchestrator import VELA_OWNER_LABEL
 from app.core.enums import BuildStrategy, SupportedLanguage
 from app.core.exceptions import ImageNotFoundError, RegistryAccessDeniedError
 from app.core.models import BuildResult, ProjectInfo
@@ -22,6 +22,7 @@ from app.core.traffic_router import NoopTrafficRouter
 
 
 def test_health_returns_ok() -> None:
+    """Health endpoint is public (no DB or auth required)."""
     app = create_app()
     with TestClient(app) as client:
         response = client.get("/api/health")
@@ -43,6 +44,24 @@ def test_list_containers_filter_status(api_client: TestClient) -> None:
     assert len(response.json()) == 1
 
 
+def test_list_containers_requires_auth(anonymous_client: TestClient) -> None:
+    response = anonymous_client.get("/api/containers/")
+    assert response.status_code == 401
+
+
+def test_other_user_does_not_see_containers(other_user_client: TestClient) -> None:
+    """A different user's bearer token must not see another user's containers."""
+    response = other_user_client.get("/api/containers/")
+    assert response.status_code == 200
+    assert response.json() == []
+
+
+def test_other_user_cannot_get_container(other_user_client: TestClient) -> None:
+    """Cross-user access on a single-container endpoint returns 404 (no existence leak)."""
+    response = other_user_client.get("/api/containers/cid-1")
+    assert response.status_code == 404
+
+
 def test_image_availability_ok(api_client: TestClient) -> None:
     response = api_client.get(
         "/api/containers/image/availability", params={"ref": "nginx:alpine"}
@@ -55,18 +74,15 @@ def test_image_availability_ok(api_client: TestClient) -> None:
     assert body["detail"] is None
 
 
-def test_image_availability_not_found() -> None:
+def test_image_availability_not_found(make_authed_client) -> None:
     orch = MagicMock(spec=ContainerOrchestrator)
     orch.verify_image_reference_available = AsyncMock(
         side_effect=ImageNotFoundError("bad:missing")
     )
-    app = create_app()
-    app.dependency_overrides[get_orchestrator] = lambda: orch
-    with TestClient(app) as client:
+    with make_authed_client(orchestrator=orch) as client:
         response = client.get(
             "/api/containers/image/availability", params={"ref": "bad:missing"}
         )
-    app.dependency_overrides.clear()
     assert response.status_code == 200
     body = response.json()
     assert body["available"] is False
@@ -77,18 +93,15 @@ def test_image_availability_not_found() -> None:
     assert body["detail"] == "Image not found."
 
 
-def test_image_availability_registry_access_denied() -> None:
+def test_image_availability_registry_access_denied(make_authed_client) -> None:
     orch = MagicMock(spec=ContainerOrchestrator)
     orch.verify_image_reference_available = AsyncMock(
         side_effect=RegistryAccessDeniedError("ngin", registry_message="denied")
     )
-    app = create_app()
-    app.dependency_overrides[get_orchestrator] = lambda: orch
-    with TestClient(app) as client:
+    with make_authed_client(orchestrator=orch) as client:
         response = client.get(
             "/api/containers/image/availability", params={"ref": "ngin"}
         )
-    app.dependency_overrides.clear()
     assert response.status_code == 200
     body = response.json()
     assert body["available"] is False
@@ -108,17 +121,14 @@ def test_image_not_found_exception_has_structured_api_content() -> None:
     assert "hints" not in content
 
 
-def test_image_availability_git_url_not_checked() -> None:
+def test_image_availability_git_url_not_checked(make_authed_client) -> None:
     orch = MagicMock(spec=ContainerOrchestrator)
     orch.verify_image_reference_available = AsyncMock()
-    app = create_app()
-    app.dependency_overrides[get_orchestrator] = lambda: orch
-    with TestClient(app) as client:
+    with make_authed_client(orchestrator=orch) as client:
         response = client.get(
             "/api/containers/image/availability",
             params={"ref": "https://github.com/org/repo.git"},
         )
-    app.dependency_overrides.clear()
     assert response.status_code == 200
     body = response.json()
     assert body["checked"] is False
@@ -133,7 +143,10 @@ def test_get_container(api_client: TestClient) -> None:
 
 
 def test_run_from_image_public_route(
-    api_client: TestClient, monkeypatch: pytest.MonkeyPatch
+    api_client: TestClient,
+    mock_orchestrator: MagicMock,
+    test_user_id,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("VELA_PUBLIC_ROUTE_DOMAIN", "apps.example.com")
     monkeypatch.setenv("VELA_PUBLIC_URL_SCHEME", "https")
@@ -156,6 +169,9 @@ def test_run_from_image_public_route(
     assert body["route_wired"] is True
     assert body["public_url"].startswith("https://")
     assert "apps.example.com" in body["public_url"]
+
+    deployed_config = mock_orchestrator.deploy.call_args.args[0]
+    assert deployed_config.labels.get(VELA_OWNER_LABEL) == str(test_user_id)
 
 
 def test_run_from_git_url(
@@ -231,8 +247,8 @@ def test_run_rejects_empty_source(api_client: TestClient) -> None:
     assert response.status_code == 422
 
 
-def test_builder_build_calls_pipeline() -> None:
-    mock_orch = MagicMock()
+def test_builder_build_calls_pipeline(make_authed_client) -> None:
+    mock_orch = MagicMock(spec=ContainerOrchestrator)
     mock_orch.build_image = AsyncMock(return_value="sha256:x")
     builder = MagicMock(spec=DefaultImageBuilder)
     builder.build_from_source = AsyncMock(
@@ -245,11 +261,7 @@ def test_builder_build_calls_pipeline() -> None:
         )
     )
 
-    app = create_app()
-    app.dependency_overrides[get_orchestrator] = lambda: mock_orch
-    app.dependency_overrides[get_image_builder] = lambda: builder
-
-    with TestClient(app) as client:
+    with make_authed_client(orchestrator=mock_orch, image_builder=builder) as client:
         response = client.post(
             "/api/builder/build",
             json={
@@ -258,77 +270,62 @@ def test_builder_build_calls_pipeline() -> None:
             },
         )
 
-    app.dependency_overrides.clear()
     assert response.status_code == 200
     assert response.json()["image_tag"] == "t:1"
     builder.build_from_source.assert_awaited_once()
 
 
-def test_builder_analyze_uses_validate_local(tmp_path) -> None:
+def test_builder_analyze_uses_validate_local(make_authed_client, tmp_path, monkeypatch) -> None:
     (tmp_path / "package.json").write_text('{"name":"x"}', encoding="utf-8")
     mock_builder = MagicMock(spec=DefaultImageBuilder)
     mock_builder.analyze = AsyncMock(
         return_value=ProjectInfo(language=SupportedLanguage.JAVASCRIPT, has_dockerfile=False)
     )
 
-    app = create_app()
-    app.dependency_overrides[get_image_builder] = lambda: mock_builder
+    monkeypatch.setenv("VELA_ALLOWED_BUILD_ROOT", str(tmp_path.parent))
 
-    with TestClient(app) as client:
-        with patch.dict("os.environ", {"VELA_ALLOWED_BUILD_ROOT": str(tmp_path.parent)}):
-            response = client.post(
-                "/api/builder/analyze",
-                json={"project_path": str(tmp_path)},
-            )
+    with make_authed_client(image_builder=mock_builder) as client:
+        response = client.post(
+            "/api/builder/analyze",
+            json={"project_path": str(tmp_path)},
+        )
 
-    app.dependency_overrides.clear()
     assert response.status_code == 200
     assert response.json()["language"] == "javascript"
 
 
-def test_list_images() -> None:
+def test_list_images(make_authed_client) -> None:
     orch = MagicMock(spec=ContainerOrchestrator)
     orch.list_images = AsyncMock(return_value=["a:latest", "b:1"])
 
-    app = create_app()
-    app.dependency_overrides[get_orchestrator] = lambda: orch
-
-    with TestClient(app) as client:
+    with make_authed_client(orchestrator=orch) as client:
         response = client.get("/api/images/")
 
-    app.dependency_overrides.clear()
     assert response.status_code == 200
     assert response.json() == {"images": ["a:latest", "b:1"]}
 
 
-def test_pull_image() -> None:
+def test_pull_image(make_authed_client) -> None:
     orch = MagicMock(spec=ContainerOrchestrator)
     orch.pull_image = AsyncMock(return_value=None)
 
-    app = create_app()
-    app.dependency_overrides[get_orchestrator] = lambda: orch
-
-    with TestClient(app) as client:
+    with make_authed_client(orchestrator=orch) as client:
         response = client.post(
             "/api/images/pull",
             params={"image": "nginx", "tag": "alpine"},
         )
 
-    app.dependency_overrides.clear()
     assert response.status_code == 200
     assert response.json()["detail"] == "ok"
     orch.pull_image.assert_awaited_once()
 
 
-def test_build_image_from_context(tmp_path) -> None:
+def test_build_image_from_context(make_authed_client, tmp_path) -> None:
     (tmp_path / "Dockerfile").write_text("FROM scratch\n", encoding="utf-8")
     orch = MagicMock(spec=ContainerOrchestrator)
     orch.build_image = AsyncMock(return_value="sha256:abc")
 
-    app = create_app()
-    app.dependency_overrides[get_orchestrator] = lambda: orch
-
-    with TestClient(app) as client:
+    with make_authed_client(orchestrator=orch) as client:
         response = client.post(
             "/api/images/build",
             json={
@@ -338,15 +335,12 @@ def test_build_image_from_context(tmp_path) -> None:
             },
         )
 
-    app.dependency_overrides.clear()
     assert response.status_code == 200
     assert response.json()["tag"] == "local/test:1"
 
 
-def test_traffic_routes_crud() -> None:
+def test_traffic_routes_crud(make_authed_client) -> None:
     router = NoopTrafficRouter()
-    app = create_app()
-    app.dependency_overrides[get_traffic_router] = lambda: router
 
     spec = {
         "route_id": "r1",
@@ -358,7 +352,7 @@ def test_traffic_routes_crud() -> None:
         "entrypoints": ["web"],
     }
 
-    with TestClient(app) as client:
+    with make_authed_client(traffic_router=router) as client:
         created = client.post("/api/routes", json=spec)
         assert created.status_code == 200
         listed = client.get("/api/routes")
@@ -370,5 +364,3 @@ def test_traffic_routes_crud() -> None:
         assert deleted.status_code == 204
         empty = client.get("/api/routes")
         assert empty.json() == []
-
-    app.dependency_overrides.clear()

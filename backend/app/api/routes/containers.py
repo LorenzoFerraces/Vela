@@ -7,7 +7,12 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, Response, status
 
-from app.api.deps import get_image_builder, get_orchestrator, get_traffic_router
+from app.api.deps import (
+    get_current_user,
+    get_image_builder,
+    get_orchestrator,
+    get_traffic_router,
+)
 from app.api.route_wiring import (
     backend_port_for_route,
     register_route_for_deployed_container,
@@ -19,13 +24,18 @@ from app.api.schemas import (
     RunFromSourceRequest,
     RunFromSourceResponse,
 )
+from app.core.docker_orchestrator import VELA_OWNER_LABEL
 from app.core.public_route_host import (
     apply_public_route_to_deploy_config,
     build_public_url,
     read_public_route_settings,
 )
 from app.core.enums import ContainerStatus, RestartPolicy
-from app.core.exceptions import ImageNotFoundError, RegistryAccessDeniedError
+from app.core.exceptions import (
+    ContainerNotFoundError,
+    ImageNotFoundError,
+    RegistryAccessDeniedError,
+)
 from app.core.default_image_builder import DefaultImageBuilder
 from app.core.models import (
     ContainerInfo,
@@ -37,8 +47,28 @@ from app.core.models import (
 )
 from app.core.orchestrator import ContainerOrchestrator
 from app.core.traffic_router import TrafficRouter
+from app.db.models import User
 
 router = APIRouter()
+
+
+def _with_owner_label(config: DeployConfig, owner_id: str) -> DeployConfig:
+    """Return a copy of ``config`` whose labels carry ``vela.owner_id=owner_id``."""
+    labels = dict(config.labels)
+    labels[VELA_OWNER_LABEL] = owner_id
+    return config.model_copy(update={"labels": labels})
+
+
+async def _require_owned(
+    orchestrator: ContainerOrchestrator,
+    container_id: str,
+    current_user: User,
+) -> ContainerInfo:
+    """Load a container and confirm it belongs to ``current_user`` (404 otherwise)."""
+    info = await orchestrator.get(container_id)
+    if info.labels.get(VELA_OWNER_LABEL) != str(current_user.id):
+        raise ContainerNotFoundError(container_id)
+    return info
 
 
 async def _deploy_and_maybe_wire_route(
@@ -103,19 +133,23 @@ def _deploy_config_for_image(
 @router.get("/", response_model=list[ContainerInfo])
 async def list_containers(
     orchestrator: Annotated[ContainerOrchestrator, Depends(get_orchestrator)],
+    current_user: Annotated[User, Depends(get_current_user)],
     container_status: Annotated[
         ContainerStatus | None,
         Query(alias="status", description="Filter by container status"),
     ] = None,
 ) -> list[ContainerInfo]:
-    """List Vela-managed containers, optionally filtered by status."""
-    return await orchestrator.list(status=container_status)
+    """List the caller's Vela-managed containers, optionally filtered by status."""
+    return await orchestrator.list(
+        status=container_status, owner_id=str(current_user.id)
+    )
 
 
 @router.get("/image/availability", response_model=ImageAvailabilityResponse)
 async def image_availability(
     ref: Annotated[str, Query(min_length=1, max_length=2048, description="Docker image reference.")],
     orchestrator: Annotated[ContainerOrchestrator, Depends(get_orchestrator)],
+    _current_user: Annotated[User, Depends(get_current_user)],
 ) -> ImageAvailabilityResponse:
     """Check whether a registry image reference exists (local engine or remote manifest).
 
@@ -164,8 +198,10 @@ async def deploy(
     config: DeployConfig,
     orchestrator: Annotated[ContainerOrchestrator, Depends(get_orchestrator)],
     traffic_router: Annotated[TrafficRouter, Depends(get_traffic_router)],
+    current_user: Annotated[User, Depends(get_current_user)],
 ) -> ContainerDeployResponse:
     """Create and start a container from configuration."""
+    config = _with_owner_label(config, str(current_user.id))
     config = await apply_public_route_to_deploy_config(config, traffic_router)
     info, route_wired, public_url = await _deploy_and_maybe_wire_route(
         orchestrator, traffic_router, config
@@ -183,6 +219,7 @@ async def run_from_user_source(
     orchestrator: Annotated[ContainerOrchestrator, Depends(get_orchestrator)],
     traffic_router: Annotated[TrafficRouter, Depends(get_traffic_router)],
     image_builder: Annotated[DefaultImageBuilder, Depends(get_image_builder)],
+    current_user: Annotated[User, Depends(get_current_user)],
 ) -> RunFromSourceResponse:
     """Pull or build an image from ``source``, then deploy a container.
 
@@ -208,6 +245,7 @@ async def run_from_user_source(
                 "public_route": body.public_route,
             }
         )
+        cfg = _with_owner_label(cfg, str(current_user.id))
         cfg = await apply_public_route_to_deploy_config(cfg, traffic_router)
         info, route_wired, public_url = await _deploy_and_maybe_wire_route(
             orchestrator, traffic_router, cfg
@@ -240,6 +278,7 @@ async def run_from_user_source(
             "public_route": body.public_route,
         }
     )
+    cfg = _with_owner_label(cfg, str(current_user.id))
     cfg = await apply_public_route_to_deploy_config(cfg, traffic_router)
     info, route_wired, public_url = await _deploy_and_maybe_wire_route(
         orchestrator, traffic_router, cfg
@@ -257,17 +296,20 @@ async def run_from_user_source(
 async def get_container(
     container_id: str,
     orchestrator: Annotated[ContainerOrchestrator, Depends(get_orchestrator)],
+    current_user: Annotated[User, Depends(get_current_user)],
 ) -> ContainerInfo:
     """Return detailed information about a single managed container."""
-    return await orchestrator.get(container_id)
+    return await _require_owned(orchestrator, container_id, current_user)
 
 
 @router.post("/{container_id}/start", response_model=ContainerInfo)
 async def start_container(
     container_id: str,
     orchestrator: Annotated[ContainerOrchestrator, Depends(get_orchestrator)],
+    current_user: Annotated[User, Depends(get_current_user)],
 ) -> ContainerInfo:
     """Start a stopped container."""
+    await _require_owned(orchestrator, container_id, current_user)
     return await orchestrator.start(container_id)
 
 
@@ -275,9 +317,11 @@ async def start_container(
 async def stop_container(
     container_id: str,
     orchestrator: Annotated[ContainerOrchestrator, Depends(get_orchestrator)],
+    current_user: Annotated[User, Depends(get_current_user)],
     timeout: int = 10,
 ) -> ContainerInfo:
     """Gracefully stop a running container."""
+    await _require_owned(orchestrator, container_id, current_user)
     return await orchestrator.stop(container_id, timeout=timeout)
 
 
@@ -285,9 +329,11 @@ async def stop_container(
 async def restart_container(
     container_id: str,
     orchestrator: Annotated[ContainerOrchestrator, Depends(get_orchestrator)],
+    current_user: Annotated[User, Depends(get_current_user)],
     timeout: int = 10,
 ) -> ContainerInfo:
     """Restart a container."""
+    await _require_owned(orchestrator, container_id, current_user)
     return await orchestrator.restart(container_id, timeout=timeout)
 
 
@@ -296,10 +342,11 @@ async def remove_container(
     container_id: str,
     orchestrator: Annotated[ContainerOrchestrator, Depends(get_orchestrator)],
     traffic_router: Annotated[TrafficRouter, Depends(get_traffic_router)],
+    current_user: Annotated[User, Depends(get_current_user)],
     force: bool = False,
 ) -> Response:
     """Remove a container and drop any Traefik route keyed by its name."""
-    info = await orchestrator.get(container_id)
+    info = await _require_owned(orchestrator, container_id, current_user)
     await remove_route_for_container_name(
         traffic_router=traffic_router,
         container_name=info.name,
@@ -312,9 +359,11 @@ async def remove_container(
 async def container_logs(
     container_id: str,
     orchestrator: Annotated[ContainerOrchestrator, Depends(get_orchestrator)],
+    current_user: Annotated[User, Depends(get_current_user)],
     tail: int = 100,
 ) -> dict[str, str]:
     """Return recent log lines for a container."""
+    await _require_owned(orchestrator, container_id, current_user)
     text = await orchestrator.logs(container_id, tail=tail)
     return {"logs": text}
 
@@ -323,8 +372,10 @@ async def container_logs(
 async def container_stats(
     container_id: str,
     orchestrator: Annotated[ContainerOrchestrator, Depends(get_orchestrator)],
+    current_user: Annotated[User, Depends(get_current_user)],
 ) -> ContainerStats:
     """Return resource usage snapshot for a container."""
+    await _require_owned(orchestrator, container_id, current_user)
     return await orchestrator.get_stats(container_id)
 
 
@@ -332,6 +383,8 @@ async def container_stats(
 async def container_health(
     container_id: str,
     orchestrator: Annotated[ContainerOrchestrator, Depends(get_orchestrator)],
+    current_user: Annotated[User, Depends(get_current_user)],
 ) -> HealthResult:
     """Return latest health check result for a container."""
+    await _require_owned(orchestrator, container_id, current_user)
     return await orchestrator.get_health(container_id)

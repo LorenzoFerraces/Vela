@@ -143,3 +143,28 @@ class RouteConfigurationError(VelaError):
 
     def __init__(self, message: str) -> None:
         super().__init__(message)
+
+
+# ---------------------------------------------------------------------------
+# Auth errors
+# ---------------------------------------------------------------------------
+
+
+class AuthError(VelaError):
+    """Base exception for authentication failures."""
+
+
+class EmailAlreadyRegisteredError(AuthError):
+    def __init__(self, email: str) -> None:
+        self.email = email
+        super().__init__("That email is already registered.")
+
+
+class InvalidCredentialsError(AuthError):
+    def __init__(self) -> None:
+        super().__init__("Invalid email or password.")
+
+
+class NotAuthenticatedError(AuthError):
+    def __init__(self, message: str = "Not authenticated.") -> None:
+        super().__init__(message)
