@@ -1,9 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   type ContainerInfo,
+  type GithubRepo,
+  type GithubStatus,
   formatApiError,
+  getGithubStatus,
   getImageAvailability,
   listContainers,
+  listGithubRepos,
   removeContainer,
   runContainerFromSource,
   startContainer,
@@ -15,6 +19,14 @@ type FormMessage = {
   text: string
   publicUrl?: string
 }
+
+type RepoPickerState =
+  | { kind: 'closed' }
+  | { kind: 'loading'; query: string }
+  | { kind: 'ready'; query: string; repos: GithubRepo[] }
+  | { kind: 'error'; query: string; detail: string }
+
+const REPO_SEARCH_DEBOUNCE_MS = 350
 
 type ImageRefCheckState =
   | { status: 'idle' }
@@ -41,6 +53,58 @@ function sourceLooksLikeGitUrl(source: string): boolean {
   )
 }
 
+function renderRepoPickerBody(
+  state: RepoPickerState,
+  onPick: (repo: GithubRepo) => void
+) {
+  switch (state.kind) {
+    case 'closed':
+      return null
+    case 'loading':
+      return <p className="containers-github-picker__muted">Searching GitHub…</p>
+    case 'error':
+      return (
+        <p className="containers-github-picker__error" role="alert">
+          {state.detail}
+        </p>
+      )
+    case 'ready':
+      if (state.repos.length === 0) {
+        return (
+          <p className="containers-github-picker__muted">
+            {state.query
+              ? 'No repositories matched that search.'
+              : 'No repositories available on this account.'}
+          </p>
+        )
+      }
+      return (
+        <ul className="containers-github-picker__list">
+          {state.repos.map((repo) => (
+            <li key={repo.full_name} className="containers-github-picker__item">
+              <div className="containers-github-picker__meta">
+                <span className="containers-github-picker__name">{repo.full_name}</span>
+                {repo.private ? (
+                  <span className="containers-github-picker__badge">Private</span>
+                ) : null}
+                <span className="containers-github-picker__branch">
+                  default: {repo.default_branch || 'main'}
+                </span>
+              </div>
+              <button
+                type="button"
+                className="btn btn--ghost btn--sm"
+                onClick={() => onPick(repo)}
+              >
+                Use
+              </button>
+            </li>
+          ))}
+        </ul>
+      )
+  }
+}
+
 export default function ContainersPage() {
   const [source, setSource] = useState('')
   const [containerName, setContainerName] = useState('')
@@ -55,6 +119,10 @@ export default function ContainersPage() {
   const [imageRefCheck, setImageRefCheck] = useState<ImageRefCheckState>({
     status: 'idle',
   })
+  const [githubStatus, setGithubStatus] = useState<GithubStatus | null>(null)
+  const [repoPickerOpen, setRepoPickerOpen] = useState(false)
+  const [repoPicker, setRepoPicker] = useState<RepoPickerState>({ kind: 'closed' })
+  const [repoQuery, setRepoQuery] = useState('')
   const sourceTrimmedRef = useRef('')
   sourceTrimmedRef.current = source.trim()
 
@@ -83,6 +151,62 @@ export default function ContainersPage() {
   useEffect(() => {
     void refresh()
   }, [refresh])
+
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      try {
+        const status = await getGithubStatus()
+        if (!cancelled) setGithubStatus(status)
+      } catch {
+        // GitHub status is optional; failure just hides the picker.
+        if (!cancelled) setGithubStatus({ connected: false, login: null, avatar_url: null, scopes: [], connected_at: null })
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!repoPickerOpen) return
+    const handle = window.setTimeout(() => {
+      void (async () => {
+        setRepoPicker({ kind: 'loading', query: repoQuery })
+        try {
+          const repos = await listGithubRepos(repoQuery || undefined)
+          setRepoPicker({ kind: 'ready', query: repoQuery, repos })
+        } catch (error) {
+          setRepoPicker({
+            kind: 'error',
+            query: repoQuery,
+            detail: formatApiError(error),
+          })
+        }
+      })()
+    }, REPO_SEARCH_DEBOUNCE_MS)
+    return () => {
+      window.clearTimeout(handle)
+    }
+  }, [repoQuery, repoPickerOpen])
+
+  function toggleRepoPicker() {
+    if (repoPickerOpen) {
+      setRepoPickerOpen(false)
+      setRepoPicker({ kind: 'closed' })
+      return
+    }
+    setRepoPickerOpen(true)
+    setRepoPicker({ kind: 'loading', query: repoQuery })
+  }
+
+  function pickRepo(repo: GithubRepo) {
+    setSource(`${repo.html_url}.git`)
+    setGitBranch(repo.default_branch || 'main')
+    setImageRefCheck({ status: 'idle' })
+    setRepoPickerOpen(false)
+    setRepoPicker({ kind: 'closed' })
+  }
 
   const runImageRefAvailabilityCheck = useCallback(async (ref: string) => {
     setImageRefCheck({ status: 'checking' })
@@ -253,9 +377,33 @@ export default function ContainersPage() {
       </p>
 
       <form className="containers-form" onSubmit={onSubmit}>
-        <label className="containers-form__label" htmlFor="source-input">
-          Image or Git URL
-        </label>
+        <div className="containers-form__source-header">
+          <label className="containers-form__label" htmlFor="source-input">
+            Image or Git URL
+          </label>
+          {githubStatus?.connected ? (
+            <button
+              type="button"
+              className="btn btn--ghost btn--sm"
+              onClick={toggleRepoPicker}
+            >
+              {repoPickerOpen ? 'Hide picker' : 'Pick from GitHub'}
+            </button>
+          ) : null}
+        </div>
+        {repoPickerOpen ? (
+          <div className="containers-github-picker" role="region" aria-label="Pick a GitHub repository">
+            <input
+              type="text"
+              className="containers-form__input containers-github-picker__search"
+              placeholder="Search your repos…"
+              value={repoQuery}
+              onChange={(e) => setRepoQuery(e.target.value)}
+              autoFocus
+            />
+            {renderRepoPickerBody(repoPicker, pickRepo)}
+          </div>
+        ) : null}
         <input
           id="source-input"
           className="containers-form__input"

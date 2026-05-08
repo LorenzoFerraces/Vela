@@ -8,7 +8,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.errors import register_exception_handlers
-from app.api.routes import auth, builder, containers, images, traffic
+from app.api.routes import auth, builder, containers, github, images, traffic
 
 API_PREFIX = "/api"
 
@@ -60,6 +60,16 @@ def create_app() -> FastAPI:
         auth.router,
         prefix=f"{API_PREFIX}/auth",
         tags=["auth"],
+    )
+    application.include_router(
+        github.router_auth,
+        prefix=f"{API_PREFIX}/auth",
+        tags=["github"],
+    )
+    application.include_router(
+        github.router_resource,
+        prefix=f"{API_PREFIX}/github",
+        tags=["github"],
     )
 
     @application.get(f"{API_PREFIX}/health", tags=["health"])

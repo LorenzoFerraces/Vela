@@ -15,7 +15,11 @@ class ImageBuilder(ABC):
 
     @abstractmethod
     async def build_from_source(
-        self, source: ProjectSource, *, tag: str
+        self,
+        source: ProjectSource,
+        *,
+        tag: str,
+        access_token: str | None = None,
     ) -> BuildResult:
         """Full pipeline: clone → analyse → generate/detect Dockerfile → build.
 
@@ -26,6 +30,8 @@ class ImageBuilder(ABC):
         Args:
             source: Git URL or local path to the project.
             tag:    Image tag to assign to the built image.
+            access_token: Optional credential forwarded to the git clone for
+                private HTTPS repos. Never stored alongside ``source``.
 
         Returns:
             A ``BuildResult`` with the image ID, tag, strategy used, and
@@ -60,7 +66,11 @@ class ImageBuilder(ABC):
 
     @abstractmethod
     async def clone_repository(
-        self, git_url: str, *, branch: str = "main"
+        self,
+        git_url: str,
+        *,
+        branch: str = "main",
+        access_token: str | None = None,
     ) -> str:
         """Clone a remote git repository into a temporary directory.
 

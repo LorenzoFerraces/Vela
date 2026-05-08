@@ -380,3 +380,65 @@ export async function login(body: LoginRequest): Promise<TokenResponse> {
 export async function getMe(): Promise<UserPublic> {
   return apiGet<UserPublic>('/api/auth/me')
 }
+
+// --- GitHub OAuth ---
+
+export interface GithubStatus {
+  connected: boolean
+  login: string | null
+  avatar_url: string | null
+  scopes: string[]
+  connected_at: string | null
+}
+
+export interface GithubAuthorizeUrlResponse {
+  authorize_url: string
+}
+
+export interface GithubRepo {
+  full_name: string
+  default_branch: string
+  private: boolean
+  html_url: string
+  description: string | null
+}
+
+export interface GithubBranch {
+  name: string
+}
+
+export async function getGithubStatus(): Promise<GithubStatus> {
+  return apiGet<GithubStatus>('/api/auth/github/status')
+}
+
+export async function getGithubAuthorizeUrl(): Promise<GithubAuthorizeUrlResponse> {
+  return apiGet<GithubAuthorizeUrlResponse>('/api/auth/github/start')
+}
+
+export async function disconnectGithub(): Promise<void> {
+  await apiDelete('/api/auth/github')
+}
+
+export async function listGithubRepos(
+  query?: string,
+  page: number = 1
+): Promise<GithubRepo[]> {
+  const params = new URLSearchParams({ page: String(page) })
+  const trimmedQuery = query?.trim()
+  if (trimmedQuery) {
+    params.set('q', trimmedQuery)
+  }
+  return apiGet<GithubRepo[]>(`/api/github/repos?${params.toString()}`)
+}
+
+export async function listGithubRepoBranches(
+  fullName: string
+): Promise<GithubBranch[]> {
+  const slashIndex = fullName.indexOf('/')
+  if (slashIndex <= 0 || slashIndex === fullName.length - 1) {
+    throw new Error(`Invalid repo full_name: ${fullName}`)
+  }
+  const owner = encodeURIComponent(fullName.slice(0, slashIndex))
+  const repo = encodeURIComponent(fullName.slice(slashIndex + 1))
+  return apiGet<GithubBranch[]>(`/api/github/repos/${owner}/${repo}/branches`)
+}

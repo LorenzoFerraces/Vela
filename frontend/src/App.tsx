@@ -6,6 +6,7 @@ import ContainersPage from './pages/ContainersPage'
 import LoginPage from './pages/LoginPage'
 import RegisterPage from './pages/RegisterPage'
 import PlaceholderPage from './pages/PlaceholderPage'
+import SettingsPage from './pages/SettingsPage'
 
 export default function App() {
   return (
@@ -50,7 +51,7 @@ export default function App() {
           path="/settings"
           element={
             <RequireAuth>
-              <PlaceholderPage title="Settings" />
+              <SettingsPage />
             </RequireAuth>
           }
         />

@@ -247,6 +247,119 @@ def test_run_rejects_empty_source(api_client: TestClient) -> None:
     assert response.status_code == 422
 
 
+def test_run_from_github_uses_stored_token(
+    api_client: TestClient,
+    mock_image_builder: MagicMock,
+    db_session_factory,
+    seeded_user,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A connected user's GitHub URL forwards the decrypted token to the builder."""
+    import asyncio
+
+    from cryptography.fernet import Fernet
+
+    from app.core.oauth.identity import GITHUB_PROVIDER
+    from app.core.security import reset_token_cipher_for_tests
+    from app.core.security.secrets import encrypt_secret
+    from app.db.models import UserOAuthIdentity
+
+    monkeypatch.setenv("VELA_PUBLIC_ROUTE_DOMAIN", "apps.example.com")
+    monkeypatch.setenv("VELA_PUBLIC_URL_SCHEME", "https")
+    monkeypatch.setenv("VELA_TOKEN_ENCRYPTION_KEY", Fernet.generate_key().decode())
+    reset_token_cipher_for_tests()
+
+    async def seed_identity() -> None:
+        async with db_session_factory() as session:
+            session.add(
+                UserOAuthIdentity(
+                    user_id=seeded_user.id,
+                    provider=GITHUB_PROVIDER,
+                    provider_subject="42",
+                    username="octocat",
+                    avatar_url=None,
+                    scopes="repo,read:user",
+                    access_token_encrypted=encrypt_secret("ghp_secret_value"),
+                )
+            )
+            await session.commit()
+
+    asyncio.run(seed_identity())
+
+    response = api_client.post(
+        "/api/containers/run",
+        json={
+            "source": "https://github.com/octo/private-repo.git",
+            "git_branch": "main",
+            "public_route": True,
+            "container_port": 80,
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    mock_image_builder.build_from_source.assert_awaited_once()
+    kwargs = mock_image_builder.build_from_source.await_args.kwargs
+    assert kwargs.get("access_token") == "ghp_secret_value"
+
+
+def test_run_from_github_without_connection_does_not_send_token(
+    api_client: TestClient,
+    mock_image_builder: MagicMock,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Disconnected users keep working for public repos and pass no token."""
+    monkeypatch.setenv("VELA_PUBLIC_ROUTE_DOMAIN", "apps.example.com")
+    monkeypatch.setenv("VELA_PUBLIC_URL_SCHEME", "https")
+
+    response = api_client.post(
+        "/api/containers/run",
+        json={
+            "source": "https://github.com/org/public-repo.git",
+            "git_branch": "main",
+            "public_route": True,
+            "container_port": 80,
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    mock_image_builder.build_from_source.assert_awaited_once()
+    kwargs = mock_image_builder.build_from_source.await_args.kwargs
+    assert kwargs.get("access_token") is None
+
+
+def test_run_private_github_clone_failure_hints_settings(
+    api_client: TestClient,
+    mock_image_builder: MagicMock,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An auth-style CloneError on github.com surfaces a friendly Settings hint."""
+    from app.core.exceptions import CloneError
+
+    monkeypatch.setenv("VELA_PUBLIC_ROUTE_DOMAIN", "apps.example.com")
+    monkeypatch.setenv("VELA_PUBLIC_URL_SCHEME", "https")
+
+    mock_image_builder.build_from_source = AsyncMock(
+        side_effect=CloneError(
+            "https://github.com/org/private.git",
+            "fatal: Authentication failed for 'https://github.com/org/private.git/'",
+        )
+    )
+
+    response = api_client.post(
+        "/api/containers/run",
+        json={
+            "source": "https://github.com/org/private.git",
+            "git_branch": "main",
+            "public_route": True,
+            "container_port": 80,
+        },
+    )
+
+    assert response.status_code == 422
+    detail = response.json()["detail"].lower()
+    assert "connect github in settings" in detail
+
+
 def test_builder_build_calls_pipeline(make_authed_client) -> None:
     mock_orch = MagicMock(spec=ContainerOrchestrator)
     mock_orch.build_image = AsyncMock(return_value="sha256:x")
