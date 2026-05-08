@@ -388,11 +388,15 @@ def test_builder_build_calls_pipeline(make_authed_client) -> None:
     builder.build_from_source.assert_awaited_once()
 
 
-def test_builder_analyze_uses_validate_local(make_authed_client, tmp_path, monkeypatch) -> None:
+def test_builder_analyze_uses_validate_local(
+    make_authed_client, tmp_path, monkeypatch
+) -> None:
     (tmp_path / "package.json").write_text('{"name":"x"}', encoding="utf-8")
     mock_builder = MagicMock(spec=DefaultImageBuilder)
     mock_builder.analyze = AsyncMock(
-        return_value=ProjectInfo(language=SupportedLanguage.JAVASCRIPT, has_dockerfile=False)
+        return_value=ProjectInfo(
+            language=SupportedLanguage.JAVASCRIPT, has_dockerfile=False
+        )
     )
 
     monkeypatch.setenv("VELA_ALLOWED_BUILD_ROOT", str(tmp_path.parent))

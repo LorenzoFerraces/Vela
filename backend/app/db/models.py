@@ -24,7 +24,9 @@ class User(Base):
         primary_key=True,
         default=uuid.uuid4,
     )
-    email: Mapped[str] = mapped_column(String(320), unique=True, nullable=False, index=True)
+    email: Mapped[str] = mapped_column(
+        String(320), unique=True, nullable=False, index=True
+    )
     password_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=_utcnow
@@ -51,7 +53,9 @@ class UserOAuthIdentity(Base):
 
     __tablename__ = "user_oauth_identities"
     __table_args__ = (
-        UniqueConstraint("provider", "provider_subject", name="uq_oauth_provider_subject"),
+        UniqueConstraint(
+            "provider", "provider_subject", name="uq_oauth_provider_subject"
+        ),
         UniqueConstraint("provider", "user_id", name="uq_oauth_provider_user"),
     )
 
@@ -71,7 +75,9 @@ class UserOAuthIdentity(Base):
     username: Mapped[str | None] = mapped_column(String(255), nullable=True)
     avatar_url: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     scopes: Mapped[str | None] = mapped_column(String(512), nullable=True)
-    access_token_encrypted: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
+    access_token_encrypted: Mapped[bytes | None] = mapped_column(
+        LargeBinary, nullable=True
+    )
     connected_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=_utcnow
     )

@@ -192,7 +192,9 @@ async def list_containers(
 
 @router.get("/image/availability", response_model=ImageAvailabilityResponse)
 async def image_availability(
-    ref: Annotated[str, Query(min_length=1, max_length=2048, description="Docker image reference.")],
+    ref: Annotated[
+        str, Query(min_length=1, max_length=2048, description="Docker image reference.")
+    ],
     orchestrator: Annotated[ContainerOrchestrator, Depends(get_orchestrator)],
     _current_user: Annotated[User, Depends(get_current_user)],
 ) -> ImageAvailabilityResponse:
@@ -235,7 +237,9 @@ async def image_availability(
             hints=None,
             registry_detail=None,
         )
-    return ImageAvailabilityResponse(ref=source, available=True, checked=True, detail=None)
+    return ImageAvailabilityResponse(
+        ref=source, available=True, checked=True, detail=None
+    )
 
 
 @router.post("/deploy", response_model=ContainerDeployResponse)

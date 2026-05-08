@@ -91,9 +91,7 @@ class BuilderError(VelaError):
 class UnsupportedLanguageError(BuilderError):
     def __init__(self, language: str) -> None:
         self.language = language
-        super().__init__(
-            f"No Dockerfile template available for language: {language}"
-        )
+        super().__init__(f"No Dockerfile template available for language: {language}")
 
 
 class UnsupportedProjectError(VelaError):
@@ -118,9 +116,7 @@ class AnalysisError(BuilderError):
 class DockerfileGenerationError(BuilderError):
     def __init__(self, language: str, message: str) -> None:
         self.language = language
-        super().__init__(
-            f"Dockerfile generation failed for {language}: {message}"
-        )
+        super().__init__(f"Dockerfile generation failed for {language}: {message}")
 
 
 # ---------------------------------------------------------------------------

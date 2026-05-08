@@ -112,7 +112,9 @@ def register_exception_handlers(app) -> None:
     @app.exception_handler(CloneError)
     @app.exception_handler(AnalysisError)
     @app.exception_handler(DockerfileGenerationError)
-    async def builder_subclass_handler(_request: Request, exc: BuilderError) -> JSONResponse:
+    async def builder_subclass_handler(
+        _request: Request, exc: BuilderError
+    ) -> JSONResponse:
         return JSONResponse(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             content={"detail": str(exc)},
@@ -126,14 +128,18 @@ def register_exception_handlers(app) -> None:
         )
 
     @app.exception_handler(TrafficRouterError)
-    async def traffic_router_handler(_request: Request, exc: TrafficRouterError) -> JSONResponse:
+    async def traffic_router_handler(
+        _request: Request, exc: TrafficRouterError
+    ) -> JSONResponse:
         return JSONResponse(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             content={"detail": str(exc)},
         )
 
     @app.exception_handler(OrchestratorError)
-    async def orchestrator_handler(_request: Request, exc: OrchestratorError) -> JSONResponse:
+    async def orchestrator_handler(
+        _request: Request, exc: OrchestratorError
+    ) -> JSONResponse:
         return JSONResponse(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             content={"detail": str(exc)},
@@ -150,7 +156,9 @@ def register_exception_handlers(app) -> None:
 
     @app.exception_handler(InvalidCredentialsError)
     @app.exception_handler(NotAuthenticatedError)
-    async def auth_unauthorized_handler(_request: Request, exc: AuthError) -> JSONResponse:
+    async def auth_unauthorized_handler(
+        _request: Request, exc: AuthError
+    ) -> JSONResponse:
         return JSONResponse(
             status_code=status.HTTP_401_UNAUTHORIZED,
             content={"detail": str(exc)},

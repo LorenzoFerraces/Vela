@@ -197,7 +197,9 @@ class TokenResponse(BaseModel):
 
 
 class GitHubAuthorizeUrlResponse(BaseModel):
-    authorize_url: str = Field(..., description="GitHub authorize URL the SPA navigates to.")
+    authorize_url: str = Field(
+        ..., description="GitHub authorize URL the SPA navigates to."
+    )
 
 
 class GitHubStatusResponse(BaseModel):
