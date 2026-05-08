@@ -69,6 +69,11 @@ Create `backend/.env` as needed. Common variables:
 | `VELA_PUBLIC_ROUTE_DOMAIN` | Base domain for generated public hostnames (optional) |
 | `VELA_PUBLIC_URL_SCHEME` | `https` or `http` for public URLs |
 | `VELA_ALLOWED_BUILD_ROOT` | Restricts local build paths on the server (optional) |
+| `VELA_FRONTEND_BASE_URL` | Used by the GitHub OAuth callback to redirect the browser back to the SPA after success/error (e.g. `http://localhost:5173`) |
+| `VELA_GITHUB_CLIENT_ID` / `VELA_GITHUB_CLIENT_SECRET` | OAuth App credentials for GitHub. Register at [github.com/settings/developers](https://github.com/settings/developers); the App's **Authorization callback URL** must equal `VELA_GITHUB_OAUTH_REDIRECT_URI` |
+| `VELA_GITHUB_OAUTH_REDIRECT_URI` | Public URL of `GET /api/auth/github/callback`, e.g. `http://localhost:8000/api/auth/github/callback` |
+| `VELA_GITHUB_OAUTH_SCOPES` | Comma-separated scopes requested from GitHub (default `repo,read:user`) |
+| `VELA_TOKEN_ENCRYPTION_KEY` | Fernet key used to encrypt third-party access tokens at rest. Generate with `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"` |
 
 ```powershell
 python run.py
@@ -83,6 +88,18 @@ API: **http://127.0.0.1:8000** — health: `GET /api/health` (no auth).
 - `GET /api/auth/me` — current user; requires `Authorization: Bearer <access_token>`.
 
 Most **`/api/containers/**`** routes require that bearer token. Containers are scoped per user (Docker label `vela.owner_id`).
+
+### GitHub integration (private repos)
+
+To deploy private GitHub repos, connect a GitHub account from the **Settings** page in the UI. The flow is a standard OAuth App authorization:
+
+- `GET /api/auth/github/start` — returns the GitHub authorize URL (the SPA navigates to it).
+- `GET /api/auth/github/callback` — GitHub redirects here with `?code&state`; the API exchanges the code, encrypts the access token (Fernet, key from `VELA_TOKEN_ENCRYPTION_KEY`), and stores it in `user_oauth_identities`. The browser is then sent back to `${VELA_FRONTEND_BASE_URL}/settings?github=connected` (or `?github=error&reason=...`).
+- `GET /api/auth/github/status` — `{ connected, login?, avatar_url?, scopes?, connected_at? }` (never returns the token).
+- `DELETE /api/auth/github` — disconnects the account and removes the stored token.
+- `GET /api/github/repos` and `/api/github/repos/{owner}/{repo}/branches` — back the **Pick from GitHub** picker on Containers.
+
+When you `POST /api/containers/run` with a private `github.com` URL, the server transparently uses the connected user's stored token to clone (passed via `git -c http.extraheader=...` so the token never appears in URLs or process listings).
 
 ## Traefik (optional)
 

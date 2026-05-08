@@ -4,11 +4,14 @@ from __future__ import annotations
 
 import uuid
 from typing import Annotated
+from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, Query, Response, status
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import (
     get_current_user,
+    get_db,
     get_image_builder,
     get_orchestrator,
     get_traffic_router,
@@ -32,6 +35,7 @@ from app.core.public_route_host import (
 )
 from app.core.enums import ContainerStatus, RestartPolicy
 from app.core.exceptions import (
+    CloneError,
     ContainerNotFoundError,
     ImageNotFoundError,
     RegistryAccessDeniedError,
@@ -45,6 +49,7 @@ from app.core.models import (
     PortMapping,
     ProjectSource,
 )
+from app.core.oauth import decrypt_identity_token, get_github_identity
 from app.core.orchestrator import ContainerOrchestrator
 from app.core.traffic_router import TrafficRouter
 from app.db.models import User
@@ -112,6 +117,46 @@ def _infer_source_kind(source: str) -> tuple[str, str]:
     return "image", stripped
 
 
+def _is_github_https_url(source: str) -> bool:
+    """True for the HTTPS forms we can authenticate with a stored access token."""
+    try:
+        parsed = urlparse(source)
+    except ValueError:
+        return False
+    if parsed.scheme not in {"http", "https"}:
+        return False
+    host = (parsed.hostname or "").lower()
+    return host == "github.com" or host.endswith(".github.com")
+
+
+async def _github_token_for_url(
+    session: AsyncSession, user: User, source: str
+) -> str | None:
+    """Decrypt the user's GitHub token if ``source`` is a GitHub HTTPS URL."""
+    if not _is_github_https_url(source):
+        return None
+    identity = await get_github_identity(session, user.id)
+    if identity is None:
+        return None
+    return decrypt_identity_token(identity)
+
+
+def _looks_like_auth_failure(error_message: str) -> bool:
+    lowered = error_message.lower()
+    auth_markers = (
+        "authentication failed",
+        "could not read username",
+        "terminal prompts disabled",
+        "http 401",
+        "http 403",
+        "403",
+        "401",
+        "permission denied",
+        "repository not found",
+    )
+    return any(marker in lowered for marker in auth_markers)
+
+
 def _deploy_config_for_image(
     *,
     image: str,
@@ -147,7 +192,9 @@ async def list_containers(
 
 @router.get("/image/availability", response_model=ImageAvailabilityResponse)
 async def image_availability(
-    ref: Annotated[str, Query(min_length=1, max_length=2048, description="Docker image reference.")],
+    ref: Annotated[
+        str, Query(min_length=1, max_length=2048, description="Docker image reference.")
+    ],
     orchestrator: Annotated[ContainerOrchestrator, Depends(get_orchestrator)],
     _current_user: Annotated[User, Depends(get_current_user)],
 ) -> ImageAvailabilityResponse:
@@ -190,7 +237,9 @@ async def image_availability(
             hints=None,
             registry_detail=None,
         )
-    return ImageAvailabilityResponse(ref=source, available=True, checked=True, detail=None)
+    return ImageAvailabilityResponse(
+        ref=source, available=True, checked=True, detail=None
+    )
 
 
 @router.post("/deploy", response_model=ContainerDeployResponse)
@@ -220,6 +269,7 @@ async def run_from_user_source(
     traffic_router: Annotated[TrafficRouter, Depends(get_traffic_router)],
     image_builder: Annotated[DefaultImageBuilder, Depends(get_image_builder)],
     current_user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[AsyncSession, Depends(get_db)],
 ) -> RunFromSourceResponse:
     """Pull or build an image from ``source``, then deploy a container.
 
@@ -228,6 +278,9 @@ async def run_from_user_source(
     * **Git URL** — shallow clone, ensure a ``Dockerfile`` (existing or
       generated from ``package.json`` / Python / Go markers), ``docker build``,
       then start a container from the new image tag.
+
+    For GitHub HTTPS URLs we transparently use the caller's stored OAuth token
+    (when they have connected GitHub in Settings) so private repos clone too.
     """
     kind, source = _infer_source_kind(body.source)
 
@@ -258,11 +311,25 @@ async def run_from_user_source(
             public_url=public_url,
         )
 
+    access_token = await _github_token_for_url(session, current_user, source)
     tag = f"vela/gitbuild:{uuid.uuid4().hex[:12]}"
-    build_result = await image_builder.build_from_source(
-        ProjectSource(git_url=source, branch=body.git_branch),
-        tag=tag,
-    )
+    try:
+        build_result = await image_builder.build_from_source(
+            ProjectSource(git_url=source, branch=body.git_branch),
+            tag=tag,
+            access_token=access_token,
+        )
+    except CloneError as exc:
+        if (
+            access_token is None
+            and _is_github_https_url(source)
+            and _looks_like_auth_failure(str(exc))
+        ):
+            raise CloneError(
+                source,
+                "Repository looks private. Connect GitHub in Settings to deploy private repos.",
+            ) from exc
+        raise
 
     cfg = _deploy_config_for_image(
         image=build_result.image_tag,

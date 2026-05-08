@@ -189,3 +189,34 @@ class TokenResponse(BaseModel):
     access_token: str
     token_type: Literal["bearer"] = "bearer"
     user: UserPublic
+
+
+# ---------------------------------------------------------------------------
+# GitHub OAuth schemas
+# ---------------------------------------------------------------------------
+
+
+class GitHubAuthorizeUrlResponse(BaseModel):
+    authorize_url: str = Field(
+        ..., description="GitHub authorize URL the SPA navigates to."
+    )
+
+
+class GitHubStatusResponse(BaseModel):
+    connected: bool
+    login: str | None = None
+    avatar_url: str | None = None
+    scopes: list[str] = Field(default_factory=list)
+    connected_at: datetime | None = None
+
+
+class GitHubRepoSummary(BaseModel):
+    full_name: str
+    default_branch: str
+    private: bool
+    html_url: str
+    description: str | None = None
+
+
+class GitHubBranchSummary(BaseModel):
+    name: str

@@ -91,9 +91,7 @@ class BuilderError(VelaError):
 class UnsupportedLanguageError(BuilderError):
     def __init__(self, language: str) -> None:
         self.language = language
-        super().__init__(
-            f"No Dockerfile template available for language: {language}"
-        )
+        super().__init__(f"No Dockerfile template available for language: {language}")
 
 
 class UnsupportedProjectError(VelaError):
@@ -118,9 +116,7 @@ class AnalysisError(BuilderError):
 class DockerfileGenerationError(BuilderError):
     def __init__(self, language: str, message: str) -> None:
         self.language = language
-        super().__init__(
-            f"Dockerfile generation failed for {language}: {message}"
-        )
+        super().__init__(f"Dockerfile generation failed for {language}: {message}")
 
 
 # ---------------------------------------------------------------------------
@@ -167,4 +163,39 @@ class InvalidCredentialsError(AuthError):
 
 class NotAuthenticatedError(AuthError):
     def __init__(self, message: str = "Not authenticated.") -> None:
+        super().__init__(message)
+
+
+# ---------------------------------------------------------------------------
+# Third-party integrations (GitHub OAuth)
+# ---------------------------------------------------------------------------
+
+
+class IntegrationError(VelaError):
+    """Base exception for third-party integration failures (OAuth providers, etc.)."""
+
+
+class IntegrationConfigurationError(IntegrationError):
+    """The server is missing configuration required to talk to a provider."""
+
+
+class GitHubNotConnectedError(IntegrationError):
+    def __init__(
+        self, message: str = "Connect your GitHub account in Settings first."
+    ) -> None:
+        super().__init__(message)
+
+
+class GitHubOAuthError(IntegrationError):
+    """Failure during the GitHub OAuth handshake (bad code, denied, expired state, ...)."""
+
+    def __init__(self, reason: str, message: str | None = None) -> None:
+        self.reason = reason
+        super().__init__(message or f"GitHub authorization failed ({reason}).")
+
+
+class GitHubAPIError(IntegrationError):
+    """A call to the GitHub REST API failed."""
+
+    def __init__(self, message: str = "GitHub request failed.") -> None:
         super().__init__(message)

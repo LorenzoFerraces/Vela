@@ -14,8 +14,13 @@ from app.core.exceptions import (
     ContainerNotRunningError,
     DockerfileGenerationError,
     EmailAlreadyRegisteredError,
+    GitHubAPIError,
+    GitHubNotConnectedError,
+    GitHubOAuthError,
     ImageBuildError,
     ImageNotFoundError,
+    IntegrationConfigurationError,
+    IntegrationError,
     InvalidCredentialsError,
     NotAuthenticatedError,
     OrchestratorError,
@@ -107,7 +112,9 @@ def register_exception_handlers(app) -> None:
     @app.exception_handler(CloneError)
     @app.exception_handler(AnalysisError)
     @app.exception_handler(DockerfileGenerationError)
-    async def builder_subclass_handler(_request: Request, exc: BuilderError) -> JSONResponse:
+    async def builder_subclass_handler(
+        _request: Request, exc: BuilderError
+    ) -> JSONResponse:
         return JSONResponse(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             content={"detail": str(exc)},
@@ -121,14 +128,18 @@ def register_exception_handlers(app) -> None:
         )
 
     @app.exception_handler(TrafficRouterError)
-    async def traffic_router_handler(_request: Request, exc: TrafficRouterError) -> JSONResponse:
+    async def traffic_router_handler(
+        _request: Request, exc: TrafficRouterError
+    ) -> JSONResponse:
         return JSONResponse(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             content={"detail": str(exc)},
         )
 
     @app.exception_handler(OrchestratorError)
-    async def orchestrator_handler(_request: Request, exc: OrchestratorError) -> JSONResponse:
+    async def orchestrator_handler(
+        _request: Request, exc: OrchestratorError
+    ) -> JSONResponse:
         return JSONResponse(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             content={"detail": str(exc)},
@@ -145,7 +156,9 @@ def register_exception_handlers(app) -> None:
 
     @app.exception_handler(InvalidCredentialsError)
     @app.exception_handler(NotAuthenticatedError)
-    async def auth_unauthorized_handler(_request: Request, exc: AuthError) -> JSONResponse:
+    async def auth_unauthorized_handler(
+        _request: Request, exc: AuthError
+    ) -> JSONResponse:
         return JSONResponse(
             status_code=status.HTTP_401_UNAUTHORIZED,
             content={"detail": str(exc)},
@@ -158,6 +171,51 @@ def register_exception_handlers(app) -> None:
             status_code=status.HTTP_401_UNAUTHORIZED,
             content={"detail": str(exc)},
             headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    @app.exception_handler(GitHubNotConnectedError)
+    async def github_not_connected_handler(
+        _request: Request, exc: GitHubNotConnectedError
+    ) -> JSONResponse:
+        return JSONResponse(
+            status_code=status.HTTP_409_CONFLICT,
+            content={"detail": str(exc), "code": "github_not_connected"},
+        )
+
+    @app.exception_handler(GitHubOAuthError)
+    async def github_oauth_handler(
+        _request: Request, exc: GitHubOAuthError
+    ) -> JSONResponse:
+        return JSONResponse(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            content={"detail": str(exc), "reason": exc.reason},
+        )
+
+    @app.exception_handler(GitHubAPIError)
+    async def github_api_handler(
+        _request: Request, exc: GitHubAPIError
+    ) -> JSONResponse:
+        return JSONResponse(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            content={"detail": str(exc)},
+        )
+
+    @app.exception_handler(IntegrationConfigurationError)
+    async def integration_config_handler(
+        _request: Request, exc: IntegrationConfigurationError
+    ) -> JSONResponse:
+        return JSONResponse(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            content={"detail": str(exc)},
+        )
+
+    @app.exception_handler(IntegrationError)
+    async def integration_handler(
+        _request: Request, exc: IntegrationError
+    ) -> JSONResponse:
+        return JSONResponse(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            content={"detail": str(exc)},
         )
 
     @app.exception_handler(VelaError)

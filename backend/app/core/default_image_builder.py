@@ -42,7 +42,13 @@ class DefaultImageBuilder(ImageBuilder):
     def __init__(self, orchestrator: ContainerOrchestrator) -> None:
         self._orchestrator = orchestrator
 
-    async def clone_repository(self, git_url: str, *, branch: str = "main") -> str:
+    async def clone_repository(
+        self,
+        git_url: str,
+        *,
+        branch: str = "main",
+        access_token: str | None = None,
+    ) -> str:
         """Clone into a fresh temp directory; return path to the repo root.
 
         The parent of the returned path is a temp prefix ``vela-clone-*``;
@@ -50,7 +56,12 @@ class DefaultImageBuilder(ImageBuilder):
         """
         root = Path(tempfile.mkdtemp(prefix="vela-clone-"))
         dest = root / "repo"
-        await git_shallow_clone(url=git_url.strip(), branch=branch, dest=dest)
+        await git_shallow_clone(
+            url=git_url.strip(),
+            branch=branch,
+            dest=dest,
+            access_token=access_token,
+        )
         return str(dest.resolve())
 
     async def analyze(self, project_path: str) -> ProjectInfo:
@@ -62,11 +73,21 @@ class DefaultImageBuilder(ImageBuilder):
         _ = project_path  # reserved for future per-path templates
         return dockerfile_contents_for(project_info)
 
-    async def build_from_source(self, source: ProjectSource, *, tag: str) -> BuildResult:
+    async def build_from_source(
+        self,
+        source: ProjectSource,
+        *,
+        tag: str,
+        access_token: str | None = None,
+    ) -> BuildResult:
         tmp_parent: Path | None = None
         project_path: str
         if source.git_url:
-            project_path = await self.clone_repository(source.git_url, branch=source.branch)
+            project_path = await self.clone_repository(
+                source.git_url,
+                branch=source.branch,
+                access_token=access_token,
+            )
             tmp_parent = Path(project_path).parent
         elif source.local_path:
             resolved = validate_local_build_context(Path(source.local_path))
