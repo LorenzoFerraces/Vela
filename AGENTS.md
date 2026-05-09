@@ -46,6 +46,9 @@ After substantive agent-generated edits on a branch, run the **deslop** Cursor s
 
 - **Avoid `instanceof` when practical.** Prefer discriminated unions, narrow with `typeof` / `in`, small type-predicate helpers, or parsing/validation (e.g. Zod) so behavior does not depend on prototype chains or cross-realm objects.
 - Use `instanceof` only where it is clearly the best tool (e.g. a well-owned `Error` subclass in the same bundle) and document why if it is non-obvious.
+- **Keep page and component files from growing too large.** Split out subviews, hooks, and shared UI into focused modules when a file becomes hard to scan or review.
+- **Reuse across pages** when the same UI or logic appears in more than one place — extract shared components or hooks rather than duplicating large blocks.
+- **`useEffect`**: Prefer deriving state during render, event handlers, or library patterns that avoid sync-on-mount when they suffice. Reserve effects for real side effects (subscriptions, imperative DOM, syncing with external systems) and avoid redundant or overly chained effects that are hard to reason about.
 
 ## UI and forms (user experience)
 

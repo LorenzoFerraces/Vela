@@ -870,6 +870,23 @@ body {
   margin-bottom: 0;
 }
 
+.containers-form__github-aside {
+  font-size: 0.875rem;
+  color: var(--text-muted);
+  text-align: right;
+  line-height: 1.35;
+}
+
+.containers-form__github-aside a {
+  color: var(--accent);
+  text-decoration: none;
+  font-weight: 500;
+}
+
+.containers-form__github-aside a:hover {
+  text-decoration: underline;
+}
+
 .containers-github-picker {
   margin: 0 0 1rem;
   padding: 0.85rem;
