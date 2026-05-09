@@ -77,6 +77,26 @@ class RunFromSourceRequest(BaseModel):
         return value
 
 
+class ImageSuggestion(BaseModel):
+    """One autocomplete candidate for a registry image reference."""
+
+    ref: str = Field(..., description="Suggested image reference (may omit implicit :latest).")
+    pull_count: int | None = Field(
+        default=None,
+        description="Docker Hub pull count when ``source`` is ``registry`` and Hub returned it.",
+    )
+    source: Literal["local", "registry"] = Field(
+        ...,
+        description="Whether the hint came from the local engine or Docker Hub search.",
+    )
+
+
+class ImageSuggestionsResponse(BaseModel):
+    """Merged image autocomplete list (local tags + Hub, ordered for the UI)."""
+
+    suggestions: list[ImageSuggestion]
+
+
 class ImageAvailabilityResponse(BaseModel):
     """Result of checking whether a registry image reference can be resolved."""
 

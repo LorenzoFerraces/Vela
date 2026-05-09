@@ -1,5 +1,10 @@
+import { useEffect, useId, useState } from 'react'
+import { getImageSuggestions } from '../../api/client'
 import type { ImageRefCheckState } from './types'
 import { sourceLooksLikeGitUrl } from './sourceKind'
+
+const IMAGE_SUGGEST_DEBOUNCE_MS = 320
+const IMAGE_SUGGEST_LIMIT = 22
 
 type ContainersSourceFieldProps = {
   source: string
@@ -16,6 +21,29 @@ export function ContainersSourceField({
   onSourceChange,
   onRequestImageCheck,
 }: ContainersSourceFieldProps) {
+  const suggestionsListId = useId()
+  const [suggestionRefs, setSuggestionRefs] = useState<string[]>([])
+  const trimmedSource = source.trim()
+  const imageSuggestionsEnabled =
+    !showGitBranch &&
+    (trimmedSource.length === 0 || !sourceLooksLikeGitUrl(trimmedSource))
+
+  useEffect(() => {
+    if (!imageSuggestionsEnabled) {
+      return
+    }
+    const timer = window.setTimeout(() => {
+      void getImageSuggestions(trimmedSource, { limit: IMAGE_SUGGEST_LIMIT })
+        .then((rows) => {
+          setSuggestionRefs(rows.map((row) => row.ref))
+        })
+        .catch(() => {
+          setSuggestionRefs([])
+        })
+    }, IMAGE_SUGGEST_DEBOUNCE_MS)
+    return () => window.clearTimeout(timer)
+  }, [trimmedSource, imageSuggestionsEnabled])
+
   return (
     <>
       <input
@@ -23,6 +51,7 @@ export function ContainersSourceField({
         className="containers-form__input"
         type="text"
         autoComplete="off"
+        list={imageSuggestionsEnabled ? suggestionsListId : undefined}
         placeholder="nginx:alpine or https://github.com/org/repo.git"
         value={source}
         onChange={(e) => onSourceChange(e.target.value)}
@@ -46,6 +75,13 @@ export function ContainersSourceField({
             : undefined
         }
       />
+      {imageSuggestionsEnabled ? (
+        <datalist id={suggestionsListId}>
+          {suggestionRefs.map((refValue) => (
+            <option key={refValue} value={refValue} />
+          ))}
+        </datalist>
+      ) : null}
       {!showGitBranch && imageRefCheck.status === 'checking' ? (
         <p
           id="source-input-status"

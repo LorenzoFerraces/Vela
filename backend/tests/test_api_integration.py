@@ -483,6 +483,61 @@ def test_builder_analyze_uses_validate_local(
     assert response.json()["language"] == "javascript"
 
 
+def test_image_suggestions_requires_auth(anonymous_client: TestClient) -> None:
+    response = anonymous_client.get("/api/containers/image/suggestions")
+    assert response.status_code == 401
+
+
+def test_image_suggestions_merges_local_and_hub(
+    make_authed_client, monkeypatch
+) -> None:
+    orch = MagicMock(spec=ContainerOrchestrator)
+    orch.list_images = AsyncMock(return_value=["my/nginx:dev", "nginx:alpine"])
+
+    async def fake_hub(query: str, *, page_size: int) -> list[tuple[str, int]]:
+        assert query == "nginx"
+        assert page_size >= 25
+        return [("nginx", 1_000_000), ("other/nginx", 100)]
+
+    monkeypatch.setattr(
+        "app.api.routes.containers.fetch_docker_hub_suggestions",
+        fake_hub,
+    )
+
+    with make_authed_client(orchestrator=orch) as client:
+        response = client.get("/api/containers/image/suggestions?q=nginx&limit=10")
+
+    assert response.status_code == 200
+    body = response.json()["suggestions"]
+    refs = [item["ref"] for item in body]
+    assert "my/nginx:dev" in refs
+    assert "nginx" in refs
+    assert refs.index("my/nginx:dev") < refs.index("nginx")
+
+
+def test_image_suggestions_empty_query_skips_hub(
+    make_authed_client, monkeypatch
+) -> None:
+    orch = MagicMock(spec=ContainerOrchestrator)
+    orch.list_images = AsyncMock(return_value=["local-only:1"])
+
+    async def fake_hub(*_args: object, **_kwargs: object) -> list[tuple[str, int]]:
+        raise AssertionError("Hub should not be called for an empty query")
+
+    monkeypatch.setattr(
+        "app.api.routes.containers.fetch_docker_hub_suggestions",
+        fake_hub,
+    )
+
+    with make_authed_client(orchestrator=orch) as client:
+        response = client.get("/api/containers/image/suggestions")
+
+    assert response.status_code == 200
+    refs = {item["ref"] for item in response.json()["suggestions"]}
+    assert "local-only:1" in refs
+    assert any("nginx" in ref for ref in refs)
+
+
 def test_list_images(make_authed_client) -> None:
     orch = MagicMock(spec=ContainerOrchestrator)
     orch.list_images = AsyncMock(return_value=["a:latest", "b:1"])

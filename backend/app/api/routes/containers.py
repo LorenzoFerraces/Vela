@@ -25,6 +25,8 @@ from app.api.route_wiring import (
 from app.api.schemas import (
     ContainerDeployResponse,
     ImageAvailabilityResponse,
+    ImageSuggestion,
+    ImageSuggestionsResponse,
     RunFromSourceRequest,
     RunFromSourceResponse,
 )
@@ -42,7 +44,12 @@ from app.core.exceptions import (
     ContainerNotFoundError,
     ImageNotFoundError,
     NotAuthenticatedError,
+    ProviderConnectionError,
     RegistryAccessDeniedError,
+)
+from app.core.registry_image_suggestions import (
+    fetch_docker_hub_suggestions,
+    merge_image_suggestions,
 )
 from app.core.default_image_builder import DefaultImageBuilder
 from app.core.models import (
@@ -246,6 +253,43 @@ async def image_availability(
         )
     return ImageAvailabilityResponse(
         ref=source, available=True, checked=True, detail=None
+    )
+
+
+@router.get("/image/suggestions", response_model=ImageSuggestionsResponse)
+async def image_suggestions(
+    orchestrator: Annotated[ContainerOrchestrator, Depends(get_orchestrator)],
+    _current_user: Annotated[User, Depends(get_current_user)],
+    q: Annotated[str, Query(max_length=128)] = "",
+    limit: Annotated[int, Query(ge=1, le=40)] = 20,
+) -> ImageSuggestionsResponse:
+    """Autocomplete registry images: local engine tags plus Docker Hub (sorted by pull count)."""
+    stripped = q.strip()
+    try:
+        local_tags = await orchestrator.list_images()
+    except ProviderConnectionError:
+        local_tags = []
+    hub_page = max(limit * 2, 25)
+    hub_rows = (
+        await fetch_docker_hub_suggestions(stripped, page_size=hub_page)
+        if stripped
+        else []
+    )
+    merged = merge_image_suggestions(
+        query=stripped,
+        limit=limit,
+        local_tags=local_tags,
+        hub_rows=hub_rows,
+    )
+    return ImageSuggestionsResponse(
+        suggestions=[
+            ImageSuggestion(
+                ref=item.ref,
+                pull_count=item.pull_count,
+                source=item.source,
+            )
+            for item in merged
+        ],
     )
 
 
