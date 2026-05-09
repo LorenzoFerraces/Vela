@@ -964,3 +964,105 @@ body {
   color: var(--text-muted);
   font-family: ui-monospace, monospace;
 }
+
+/* --- Dashboard --- */
+
+.dashboard-page {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 1.25rem 1.5rem 2rem;
+}
+
+.dashboard-page__title {
+  margin: 0 0 0.35rem;
+  font-size: 1.75rem;
+  color: var(--text-heading);
+}
+
+.dashboard-page__lead {
+  margin: 0 0 1rem;
+  color: var(--text-muted);
+  font-size: 0.95rem;
+  max-width: 42rem;
+}
+
+.dashboard-page__subtitle {
+  margin: 1.5rem 0 0.65rem;
+  font-size: 1.15rem;
+  color: var(--text-heading);
+}
+
+.dashboard-page__actions {
+  margin-bottom: 0.5rem;
+}
+
+/* --- Workloads table + log panel --- */
+
+.workloads-table-wrap-outer {
+  margin-top: 0.25rem;
+}
+
+.workloads-table__url-cell {
+  white-space: nowrap;
+}
+
+.workloads-table__expand-row td {
+  padding: 0;
+  vertical-align: top;
+  border-top: none;
+}
+
+.workloads-table__expand-inner {
+  padding: 0.65rem 0.85rem 0.85rem;
+  background: var(--bg-deep);
+  border-top: 1px solid var(--border);
+}
+
+.workloads-log-panel__toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.65rem 1rem;
+  margin-bottom: 0.5rem;
+}
+
+.workloads-log-panel__status {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.workloads-log-panel__toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.workloads-log-panel__error {
+  margin: 0 0 0.5rem;
+  font-size: 0.875rem;
+  color: var(--error);
+}
+
+.workloads-log-panel__pre {
+  margin: 0;
+  max-height: 18rem;
+  overflow: auto;
+  padding: 0.65rem 0.75rem;
+  font-size: 0.78rem;
+  line-height: 1.45;
+  font-family: ui-monospace, 'Cascadia Code', monospace;
+  color: var(--text);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.workloads-log-panel__line--warn {
+  background: rgba(232, 184, 74, 0.12);
+  display: inline;
+}

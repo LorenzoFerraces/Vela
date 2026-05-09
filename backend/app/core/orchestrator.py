@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections.abc import AsyncIterator
 
 from app.core.enums import ContainerStatus
 from app.core.models import ContainerInfo, ContainerStats, DeployConfig, HealthResult
@@ -66,6 +67,16 @@ class ContainerOrchestrator(ABC):
     @abstractmethod
     async def logs(self, container_id: str, *, tail: int = 100) -> str:
         """Return the most recent log lines for a container."""
+
+    @abstractmethod
+    async def stream_logs(
+        self,
+        container_id: str,
+        *,
+        tail: int | None = 100,
+        follow: bool = True,
+    ) -> AsyncIterator[bytes]:
+        """Yield log chunks from the runtime (blocking iterator wrapped for async consumption)."""
 
     # ------------------------------------------------------------------
     # Telemetry

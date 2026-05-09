@@ -91,6 +91,10 @@ class ContainerInfo(BaseModel):
     ports: list[PortMapping] = Field(default_factory=list)
     labels: dict[str, str] = Field(default_factory=dict)
     health: HealthStatus = HealthStatus.NONE
+    access_url: str | None = Field(
+        default=None,
+        description="HTTPS or HTTP URL for the Traefik edge route when route labels are present.",
+    )
 
 
 class ContainerStats(BaseModel):

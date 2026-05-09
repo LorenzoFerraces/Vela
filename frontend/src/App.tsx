@@ -5,6 +5,7 @@ import Home from './pages/Home'
 import ContainersPage from './pages/ContainersPage'
 import LoginPage from './pages/LoginPage'
 import RegisterPage from './pages/RegisterPage'
+import DashboardPage from './pages/DashboardPage'
 import PlaceholderPage from './pages/PlaceholderPage'
 import SettingsPage from './pages/SettingsPage'
 
@@ -19,7 +20,7 @@ export default function App() {
           path="/dashboard"
           element={
             <RequireAuth>
-              <PlaceholderPage title="Dashboard" />
+              <DashboardPage />
             </RequireAuth>
           }
         />
