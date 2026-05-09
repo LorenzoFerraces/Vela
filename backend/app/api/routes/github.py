@@ -28,7 +28,11 @@ from app.api.schemas import (
     GitHubRepoSummary,
     GitHubStatusResponse,
 )
-from app.core.exceptions import GitHubNotConnectedError, GitHubOAuthError
+from app.core.exceptions import (
+    GitHubAccountAlreadyLinkedError,
+    GitHubNotConnectedError,
+    GitHubOAuthError,
+)
 from app.core.oauth import (
     build_authorize_url,
     decode_state,
@@ -107,6 +111,8 @@ async def github_oauth_callback(
         )
     except GitHubOAuthError as exc:
         return _redirect_with_error(target, exc.reason, str(exc))
+    except GitHubAccountAlreadyLinkedError as exc:
+        return _redirect_with_error(target, "account_already_linked", str(exc))
     except Exception as exc:  # noqa: BLE001 — convert anything else to a friendly redirect
         return _redirect_with_error(target, "callback_failed", str(exc))
 

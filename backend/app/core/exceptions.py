@@ -199,3 +199,16 @@ class GitHubAPIError(IntegrationError):
 
     def __init__(self, message: str = "GitHub request failed.") -> None:
         super().__init__(message)
+
+
+class GitHubAccountAlreadyLinkedError(IntegrationError):
+    """This GitHub account is already stored for a different Vela user."""
+
+    def __init__(
+        self,
+        message: str = (
+            "This GitHub account is already connected to another Vela user. "
+            "Disconnect it from the other account first, or sign in as that user."
+        ),
+    ) -> None:
+        super().__init__(message)

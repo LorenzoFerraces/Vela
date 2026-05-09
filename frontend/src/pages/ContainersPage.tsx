@@ -1,13 +1,15 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useAuth } from '../auth/AuthContext'
 import {
   type ContainerInfo,
   type GithubRepo,
   type GithubStatus,
+  fetchAllGithubRepos,
+  filterGithubReposByQuery,
   formatApiError,
-  getGithubStatus,
+  getGithubStatusWithRetry,
   getImageAvailability,
   listContainers,
-  listGithubRepos,
   removeContainer,
   runContainerFromSource,
   startContainer,
@@ -20,13 +22,11 @@ type FormMessage = {
   publicUrl?: string
 }
 
-type RepoPickerState =
-  | { kind: 'closed' }
-  | { kind: 'loading'; query: string }
-  | { kind: 'ready'; query: string; repos: GithubRepo[] }
-  | { kind: 'error'; query: string; detail: string }
-
-const REPO_SEARCH_DEBOUNCE_MS = 350
+type GithubReposCacheState =
+  | { status: 'idle' }
+  | { status: 'loading' }
+  | { status: 'ok'; repos: GithubRepo[] }
+  | { status: 'error'; detail: string }
 
 type ImageRefCheckState =
   | { status: 'idle' }
@@ -53,59 +53,8 @@ function sourceLooksLikeGitUrl(source: string): boolean {
   )
 }
 
-function renderRepoPickerBody(
-  state: RepoPickerState,
-  onPick: (repo: GithubRepo) => void
-) {
-  switch (state.kind) {
-    case 'closed':
-      return null
-    case 'loading':
-      return <p className="containers-github-picker__muted">Searching GitHub…</p>
-    case 'error':
-      return (
-        <p className="containers-github-picker__error" role="alert">
-          {state.detail}
-        </p>
-      )
-    case 'ready':
-      if (state.repos.length === 0) {
-        return (
-          <p className="containers-github-picker__muted">
-            {state.query
-              ? 'No repositories matched that search.'
-              : 'No repositories available on this account.'}
-          </p>
-        )
-      }
-      return (
-        <ul className="containers-github-picker__list">
-          {state.repos.map((repo) => (
-            <li key={repo.full_name} className="containers-github-picker__item">
-              <div className="containers-github-picker__meta">
-                <span className="containers-github-picker__name">{repo.full_name}</span>
-                {repo.private ? (
-                  <span className="containers-github-picker__badge">Private</span>
-                ) : null}
-                <span className="containers-github-picker__branch">
-                  default: {repo.default_branch || 'main'}
-                </span>
-              </div>
-              <button
-                type="button"
-                className="btn btn--ghost btn--sm"
-                onClick={() => onPick(repo)}
-              >
-                Use
-              </button>
-            </li>
-          ))}
-        </ul>
-      )
-  }
-}
-
 export default function ContainersPage() {
+  const { user, status: authStatus } = useAuth()
   const [source, setSource] = useState('')
   const [containerName, setContainerName] = useState('')
   const [gitBranch, setGitBranch] = useState('main')
@@ -120,8 +69,10 @@ export default function ContainersPage() {
     status: 'idle',
   })
   const [githubStatus, setGithubStatus] = useState<GithubStatus | null>(null)
+  const [githubReposCache, setGithubReposCache] = useState<GithubReposCacheState>({
+    status: 'idle',
+  })
   const [repoPickerOpen, setRepoPickerOpen] = useState(false)
-  const [repoPicker, setRepoPicker] = useState<RepoPickerState>({ kind: 'closed' })
   const [repoQuery, setRepoQuery] = useState('')
   const sourceTrimmedRef = useRef('')
   sourceTrimmedRef.current = source.trim()
@@ -155,49 +106,93 @@ export default function ContainersPage() {
   useEffect(() => {
     let cancelled = false
     void (async () => {
+      if (authStatus !== 'authenticated' || !user?.id) {
+        return
+      }
       try {
-        const status = await getGithubStatus()
+        const status = await getGithubStatusWithRetry()
         if (!cancelled) setGithubStatus(status)
       } catch {
-        // GitHub status is optional; failure just hides the picker.
-        if (!cancelled) setGithubStatus({ connected: false, login: null, avatar_url: null, scopes: [], connected_at: null })
+        if (!cancelled) {
+          setGithubStatus({
+            connected: false,
+            login: null,
+            avatar_url: null,
+            scopes: [],
+            connected_at: null,
+          })
+        }
       }
     })()
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [authStatus, user?.id])
 
   useEffect(() => {
-    if (!repoPickerOpen) return
-    const handle = window.setTimeout(() => {
-      void (async () => {
-        setRepoPicker({ kind: 'loading', query: repoQuery })
-        try {
-          const repos = await listGithubRepos(repoQuery || undefined)
-          setRepoPicker({ kind: 'ready', query: repoQuery, repos })
-        } catch (error) {
-          setRepoPicker({
-            kind: 'error',
-            query: repoQuery,
+    function onVisible() {
+      if (document.visibilityState !== 'visible') return
+      if (authStatus !== 'authenticated' || !user?.id) return
+      void getGithubStatusWithRetry()
+        .then(setGithubStatus)
+        .catch(() => {
+          setGithubStatus({
+            connected: false,
+            login: null,
+            avatar_url: null,
+            scopes: [],
+            connected_at: null,
+          })
+        })
+    }
+    document.addEventListener('visibilitychange', onVisible)
+    return () => {
+      document.removeEventListener('visibilitychange', onVisible)
+    }
+  }, [authStatus, user?.id])
+
+  useEffect(() => {
+    let cancelled = false
+    if (!githubStatus?.connected) {
+      setGithubReposCache({ status: 'idle' })
+      return () => {
+        cancelled = true
+      }
+    }
+    setGithubReposCache({ status: 'loading' })
+    void fetchAllGithubRepos()
+      .then((repos) => {
+        if (!cancelled) {
+          setGithubReposCache({ status: 'ok', repos })
+        }
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setGithubReposCache({
+            status: 'error',
             detail: formatApiError(error),
           })
         }
-      })()
-    }, REPO_SEARCH_DEBOUNCE_MS)
+      })
     return () => {
-      window.clearTimeout(handle)
+      cancelled = true
     }
-  }, [repoQuery, repoPickerOpen])
+  }, [githubStatus?.connected])
+
+  const filteredGithubRepos = useMemo(() => {
+    if (githubReposCache.status !== 'ok') {
+      return []
+    }
+    return filterGithubReposByQuery(githubReposCache.repos, repoQuery)
+  }, [githubReposCache, repoQuery])
 
   function toggleRepoPicker() {
     if (repoPickerOpen) {
       setRepoPickerOpen(false)
-      setRepoPicker({ kind: 'closed' })
+      setRepoQuery('')
       return
     }
     setRepoPickerOpen(true)
-    setRepoPicker({ kind: 'loading', query: repoQuery })
   }
 
   function pickRepo(repo: GithubRepo) {
@@ -205,7 +200,7 @@ export default function ContainersPage() {
     setGitBranch(repo.default_branch || 'main')
     setImageRefCheck({ status: 'idle' })
     setRepoPickerOpen(false)
-    setRepoPicker({ kind: 'closed' })
+    setRepoQuery('')
   }
 
   const runImageRefAvailabilityCheck = useCallback(async (ref: string) => {
@@ -393,12 +388,49 @@ export default function ContainersPage() {
             <input
               type="text"
               className="containers-form__input containers-github-picker__search"
-              placeholder="Search your repos…"
+              placeholder="Filter by name, or regex (e.g. ^myorg/)"
               value={repoQuery}
               onChange={(e) => setRepoQuery(e.target.value)}
               autoFocus
             />
-            {renderRepoPickerBody(repoPicker, pickRepo)}
+            {githubReposCache.status === 'loading' ? (
+              <p className="containers-github-picker__muted">Loading your repositories…</p>
+            ) : githubReposCache.status === 'error' ? (
+              <p className="containers-github-picker__error" role="alert">
+                {githubReposCache.detail}
+              </p>
+            ) : githubReposCache.status === 'ok' && githubReposCache.repos.length === 0 ? (
+              <p className="containers-github-picker__muted">
+                No repositories returned for this account.
+              </p>
+            ) : githubReposCache.status === 'ok' && filteredGithubRepos.length === 0 ? (
+              <p className="containers-github-picker__muted">
+                No repositories match this filter.
+              </p>
+            ) : githubReposCache.status === 'ok' ? (
+              <ul className="containers-github-picker__list">
+                {filteredGithubRepos.map((repo) => (
+                  <li key={repo.full_name} className="containers-github-picker__item">
+                    <div className="containers-github-picker__meta">
+                      <span className="containers-github-picker__name">{repo.full_name}</span>
+                      {repo.private ? (
+                        <span className="containers-github-picker__badge">Private</span>
+                      ) : null}
+                      <span className="containers-github-picker__branch">
+                        default: {repo.default_branch || 'main'}
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      className="btn btn--ghost btn--sm"
+                      onClick={() => pickRepo(repo)}
+                    >
+                      Use
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            ) : null}
           </div>
         ) : null}
         <input

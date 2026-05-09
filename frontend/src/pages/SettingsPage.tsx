@@ -5,8 +5,9 @@ import {
   type GithubStatus,
   disconnectGithub,
   formatApiError,
+  getAccessToken,
   getGithubAuthorizeUrl,
-  getGithubStatus,
+  getGithubStatusWithRetry,
 } from '../api/client'
 
 type StatusState =
@@ -22,6 +23,8 @@ const oauthErrorReasonMessages: Record<string, string> = {
   bad_verification_code: 'GitHub rejected the authorization. Try connecting again.',
   missing_params: 'GitHub did not return the expected parameters.',
   network_error: 'Could not reach GitHub. Check your connection and try again.',
+  account_already_linked:
+    'This GitHub account is already linked to another Vela user. Disconnect it there or sign in as that user.',
 }
 
 function describeOAuthError(reason: string | null, message: string | null): string {
@@ -45,16 +48,22 @@ function formatJoinedDate(iso: string | null): string {
 }
 
 export default function SettingsPage() {
-  const { user } = useAuth()
+  const { user, status: authStatus } = useAuth()
   const [searchParams, setSearchParams] = useSearchParams()
   const [state, setState] = useState<StatusState>({ kind: 'loading' })
   const [banner, setBanner] = useState<Banner>(null)
   const [busy, setBusy] = useState(false)
 
-  const reload = useCallback(async () => {
-    setState({ kind: 'loading' })
+  const reload = useCallback(async (options?: { showLoading?: boolean }) => {
+    if (!getAccessToken()) {
+      return
+    }
+    const showLoading = options?.showLoading !== false
+    if (showLoading) {
+      setState({ kind: 'loading' })
+    }
     try {
-      const status = await getGithubStatus()
+      const status = await getGithubStatusWithRetry()
       setState({ kind: 'ready', status })
     } catch (error) {
       setState({ kind: 'error', detail: formatApiError(error) })
@@ -62,8 +71,23 @@ export default function SettingsPage() {
   }, [])
 
   useEffect(() => {
-    void reload()
-  }, [reload])
+    if (authStatus !== 'authenticated' || !user?.id) {
+      return
+    }
+    void reload({ showLoading: true })
+  }, [reload, authStatus, user?.id])
+
+  useEffect(() => {
+    function onVisible() {
+      if (document.visibilityState !== 'visible') return
+      if (authStatus !== 'authenticated' || !user?.id) return
+      void reload({ showLoading: false })
+    }
+    document.addEventListener('visibilitychange', onVisible)
+    return () => {
+      document.removeEventListener('visibilitychange', onVisible)
+    }
+  }, [reload, authStatus, user?.id])
 
   // Surface the redirect outcome from /api/auth/github/callback then drop the params.
   useEffect(() => {
@@ -82,7 +106,10 @@ export default function SettingsPage() {
     next.delete('reason')
     next.delete('message')
     setSearchParams(next, { replace: true })
-  }, [searchParams, setSearchParams])
+    if (githubParam === 'connected') {
+      void reload({ showLoading: false })
+    }
+  }, [searchParams, setSearchParams, reload])
 
   async function handleConnect() {
     setBusy(true)

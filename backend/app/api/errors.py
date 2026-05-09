@@ -14,6 +14,7 @@ from app.core.exceptions import (
     ContainerNotRunningError,
     DockerfileGenerationError,
     EmailAlreadyRegisteredError,
+    GitHubAccountAlreadyLinkedError,
     GitHubAPIError,
     GitHubNotConnectedError,
     GitHubOAuthError,
@@ -180,6 +181,15 @@ def register_exception_handlers(app) -> None:
         return JSONResponse(
             status_code=status.HTTP_409_CONFLICT,
             content={"detail": str(exc), "code": "github_not_connected"},
+        )
+
+    @app.exception_handler(GitHubAccountAlreadyLinkedError)
+    async def github_account_already_linked_handler(
+        _request: Request, exc: GitHubAccountAlreadyLinkedError
+    ) -> JSONResponse:
+        return JSONResponse(
+            status_code=status.HTTP_409_CONFLICT,
+            content={"detail": str(exc), "code": "github_account_already_linked"},
         )
 
     @app.exception_handler(GitHubOAuthError)

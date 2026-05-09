@@ -228,6 +228,47 @@ def test_callback_token_exchange_failure_redirects_with_error(
     assert "reason=bad_verification_code" in location
 
 
+def test_callback_when_github_subject_belongs_to_another_user_redirects(
+    api_client: TestClient,
+    db_session_factory: async_sessionmaker,
+    seeded_user: User,
+    seeded_other_user: User,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``uq_oauth_provider_subject``: same GitHub user id cannot link two Vela accounts."""
+    _seed_identity(db_session_factory, seeded_user.id, token="ghp_existing")
+    state = encode_state(seeded_other_user.id)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/login/oauth/access_token"):
+            return httpx.Response(
+                200,
+                json={
+                    "access_token": "ghp_new",
+                    "scope": "repo",
+                    "token_type": "bearer",
+                },
+            )
+        if request.url.path == "/user":
+            return httpx.Response(
+                200,
+                json={"id": 99, "login": "octocat", "avatar_url": None},
+            )
+        return httpx.Response(404)
+
+    _install_transport(monkeypatch, handler)
+
+    response = api_client.get(
+        "/api/auth/github/callback",
+        params={"code": "ok", "state": state},
+        follow_redirects=False,
+    )
+    assert response.status_code == 302
+    location = response.headers["location"]
+    assert "github=error" in location
+    assert "reason=account_already_linked" in location
+
+
 # ---------------------------------------------------------------------------
 # Status / disconnect / repos / branches
 # ---------------------------------------------------------------------------

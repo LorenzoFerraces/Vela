@@ -6,8 +6,10 @@ import uuid
 from datetime import datetime, timezone
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.exceptions import GitHubAccountAlreadyLinkedError
 from app.core.oauth.github import GitHubProfile
 from app.core.security.secrets import decrypt_secret, encrypt_secret
 from app.db.models import UserOAuthIdentity
@@ -27,6 +29,18 @@ async def get_github_identity(
     )
 
 
+async def get_github_identity_by_subject(
+    session: AsyncSession, provider_subject: str
+) -> UserOAuthIdentity | None:
+    """Return the row for this GitHub user id (global ``uq_oauth_provider_subject``)."""
+    return await session.scalar(
+        select(UserOAuthIdentity).where(
+            UserOAuthIdentity.provider == GITHUB_PROVIDER,
+            UserOAuthIdentity.provider_subject == provider_subject,
+        )
+    )
+
+
 async def upsert_github_identity(
     session: AsyncSession,
     *,
@@ -36,7 +50,13 @@ async def upsert_github_identity(
     scopes: str,
 ) -> UserOAuthIdentity:
     """Insert or update the user's GitHub identity. Commits before returning."""
+    subject_str = str(profile.id)
     identity = await get_github_identity(session, user_id)
+    owner_of_subject = await get_github_identity_by_subject(session, subject_str)
+
+    if owner_of_subject is not None and owner_of_subject.user_id != user_id:
+        raise GitHubAccountAlreadyLinkedError()
+
     encrypted = encrypt_secret(access_token)
     now = datetime.now(timezone.utc)
 
@@ -44,7 +64,7 @@ async def upsert_github_identity(
         identity = UserOAuthIdentity(
             user_id=user_id,
             provider=GITHUB_PROVIDER,
-            provider_subject=str(profile.id),
+            provider_subject=subject_str,
             username=profile.login,
             avatar_url=profile.avatar_url,
             scopes=scopes,
@@ -54,14 +74,25 @@ async def upsert_github_identity(
         )
         session.add(identity)
     else:
-        identity.provider_subject = str(profile.id)
+        identity.provider_subject = subject_str
         identity.username = profile.login
         identity.avatar_url = profile.avatar_url
         identity.scopes = scopes
         identity.access_token_encrypted = encrypted
         identity.updated_at = now
 
-    await session.commit()
+    try:
+        await session.commit()
+    except IntegrityError as exc:
+        await session.rollback()
+        detail = str(getattr(exc, "orig", None) or exc).lower()
+        if (
+            "uq_oauth_provider_subject" in detail
+            or "provider_subject" in detail
+        ):
+            raise GitHubAccountAlreadyLinkedError() from exc
+        raise
+
     await session.refresh(identity)
     return identity
 

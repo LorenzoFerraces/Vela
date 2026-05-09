@@ -411,6 +411,37 @@ export async function getGithubStatus(): Promise<GithubStatus> {
   return apiGet<GithubStatus>('/api/auth/github/status')
 }
 
+const disconnectedGithubStatus: GithubStatus = {
+  connected: false,
+  login: null,
+  avatar_url: null,
+  scopes: [],
+  connected_at: null,
+}
+
+/** Same as getGithubStatus but tolerates a cold API or brief network failures (e.g. right after dev server start). */
+export async function getGithubStatusWithRetry(): Promise<GithubStatus> {
+  const backoffMs = [0, 400, 1200]
+  let lastError: unknown
+  for (const wait of backoffMs) {
+    if (wait > 0) {
+      await new Promise((resolve) => setTimeout(resolve, wait))
+    }
+    if (!getAccessToken()) {
+      return disconnectedGithubStatus
+    }
+    try {
+      return await getGithubStatus()
+    } catch (error) {
+      lastError = error
+    }
+  }
+  if (lastError !== undefined) {
+    throw lastError
+  }
+  return disconnectedGithubStatus
+}
+
 export async function getGithubAuthorizeUrl(): Promise<GithubAuthorizeUrlResponse> {
   return apiGet<GithubAuthorizeUrlResponse>('/api/auth/github/start')
 }
@@ -419,16 +450,82 @@ export async function disconnectGithub(): Promise<void> {
   await apiDelete('/api/auth/github')
 }
 
+export interface ListGithubReposParams {
+  /** Server-side filter (GitHub search API). Prefer client-side filtering after fetchAllGithubRepos when browsing. */
+  query?: string
+  page?: number
+  perPage?: number
+}
+
 export async function listGithubRepos(
-  query?: string,
-  page: number = 1
+  params?: ListGithubReposParams
 ): Promise<GithubRepo[]> {
-  const params = new URLSearchParams({ page: String(page) })
-  const trimmedQuery = query?.trim()
+  const page = params?.page ?? 1
+  const perPage = Math.min(100, Math.max(1, params?.perPage ?? 30))
+  const searchParams = new URLSearchParams({
+    page: String(page),
+    per_page: String(perPage),
+  })
+  const trimmedQuery = params?.query?.trim()
   if (trimmedQuery) {
-    params.set('q', trimmedQuery)
+    searchParams.set('q', trimmedQuery)
   }
-  return apiGet<GithubRepo[]>(`/api/github/repos?${params.toString()}`)
+  return apiGet<GithubRepo[]>(`/api/github/repos?${searchParams.toString()}`)
+}
+
+const GITHUB_REPOS_FULL_FETCH_PAGE_SIZE = 100
+const GITHUB_REPOS_FULL_FETCH_MAX_PAGES = 100
+
+/** Load every repo page from ``GET /api/github/repos`` (no search query) for client-side filtering. */
+export async function fetchAllGithubRepos(): Promise<GithubRepo[]> {
+  const all: GithubRepo[] = []
+  const seen = new Set<string>()
+  for (let page = 1; page <= GITHUB_REPOS_FULL_FETCH_MAX_PAGES; page++) {
+    const batch = await listGithubRepos({
+      page,
+      perPage: GITHUB_REPOS_FULL_FETCH_PAGE_SIZE,
+    })
+    for (const repo of batch) {
+      if (repo.full_name && !seen.has(repo.full_name)) {
+        seen.add(repo.full_name)
+        all.push(repo)
+      }
+    }
+    if (batch.length < GITHUB_REPOS_FULL_FETCH_PAGE_SIZE) {
+      break
+    }
+  }
+  return all
+}
+
+/**
+ * Filter repos by ``query``: tries case-insensitive ``RegExp``; if the pattern is invalid, falls back to substring match on ``full_name`` and ``description``.
+ */
+export function filterGithubReposByQuery(
+  repos: GithubRepo[],
+  query: string
+): GithubRepo[] {
+  const trimmed = query.trim()
+  if (!trimmed) {
+    return repos
+  }
+  try {
+    const pattern = new RegExp(trimmed, 'i')
+    return repos.filter(
+      (repo) =>
+        pattern.test(repo.full_name) ||
+        (repo.description !== null &&
+          repo.description !== undefined &&
+          pattern.test(repo.description))
+    )
+  } catch {
+    const needle = trimmed.toLowerCase()
+    return repos.filter(
+      (repo) =>
+        repo.full_name.toLowerCase().includes(needle) ||
+        (repo.description?.toLowerCase().includes(needle) ?? false)
+    )
+  }
 }
 
 export async function listGithubRepoBranches(
