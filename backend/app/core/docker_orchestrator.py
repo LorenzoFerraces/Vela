@@ -4,7 +4,8 @@ import asyncio
 import os
 import re
 import sys
-from collections.abc import Callable
+import threading
+from collections.abc import AsyncIterator, Callable
 from datetime import datetime, timezone
 from typing import Any, TypeVar
 
@@ -32,11 +33,31 @@ from app.core.models import (
     PortMapping,
 )
 from app.core.orchestrator import ContainerOrchestrator
+from app.core.public_route_host import build_public_url
 
 VELA_MANAGED_LABEL = "vela.managed"
 VELA_MANAGED_VALUE = "true"
 VELA_OWNER_LABEL = "vela.owner_id"
+VELA_ROUTE_HOST_LABEL = "vela.route_host"
+VELA_ROUTE_PATH_PREFIX_LABEL = "vela.route_path_prefix"
+VELA_ROUTE_TLS_LABEL = "vela.route_tls"
 _NS_PER_SEC = 1_000_000_000
+
+
+def _max_concurrent_log_streams() -> int:
+    return max(1, int(os.environ.get("VELA_MAX_LOG_STREAMS", "64")))
+
+
+def _access_url_from_route_labels(labels: dict[str, Any]) -> str | None:
+    host = str(labels.get(VELA_ROUTE_HOST_LABEL) or "").strip()
+    if not host:
+        return None
+    prefix = str(labels.get(VELA_ROUTE_PATH_PREFIX_LABEL) or "/").strip()
+    if not prefix.startswith("/"):
+        prefix = f"/{prefix}"
+    tls_raw = str(labels.get(VELA_ROUTE_TLS_LABEL) or "").lower()
+    scheme = "https" if tls_raw == "true" else "http"
+    return build_public_url(scheme=scheme, host=host, path_prefix=prefix)
 
 
 def _is_vela_local_build_tag(image_ref: str) -> bool:
@@ -183,6 +204,7 @@ def _inspect_to_container_info(data: dict[str, Any]) -> ContainerInfo:
         ports=_ports_from_inspect(data),
         labels=labels,
         health=health,
+        access_url=_access_url_from_route_labels(labels),
     )
 
 
@@ -247,6 +269,7 @@ class DockerOrchestrator(ContainerOrchestrator):
             self._default_network = os.environ.get("VELA_DOCKER_NETWORK", "").strip() or None
         else:
             self._default_network = default_network.strip() or None
+        self._log_stream_semaphore = asyncio.Semaphore(_max_concurrent_log_streams())
 
     async def _to_thread(self, fn: Callable[[], T]) -> T:
         return await asyncio.to_thread(fn)
@@ -258,6 +281,14 @@ class DockerOrchestrator(ContainerOrchestrator):
     def _merge_labels(self, config: DeployConfig) -> dict[str, str]:
         merged = {VELA_MANAGED_LABEL: VELA_MANAGED_VALUE}
         merged.update(config.labels)
+        route_host = (config.route_host or "").strip()
+        if route_host:
+            merged[VELA_ROUTE_HOST_LABEL] = route_host.lower()
+            path_prefix = (config.route_path_prefix or "/").strip() or "/"
+            if not path_prefix.startswith("/"):
+                path_prefix = f"/{path_prefix}"
+            merged[VELA_ROUTE_PATH_PREFIX_LABEL] = path_prefix
+            merged[VELA_ROUTE_TLS_LABEL] = "true" if config.route_tls else "false"
         return merged
 
     def _port_bindings_from_config(self, config: DeployConfig) -> dict[str, Any]:
@@ -567,6 +598,79 @@ class DockerOrchestrator(ContainerOrchestrator):
             raise ProviderConnectionError(str(e)) from e
         except docker.errors.DockerException as e:
             raise ProviderConnectionError(str(e)) from e
+
+    async def stream_logs(
+        self,
+        container_id: str,
+        *,
+        tail: int | None = 100,
+        follow: bool = True,
+    ) -> AsyncIterator[bytes]:
+        await self._log_stream_semaphore.acquire()
+        loop = asyncio.get_running_loop()
+        queue: asyncio.Queue[tuple[str, Any]] = asyncio.Queue(maxsize=64)
+
+        def blocking_reader() -> None:
+            try:
+                c = self._client.containers.get(container_id)
+                self._assert_managed_labels(c.labels or {}, container_id)
+                log_kwargs: dict[str, Any] = {
+                    "stream": True,
+                    "follow": follow,
+                    "stdout": True,
+                    "stderr": True,
+                }
+                if tail is not None:
+                    log_kwargs["tail"] = tail
+                stream = c.logs(**log_kwargs)
+                for chunk in stream:
+                    if not chunk:
+                        continue
+                    payload = bytes(chunk)
+                    fut = asyncio.run_coroutine_threadsafe(
+                        queue.put(("chunk", payload)),
+                        loop,
+                    )
+                    fut.result(timeout=120)
+                fut_done = asyncio.run_coroutine_threadsafe(
+                    queue.put(("done", None)),
+                    loop,
+                )
+                fut_done.result(timeout=30)
+            except BaseException as exc:
+                fut_err = asyncio.run_coroutine_threadsafe(
+                    queue.put(("err", exc)),
+                    loop,
+                )
+                try:
+                    fut_err.result(timeout=30)
+                except BaseException:
+                    pass
+
+        thread = threading.Thread(
+            target=blocking_reader,
+            name="vela-docker-log-stream",
+            daemon=True,
+        )
+        thread.start()
+        try:
+            while True:
+                kind, payload = await queue.get()
+                if kind == "chunk":
+                    yield payload
+                elif kind == "done":
+                    break
+                elif kind == "err":
+                    exc = payload
+                    if isinstance(exc, docker.errors.NotFound):
+                        raise ContainerNotFoundError(container_id) from exc
+                    if isinstance(exc, requests.exceptions.RequestException):
+                        raise ProviderConnectionError(str(exc)) from exc
+                    if isinstance(exc, docker.errors.DockerException):
+                        raise ProviderConnectionError(str(exc)) from exc
+                    raise exc
+        finally:
+            self._log_stream_semaphore.release()
 
     async def get_stats(self, container_id: str) -> ContainerStats:
         def sync() -> ContainerStats:

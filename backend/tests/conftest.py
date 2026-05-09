@@ -132,6 +132,17 @@ def mock_orchestrator(sample_container: ContainerInfo) -> MagicMock:
             timestamp=datetime.now(timezone.utc),
         )
     )
+
+    async def _stream_logs_side_effect(
+        *_args: object,
+        **_kwargs: object,
+    ):
+        yield b"log line\n"
+
+    orch.stream_logs = MagicMock(
+        side_effect=lambda *a, **k: _stream_logs_side_effect()
+    )
+
     return orch
 
 

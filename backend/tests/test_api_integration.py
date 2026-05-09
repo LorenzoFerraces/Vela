@@ -6,19 +6,29 @@ Orchestrator / image builder are mocked so tests do not require Docker.
 
 from __future__ import annotations
 
+import uuid
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from fastapi.testclient import TestClient
+from starlette.websockets import WebSocketDisconnect
 
 from app.api.app import create_app
+from app.core.auth.tokens import create_access_token
 from app.core.default_image_builder import DefaultImageBuilder
-from app.core.docker_orchestrator import VELA_OWNER_LABEL
+from app.core.docker_orchestrator import (
+    VELA_OWNER_LABEL,
+    VELA_ROUTE_HOST_LABEL,
+    VELA_ROUTE_PATH_PREFIX_LABEL,
+    VELA_ROUTE_TLS_LABEL,
+)
 from app.core.enums import BuildStrategy, SupportedLanguage
 from app.core.exceptions import ImageNotFoundError, RegistryAccessDeniedError
 from app.core.models import BuildResult, ProjectInfo
 from app.core.orchestrator import ContainerOrchestrator
 from app.core.traffic_router import NoopTrafficRouter
+from app.db.models import User
+from tests.conftest import make_container_info
 
 
 def test_health_returns_ok() -> None:
@@ -217,6 +227,68 @@ def test_start_stop_restart_remove(api_client: TestClient) -> None:
 
 def test_container_logs_stats_health(api_client: TestClient) -> None:
     assert api_client.get("/api/containers/cid-1/logs").json()["logs"] == "log line\n"
+
+
+def test_container_logs_tail_validation(api_client: TestClient) -> None:
+    response = api_client.get("/api/containers/cid-1/logs", params={"tail": 99999})
+    assert response.status_code == 422
+
+
+def test_list_containers_includes_access_url(
+    api_client: TestClient,
+    mock_orchestrator: MagicMock,
+    test_user_id: uuid.UUID,
+) -> None:
+    row = make_container_info(
+        owner_id=test_user_id,
+        labels={
+            VELA_ROUTE_HOST_LABEL: "svc.example.com",
+            VELA_ROUTE_PATH_PREFIX_LABEL: "/",
+            VELA_ROUTE_TLS_LABEL: "true",
+        },
+        access_url="https://svc.example.com/",
+    )
+    mock_orchestrator.list = AsyncMock(return_value=[row])
+    response = api_client.get("/api/containers/")
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data) == 1
+    assert data[0]["access_url"] == "https://svc.example.com/"
+
+
+def test_logs_stream_authenticated(
+    api_client: TestClient, auth_token: str, mock_orchestrator: MagicMock
+) -> None:
+    async def _chunks() -> object:
+        yield b"log line\n"
+
+    mock_orchestrator.stream_logs = MagicMock(
+        side_effect=lambda *a, **k: _chunks()
+    )
+    with api_client.websocket_connect(
+        f"/api/containers/cid-1/logs/stream?access_token={auth_token}&follow=false"
+    ) as websocket:
+        data = websocket.receive_bytes()
+    assert data == b"log line\n"
+
+
+def test_logs_stream_requires_token(anonymous_client: TestClient) -> None:
+    with anonymous_client.websocket_connect(
+        "/api/containers/cid-1/logs/stream"
+    ) as websocket:
+        with pytest.raises(WebSocketDisconnect):
+            websocket.receive_bytes()
+
+
+def test_logs_stream_wrong_owner(
+    other_user_client: TestClient, seeded_other_user: User
+) -> None:
+    token = create_access_token(seeded_other_user.id)
+    with other_user_client.websocket_connect(
+        f"/api/containers/cid-1/logs/stream?access_token={token}"
+    ) as websocket:
+        with pytest.raises(WebSocketDisconnect):
+            websocket.receive_bytes()
     stats = api_client.get("/api/containers/cid-1/stats").json()
     assert stats["container_id"] == "cid-1"
     assert api_client.get("/api/containers/cid-1/health").json()["status"] == "healthy"

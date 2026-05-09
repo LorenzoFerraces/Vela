@@ -14,7 +14,7 @@ import { ContainersGithubRepoPickerPanel } from './containers/ContainersGithubRe
 import { ContainersGithubSourceAside } from './containers/ContainersGithubSourceAside'
 import { ContainersRunFormFields } from './containers/ContainersRunFormFields'
 import { ContainersSourceField } from './containers/ContainersSourceField'
-import { ContainersWorkloadsSection } from './containers/ContainersWorkloadsSection'
+import { WorkloadsTable } from '../components/workloads/WorkloadsTable'
 import type { FormMessage } from './containers/types'
 import { sourceLooksLikeGitUrl } from './containers/sourceKind'
 import { useContainerList } from './containers/useContainerList'
@@ -271,7 +271,7 @@ export default function ContainersPage() {
       ) : null}
 
       <h2 className="containers-page__subtitle">Running workloads</h2>
-      <ContainersWorkloadsSection
+      <WorkloadsTable
         listLoading={listLoading}
         rows={rows}
         rowBusyId={rowBusy}

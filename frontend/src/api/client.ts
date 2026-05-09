@@ -264,6 +264,8 @@ export interface ContainerInfo {
   ports: PortMapping[]
   labels: Record<string, string>
   health: string
+  /** Public edge URL when Traefik route labels are present on the container. */
+  access_url?: string | null
 }
 
 export interface RunFromSourceRequest {
@@ -308,6 +310,107 @@ export async function getImageAvailability(
 
 export async function listContainers(): Promise<ContainerInfo[]> {
   return apiGet<ContainerInfo[]>('/api/containers/')
+}
+
+const MAX_CONTAINER_LOG_TAIL = 2000
+
+function apiBaseLooksLikeLocalDevBackend(api: URL): boolean {
+  if (api.hostname === 'localhost' || api.hostname === '127.0.0.1') {
+    return true
+  }
+  if (typeof window === 'undefined') {
+    return false
+  }
+  return api.hostname === window.location.hostname
+}
+
+/**
+ * Build ws/wss URL for the API.
+ *
+ * HTTPS pages cannot open `ws:` to another port (mixed content). In dev, use the
+ * Vite dev server origin + `/api/...` so `vite.config` proxy upgrades WebSockets
+ * to FastAPI. In production, if the API base is `http` on the same host as the
+ * page, assume a reverse proxy serves `/api` on the page origin and use `wss`
+ * there.
+ */
+export function getApiWebSocketUrl(pathWithQuery: string): string {
+  const base = getApiBaseUrl()
+  const path = pathWithQuery.startsWith('/') ? pathWithQuery : `/${pathWithQuery}`
+
+  if (typeof window !== 'undefined' && import.meta.env.DEV) {
+    try {
+      const api = new URL(base)
+      if (apiBaseLooksLikeLocalDevBackend(api)) {
+        const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+        return `${wsProtocol}//${window.location.host}${path}`
+      }
+    } catch {
+      // fall through
+    }
+  }
+
+  if (typeof window !== 'undefined' && window.location.protocol === 'https:') {
+    try {
+      const api = new URL(base)
+      if (api.protocol === 'http:' && api.hostname === window.location.hostname) {
+        return `wss://${window.location.host}${path}`
+      }
+    } catch {
+      // fall through
+    }
+  }
+
+  if (base.startsWith('https://')) {
+    return `wss://${base.slice('https://'.length)}${path}`
+  }
+  return `ws://${base.slice('http://'.length)}${path}`
+}
+
+export type ContainerLogWebSocketOptions = {
+  tail?: number
+  follow?: boolean
+}
+
+/**
+ * Open an authenticated WebSocket for live container logs.
+ * Pass `access_token` query param (required for browser WebSocket auth).
+ */
+export function openContainerLogWebSocket(
+  containerId: string,
+  options: ContainerLogWebSocketOptions = {}
+): WebSocket {
+  const token = getAccessToken()
+  if (!token) {
+    throw new Error('Sign in to view logs.')
+  }
+  const tail =
+    options.tail != null
+      ? Math.min(Math.max(1, options.tail), MAX_CONTAINER_LOG_TAIL)
+      : 400
+  const params = new URLSearchParams({
+    access_token: token,
+    tail: String(tail),
+  })
+  if (options.follow === false) {
+    params.set('follow', 'false')
+  }
+  const path = `/api/containers/${encodeURIComponent(containerId)}/logs/stream?${params.toString()}`
+  return new WebSocket(getApiWebSocketUrl(path))
+}
+
+export async function fetchContainerLogs(
+  containerId: string,
+  options: { tail?: number } = {}
+): Promise<string> {
+  const tail =
+    options.tail != null
+      ? Math.min(Math.max(1, options.tail), MAX_CONTAINER_LOG_TAIL)
+      : 200
+  const query = new URLSearchParams({ tail: String(tail) })
+  const data = await apiGet<{ logs: string }>(
+    `/api/containers/${encodeURIComponent(containerId)}/logs?${query.toString()}`
+  )
+  return data.logs
 }
 
 export async function runContainerFromSource(

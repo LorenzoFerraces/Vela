@@ -6,8 +6,9 @@ import uuid
 from typing import Annotated
 from urllib.parse import urlparse
 
-from fastapi import APIRouter, Depends, Query, Response, status
+from fastapi import APIRouter, Depends, Query, Response, WebSocket, status
 from sqlalchemy.ext.asyncio import AsyncSession
+from starlette.websockets import WebSocketDisconnect
 
 from app.api.deps import (
     get_current_user,
@@ -27,6 +28,8 @@ from app.api.schemas import (
     RunFromSourceRequest,
     RunFromSourceResponse,
 )
+from app.core.auth.service import get_user_by_id
+from app.core.auth.tokens import decode_access_token
 from app.core.docker_orchestrator import VELA_OWNER_LABEL
 from app.core.public_route_host import (
     apply_public_route_to_deploy_config,
@@ -38,6 +41,7 @@ from app.core.exceptions import (
     CloneError,
     ContainerNotFoundError,
     ImageNotFoundError,
+    NotAuthenticatedError,
     RegistryAccessDeniedError,
 )
 from app.core.default_image_builder import DefaultImageBuilder
@@ -52,9 +56,12 @@ from app.core.models import (
 from app.core.oauth import decrypt_identity_token, get_github_identity
 from app.core.orchestrator import ContainerOrchestrator
 from app.core.traffic_router import TrafficRouter
+from app.db.engine import get_session_factory
 from app.db.models import User
 
 router = APIRouter()
+
+_MAX_LOG_TAIL_LINES = 2000
 
 
 def _with_owner_label(config: DeployConfig, owner_id: str) -> DeployConfig:
@@ -427,12 +434,63 @@ async def container_logs(
     container_id: str,
     orchestrator: Annotated[ContainerOrchestrator, Depends(get_orchestrator)],
     current_user: Annotated[User, Depends(get_current_user)],
-    tail: int = 100,
+    tail: Annotated[int, Query(ge=1, le=_MAX_LOG_TAIL_LINES)] = 100,
 ) -> dict[str, str]:
     """Return recent log lines for a container."""
     await _require_owned(orchestrator, container_id, current_user)
     text = await orchestrator.logs(container_id, tail=tail)
     return {"logs": text}
+
+
+@router.websocket("/{container_id}/logs/stream")
+async def container_logs_stream(
+    websocket: WebSocket,
+    container_id: str,
+    orchestrator: Annotated[ContainerOrchestrator, Depends(get_orchestrator)],
+) -> None:
+    """Stream container logs over WebSocket (binary frames). Authenticate with ``access_token`` query param."""
+    await websocket.accept()
+    token = websocket.query_params.get("access_token")
+    tail_raw = websocket.query_params.get("tail", "200")
+    try:
+        tail_parsed = int(tail_raw)
+    except ValueError:
+        tail_parsed = 200
+    tail_parsed = max(1, min(tail_parsed, _MAX_LOG_TAIL_LINES))
+    follow_logs = websocket.query_params.get("follow", "true").strip().lower() != "false"
+
+    factory = get_session_factory()
+    async with factory() as session:
+        try:
+            if not token:
+                raise NotAuthenticatedError()
+            claims = decode_access_token(token)
+            user = await get_user_by_id(session, claims.user_id)
+            if user is None:
+                raise NotAuthenticatedError()
+        except NotAuthenticatedError:
+            await websocket.close(code=1008)
+            return
+        try:
+            await _require_owned(orchestrator, container_id, user)
+        except ContainerNotFoundError:
+            await websocket.close(code=1008)
+            return
+
+    try:
+        async for chunk in orchestrator.stream_logs(
+            container_id,
+            tail=tail_parsed,
+            follow=follow_logs,
+        ):
+            await websocket.send_bytes(chunk)
+    except WebSocketDisconnect:
+        pass
+    except Exception:
+        try:
+            await websocket.close(code=1011)
+        except Exception:
+            pass
 
 
 @router.get("/{container_id}/stats", response_model=ContainerStats)
