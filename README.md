@@ -128,6 +128,38 @@ VITE_API_BASE_URL=http://127.0.0.1:8000
 | Backend tests | `cd backend` → `python -m pytest tests -q` |
 | DB migrations (apply) | `cd backend` → `alembic upgrade head` |
 | Frontend build | `cd frontend` → `npm run build` |
+| Frontend e2e tests | `cd frontend` → `npm run test:e2e` |
+
+## End-to-end tests (Playwright)
+
+The `frontend/e2e/` suite drives the SPA in a real browser against a real FastAPI process. Playwright's `webServer` config starts both the API (`python -m uvicorn app.api.app:app`) and Vite dev server on the test ports automatically.
+
+```powershell
+cd frontend
+npm ci
+npx playwright install --with-deps chromium
+npm run test:e2e
+```
+
+Most specs (auth, settings, dashboard, containers) work entirely against mocked HTTP responses installed via `page.route(...)` — the only test that actually hits the live backend is `e2e/api.spec.ts` (`GET /api/health`). That means **no Postgres or Docker is required to run the suite**.
+
+**Python interpreter selection.** Playwright auto-detects the repo's virtualenv: if `<repoRoot>/.venv/Scripts/python.exe` (Windows) or `<repoRoot>/.venv/bin/python` (Unix) exists, it is used to launch uvicorn. So after the standard `Backend` setup above (which creates `.venv` and installs `pip install -e ".[dev]"`), `npm run test:e2e` works without further configuration. If neither is found, plain `python` on `PATH` is used. To force a specific interpreter, set `PW_API_SERVER_COMMAND`, e.g.:
+
+```powershell
+$env:PW_API_SERVER_COMMAND = "C:\path\to\python.exe -m uvicorn app.api.app:app --host 127.0.0.1 --port 8000"
+npm run test:e2e
+```
+
+Useful variants:
+
+| Command | What it does |
+|---------|--------------|
+| `npm run test:e2e -- e2e/auth.spec.ts` | Run a single spec |
+| `npm run test:e2e -- -g "Settings page"` | Filter by test name |
+| `npm run test:e2e:headed` | Watch the browser |
+| `npm run test:e2e:ui` | Open the Playwright UI runner |
+
+The CI workflow (`.github/workflows/e2e.yml`) installs Python + Node + Chromium and runs the full suite on every push and pull request that touches `frontend/` or `backend/`.
 
 ## Troubleshooting
 

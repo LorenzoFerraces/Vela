@@ -281,7 +281,9 @@ def test_logs_stream_requires_token(anonymous_client: TestClient) -> None:
 
 
 def test_logs_stream_wrong_owner(
-    other_user_client: TestClient, seeded_other_user: User
+    api_client: TestClient,
+    other_user_client: TestClient,
+    seeded_other_user: User,
 ) -> None:
     token = create_access_token(seeded_other_user.id)
     with other_user_client.websocket_connect(

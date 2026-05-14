@@ -63,7 +63,6 @@ from app.core.models import (
 from app.core.oauth import decrypt_identity_token, get_github_identity
 from app.core.orchestrator import ContainerOrchestrator
 from app.core.traffic_router import TrafficRouter
-from app.db.engine import get_session_factory
 from app.db.models import User
 
 router = APIRouter()
@@ -491,6 +490,7 @@ async def container_logs_stream(
     websocket: WebSocket,
     container_id: str,
     orchestrator: Annotated[ContainerOrchestrator, Depends(get_orchestrator)],
+    session: Annotated[AsyncSession, Depends(get_db)],
 ) -> None:
     """Stream container logs over WebSocket (binary frames). Authenticate with ``access_token`` query param."""
     await websocket.accept()
@@ -503,23 +503,21 @@ async def container_logs_stream(
     tail_parsed = max(1, min(tail_parsed, _MAX_LOG_TAIL_LINES))
     follow_logs = websocket.query_params.get("follow", "true").strip().lower() != "false"
 
-    factory = get_session_factory()
-    async with factory() as session:
-        try:
-            if not token:
-                raise NotAuthenticatedError()
-            claims = decode_access_token(token)
-            user = await get_user_by_id(session, claims.user_id)
-            if user is None:
-                raise NotAuthenticatedError()
-        except NotAuthenticatedError:
-            await websocket.close(code=1008)
-            return
-        try:
-            await _require_owned(orchestrator, container_id, user)
-        except ContainerNotFoundError:
-            await websocket.close(code=1008)
-            return
+    try:
+        if not token:
+            raise NotAuthenticatedError()
+        claims = decode_access_token(token)
+        user = await get_user_by_id(session, claims.user_id)
+        if user is None:
+            raise NotAuthenticatedError()
+    except NotAuthenticatedError:
+        await websocket.close(code=1008)
+        return
+    try:
+        await _require_owned(orchestrator, container_id, user)
+    except ContainerNotFoundError:
+        await websocket.close(code=1008)
+        return
 
     try:
         async for chunk in orchestrator.stream_logs(
