@@ -13,6 +13,9 @@ from app.core.exceptions import (
     ContainerNotFoundError,
     ContainerNotRunningError,
     DockerfileGenerationError,
+    DockerfileTemplateNotFoundError,
+    DuplicateDockerfileNameError,
+    DuplicateSavedImageError,
     EmailAlreadyRegisteredError,
     GitHubAccountAlreadyLinkedError,
     GitHubAPIError,
@@ -30,6 +33,7 @@ from app.core.exceptions import (
     ResourceLimitError,
     RouteConfigurationError,
     RouteNotFoundError,
+    SavedImageNotFoundError,
     TrafficRouterError,
     UnsupportedLanguageError,
     VelaError,
@@ -59,6 +63,8 @@ def register_exception_handlers(app) -> None:
 
     @app.exception_handler(RouteNotFoundError)
     @app.exception_handler(ContainerNotFoundError)
+    @app.exception_handler(SavedImageNotFoundError)
+    @app.exception_handler(DockerfileTemplateNotFoundError)
     async def not_found_handler(_request: Request, exc: VelaError) -> JSONResponse:
         return JSONResponse(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -67,6 +73,8 @@ def register_exception_handlers(app) -> None:
 
     @app.exception_handler(ContainerAlreadyRunningError)
     @app.exception_handler(ContainerNotRunningError)
+    @app.exception_handler(DuplicateSavedImageError)
+    @app.exception_handler(DuplicateDockerfileNameError)
     async def conflict_handler(_request: Request, exc: VelaError) -> JSONResponse:
         return JSONResponse(
             status_code=status.HTTP_409_CONFLICT,

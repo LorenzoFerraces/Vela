@@ -6,6 +6,7 @@ import ContainersPage from './pages/ContainersPage'
 import LoginPage from './pages/LoginPage'
 import RegisterPage from './pages/RegisterPage'
 import DashboardPage from './pages/DashboardPage'
+import ImagesPage from './pages/ImagesPage'
 import PlaceholderPage from './pages/PlaceholderPage'
 import SettingsPage from './pages/SettingsPage'
 
@@ -44,7 +45,7 @@ export default function App() {
           path="/images"
           element={
             <RequireAuth>
-              <PlaceholderPage title="Images" />
+              <ImagesPage />
             </RequireAuth>
           }
         />

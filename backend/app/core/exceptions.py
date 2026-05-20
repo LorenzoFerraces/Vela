@@ -167,6 +167,39 @@ class NotAuthenticatedError(AuthError):
 
 
 # ---------------------------------------------------------------------------
+# User library (saved images, Dockerfile templates)
+# ---------------------------------------------------------------------------
+
+
+class UserLibraryError(VelaError):
+    """Base exception for per-user saved image / Dockerfile template operations."""
+
+
+class SavedImageNotFoundError(UserLibraryError):
+    def __init__(self, image_id: str) -> None:
+        self.image_id = image_id
+        super().__init__(f"Saved image not found: {image_id}")
+
+
+class DockerfileTemplateNotFoundError(UserLibraryError):
+    def __init__(self, template_id: str) -> None:
+        self.template_id = template_id
+        super().__init__(f"Dockerfile template not found: {template_id}")
+
+
+class DuplicateSavedImageError(UserLibraryError):
+    def __init__(self, ref: str) -> None:
+        self.ref = ref
+        super().__init__(f"You already saved this image reference: {ref}")
+
+
+class DuplicateDockerfileNameError(UserLibraryError):
+    def __init__(self, name: str) -> None:
+        self.name = name
+        super().__init__(f"You already have a Dockerfile template named {name!r}.")
+
+
+# ---------------------------------------------------------------------------
 # Third-party integrations (GitHub OAuth)
 # ---------------------------------------------------------------------------
 

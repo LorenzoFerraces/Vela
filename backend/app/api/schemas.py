@@ -240,3 +240,44 @@ class GitHubRepoSummary(BaseModel):
 
 class GitHubBranchSummary(BaseModel):
     name: str
+
+
+# ---------------------------------------------------------------------------
+# User library (saved image refs, Dockerfile templates)
+# ---------------------------------------------------------------------------
+
+
+class SavedImageCreate(BaseModel):
+    ref: str = Field(..., min_length=1, max_length=512)
+
+
+class SavedImageUpdate(BaseModel):
+    ref: str = Field(..., min_length=1, max_length=512)
+
+
+class SavedImagePublic(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    ref: str
+    created_at: datetime
+
+
+class DockerfileTemplateCreate(BaseModel):
+    name: str = Field(..., min_length=1, max_length=255)
+    contents: str = Field(..., min_length=1)
+
+
+class DockerfileTemplateUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=255)
+    contents: str | None = Field(default=None, min_length=1)
+
+
+class DockerfileTemplatePublic(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    name: str
+    contents: str
+    created_at: datetime
+    updated_at: datetime

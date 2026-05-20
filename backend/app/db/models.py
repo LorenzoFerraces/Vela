@@ -93,6 +93,9 @@ class UserOAuthIdentity(Base):
 
 class Image(Base):
     __tablename__ = "images"
+    __table_args__ = (
+        UniqueConstraint("owner_id", "ref", name="uq_images_owner_ref"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(
         Uuid(as_uuid=True),
@@ -115,6 +118,9 @@ class Image(Base):
 
 class Dockerfile(Base):
     __tablename__ = "dockerfiles"
+    __table_args__ = (
+        UniqueConstraint("owner_id", "name", name="uq_dockerfiles_owner_name"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(
         Uuid(as_uuid=True),
@@ -131,6 +137,9 @@ class Dockerfile(Base):
     contents: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=_utcnow
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow
     )
 
     owner: Mapped[User] = relationship(back_populates="dockerfiles")

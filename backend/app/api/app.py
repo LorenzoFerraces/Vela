@@ -8,7 +8,16 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.errors import register_exception_handlers
-from app.api.routes import auth, builder, containers, github, images, traffic
+from app.api.routes import (
+    auth,
+    builder,
+    containers,
+    dockerfile_templates,
+    github,
+    images,
+    saved_images,
+    traffic,
+)
 
 API_PREFIX = "/api"
 
@@ -50,6 +59,16 @@ def create_app() -> FastAPI:
         images.router,
         prefix=f"{API_PREFIX}/images",
         tags=["images"],
+    )
+    application.include_router(
+        saved_images.router,
+        prefix=f"{API_PREFIX}/saved-images",
+        tags=["saved-images"],
+    )
+    application.include_router(
+        dockerfile_templates.router,
+        prefix=f"{API_PREFIX}/dockerfiles",
+        tags=["dockerfiles"],
     )
     application.include_router(
         traffic.router,

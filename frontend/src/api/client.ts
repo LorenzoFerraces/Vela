@@ -220,6 +220,16 @@ export async function apiPost<TResponse, TBody = unknown>(
   )
 }
 
+export async function apiPatch<TResponse, TBody = unknown>(
+  path: string,
+  body: TBody
+): Promise<TResponse> {
+  return apiRequest<TResponse>(path, {
+    method: 'PATCH',
+    body: JSON.stringify(body),
+  })
+}
+
 export async function apiDelete(path: string): Promise<void> {
   const url = `${getApiBaseUrl()}${path.startsWith('/') ? path : `/${path}`}`
   const headers = new Headers({ Accept: 'application/json' })
@@ -651,6 +661,72 @@ export function filterGithubReposByQuery(
         (repo.description?.toLowerCase().includes(needle) ?? false)
     )
   }
+}
+
+// --- User library (saved image refs, Dockerfile templates) ---
+
+export interface SavedImage {
+  id: string
+  ref: string
+  created_at: string
+}
+
+export interface DockerfileTemplate {
+  id: string
+  name: string
+  contents: string
+  created_at: string
+  updated_at: string
+}
+
+export async function listSavedImages(): Promise<SavedImage[]> {
+  return apiGet<SavedImage[]>('/api/saved-images/')
+}
+
+export async function createSavedImage(ref: string): Promise<SavedImage> {
+  return apiPost<SavedImage, { ref: string }>('/api/saved-images/', { ref })
+}
+
+export async function updateSavedImage(
+  imageId: string,
+  ref: string
+): Promise<SavedImage> {
+  return apiPatch<SavedImage, { ref: string }>(
+    `/api/saved-images/${encodeURIComponent(imageId)}`,
+    { ref }
+  )
+}
+
+export async function deleteSavedImage(imageId: string): Promise<void> {
+  await apiDelete(`/api/saved-images/${encodeURIComponent(imageId)}`)
+}
+
+export async function listDockerfileTemplates(): Promise<DockerfileTemplate[]> {
+  return apiGet<DockerfileTemplate[]>('/api/dockerfiles/')
+}
+
+export async function createDockerfileTemplate(body: {
+  name: string
+  contents: string
+}): Promise<DockerfileTemplate> {
+  return apiPost<DockerfileTemplate, { name: string; contents: string }>(
+    '/api/dockerfiles/',
+    body
+  )
+}
+
+export async function updateDockerfileTemplate(
+  templateId: string,
+  body: { name?: string; contents?: string }
+): Promise<DockerfileTemplate> {
+  return apiPatch<DockerfileTemplate, { name?: string; contents?: string }>(
+    `/api/dockerfiles/${encodeURIComponent(templateId)}`,
+    body
+  )
+}
+
+export async function deleteDockerfileTemplate(templateId: string): Promise<void> {
+  await apiDelete(`/api/dockerfiles/${encodeURIComponent(templateId)}`)
 }
 
 export async function listGithubRepoBranches(
