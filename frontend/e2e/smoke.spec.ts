@@ -45,6 +45,30 @@ test.describe('navbar (authenticated)', () => {
       }
       await route.continue()
     })
+
+    await authenticatedPage.route('**/api/saved-images/**', async (route) => {
+      if (route.request().method() === 'GET') {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify([]),
+        })
+        return
+      }
+      await route.continue()
+    })
+
+    await authenticatedPage.route('**/api/dockerfiles/**', async (route) => {
+      if (route.request().method() === 'GET') {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify([]),
+        })
+        return
+      }
+      await route.continue()
+    })
   })
 
   test('signed-in user can walk through every protected section', async ({
@@ -67,9 +91,15 @@ test.describe('navbar (authenticated)', () => {
             /Docker image reference or Git clone URL/i,
           ),
         ).toBeVisible()
-      } else if (path === '/builder' || path === '/images') {
+      } else if (path === '/builder') {
         await expect(
           authenticatedPage.getByText('Esta sección estará disponible pronto.'),
+        ).toBeVisible()
+      } else if (path === '/images') {
+        await expect(
+          authenticatedPage.getByText(
+            /Manage saved registry references and Dockerfile templates/i,
+          ),
         ).toBeVisible()
       }
     }
