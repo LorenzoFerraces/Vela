@@ -1,12 +1,12 @@
+import { appBase } from './constants'
 import { expect, test } from './fixtures'
 
-const baseURL = 'http://127.0.0.1:5173'
+const baseURL = appBase
 
 const protectedNavItems = [
   { label: 'Dashboard', path: '/dashboard', title: 'Dashboard' },
   { label: 'Containers', path: '/containers', title: 'Containers' },
   { label: 'Builder', path: '/builder', title: 'Builder' },
-  { label: 'Images', path: '/images', title: 'Images' },
   { label: 'Settings', path: '/settings', title: 'Settings' },
 ] as const
 
@@ -33,44 +33,6 @@ test.describe('home page (anonymous)', () => {
 })
 
 test.describe('navbar (authenticated)', () => {
-  test.beforeEach(async ({ authenticatedPage }) => {
-    await authenticatedPage.route('**/api/containers/', async (route) => {
-      if (route.request().method() === 'GET') {
-        await route.fulfill({
-          status: 200,
-          contentType: 'application/json',
-          body: JSON.stringify([]),
-        })
-        return
-      }
-      await route.continue()
-    })
-
-    await authenticatedPage.route('**/api/saved-images/**', async (route) => {
-      if (route.request().method() === 'GET') {
-        await route.fulfill({
-          status: 200,
-          contentType: 'application/json',
-          body: JSON.stringify([]),
-        })
-        return
-      }
-      await route.continue()
-    })
-
-    await authenticatedPage.route('**/api/dockerfiles/**', async (route) => {
-      if (route.request().method() === 'GET') {
-        await route.fulfill({
-          status: 200,
-          contentType: 'application/json',
-          body: JSON.stringify([]),
-        })
-        return
-      }
-      await route.continue()
-    })
-  })
-
   test('signed-in user can walk through every protected section', async ({
     authenticatedPage,
   }) => {
@@ -87,19 +49,14 @@ test.describe('navbar (authenticated)', () => {
       ).toBeVisible()
       if (path === '/containers') {
         await expect(
-          authenticatedPage.getByLabel(
-            /Docker image reference or Git clone URL/i,
-          ),
+          authenticatedPage.getByLabel('Deploy source'),
         ).toBeVisible()
       } else if (path === '/builder') {
         await expect(
-          authenticatedPage.getByText('Esta sección estará disponible pronto.'),
-        ).toBeVisible()
-      } else if (path === '/images') {
-        await expect(
-          authenticatedPage.getByText(
-            /Manage saved registry references and Dockerfile templates/i,
-          ),
+          authenticatedPage.getByRole('heading', {
+            name: 'Dockerfile templates',
+            level: 2,
+          }),
         ).toBeVisible()
       }
     }

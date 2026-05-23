@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import app.bootstrap_env  # noqa: F401 — loads backend/.env before other app imports.
 
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -15,11 +17,18 @@ from app.api.routes import (
     dockerfile_templates,
     github,
     images,
-    saved_images,
     traffic,
 )
 
 API_PREFIX = "/api"
+
+
+@asynccontextmanager
+async def _lifespan(_application: FastAPI):
+    from app.e2e_support import ensure_e2e_database
+
+    await ensure_e2e_database()
+    yield
 
 
 def create_app() -> FastAPI:
@@ -27,6 +36,7 @@ def create_app() -> FastAPI:
         title="Vela API",
         description="Container deployment platform — orchestrate, build, and manage containers.",
         version="0.1.0",
+        lifespan=_lifespan,
     )
 
     application.add_middleware(
@@ -34,10 +44,12 @@ def create_app() -> FastAPI:
         allow_origins=[
             "http://localhost:5173",
             "http://127.0.0.1:5173",
+            "http://localhost:5174",
+            "http://127.0.0.1:5174",
             "http://velaunq.ddns.net:5173",
             "https://velaunq.ddns.net:5173",
         ],
-        allow_origin_regex=r"^https?://[^/]+:5173$",
+        allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$",
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
@@ -59,11 +71,6 @@ def create_app() -> FastAPI:
         images.router,
         prefix=f"{API_PREFIX}/images",
         tags=["images"],
-    )
-    application.include_router(
-        saved_images.router,
-        prefix=f"{API_PREFIX}/saved-images",
-        tags=["saved-images"],
     )
     application.include_router(
         dockerfile_templates.router,

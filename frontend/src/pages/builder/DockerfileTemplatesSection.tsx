@@ -58,7 +58,7 @@ export function DockerfileTemplatesSection({
         Dockerfile templates
       </h2>
       <p className="containers-muted images-section__lead">
-        Name and edit Dockerfile snippets stored in your account.
+        Create and edit Dockerfiles to use when deploying containers.
       </p>
 
       <form

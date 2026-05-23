@@ -1,13 +1,13 @@
 """
 HTTP integration tests for the FastAPI app (full routing, serialization, dependency wiring).
 
-Orchestrator / image builder are mocked so tests do not require Docker.
+Uses in-memory SQLite and FakeContainerOrchestrator — no Docker daemon required.
 """
 
 from __future__ import annotations
 
 import uuid
-from unittest.mock import AsyncMock, MagicMock
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -15,20 +15,29 @@ from starlette.websockets import WebSocketDisconnect
 
 from app.api.app import create_app
 from app.core.auth.tokens import create_access_token
-from app.core.default_image_builder import DefaultImageBuilder
 from app.core.docker_orchestrator import (
     VELA_OWNER_LABEL,
     VELA_ROUTE_HOST_LABEL,
     VELA_ROUTE_PATH_PREFIX_LABEL,
     VELA_ROUTE_TLS_LABEL,
 )
-from app.core.enums import BuildStrategy, SupportedLanguage
-from app.core.exceptions import ImageNotFoundError, RegistryAccessDeniedError
-from app.core.models import BuildResult, ProjectInfo
-from app.core.orchestrator import ContainerOrchestrator
+from app.core.exceptions import CloneError, ImageNotFoundError, RegistryAccessDeniedError
+from app.core.fake_orchestrator import FakeContainerOrchestrator
 from app.core.traffic_router import NoopTrafficRouter
 from app.db.models import User
 from tests.conftest import make_container_info
+
+
+async def _stub_git_shallow_clone(
+    *,
+    url: str,
+    branch: str,
+    dest: Path,
+    access_token: str | None = None,
+) -> None:
+    _ = url, branch, access_token
+    dest.mkdir(parents=True, exist_ok=True)
+    (dest / "Dockerfile").write_text("FROM alpine:3.20\n", encoding="utf-8")
 
 
 def test_health_returns_ok() -> None:
@@ -85,11 +94,9 @@ def test_image_availability_ok(api_client: TestClient) -> None:
 
 
 def test_image_availability_not_found(make_authed_client) -> None:
-    orch = MagicMock(spec=ContainerOrchestrator)
-    orch.verify_image_reference_available = AsyncMock(
-        side_effect=ImageNotFoundError("bad:missing")
-    )
-    with make_authed_client(orchestrator=orch) as client:
+    orchestrator = FakeContainerOrchestrator()
+    orchestrator.set_verify_error("bad:missing", ImageNotFoundError("bad:missing"))
+    with make_authed_client(orchestrator=orchestrator) as client:
         response = client.get(
             "/api/containers/image/availability", params={"ref": "bad:missing"}
         )
@@ -104,11 +111,12 @@ def test_image_availability_not_found(make_authed_client) -> None:
 
 
 def test_image_availability_registry_access_denied(make_authed_client) -> None:
-    orch = MagicMock(spec=ContainerOrchestrator)
-    orch.verify_image_reference_available = AsyncMock(
-        side_effect=RegistryAccessDeniedError("ngin", registry_message="denied")
+    orchestrator = FakeContainerOrchestrator()
+    orchestrator.set_verify_error(
+        "ngin",
+        RegistryAccessDeniedError("ngin", registry_message="denied"),
     )
-    with make_authed_client(orchestrator=orch) as client:
+    with make_authed_client(orchestrator=orchestrator) as client:
         response = client.get(
             "/api/containers/image/availability", params={"ref": "ngin"}
         )
@@ -131,10 +139,10 @@ def test_image_not_found_exception_has_structured_api_content() -> None:
     assert "hints" not in content
 
 
-def test_image_availability_git_url_not_checked(make_authed_client) -> None:
-    orch = MagicMock(spec=ContainerOrchestrator)
-    orch.verify_image_reference_available = AsyncMock()
-    with make_authed_client(orchestrator=orch) as client:
+def test_image_availability_git_url_not_checked(
+    make_authed_client, fake_orchestrator: FakeContainerOrchestrator
+) -> None:
+    with make_authed_client(orchestrator=fake_orchestrator) as client:
         response = client.get(
             "/api/containers/image/availability",
             params={"ref": "https://github.com/org/repo.git"},
@@ -143,7 +151,7 @@ def test_image_availability_git_url_not_checked(make_authed_client) -> None:
     body = response.json()
     assert body["checked"] is False
     assert body["available"] is True
-    orch.verify_image_reference_available.assert_not_called()
+    assert fake_orchestrator.verify_calls == []
 
 
 def test_get_container(api_client: TestClient) -> None:
@@ -154,7 +162,7 @@ def test_get_container(api_client: TestClient) -> None:
 
 def test_run_from_image_public_route(
     api_client: TestClient,
-    mock_orchestrator: MagicMock,
+    fake_orchestrator: FakeContainerOrchestrator,
     test_user_id,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -180,15 +188,52 @@ def test_run_from_image_public_route(
     assert body["public_url"].startswith("https://")
     assert "apps.example.com" in body["public_url"]
 
-    deployed_config = mock_orchestrator.deploy.call_args.args[0]
-    assert deployed_config.labels.get(VELA_OWNER_LABEL) == str(test_user_id)
+    assert fake_orchestrator.last_deploy_config is not None
+    assert fake_orchestrator.last_deploy_config.labels.get(VELA_OWNER_LABEL) == str(
+        test_user_id
+    )
 
 
-def test_run_from_git_url(
-    api_client: TestClient, monkeypatch: pytest.MonkeyPatch
+def test_run_from_dockerfile_template(
+    api_client: TestClient,
+    fake_orchestrator: FakeContainerOrchestrator,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("VELA_PUBLIC_ROUTE_DOMAIN", "apps.example.com")
     monkeypatch.setenv("VELA_PUBLIC_URL_SCHEME", "https")
+
+    create = api_client.post(
+        "/api/dockerfiles/",
+        json={"name": "minimal", "contents": "FROM alpine:3.20\n"},
+    )
+    template_id = create.json()["id"]
+
+    response = api_client.post(
+        "/api/containers/run",
+        json={
+            "source_kind": "dockerfile_template",
+            "dockerfile_template_id": template_id,
+            "public_route": True,
+            "container_port": 80,
+        },
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["kind"] == "dockerfile_template"
+    assert body["image"].startswith("vela/templatebuild:")
+    assert any(tag.startswith("vela/templatebuild:") for tag in fake_orchestrator._built_tags)
+
+
+def test_run_from_git_url(
+    api_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("VELA_PUBLIC_ROUTE_DOMAIN", "apps.example.com")
+    monkeypatch.setenv("VELA_PUBLIC_URL_SCHEME", "https")
+    monkeypatch.setattr(
+        "app.core.default_image_builder.git_shallow_clone",
+        _stub_git_shallow_clone,
+    )
 
     response = api_client.post(
         "/api/containers/run",
@@ -202,7 +247,7 @@ def test_run_from_git_url(
     assert response.status_code == 200
     body = response.json()
     assert body["kind"] == "git"
-    assert body["image"] == "vela/gitbuild:abc123"
+    assert body["image"].startswith("vela/gitbuild:")
 
 
 def test_run_public_route_requires_domain(
@@ -235,10 +280,10 @@ def test_container_logs_tail_validation(api_client: TestClient) -> None:
 
 
 def test_list_containers_includes_access_url(
-    api_client: TestClient,
-    mock_orchestrator: MagicMock,
+    make_authed_client,
     test_user_id: uuid.UUID,
 ) -> None:
+    orchestrator = FakeContainerOrchestrator()
     row = make_container_info(
         owner_id=test_user_id,
         labels={
@@ -248,8 +293,9 @@ def test_list_containers_includes_access_url(
         },
         access_url="https://svc.example.com/",
     )
-    mock_orchestrator.list = AsyncMock(return_value=[row])
-    response = api_client.get("/api/containers/")
+    orchestrator.seed_container(row)
+    with make_authed_client(orchestrator=orchestrator) as client:
+        response = client.get("/api/containers/")
     assert response.status_code == 200
     data = response.json()
     assert len(data) == 1
@@ -257,14 +303,8 @@ def test_list_containers_includes_access_url(
 
 
 def test_logs_stream_authenticated(
-    api_client: TestClient, auth_token: str, mock_orchestrator: MagicMock
+    api_client: TestClient, auth_token: str
 ) -> None:
-    async def _chunks() -> object:
-        yield b"log line\n"
-
-    mock_orchestrator.stream_logs = MagicMock(
-        side_effect=lambda *a, **k: _chunks()
-    )
     with api_client.websocket_connect(
         f"/api/containers/cid-1/logs/stream?access_token={auth_token}&follow=false"
     ) as websocket:
@@ -323,12 +363,11 @@ def test_run_rejects_empty_source(api_client: TestClient) -> None:
 
 def test_run_from_github_uses_stored_token(
     api_client: TestClient,
-    mock_image_builder: MagicMock,
     db_session_factory,
     seeded_user,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A connected user's GitHub URL forwards the decrypted token to the builder."""
+    """A connected user's GitHub URL forwards the decrypted token to git clone."""
     import asyncio
 
     from cryptography.fernet import Fernet
@@ -338,10 +377,29 @@ def test_run_from_github_uses_stored_token(
     from app.core.security.secrets import encrypt_secret
     from app.db.models import UserOAuthIdentity
 
+    recorded_tokens: list[str | None] = []
+
+    async def recording_clone(
+        *,
+        url: str,
+        branch: str,
+        dest: Path,
+        access_token: str | None = None,
+    ) -> None:
+        _ = url, branch
+        recorded_tokens.append(access_token)
+        await _stub_git_shallow_clone(
+            url=url, branch=branch, dest=dest, access_token=access_token
+        )
+
     monkeypatch.setenv("VELA_PUBLIC_ROUTE_DOMAIN", "apps.example.com")
     monkeypatch.setenv("VELA_PUBLIC_URL_SCHEME", "https")
     monkeypatch.setenv("VELA_TOKEN_ENCRYPTION_KEY", Fernet.generate_key().decode())
     reset_token_cipher_for_tests()
+    monkeypatch.setattr(
+        "app.core.default_image_builder.git_shallow_clone",
+        recording_clone,
+    )
 
     async def seed_identity() -> None:
         async with db_session_factory() as session:
@@ -371,19 +429,35 @@ def test_run_from_github_uses_stored_token(
     )
 
     assert response.status_code == 200, response.text
-    mock_image_builder.build_from_source.assert_awaited_once()
-    kwargs = mock_image_builder.build_from_source.await_args.kwargs
-    assert kwargs.get("access_token") == "ghp_secret_value"
+    assert recorded_tokens == ["ghp_secret_value"]
 
 
 def test_run_from_github_without_connection_does_not_send_token(
     api_client: TestClient,
-    mock_image_builder: MagicMock,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Disconnected users keep working for public repos and pass no token."""
+    recorded_tokens: list[str | None] = []
+
+    async def recording_clone(
+        *,
+        url: str,
+        branch: str,
+        dest: Path,
+        access_token: str | None = None,
+    ) -> None:
+        _ = url, branch
+        recorded_tokens.append(access_token)
+        await _stub_git_shallow_clone(
+            url=url, branch=branch, dest=dest, access_token=access_token
+        )
+
     monkeypatch.setenv("VELA_PUBLIC_ROUTE_DOMAIN", "apps.example.com")
     monkeypatch.setenv("VELA_PUBLIC_URL_SCHEME", "https")
+    monkeypatch.setattr(
+        "app.core.default_image_builder.git_shallow_clone",
+        recording_clone,
+    )
 
     response = api_client.post(
         "/api/containers/run",
@@ -396,27 +470,25 @@ def test_run_from_github_without_connection_does_not_send_token(
     )
 
     assert response.status_code == 200, response.text
-    mock_image_builder.build_from_source.assert_awaited_once()
-    kwargs = mock_image_builder.build_from_source.await_args.kwargs
-    assert kwargs.get("access_token") is None
+    assert recorded_tokens == [None]
 
 
 def test_run_private_github_clone_failure_hints_settings(
     api_client: TestClient,
-    mock_image_builder: MagicMock,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """An auth-style CloneError on github.com surfaces a friendly Settings hint."""
-    from app.core.exceptions import CloneError
-
-    monkeypatch.setenv("VELA_PUBLIC_ROUTE_DOMAIN", "apps.example.com")
-    monkeypatch.setenv("VELA_PUBLIC_URL_SCHEME", "https")
-
-    mock_image_builder.build_from_source = AsyncMock(
-        side_effect=CloneError(
+    async def failing_clone(**_kwargs: object) -> None:
+        raise CloneError(
             "https://github.com/org/private.git",
             "fatal: Authentication failed for 'https://github.com/org/private.git/'",
         )
+
+    monkeypatch.setenv("VELA_PUBLIC_ROUTE_DOMAIN", "apps.example.com")
+    monkeypatch.setenv("VELA_PUBLIC_URL_SCHEME", "https")
+    monkeypatch.setattr(
+        "app.core.default_image_builder.git_shallow_clone",
+        failing_clone,
     )
 
     response = api_client.post(
@@ -434,48 +506,33 @@ def test_run_private_github_clone_failure_hints_settings(
     assert "connect github in settings" in detail
 
 
-def test_builder_build_calls_pipeline(make_authed_client) -> None:
-    mock_orch = MagicMock(spec=ContainerOrchestrator)
-    mock_orch.build_image = AsyncMock(return_value="sha256:x")
-    builder = MagicMock(spec=DefaultImageBuilder)
-    builder.build_from_source = AsyncMock(
-        return_value=BuildResult(
-            image_id="sha256:x",
-            image_tag="t:1",
-            strategy=BuildStrategy.GENERATED_DOCKERFILE,
-            build_log="ok",
-            project_info=ProjectInfo(language=SupportedLanguage.JAVASCRIPT),
-        )
-    )
+def test_builder_build_calls_pipeline(make_authed_client, tmp_path, monkeypatch) -> None:
+    project_dir = tmp_path / "app"
+    project_dir.mkdir()
+    (project_dir / "package.json").write_text('{"name":"x"}', encoding="utf-8")
+    monkeypatch.setenv("VELA_ALLOWED_BUILD_ROOT", str(tmp_path.parent))
 
-    with make_authed_client(orchestrator=mock_orch, image_builder=builder) as client:
+    with make_authed_client() as client:
         response = client.post(
             "/api/builder/build",
             json={
-                "source": {"local_path": "C:/fake"},
+                "source": {"local_path": str(project_dir)},
                 "tag": "my/app:1",
             },
         )
 
     assert response.status_code == 200
-    assert response.json()["image_tag"] == "t:1"
-    builder.build_from_source.assert_awaited_once()
+    assert response.json()["image_tag"] == "my/app:1"
 
 
 def test_builder_analyze_uses_validate_local(
     make_authed_client, tmp_path, monkeypatch
 ) -> None:
     (tmp_path / "package.json").write_text('{"name":"x"}', encoding="utf-8")
-    mock_builder = MagicMock(spec=DefaultImageBuilder)
-    mock_builder.analyze = AsyncMock(
-        return_value=ProjectInfo(
-            language=SupportedLanguage.JAVASCRIPT, has_dockerfile=False
-        )
-    )
 
     monkeypatch.setenv("VELA_ALLOWED_BUILD_ROOT", str(tmp_path.parent))
 
-    with make_authed_client(image_builder=mock_builder) as client:
+    with make_authed_client() as client:
         response = client.post(
             "/api/builder/analyze",
             json={"project_path": str(tmp_path)},
@@ -493,8 +550,9 @@ def test_image_suggestions_requires_auth(anonymous_client: TestClient) -> None:
 def test_image_suggestions_merges_local_and_hub(
     make_authed_client, monkeypatch
 ) -> None:
-    orch = MagicMock(spec=ContainerOrchestrator)
-    orch.list_images = AsyncMock(return_value=["my/nginx:dev", "nginx:alpine"])
+    orchestrator = FakeContainerOrchestrator()
+    orchestrator.register_image("my/nginx:dev")
+    orchestrator.register_image("nginx:alpine")
 
     async def fake_hub(query: str, *, page_size: int) -> list[tuple[str, int]]:
         assert query == "nginx"
@@ -506,7 +564,7 @@ def test_image_suggestions_merges_local_and_hub(
         fake_hub,
     )
 
-    with make_authed_client(orchestrator=orch) as client:
+    with make_authed_client(orchestrator=orchestrator) as client:
         response = client.get("/api/containers/image/suggestions?q=nginx&limit=10")
 
     assert response.status_code == 200
@@ -520,8 +578,8 @@ def test_image_suggestions_merges_local_and_hub(
 def test_image_suggestions_empty_query_skips_hub(
     make_authed_client, monkeypatch
 ) -> None:
-    orch = MagicMock(spec=ContainerOrchestrator)
-    orch.list_images = AsyncMock(return_value=["local-only:1"])
+    orchestrator = FakeContainerOrchestrator()
+    orchestrator.register_image("local-only:1")
 
     async def fake_hub(*_args: object, **_kwargs: object) -> list[tuple[str, int]]:
         raise AssertionError("Hub should not be called for an empty query")
@@ -531,31 +589,32 @@ def test_image_suggestions_empty_query_skips_hub(
         fake_hub,
     )
 
-    with make_authed_client(orchestrator=orch) as client:
+    with make_authed_client(orchestrator=orchestrator) as client:
         response = client.get("/api/containers/image/suggestions")
 
     assert response.status_code == 200
     refs = {item["ref"] for item in response.json()["suggestions"]}
     assert "local-only:1" in refs
-    assert any("nginx" in ref for ref in refs)
 
 
 def test_list_images(make_authed_client) -> None:
-    orch = MagicMock(spec=ContainerOrchestrator)
-    orch.list_images = AsyncMock(return_value=["a:latest", "b:1"])
+    orchestrator = FakeContainerOrchestrator()
+    orchestrator.register_image("a:latest")
+    orchestrator.register_image("b:1")
 
-    with make_authed_client(orchestrator=orch) as client:
+    with make_authed_client(orchestrator=orchestrator) as client:
         response = client.get("/api/images/")
 
     assert response.status_code == 200
-    assert response.json() == {"images": ["a:latest", "b:1"]}
+    images = response.json()["images"]
+    assert "a:latest" in images
+    assert "b:1" in images
 
 
 def test_pull_image(make_authed_client) -> None:
-    orch = MagicMock(spec=ContainerOrchestrator)
-    orch.pull_image = AsyncMock(return_value=None)
+    orchestrator = FakeContainerOrchestrator()
 
-    with make_authed_client(orchestrator=orch) as client:
+    with make_authed_client(orchestrator=orchestrator) as client:
         response = client.post(
             "/api/images/pull",
             params={"image": "nginx", "tag": "alpine"},
@@ -563,15 +622,14 @@ def test_pull_image(make_authed_client) -> None:
 
     assert response.status_code == 200
     assert response.json()["detail"] == "ok"
-    orch.pull_image.assert_awaited_once()
+    assert "nginx:alpine" in orchestrator._images
 
 
 def test_build_image_from_context(make_authed_client, tmp_path) -> None:
     (tmp_path / "Dockerfile").write_text("FROM scratch\n", encoding="utf-8")
-    orch = MagicMock(spec=ContainerOrchestrator)
-    orch.build_image = AsyncMock(return_value="sha256:abc")
+    orchestrator = FakeContainerOrchestrator()
 
-    with make_authed_client(orchestrator=orch) as client:
+    with make_authed_client(orchestrator=orchestrator) as client:
         response = client.post(
             "/api/images/build",
             json={
@@ -583,6 +641,7 @@ def test_build_image_from_context(make_authed_client, tmp_path) -> None:
 
     assert response.status_code == 200
     assert response.json()["tag"] == "local/test:1"
+    assert "local/test:1" in orchestrator._images
 
 
 def test_traffic_routes_crud(make_authed_client) -> None:

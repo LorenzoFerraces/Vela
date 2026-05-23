@@ -1,68 +1,10 @@
-"""Integration tests for saved images and Dockerfile template CRUD."""
+"""Integration tests for Dockerfile template CRUD."""
 
 from __future__ import annotations
 
 import uuid
 
 from fastapi.testclient import TestClient
-
-
-def test_saved_images_crud(api_client: TestClient) -> None:
-    create = api_client.post(
-        "/api/saved-images/",
-        json={"ref": "nginx:alpine"},
-    )
-    assert create.status_code == 201
-    created = create.json()
-    image_id = created["id"]
-    assert created["ref"] == "nginx:alpine"
-
-    listed = api_client.get("/api/saved-images/")
-    assert listed.status_code == 200
-    assert len(listed.json()) == 1
-
-    fetched = api_client.get(f"/api/saved-images/{image_id}")
-    assert fetched.status_code == 200
-
-    updated = api_client.patch(
-        f"/api/saved-images/{image_id}",
-        json={"ref": "nginx:latest"},
-    )
-    assert updated.status_code == 200
-    assert updated.json()["ref"] == "nginx:latest"
-
-    deleted = api_client.delete(f"/api/saved-images/{image_id}")
-    assert deleted.status_code == 204
-
-    missing = api_client.get(f"/api/saved-images/{image_id}")
-    assert missing.status_code == 404
-
-
-def test_saved_images_duplicate_ref(api_client: TestClient) -> None:
-    api_client.post("/api/saved-images/", json={"ref": "redis:7"})
-    second = api_client.post("/api/saved-images/", json={"ref": "redis:7"})
-    assert second.status_code == 409
-
-
-def test_saved_images_requires_auth(anonymous_client: TestClient) -> None:
-    response = anonymous_client.get("/api/saved-images/")
-    assert response.status_code == 401
-
-
-def test_saved_images_other_user_isolated(
-    api_client: TestClient, other_user_client: TestClient
-) -> None:
-    create = api_client.post(
-        "/api/saved-images/",
-        json={"ref": "private:mine"},
-    )
-    image_id = create.json()["id"]
-
-    assert other_user_client.get("/api/saved-images/").json() == []
-    assert other_user_client.get(f"/api/saved-images/{image_id}").status_code == 404
-    assert (
-        other_user_client.delete(f"/api/saved-images/{image_id}").status_code == 404
-    )
 
 
 def test_dockerfile_templates_crud(api_client: TestClient) -> None:
@@ -141,3 +83,21 @@ def test_dockerfile_templates_other_user_isolated(
 def test_dockerfile_not_found(api_client: TestClient) -> None:
     missing_id = str(uuid.uuid4())
     assert api_client.get(f"/api/dockerfiles/{missing_id}").status_code == 404
+
+
+def test_deploy_sources_includes_dockerfile_template(
+    api_client: TestClient,
+) -> None:
+    create = api_client.post(
+        "/api/dockerfiles/",
+        json={"name": "nginx-static", "contents": "FROM nginx:alpine\n"},
+    )
+    assert create.status_code == 201
+
+    listed = api_client.get("/api/containers/deploy-sources", params={"q": "nginx"})
+    assert listed.status_code == 200
+    suggestions = listed.json()["suggestions"]
+    template_rows = [
+        row for row in suggestions if row["kind"] == "dockerfile_template"
+    ]
+    assert any(row["name"] == "nginx-static" for row in template_rows)

@@ -278,8 +278,14 @@ export interface ContainerInfo {
   access_url?: string | null
 }
 
+export type RunSourceKind = 'image' | 'git' | 'dockerfile_template'
+
 export interface RunFromSourceRequest {
-  source: string
+  source_kind?: RunSourceKind
+  source?: string
+  image_ref?: string
+  git_url?: string
+  dockerfile_template_id?: string
   container_name?: string | null
   host_port?: number | null
   container_port?: number
@@ -292,7 +298,7 @@ export interface RunFromSourceRequest {
 
 export interface RunFromSourceResponse {
   container: ContainerInfo
-  kind: 'image' | 'git'
+  kind: RunSourceKind
   image: string
   route_wired: boolean
   public_url?: string | null
@@ -324,6 +330,30 @@ export interface ImageSuggestion {
   ref: string
   pull_count: number | null
   source: ImageSuggestionSource
+}
+
+export type DeploySourceSuggestion =
+  | { kind: 'image'; ref: string; label: string }
+  | {
+      kind: 'git'
+      url: string
+      name: string
+      default_branch: string
+    }
+  | { kind: 'dockerfile_template'; id: string; name: string }
+
+export async function getDeploySourceSuggestions(
+  query: string,
+  options: { limit?: number } = {}
+): Promise<DeploySourceSuggestion[]> {
+  const params = new URLSearchParams({ q: query })
+  if (options.limit != null) {
+    params.set('limit', String(options.limit))
+  }
+  const data = await apiGet<{ suggestions: DeploySourceSuggestion[] }>(
+    `/api/containers/deploy-sources?${params.toString()}`
+  )
+  return data.suggestions
 }
 
 export async function getImageSuggestions(
@@ -663,13 +693,7 @@ export function filterGithubReposByQuery(
   }
 }
 
-// --- User library (saved image refs, Dockerfile templates) ---
-
-export interface SavedImage {
-  id: string
-  ref: string
-  created_at: string
-}
+// --- User library (Dockerfile templates) ---
 
 export interface DockerfileTemplate {
   id: string
@@ -677,28 +701,6 @@ export interface DockerfileTemplate {
   contents: string
   created_at: string
   updated_at: string
-}
-
-export async function listSavedImages(): Promise<SavedImage[]> {
-  return apiGet<SavedImage[]>('/api/saved-images/')
-}
-
-export async function createSavedImage(ref: string): Promise<SavedImage> {
-  return apiPost<SavedImage, { ref: string }>('/api/saved-images/', { ref })
-}
-
-export async function updateSavedImage(
-  imageId: string,
-  ref: string
-): Promise<SavedImage> {
-  return apiPatch<SavedImage, { ref: string }>(
-    `/api/saved-images/${encodeURIComponent(imageId)}`,
-    { ref }
-  )
-}
-
-export async function deleteSavedImage(imageId: string): Promise<void> {
-  await apiDelete(`/api/saved-images/${encodeURIComponent(imageId)}`)
 }
 
 export async function listDockerfileTemplates(): Promise<DockerfileTemplate[]> {

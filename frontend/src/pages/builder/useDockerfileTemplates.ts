@@ -7,10 +7,10 @@ import {
   updateDockerfileTemplate,
   type DockerfileTemplate,
 } from '../../api/client'
-import type { ImagesBanner } from './types'
+import type { BuilderBanner } from './types'
 
 export function useDockerfileTemplates(
-  reportBanner: (banner: ImagesBanner) => void
+  reportBanner: (banner: BuilderBanner) => void
 ) {
   const [rows, setRows] = useState<DockerfileTemplate[]>([])
   const [listLoading, setListLoading] = useState(true)

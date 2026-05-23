@@ -1,0 +1,118 @@
+"""Bootstrap helpers when ``VELA_E2E=1`` (Playwright and local E2E runs)."""
+
+from __future__ import annotations
+
+import os
+import uuid
+
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+from app.core.auth.passwords import hash_password
+from app.core.oauth.github import GitHubRepo
+from app.core.oauth.identity import GITHUB_PROVIDER
+from app.core.security.secrets import encrypt_secret
+from app.db.base import Base
+from app.db.engine import get_engine
+from app.db.models import User, UserOAuthIdentity
+
+E2E_USER_EMAIL = "e2e@example.com"
+E2E_USER_PASSWORD = "e2e-test-password-min-8"
+E2E_USER_ID = uuid.UUID("11111111-1111-1111-1111-111111111111")
+E2E_USER_NO_GITHUB_EMAIL = "e2e-nogithub@example.com"
+E2E_USER_NO_GITHUB_PASSWORD = "e2e-nogithub-password-min-8"
+E2E_USER_NO_GITHUB_ID = uuid.UUID("22222222-2222-2222-2222-222222222222")
+E2E_GITHUB_FAKE_TOKEN = "e2e-fake-github-token"
+
+_E2E_GITHUB_REPOS = (
+    GitHubRepo(
+        full_name="org/repo",
+        default_branch="main",
+        private=False,
+        html_url="https://github.com/org/repo",
+        description="E2E fixture repo",
+    ),
+)
+
+
+def e2e_mode_enabled() -> bool:
+    return os.environ.get("VELA_E2E", "").strip() == "1"
+
+
+def e2e_github_repos_if_enabled(
+    access_token: str,
+    *,
+    query: str | None,
+    page: int,
+    per_page: int,
+) -> list[GitHubRepo] | None:
+    """Return fixture GitHub repos in E2E mode instead of calling api.github.com."""
+    _ = page, per_page
+    if not e2e_mode_enabled():
+        return None
+    if access_token != E2E_GITHUB_FAKE_TOKEN:
+        return []
+    cleaned = (query or "").strip().lower()
+    repos = list(_E2E_GITHUB_REPOS)
+    if cleaned:
+        repos = [
+            repo
+            for repo in repos
+            if cleaned in repo.full_name.lower()
+            or cleaned in repo.html_url.lower()
+        ]
+    return repos
+
+
+async def ensure_e2e_database() -> None:
+    """Create schema and seed the primary E2E user (idempotent)."""
+    if not e2e_mode_enabled():
+        return
+
+    engine = get_engine()
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+
+    session_factory = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
+    async with session_factory() as session:
+        existing = await session.get(User, E2E_USER_ID)
+        if existing is None:
+            session.add(
+                User(
+                    id=E2E_USER_ID,
+                    email=E2E_USER_EMAIL,
+                    password_hash=hash_password(E2E_USER_PASSWORD),
+                )
+            )
+            await session.commit()
+
+        no_github = await session.get(User, E2E_USER_NO_GITHUB_ID)
+        if no_github is None:
+            session.add(
+                User(
+                    id=E2E_USER_NO_GITHUB_ID,
+                    email=E2E_USER_NO_GITHUB_EMAIL,
+                    password_hash=hash_password(E2E_USER_NO_GITHUB_PASSWORD),
+                )
+            )
+            await session.commit()
+
+        identity_result = await session.execute(
+            select(UserOAuthIdentity).where(
+                UserOAuthIdentity.user_id == E2E_USER_ID,
+                UserOAuthIdentity.provider == GITHUB_PROVIDER,
+            )
+        )
+        if identity_result.scalar_one_or_none() is None:
+            session.add(
+                UserOAuthIdentity(
+                    user_id=E2E_USER_ID,
+                    provider=GITHUB_PROVIDER,
+                    provider_subject="999",
+                    username="vela-user",
+                    avatar_url="https://avatars.example.com/u/1",
+                    scopes="repo,read:user",
+                    access_token_encrypted=encrypt_secret(E2E_GITHUB_FAKE_TOKEN),
+                )
+            )
+            await session.commit()

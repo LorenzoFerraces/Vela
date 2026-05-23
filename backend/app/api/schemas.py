@@ -6,19 +6,39 @@ import uuid
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator, model_validator
 
 from app.core.models import ContainerInfo, ProjectSource
 
 
 class RunFromSourceRequest(BaseModel):
-    """Run a container from a registry image or from a Git URL (Docker build)."""
+    """Run a container from a registry image, Git URL, or saved Dockerfile template."""
 
-    source: str = Field(
-        ...,
+    source_kind: Literal["image", "git", "dockerfile_template"] | None = Field(
+        default=None,
+        description="Explicit deploy source; when omitted, ``source`` is inferred.",
+    )
+    source: str | None = Field(
+        default=None,
         min_length=1,
         max_length=2048,
-        description="Docker image reference (e.g. nginx:alpine) or Git clone URL.",
+        description="Legacy: image ref or Git URL (used when ``source_kind`` is omitted).",
+    )
+    image_ref: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=2048,
+        description="Registry image when ``source_kind`` is ``image``.",
+    )
+    git_url: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=2048,
+        description="Git clone URL when ``source_kind`` is ``git``.",
+    )
+    dockerfile_template_id: uuid.UUID | None = Field(
+        default=None,
+        description="Saved Dockerfile template when ``source_kind`` is ``dockerfile_template``.",
     )
     container_name: str | None = Field(
         default=None,
@@ -75,6 +95,36 @@ class RunFromSourceRequest(BaseModel):
             msg = "route_path_prefix must start with '/'"
             raise ValueError(msg)
         return value
+
+    @model_validator(mode="after")
+    def validate_source_fields(self) -> RunFromSourceRequest:
+        kind = self.source_kind
+        if kind is None:
+            legacy = (self.source or "").strip()
+            if not legacy:
+                raise ValueError("source is required when source_kind is omitted.")
+            if legacy.startswith(("git@", "http://", "https://", "ssh://")):
+                return self.model_copy(
+                    update={"source_kind": "git", "git_url": legacy},
+                )
+            return self.model_copy(
+                update={"source_kind": "image", "image_ref": legacy},
+            )
+        if kind == "image":
+            ref = (self.image_ref or self.source or "").strip()
+            if not ref:
+                raise ValueError("image_ref or source is required for image deploy.")
+            return self.model_copy(update={"image_ref": ref})
+        if kind == "git":
+            url = (self.git_url or self.source or "").strip()
+            if not url:
+                raise ValueError("git_url or source is required for git deploy.")
+            return self.model_copy(update={"git_url": url})
+        if self.dockerfile_template_id is None:
+            raise ValueError(
+                "dockerfile_template_id is required for dockerfile_template deploy."
+            )
+        return self
 
 
 class ImageSuggestion(BaseModel):
@@ -136,7 +186,7 @@ class ImageAvailabilityResponse(BaseModel):
 
 class RunFromSourceResponse(BaseModel):
     container: ContainerInfo
-    kind: Literal["image", "git"]
+    kind: Literal["image", "git", "dockerfile_template"]
     image: str
     route_wired: bool = Field(
         default=False,
@@ -243,24 +293,8 @@ class GitHubBranchSummary(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# User library (saved image refs, Dockerfile templates)
+# User library (Dockerfile templates)
 # ---------------------------------------------------------------------------
-
-
-class SavedImageCreate(BaseModel):
-    ref: str = Field(..., min_length=1, max_length=512)
-
-
-class SavedImageUpdate(BaseModel):
-    ref: str = Field(..., min_length=1, max_length=512)
-
-
-class SavedImagePublic(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
-    id: uuid.UUID
-    ref: str
-    created_at: datetime
 
 
 class DockerfileTemplateCreate(BaseModel):

@@ -6,8 +6,7 @@ import ContainersPage from './pages/ContainersPage'
 import LoginPage from './pages/LoginPage'
 import RegisterPage from './pages/RegisterPage'
 import DashboardPage from './pages/DashboardPage'
-import ImagesPage from './pages/ImagesPage'
-import PlaceholderPage from './pages/PlaceholderPage'
+import BuilderPage from './pages/BuilderPage'
 import SettingsPage from './pages/SettingsPage'
 
 export default function App() {
@@ -37,15 +36,7 @@ export default function App() {
           path="/builder"
           element={
             <RequireAuth>
-              <PlaceholderPage title="Builder" />
-            </RequireAuth>
-          }
-        />
-        <Route
-          path="/images"
-          element={
-            <RequireAuth>
-              <ImagesPage />
+              <BuilderPage />
             </RequireAuth>
           }
         />

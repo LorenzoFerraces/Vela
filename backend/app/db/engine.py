@@ -16,7 +16,8 @@ from sqlalchemy.ext.asyncio import (
 
 from dotenv import load_dotenv
 
-load_dotenv(override=True)
+# Preserve Playwright / pytest env (e.g. ``VELA_E2E`` SQLite) — do not let ``.env`` clobber it.
+load_dotenv(override=os.environ.get("VELA_E2E", "").strip() != "1")
 
 
 def _database_url() -> str:

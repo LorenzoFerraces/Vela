@@ -1,4 +1,4 @@
-"""Per-user saved image references and Dockerfile templates (PostgreSQL)."""
+"""Per-user Dockerfile templates (PostgreSQL)."""
 
 from __future__ import annotations
 
@@ -11,17 +11,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.exceptions import (
     DockerfileTemplateNotFoundError,
     DuplicateDockerfileNameError,
-    DuplicateSavedImageError,
-    SavedImageNotFoundError,
 )
-from app.db.models import Dockerfile, Image
-
-
-def _normalize_ref(ref: str) -> str:
-    trimmed = ref.strip()
-    if not trimmed:
-        raise ValueError("Image reference cannot be empty.")
-    return trimmed
+from app.db.models import Dockerfile
 
 
 def _normalize_name(name: str) -> str:
@@ -37,70 +28,6 @@ def _normalize_contents(contents: str) -> str:
     return contents
 
 
-async def list_saved_images(
-    session: AsyncSession, owner_id: uuid.UUID
-) -> list[Image]:
-    result = await session.scalars(
-        select(Image)
-        .where(Image.owner_id == owner_id)
-        .order_by(Image.created_at.desc())
-    )
-    return list(result.all())
-
-
-async def get_saved_image(
-    session: AsyncSession, owner_id: uuid.UUID, image_id: uuid.UUID
-) -> Image:
-    row = await session.scalar(
-        select(Image).where(Image.id == image_id, Image.owner_id == owner_id)
-    )
-    if row is None:
-        raise SavedImageNotFoundError(str(image_id))
-    return row
-
-
-async def create_saved_image(
-    session: AsyncSession, owner_id: uuid.UUID, ref: str
-) -> Image:
-    normalized_ref = _normalize_ref(ref)
-    row = Image(owner_id=owner_id, ref=normalized_ref)
-    session.add(row)
-    try:
-        await session.commit()
-    except IntegrityError as exc:
-        await session.rollback()
-        raise DuplicateSavedImageError(normalized_ref) from exc
-    await session.refresh(row)
-    return row
-
-
-async def update_saved_image(
-    session: AsyncSession,
-    owner_id: uuid.UUID,
-    image_id: uuid.UUID,
-    *,
-    ref: str,
-) -> Image:
-    row = await get_saved_image(session, owner_id, image_id)
-    normalized_ref = _normalize_ref(ref)
-    row.ref = normalized_ref
-    try:
-        await session.commit()
-    except IntegrityError as exc:
-        await session.rollback()
-        raise DuplicateSavedImageError(normalized_ref) from exc
-    await session.refresh(row)
-    return row
-
-
-async def delete_saved_image(
-    session: AsyncSession, owner_id: uuid.UUID, image_id: uuid.UUID
-) -> None:
-    row = await get_saved_image(session, owner_id, image_id)
-    await session.delete(row)
-    await session.commit()
-
-
 async def list_dockerfile_templates(
     session: AsyncSession, owner_id: uuid.UUID
 ) -> list[Dockerfile]:
@@ -110,6 +37,23 @@ async def list_dockerfile_templates(
         .order_by(Dockerfile.name.asc())
     )
     return list(result.all())
+
+
+async def list_dockerfile_templates_matching_name(
+    session: AsyncSession,
+    owner_id: uuid.UUID,
+    query: str,
+    *,
+    limit: int = 20,
+) -> list[Dockerfile]:
+    """Return templates whose name contains ``query`` (case-insensitive)."""
+    trimmed = query.strip()
+    rows = await list_dockerfile_templates(session, owner_id)
+    if not trimmed:
+        return rows[:limit]
+    needle = trimmed.casefold()
+    matched = [row for row in rows if needle in row.name.casefold()]
+    return matched[:limit]
 
 
 async def get_dockerfile_template(

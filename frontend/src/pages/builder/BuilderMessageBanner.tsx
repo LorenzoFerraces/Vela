@@ -1,10 +1,10 @@
-import type { ImagesBanner } from './types'
+import type { BuilderBanner } from './types'
 
-type ImagesMessageBannerProps = {
-  banner: ImagesBanner
+type BuilderMessageBannerProps = {
+  banner: BuilderBanner
 }
 
-export function ImagesMessageBanner({ banner }: ImagesMessageBannerProps) {
+export function BuilderMessageBanner({ banner }: BuilderMessageBannerProps) {
   if (!banner) {
     return null
   }

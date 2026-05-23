@@ -1067,8 +1067,9 @@ body {
   display: inline;
 }
 
-/* --- Images page (saved refs + Dockerfile templates) --- */
+/* --- Builder page (Dockerfile templates) --- */
 
+.builder-page .images-section,
 .images-page .images-section {
   margin-bottom: 2.5rem;
 }
@@ -1135,4 +1136,61 @@ body {
 
 .images-editor-panel--empty {
   padding: 1rem 0;
+}
+
+/* --- Deploy source combobox (Containers) --- */
+
+.deploy-source-combobox {
+  position: relative;
+}
+
+.deploy-source-combobox__list {
+  position: absolute;
+  z-index: 20;
+  left: 0;
+  right: 0;
+  top: calc(100% + 0.25rem);
+  margin: 0;
+  padding: 0.35rem 0;
+  list-style: none;
+  max-height: 16rem;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-elevated);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+}
+
+.deploy-source-combobox__group {
+  display: block;
+  padding: 0.35rem 0.75rem 0.2rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+}
+
+.deploy-source-combobox__option {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 0.45rem 0.75rem;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+}
+
+.deploy-source-combobox__option:hover,
+.deploy-source-combobox__option:focus-visible {
+  background: var(--accent-soft);
+  outline: none;
+}
+
+.deploy-source-combobox__empty {
+  padding: 0.5rem 0.75rem;
+  color: var(--text-muted);
+  font-size: 0.9rem;
 }

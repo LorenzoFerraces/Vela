@@ -1,7 +1,7 @@
 """Fixtures for pytest API integration tests.
 
-Orchestrator / image builder / traffic router are mocked so tests don't need
-Docker. The database layer is replaced by an in-memory SQLite (aiosqlite).
+Uses in-memory SQLite and :class:`~app.core.fake_orchestrator.FakeContainerOrchestrator`
+so tests exercise real route and builder wiring without Docker.
 """
 
 from __future__ import annotations
@@ -10,9 +10,9 @@ import asyncio
 import os
 import uuid
 from collections.abc import AsyncIterator, Iterator
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from fastapi.testclient import TestClient
@@ -37,9 +37,9 @@ from app.core.docker_orchestrator import (
     VELA_MANAGED_VALUE,
     VELA_OWNER_LABEL,
 )
-from app.core.enums import BuildStrategy, ContainerStatus, HealthStatus, SupportedLanguage
-from app.core.models import BuildResult, ContainerInfo, ContainerStats, HealthResult, ProjectInfo
-from app.core.orchestrator import ContainerOrchestrator
+from app.core.enums import ContainerStatus, HealthStatus
+from app.core.fake_orchestrator import FakeContainerOrchestrator
+from app.core.models import ContainerInfo
 from app.core.traffic_router import NoopTrafficRouter
 from app.db.base import Base
 from app.db.models import User
@@ -86,87 +86,21 @@ def sample_container(test_user_id: uuid.UUID) -> ContainerInfo:
 
 
 @pytest.fixture
-def mock_orchestrator(sample_container: ContainerInfo) -> MagicMock:
-    orch = MagicMock(spec=ContainerOrchestrator)
+def fake_orchestrator(sample_container: ContainerInfo) -> FakeContainerOrchestrator:
+    orchestrator = FakeContainerOrchestrator()
+    orchestrator.seed_container(sample_container)
+    orchestrator.register_image("nginx:alpine")
+    return orchestrator
 
-    async def list_containers(
-        *,
-        status: ContainerStatus | None = None,
-        owner_id: str | None = None,
-    ) -> list[ContainerInfo]:
-        rows = [sample_container]
-        if owner_id is not None:
-            rows = [
-                row for row in rows if row.labels.get(VELA_OWNER_LABEL) == owner_id
-            ]
-        if status is not None:
-            rows = [row for row in rows if row.status == status]
-        return rows
 
-    orch.deploy = AsyncMock(return_value=sample_container)
-    orch.start = AsyncMock(return_value=sample_container)
-    orch.stop = AsyncMock(return_value=sample_container)
-    orch.restart = AsyncMock(return_value=sample_container)
-    orch.remove = AsyncMock(return_value=None)
-    orch.get = AsyncMock(return_value=sample_container)
-    orch.list = AsyncMock(side_effect=list_containers)
-    orch.logs = AsyncMock(return_value="log line\n")
-    orch.pull_image = AsyncMock(return_value=None)
-    orch.build_image = AsyncMock(return_value="sha256:deadbeef")
-    orch.list_images = AsyncMock(return_value=["nginx:alpine"])
-    orch.verify_image_reference_available = AsyncMock(return_value=None)
-
-    orch.get_stats = AsyncMock(
-        return_value=ContainerStats(
-            container_id=sample_container.id,
-            timestamp=datetime.now(timezone.utc),
-            cpu_percent=1.0,
-            memory_usage_bytes=1000,
-            memory_limit_bytes=2000,
-            memory_percent=50.0,
-        )
-    )
-    orch.get_health = AsyncMock(
-        return_value=HealthResult(
-            status=HealthStatus.HEALTHY,
-            timestamp=datetime.now(timezone.utc),
-        )
-    )
-
-    async def _stream_logs_side_effect(
-        *_args: object,
-        **_kwargs: object,
-    ):
-        yield b"log line\n"
-
-    orch.stream_logs = MagicMock(
-        side_effect=lambda *a, **k: _stream_logs_side_effect()
-    )
-
-    return orch
+@pytest.fixture
+def image_builder(fake_orchestrator: FakeContainerOrchestrator) -> DefaultImageBuilder:
+    return DefaultImageBuilder(orchestrator=fake_orchestrator)
 
 
 @pytest.fixture
 def noop_router() -> NoopTrafficRouter:
     return NoopTrafficRouter()
-
-
-@pytest.fixture
-def mock_image_builder(mock_orchestrator: MagicMock) -> MagicMock:
-    builder = MagicMock(spec=DefaultImageBuilder)
-    builder.build_from_source = AsyncMock(
-        return_value=BuildResult(
-            image_id="sha256:built",
-            image_tag="vela/gitbuild:abc123",
-            strategy=BuildStrategy.DOCKERFILE_EXISTS,
-            build_log="",
-            project_info=ProjectInfo(language=SupportedLanguage.PYTHON, has_dockerfile=True),
-        )
-    )
-    builder.analyze = AsyncMock(
-        return_value=ProjectInfo(language=SupportedLanguage.PYTHON, has_dockerfile=False)
-    )
-    return builder
 
 
 @pytest.fixture
@@ -259,17 +193,27 @@ def _build_app_with_overrides(
 
 
 @pytest.fixture
-def unauth_app(
+def db_app(
     db_session_factory: async_sessionmaker[AsyncSession],
-    mock_orchestrator: MagicMock,
-    mock_image_builder: MagicMock,
+) -> Iterator[Any]:
+    """App with only the DB override (real orchestrator/builder from env)."""
+    app = _build_app_with_overrides(db_session_factory=db_session_factory)
+    yield app
+    app.dependency_overrides.clear()
+
+
+@pytest.fixture
+def integration_app(
+    db_session_factory: async_sessionmaker[AsyncSession],
+    fake_orchestrator: FakeContainerOrchestrator,
+    image_builder: DefaultImageBuilder,
     noop_router: NoopTrafficRouter,
 ) -> Iterator[Any]:
-    """App with all dependencies overridden but no Authorization header on the client."""
+    """App with SQLite DB, fake orchestrator, and real image builder."""
     app = _build_app_with_overrides(
         db_session_factory=db_session_factory,
-        orchestrator=mock_orchestrator,
-        image_builder=mock_image_builder,
+        orchestrator=fake_orchestrator,
+        image_builder=image_builder,
         traffic_router=noop_router,
     )
     yield app
@@ -278,43 +222,33 @@ def unauth_app(
 
 @pytest.fixture
 def api_client(
-    unauth_app: Any,
+    integration_app: Any,
     seeded_user: User,
 ) -> Iterator[TestClient]:
     """Authenticated test client (Authorization: Bearer <token>) for the seeded user."""
     token = create_access_token(seeded_user.id)
-    with TestClient(unauth_app) as client:
+    with TestClient(integration_app) as client:
         client.headers["Authorization"] = f"Bearer {token}"
         yield client
 
 
 @pytest.fixture
 def other_user_client(
-    unauth_app: Any,
+    integration_app: Any,
     seeded_other_user: User,
 ) -> Iterator[TestClient]:
     """Authenticated client for a *different* user — used to test ownership filtering."""
     token = create_access_token(seeded_other_user.id)
-    with TestClient(unauth_app) as client:
+    with TestClient(integration_app) as client:
         client.headers["Authorization"] = f"Bearer {token}"
         yield client
 
 
 @pytest.fixture
-def anonymous_client(unauth_app: Any) -> Iterator[TestClient]:
+def anonymous_client(integration_app: Any) -> Iterator[TestClient]:
     """Unauthenticated client — every protected route should return 401."""
-    with TestClient(unauth_app) as client:
+    with TestClient(integration_app) as client:
         yield client
-
-
-@pytest.fixture
-def db_app(
-    db_session_factory: async_sessionmaker[AsyncSession],
-) -> Iterator[Any]:
-    """Plain app with only the DB override (no mocks for orchestrator/builder)."""
-    app = _build_app_with_overrides(db_session_factory=db_session_factory)
-    yield app
-    app.dependency_overrides.clear()
 
 
 @pytest.fixture
@@ -326,14 +260,11 @@ def auth_token(seeded_user: User) -> str:
 def make_authed_client(
     db_session_factory: async_sessionmaker[AsyncSession],
     seeded_user: User,
+    fake_orchestrator: FakeContainerOrchestrator,
+    image_builder: DefaultImageBuilder,
+    noop_router: NoopTrafficRouter,
 ):
-    """Return a builder for a TestClient with custom dependency overrides.
-
-    Each call yields a ``(client, app)`` tuple via a context manager. The client
-    is pre-authenticated as ``seeded_user``.
-    """
-    from contextlib import contextmanager
-
+    """Return a builder for a TestClient with optional dependency overrides."""
     token = create_access_token(seeded_user.id)
 
     @contextmanager
@@ -345,9 +276,11 @@ def make_authed_client(
     ) -> Iterator[TestClient]:
         app = _build_app_with_overrides(
             db_session_factory=db_session_factory,
-            orchestrator=orchestrator,
-            image_builder=image_builder,
-            traffic_router=traffic_router,
+            orchestrator=orchestrator if orchestrator is not None else fake_orchestrator,
+            image_builder=image_builder if image_builder is not None else DefaultImageBuilder(
+                orchestrator=orchestrator if orchestrator is not None else fake_orchestrator
+            ),
+            traffic_router=traffic_router if traffic_router is not None else noop_router,
         )
         try:
             with TestClient(app) as client:

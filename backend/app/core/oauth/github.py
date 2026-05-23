@@ -166,6 +166,17 @@ async def list_user_repos(
     page = max(1, page)
     cleaned_query = (query or "").strip()
 
+    from app.e2e_support import e2e_github_repos_if_enabled
+
+    fixture_repos = e2e_github_repos_if_enabled(
+        access_token,
+        query=cleaned_query or None,
+        page=page,
+        per_page=per_page,
+    )
+    if fixture_repos is not None:
+        return fixture_repos
+
     if cleaned_query:
         search_q = f"{cleaned_query} in:name user:@me fork:true"
         payload = await _api_get(

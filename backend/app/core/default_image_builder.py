@@ -7,6 +7,7 @@ import tempfile
 from pathlib import Path
 
 from app.core.builder import ImageBuilder
+from app.core.enums import BuildStrategy
 from app.core.exceptions import AnalysisError
 from app.core.git_ops import git_shallow_clone, rm_tree
 from app.core.models import BuildResult, ProjectInfo, ProjectSource
@@ -112,3 +113,37 @@ class DefaultImageBuilder(ImageBuilder):
         finally:
             if tmp_parent is not None:
                 rm_tree(tmp_parent)
+
+    async def build_from_dockerfile_template(
+        self,
+        dockerfile_contents: str,
+        *,
+        tag: str,
+    ) -> BuildResult:
+        """Build from saved Dockerfile text in an ephemeral context directory."""
+        trimmed = dockerfile_contents.strip()
+        if not trimmed:
+            raise AnalysisError("", "Dockerfile contents cannot be empty.")
+
+        tmp_parent = Path(tempfile.mkdtemp(prefix="vela-template-"))
+        project_path = tmp_parent / "ctx"
+        project_path.mkdir(parents=True, exist_ok=True)
+        dockerfile_path = project_path / "Dockerfile"
+        dockerfile_path.write_text(trimmed, encoding="utf-8")
+
+        try:
+            info = analyze_project(project_path)
+            image_id = await self._orchestrator.build_image(
+                str(project_path.resolve()),
+                tag=tag,
+                dockerfile="Dockerfile",
+            )
+            return BuildResult(
+                image_id=image_id,
+                image_tag=tag,
+                strategy=BuildStrategy.DOCKERFILE_EXISTS,
+                build_log="",
+                project_info=info,
+            )
+        finally:
+            rm_tree(tmp_parent)
