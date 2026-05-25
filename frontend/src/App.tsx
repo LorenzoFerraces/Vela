@@ -9,6 +9,13 @@ import DashboardPage from './pages/DashboardPage'
 import BuilderPage from './pages/BuilderPage'
 import SettingsPage from './pages/SettingsPage'
 
+/**
+ * Defines the application's client-side routes and layout.
+ *
+ * Renders public routes for /login and /register, and nested routes within the main Layout: / (Home), and protected routes /dashboard, /containers, /builder, and /settings which are wrapped with RequireAuth.
+ *
+ * @returns The top-level routing JSX element that configures the application's routes.
+ */
 export default function App() {
   return (
     <Routes>

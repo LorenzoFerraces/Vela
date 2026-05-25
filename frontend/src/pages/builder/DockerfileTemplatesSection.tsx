@@ -22,6 +22,25 @@ type DockerfileTemplatesSectionProps = {
   onRemove: (templateId: string) => void
 }
 
+/**
+ * Renders the Dockerfile templates management section.
+ *
+ * @param props - Component props.
+ * @param props.rows - Array of available Dockerfile templates to display.
+ * @param props.listLoading - Whether the template list is currently loading.
+ * @param props.busy - Whether a create/save/delete operation is in progress; disables controls when true.
+ * @param props.selectedId - ID of the currently selected template, or falsy when none is selected.
+ * @param props.editName - Current editable name for the selected template.
+ * @param props.editContents - Current editable contents for the selected template.
+ * @param props.onEditNameChange - Handler called with the new name when the edit name input changes.
+ * @param props.onEditContentsChange - Handler called with the new contents when the edit textarea changes.
+ * @param props.onSelect - Handler called with a template object when a template is selected from the list.
+ * @param props.onClearSelection - Handler to clear the current selection.
+ * @param props.onCreate - Handler to create a new template; should resolve to `true` when creation succeeds.
+ * @param props.onSave - Handler to persist edits to the selected template.
+ * @param props.onRemove - Handler to delete a template by ID.
+ * @returns The React element containing the create form, template list, and editor panel.
+ */
 export function DockerfileTemplatesSection({
   rows,
   listLoading,

@@ -35,6 +35,17 @@ async def _stub_git_shallow_clone(
     dest: Path,
     access_token: str | None = None,
 ) -> None:
+    """
+    Create a minimal stub repository at `dest` by writing a tiny Dockerfile.
+    
+    Used in tests to simulate a shallow git clone; this function ignores `url`, `branch`, and `access_token` and only ensures `dest` exists and contains a Dockerfile.
+    
+    Parameters:
+        url (str): Source repository URL (ignored).
+        branch (str): Git branch name (ignored).
+        dest (Path): Destination directory to create and populate.
+        access_token (str | None): Optional access token for private repos (ignored).
+    """
     _ = url, branch, access_token
     dest.mkdir(parents=True, exist_ok=True)
     (dest / "Dockerfile").write_text("FROM alpine:3.20\n", encoding="utf-8")
@@ -94,6 +105,11 @@ def test_image_availability_ok(api_client: TestClient) -> None:
 
 
 def test_image_availability_not_found(make_authed_client) -> None:
+    """
+    Verify the image availability endpoint reports a missing image with the expected structured error response.
+    
+    Asserts that for a reference which the orchestrator reports as not found: `available` is `False`, `checked` is `True`, `ref` matches the requested reference, `error_code` equals `"image_not_found"`, `can_attempt_deploy` is `False`, and `detail` contains the human-readable message `"Image not found."`.
+    """
     orchestrator = FakeContainerOrchestrator()
     orchestrator.set_verify_error("bad:missing", ImageNotFoundError("bad:missing"))
     with make_authed_client(orchestrator=orchestrator) as client:
@@ -142,6 +158,11 @@ def test_image_not_found_exception_has_structured_api_content() -> None:
 def test_image_availability_git_url_not_checked(
     make_authed_client, fake_orchestrator: FakeContainerOrchestrator
 ) -> None:
+    """
+    Verifies the image availability API treats Git repository URLs as not-checked and available.
+    
+    Calls the availability endpoint with a Git URL and asserts the response has "checked" == False and "available" == True, and that the orchestrator received no verify calls.
+    """
     with make_authed_client(orchestrator=fake_orchestrator) as client:
         response = client.get(
             "/api/containers/image/availability",
@@ -283,6 +304,11 @@ def test_list_containers_includes_access_url(
     make_authed_client,
     test_user_id: uuid.UUID,
 ) -> None:
+    """
+    Ensure the container listing includes an access_url when a container is seeded with route labels.
+    
+    Seeds a FakeContainerOrchestrator with a container record that has route-related labels and an access_url, requests the containers list endpoint, and asserts the returned entry contains the same access_url.
+    """
     orchestrator = FakeContainerOrchestrator()
     row = make_container_info(
         owner_id=test_user_id,
@@ -386,6 +412,17 @@ def test_run_from_github_uses_stored_token(
         dest: Path,
         access_token: str | None = None,
     ) -> None:
+        """
+        Record the provided git access token and perform a shallow clone into the destination.
+        
+        Records the value of `access_token` by appending it to the test-scoped `recorded_tokens` list, then delegates to the test helper `_stub_git_shallow_clone` to create a minimal cloned workspace at `dest`.
+        
+        Parameters:
+            url (str): Source repository URL (not otherwise validated).
+            branch (str): Branch name to check out.
+            dest (Path): Filesystem path where the stub clone will be created.
+            access_token (str | None): Optional Git access token forwarded to the clone helper; `None` when no token is provided.
+        """
         _ = url, branch
         recorded_tokens.append(access_token)
         await _stub_git_shallow_clone(
@@ -402,6 +439,16 @@ def test_run_from_github_uses_stored_token(
     )
 
     async def seed_identity() -> None:
+        """
+        Insert a GitHub OAuth identity for the seeded test user into the test database.
+        
+        Creates and commits a UserOAuthIdentity record for `seeded_user` with:
+        - provider: GITHUB
+        - provider_subject: "42"
+        - username: "octocat"
+        - scopes: "repo,read:user"
+        - access_token_encrypted: encryption of "ghp_secret_value"
+        """
         async with db_session_factory() as session:
             session.add(
                 UserOAuthIdentity(
@@ -446,6 +493,17 @@ def test_run_from_github_without_connection_does_not_send_token(
         dest: Path,
         access_token: str | None = None,
     ) -> None:
+        """
+        Record the provided git access token and perform a shallow clone into the destination.
+        
+        Records the value of `access_token` by appending it to the test-scoped `recorded_tokens` list, then delegates to the test helper `_stub_git_shallow_clone` to create a minimal cloned workspace at `dest`.
+        
+        Parameters:
+            url (str): Source repository URL (not otherwise validated).
+            branch (str): Branch name to check out.
+            dest (Path): Filesystem path where the stub clone will be created.
+            access_token (str | None): Optional Git access token forwarded to the clone helper; `None` when no token is provided.
+        """
         _ = url, branch
         recorded_tokens.append(access_token)
         await _stub_git_shallow_clone(
@@ -479,6 +537,15 @@ def test_run_private_github_clone_failure_hints_settings(
 ) -> None:
     """An auth-style CloneError on github.com surfaces a friendly Settings hint."""
     async def failing_clone(**_kwargs: object) -> None:
+        """
+        Simulate a failing git shallow clone by always raising a CloneError.
+        
+        This test helper accepts any keyword arguments (ignored) and immediately raises a CloneError
+        with a message indicating authentication failure for the private GitHub URL.
+        
+        Raises:
+            CloneError: Indicates authentication failed for 'https://github.com/org/private.git/'.
+        """
         raise CloneError(
             "https://github.com/org/private.git",
             "fatal: Authentication failed for 'https://github.com/org/private.git/'",
@@ -550,11 +617,26 @@ def test_image_suggestions_requires_auth(anonymous_client: TestClient) -> None:
 def test_image_suggestions_merges_local_and_hub(
     make_authed_client, monkeypatch
 ) -> None:
+    """
+    Verifies that the image suggestions endpoint merges local orchestrator images with Docker Hub suggestions and prefers local images before identical upstream matches.
+    
+    Calls the suggestions API for query "nginx" and asserts the response includes both the locally registered image "my/nginx:dev" and the hub suggestion "nginx", with "my/nginx:dev" appearing earlier in the returned list.
+    """
     orchestrator = FakeContainerOrchestrator()
     orchestrator.register_image("my/nginx:dev")
     orchestrator.register_image("nginx:alpine")
 
     async def fake_hub(query: str, *, page_size: int) -> list[tuple[str, int]]:
+        """
+        Provide fake Docker Hub suggestions for the given image query.
+        
+        Parameters:
+        	query (str): Search term to query for image suggestions; expected to be "nginx" in tests.
+        	page_size (int): Maximum number of suggestions requested; tests assert this is at least 25.
+        
+        Returns:
+        	list[tuple[str, int]]: A list of (image_ref, popularity_score) tuples representing suggested images.
+        """
         assert query == "nginx"
         assert page_size >= 25
         return [("nginx", 1_000_000), ("other/nginx", 100)]
@@ -578,10 +660,21 @@ def test_image_suggestions_merges_local_and_hub(
 def test_image_suggestions_empty_query_skips_hub(
     make_authed_client, monkeypatch
 ) -> None:
+    """
+    Verifies that image suggestion endpoint returns local images and does not query Docker Hub when no search query is provided.
+    
+    Exercises the API /api/containers/image/suggestions with an empty query, asserting HTTP 200 and that registered local image refs (e.g., "local-only:1") appear in the returned suggestions. Also ensures the Docker Hub suggestion function is not invoked for empty queries by replacing it with a stub that would fail if called.
+    """
     orchestrator = FakeContainerOrchestrator()
     orchestrator.register_image("local-only:1")
 
     async def fake_hub(*_args: object, **_kwargs: object) -> list[tuple[str, int]]:
+        """
+        Stub replacement for Docker Hub suggestion fetch that fails if invoked.
+        
+        Raises:
+            AssertionError: always raised with message "Hub should not be called for an empty query".
+        """
         raise AssertionError("Hub should not be called for an empty query")
 
     monkeypatch.setattr(
@@ -598,6 +691,11 @@ def test_image_suggestions_empty_query_skips_hub(
 
 
 def test_list_images(make_authed_client) -> None:
+    """
+    Verify that GET /api/images/ returns all images registered with the orchestrator.
+    
+    Registers two images in a FakeContainerOrchestrator, queries the images endpoint, and asserts the response is HTTP 200 and includes both image references.
+    """
     orchestrator = FakeContainerOrchestrator()
     orchestrator.register_image("a:latest")
     orchestrator.register_image("b:1")
@@ -612,6 +710,11 @@ def test_list_images(make_authed_client) -> None:
 
 
 def test_pull_image(make_authed_client) -> None:
+    """
+    Verifies that POST /api/images/pull pulls the specified image and registers it with the orchestrator.
+    
+    Asserts the endpoint responds with HTTP 200 and JSON {"detail": "ok"}, and that the orchestrator's image set includes "nginx:alpine".
+    """
     orchestrator = FakeContainerOrchestrator()
 
     with make_authed_client(orchestrator=orchestrator) as client:

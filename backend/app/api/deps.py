@@ -27,7 +27,14 @@ from app.db.models import User
 
 @lru_cache(maxsize=1)
 def get_orchestrator() -> ContainerOrchestrator:
-    """Shared orchestrator (Docker in production, in-memory fake when ``VELA_FAKE_ORCHESTRATOR=1``)."""
+    """
+    Provide the shared container orchestrator instance for the application.
+    
+    Returns:
+        ContainerOrchestrator: Shared orchestrator instance. If the environment variable
+        VELA_FAKE_ORCHESTRATOR is set to "1" (after trimming), returns the shared in-memory
+        fake orchestrator; otherwise returns a DockerOrchestrator instance.
+    """
     if os.environ.get("VELA_FAKE_ORCHESTRATOR", "").strip() == "1":
         from app.core.fake_orchestrator import get_shared_fake_orchestrator
 

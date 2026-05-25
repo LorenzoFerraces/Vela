@@ -21,6 +21,12 @@ type DeploySourceComboboxProps = {
   onRequestImageCheck: (ref: string) => void
 }
 
+/**
+ * Produce a human-readable group label for a deploy source suggestion kind.
+ *
+ * @param kind - The suggestion kind; one of `image`, `git`, or `dockerfile_template`
+ * @returns The corresponding group label: `'Images'` for `image`, `'GitHub repositories'` for `git`, or `'Dockerfiles'` for `dockerfile_template`
+ */
 function groupLabel(kind: DeploySourceSuggestion['kind']): string {
   switch (kind) {
     case 'image':
@@ -32,6 +38,12 @@ function groupLabel(kind: DeploySourceSuggestion['kind']): string {
   }
 }
 
+/**
+ * Produces a stable key string for a deploy-source suggestion suitable for use as a React `key`.
+ *
+ * @param suggestion - The suggestion to create a key for
+ * @returns A key string formatted as `image:<ref>`, `git:<url>`, or `dockerfile:<id>` depending on the suggestion kind
+ */
 function suggestionKey(suggestion: DeploySourceSuggestion): string {
   switch (suggestion.kind) {
     case 'image':
@@ -43,6 +55,12 @@ function suggestionKey(suggestion: DeploySourceSuggestion): string {
   }
 }
 
+/**
+ * Get the display label for a deploy-source suggestion.
+ *
+ * @param suggestion - The suggestion object to derive the option label from
+ * @returns The text to show for the suggestion: for `image` suggestions the suggestion's `label`, for `git` and `dockerfile_template` suggestions the suggestion's `name`
+ */
 function suggestionOptionLabel(suggestion: DeploySourceSuggestion): string {
   switch (suggestion.kind) {
     case 'image':
@@ -57,6 +75,11 @@ function suggestionOptionLabel(suggestion: DeploySourceSuggestion): string {
 const SKELETON_GROUP_WIDTHS = ['4.5rem', '5.75rem'] as const
 const SKELETON_OPTION_WIDTHS = ['92%', '78%', '85%'] as const
 
+/**
+ * Renders a placeholder skeleton list of grouped suggestion rows displayed while suggestions are loading.
+ *
+ * @returns A fragment containing placeholder group headers, option rows, and a status item that reads "Searching…".
+ */
 function DeploySourceSuggestionsSkeleton() {
   return (
   <>
@@ -86,6 +109,26 @@ function DeploySourceSuggestionsSkeleton() {
   )
 }
 
+/**
+ * Render a deploy-source combobox for selecting images, GitHub repositories, or Dockerfiles.
+ *
+ * Renders a controlled text input with an optional grouped listbox of suggestions, accessibility attributes,
+ * and conditional registry-check status messages for image selections.
+ *
+ * @param listboxId - DOM id used for the suggestions listbox element
+ * @param rootRef - RefObject for the combobox root element
+ * @param displayValue - Current input string shown in the text field
+ * @param selection - Currently selected suggestion (if any)
+ * @param suggestions - Array of suggestions to show in the listbox
+ * @param listOpen - Whether the suggestions listbox is visible
+ * @param searchLoading - Whether suggestion search is in progress (shows skeleton when true)
+ * @param imageRefCheck - State of the image registry check for the current selection
+ * @param onInputChange - Called with the new input string when the text changes
+ * @param onInputFocus - Called when the input receives focus
+ * @param onPickSuggestion - Called with a suggestion when the user selects it
+ * @param onRequestImageCheck - Requests a registry check for a given image reference
+ * @returns The rendered combobox React element
+ */
 export function DeploySourceCombobox({
   listboxId,
   rootRef,

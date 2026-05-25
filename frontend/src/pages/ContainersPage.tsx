@@ -21,6 +21,16 @@ import { useContainerList } from './containers/useContainerList'
 import { useDeploySourceSelection } from './containers/useDeploySourceSelection'
 import { useImageRefAvailability } from './containers/useImageRefAvailability'
 
+/**
+ * Render the Containers page UI for building, running, and managing container workloads.
+ *
+ * The component maintains form state for container name, Git branch, and port; coordinates
+ * a deploy-source selection flow (image, Git, or Dockerfile template); performs optional
+ * image registry availability checks; submits run requests; and displays and controls the
+ * list of running workloads (start, stop, remove).
+ *
+ * @returns The Containers page React element
+ */
 export default function ContainersPage() {
   const [containerName, setContainerName] = useState('')
   const [gitBranch, setGitBranch] = useState('main')

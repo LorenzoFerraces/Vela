@@ -36,6 +36,12 @@ _E2E_GITHUB_REPOS = (
 
 
 def e2e_mode_enabled() -> bool:
+    """
+    Check whether end-to-end (E2E) mode is enabled via environment.
+    
+    Returns:
+        bool: `True` if the VELA_E2E environment variable, after trimming whitespace, equals "1", `False` otherwise.
+    """
     return os.environ.get("VELA_E2E", "").strip() == "1"
 
 
@@ -46,7 +52,19 @@ def e2e_github_repos_if_enabled(
     page: int,
     per_page: int,
 ) -> list[GitHubRepo] | None:
-    """Return fixture GitHub repos in E2E mode instead of calling api.github.com."""
+    """
+    Return fixture GitHub repositories when E2E mode is enabled and the provided access token matches the fixture token.
+    
+    Parameters:
+        access_token (str): The GitHub access token to validate against the E2E fixture token.
+        query (str | None): Optional search string; trimmed and matched case-insensitively against repo full name and html_url.
+        page (int): Ignored in E2E mode (present for API compatibility).
+        per_page (int): Ignored in E2E mode (present for API compatibility).
+    
+    Returns:
+        list[GitHubRepo] | None: A list of fixture `GitHubRepo` objects filtered by `query` when E2E mode is enabled and the token matches;
+        an empty list if E2E mode is enabled but the token does not match; `None` if E2E mode is not enabled.
+    """
     _ = page, per_page
     if not e2e_mode_enabled():
         return None
@@ -65,7 +83,11 @@ def e2e_github_repos_if_enabled(
 
 
 async def ensure_e2e_database() -> None:
-    """Create schema and seed the primary E2E user (idempotent)."""
+    """
+    Prepare the database schema and idempotently seed E2E users and a GitHub OAuth identity when E2E mode is enabled.
+    
+    If E2E mode is not enabled, the function returns immediately. When enabled, it creates any missing tables, ensures a primary E2E user and a second user without GitHub identity exist (inserting them only if absent), and ensures a GitHub OAuth identity record exists for the primary E2E user. All inserts are committed as they are performed to make the operation safe to run repeatedly.
+    """
     if not e2e_mode_enabled():
         return
 

@@ -25,6 +25,11 @@ API_PREFIX = "/api"
 
 @asynccontextmanager
 async def _lifespan(_application: FastAPI):
+    """
+    Lifespan context manager that ensures the end-to-end test database is prepared before the application starts.
+    
+    This async context manager runs once at startup to await e2e database setup, then yields control for the application runtime. No special shutdown actions are performed.
+    """
     from app.e2e_support import ensure_e2e_database
 
     await ensure_e2e_database()
@@ -32,6 +37,14 @@ async def _lifespan(_application: FastAPI):
 
 
 def create_app() -> FastAPI:
+    """
+    Create and configure the FastAPI application used by the service.
+    
+    The returned application is configured with a custom startup/shutdown lifespan, CORS middleware, global exception handlers, mounted API routers under the `/api` prefix (containers, builder, images, dockerfiles, traffic, auth, github), and a health endpoint at `/api/health`.
+    
+    Returns:
+        FastAPI: A configured FastAPI application instance.
+    """
     application = FastAPI(
         title="Vela API",
         description="Container deployment platform — orchestrate, build, and manage containers.",
