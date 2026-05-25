@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import uuid
 from typing import Literal
 
@@ -11,12 +12,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core import user_library
 from app.core.exceptions import ProviderConnectionError
 from app.core.oauth import decrypt_identity_token, get_github_identity, list_user_repos
+from app.core.oauth.github import GitHubRepo
 from app.core.orchestrator import ContainerOrchestrator
 from app.core.registry_image_suggestions import (
     fetch_docker_hub_suggestions,
     merge_image_suggestions,
 )
-from app.db.models import User
+from app.db.models import User, UserOAuthIdentity
 
 
 class DeploySourceImageSuggestion(BaseModel):
@@ -56,6 +58,42 @@ def _git_clone_url(html_url: str) -> str:
     return f"{trimmed}.git"
 
 
+async def _load_local_image_tags(orchestrator: ContainerOrchestrator) -> list[str]:
+    try:
+        return await orchestrator.list_images()
+    except ProviderConnectionError:
+        return []
+
+
+async def _load_docker_hub_rows(stripped: str, image_slots: int) -> list[tuple[str, int]]:
+    if not stripped:
+        return []
+    return await fetch_docker_hub_suggestions(
+        stripped,
+        page_size=max(image_slots * 2, 20),
+    )
+
+
+async def _load_github_repos(
+    identity: UserOAuthIdentity | None,
+    *,
+    stripped: str,
+    git_slots: int,
+) -> list[GitHubRepo]:
+    if identity is None or not identity.access_token_encrypted:
+        return []
+    token = decrypt_identity_token(identity)
+    try:
+        return await list_user_repos(
+            token,
+            query=stripped or None,
+            page=1,
+            per_page=git_slots,
+        )
+    except Exception:
+        return []
+
+
 async def collect_deploy_source_suggestions(
     *,
     session: AsyncSession,
@@ -76,14 +114,28 @@ async def collect_deploy_source_suggestions(
     stripped = query.strip()
     suggestions: list[DeploySourceSuggestion] = []
 
-    try:
-        local_tags = await orchestrator.list_images()
-    except ProviderConnectionError:
-        local_tags = []
-    hub_rows = (
-        await fetch_docker_hub_suggestions(stripped, page_size=max(image_slots * 2, 20))
-        if stripped
-        else []
+    local_tags_task = asyncio.create_task(_load_local_image_tags(orchestrator))
+    hub_rows_task = asyncio.create_task(_load_docker_hub_rows(stripped, image_slots))
+
+    templates = await user_library.list_dockerfile_templates_matching_name(
+        session,
+        user.id,
+        stripped,
+        limit=template_slots,
+    )
+    identity = await get_github_identity(session, user.id)
+    repos_task = asyncio.create_task(
+        _load_github_repos(
+            identity,
+            stripped=stripped,
+            git_slots=git_slots,
+        )
+    )
+
+    local_tags, hub_rows, repos = await asyncio.gather(
+        local_tags_task,
+        hub_rows_task,
+        repos_task,
     )
     for item in merge_image_suggestions(
         query=stripped,
@@ -95,38 +147,20 @@ async def collect_deploy_source_suggestions(
             DeploySourceImageSuggestion(ref=item.ref, label=item.ref)
         )
 
-    templates = await user_library.list_dockerfile_templates_matching_name(
-        session,
-        user.id,
-        stripped,
-        limit=template_slots,
-    )
     for row in templates:
         suggestions.append(
             DeploySourceDockerfileTemplateSuggestion(id=row.id, name=row.name)
         )
 
-    identity = await get_github_identity(session, user.id)
-    if identity is not None and identity.access_token_encrypted:
-        token = decrypt_identity_token(identity)
-        try:
-            repos = await list_user_repos(
-                token,
-                query=stripped or None,
-                page=1,
-                per_page=git_slots,
+    for repo in repos:
+        if not repo.html_url:
+            continue
+        suggestions.append(
+            DeploySourceGitSuggestion(
+                url=_git_clone_url(repo.html_url),
+                name=repo.full_name or repo.html_url,
+                default_branch=repo.default_branch or "main",
             )
-        except Exception:
-            repos = []
-        for repo in repos:
-            if not repo.html_url:
-                continue
-            suggestions.append(
-                DeploySourceGitSuggestion(
-                    url=_git_clone_url(repo.html_url),
-                    name=repo.full_name or repo.html_url,
-                    default_branch=repo.default_branch or "main",
-                )
-            )
+        )
 
     return DeploySourcesResponse(suggestions=suggestions[:bounded_limit])

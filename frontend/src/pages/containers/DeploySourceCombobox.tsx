@@ -54,6 +54,38 @@ function suggestionOptionLabel(suggestion: DeploySourceSuggestion): string {
   }
 }
 
+const SKELETON_GROUP_WIDTHS = ['4.5rem', '5.75rem'] as const
+const SKELETON_OPTION_WIDTHS = ['92%', '78%', '85%'] as const
+
+function DeploySourceSuggestionsSkeleton() {
+  return (
+  <>
+    {SKELETON_GROUP_WIDTHS.map((groupWidth, groupIndex) => (
+      <li key={groupIndex} role="presentation">
+        <span
+          className="deploy-source-combobox__skeleton deploy-source-combobox__skeleton--group"
+          style={{ width: groupWidth }}
+          aria-hidden="true"
+        />
+        <ul role="group" aria-hidden="true">
+          {SKELETON_OPTION_WIDTHS.map((optionWidth, optionIndex) => (
+            <li key={optionIndex} role="presentation">
+              <span
+                className="deploy-source-combobox__skeleton deploy-source-combobox__skeleton--option"
+                style={{ width: optionWidth }}
+              />
+            </li>
+          ))}
+        </ul>
+      </li>
+    ))}
+    <li className="deploy-source-combobox__status" role="status" aria-live="polite">
+      Searching…
+    </li>
+  </>
+  )
+}
+
 export function DeploySourceCombobox({
   listboxId,
   rootRef,
@@ -105,7 +137,7 @@ export function DeploySourceCombobox({
               : undefined
           }
           aria-describedby={
-            registryCheckEnabled && imageRefCheck.status !== 'idle'
+              registryCheckEnabled && imageRefCheck.status !== 'idle'
               ? 'deploy-source-status'
               : undefined
           }
@@ -115,18 +147,18 @@ export function DeploySourceCombobox({
             id={listboxId}
             className="deploy-source-combobox__list"
             role="listbox"
+            aria-busy={searchLoading}
           >
-            {searchLoading && suggestions.length === 0 ? (
-              <li className="deploy-source-combobox__empty" role="presentation">
-                Searching…
-              </li>
+            {searchLoading ? (
+              <DeploySourceSuggestionsSkeleton />
             ) : null}
             {!searchLoading && suggestions.length === 0 ? (
               <li className="deploy-source-combobox__empty" role="presentation">
                 No matches. Try another search.
               </li>
             ) : null}
-            {groupedKinds.map((kind) => {
+            {!searchLoading
+              ? groupedKinds.map((kind) => {
               const rows = suggestions.filter((row) => row.kind === kind)
               if (rows.length === 0) {
                 return null
@@ -153,7 +185,8 @@ export function DeploySourceCombobox({
                   </ul>
                 </li>
               )
-            })}
+            })
+              : null}
           </ul>
         ) : null}
       </div>

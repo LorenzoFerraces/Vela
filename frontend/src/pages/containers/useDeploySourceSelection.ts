@@ -17,29 +17,51 @@ export function useDeploySourceSelection() {
   const [suggestions, setSuggestions] = useState<DeploySourceSuggestion[]>([])
   const [listOpen, setListOpen] = useState(false)
   const [searchLoading, setSearchLoading] = useState(false)
+  const searchGenerationRef = useRef(0)
+  const lastFetchedQueryRef = useRef<string | null>(null)
 
   const displayValue = selection ? deploySourceLabel(selection) : query
 
-  const refreshSuggestions = useCallback(async (searchQuery: string) => {
-    setSearchLoading(true)
+  const refreshSuggestions = useCallback(async (searchQuery: string, generation: number) => {
     try {
       const rows = await getDeploySourceSuggestions(searchQuery, {
         limit: SEARCH_LIMIT,
       })
+      if (generation !== searchGenerationRef.current) {
+        return
+      }
       setSuggestions(rows)
+      lastFetchedQueryRef.current = searchQuery
     } catch {
+      if (generation !== searchGenerationRef.current) {
+        return
+      }
       setSuggestions([])
+      lastFetchedQueryRef.current = searchQuery
     } finally {
-      setSearchLoading(false)
+      if (generation === searchGenerationRef.current) {
+        setSearchLoading(false)
+      }
     }
   }, [])
 
   useEffect(() => {
     if (!listOpen) {
+      setSearchLoading(false)
       return
     }
+
+    if (lastFetchedQueryRef.current === query) {
+      setSearchLoading(false)
+      return
+    }
+
+    searchGenerationRef.current += 1
+    const generation = searchGenerationRef.current
+    setSearchLoading(true)
+
     const timer = window.setTimeout(() => {
-      void refreshSuggestions(query)
+      void refreshSuggestions(query, generation)
     }, SEARCH_DEBOUNCE_MS)
     return () => window.clearTimeout(timer)
   }, [query, listOpen, refreshSuggestions])
@@ -82,12 +104,14 @@ export function useDeploySourceSelection() {
     }
     setQuery('')
     setListOpen(false)
+    lastFetchedQueryRef.current = null
   }
 
   function clearSelection() {
     setSelection(null)
     setQuery('')
     setSuggestions([])
+    lastFetchedQueryRef.current = null
   }
 
   function onInputChange(nextRaw: string) {
@@ -98,7 +122,6 @@ export function useDeploySourceSelection() {
 
   function onInputFocus() {
     setListOpen(true)
-    void refreshSuggestions(query)
   }
 
   return {

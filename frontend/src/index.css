@@ -1194,3 +1194,41 @@ body {
   color: var(--text-muted);
   font-size: 0.9rem;
 }
+
+.deploy-source-combobox__status {
+  padding: 0.35rem 0.75rem 0.5rem;
+  font-size: 0.8125rem;
+  color: var(--text-muted);
+}
+
+.deploy-source-combobox__skeleton {
+  display: block;
+  border-radius: 6px;
+  background: linear-gradient(
+    90deg,
+    var(--border) 0%,
+    rgba(255, 255, 255, 0.06) 50%,
+    var(--border) 100%
+  );
+  background-size: 200% 100%;
+  animation: deploy-source-skeleton-shimmer 1.2s ease-in-out infinite;
+}
+
+.deploy-source-combobox__skeleton--group {
+  height: 0.65rem;
+  margin: 0.35rem 0.75rem 0.35rem;
+}
+
+.deploy-source-combobox__skeleton--option {
+  height: 1.1rem;
+  margin: 0.2rem 0.75rem;
+}
+
+@keyframes deploy-source-skeleton-shimmer {
+  0% {
+    background-position: 100% 0;
+  }
+  100% {
+    background-position: -100% 0;
+  }
+}
