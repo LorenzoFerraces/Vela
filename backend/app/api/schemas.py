@@ -91,6 +91,18 @@ class RunFromSourceRequest(BaseModel):
     @field_validator("route_path_prefix")
     @classmethod
     def route_path_prefix_must_start_with_slash(cls, value: str) -> str:
+        """
+        Validate that a Traefik route path prefix begins with a leading '/'.
+        
+        Parameters:
+            value (str): The route path prefix to validate.
+        
+        Returns:
+            str: The validated route path prefix (returned unchanged) if it starts with '/'.
+        
+        Raises:
+            ValueError: If `value` does not start with '/'.
+        """
         if not value.startswith("/"):
             msg = "route_path_prefix must start with '/'"
             raise ValueError(msg)
@@ -98,6 +110,17 @@ class RunFromSourceRequest(BaseModel):
 
     @model_validator(mode="after")
     def validate_source_fields(self) -> RunFromSourceRequest:
+        """
+        Validate and normalize the request's source fields and enforce mode-specific requirements.
+        
+        If `source_kind` is omitted, infer the kind from the legacy `source` value and return a copy with `source_kind` set and the appropriate field (`git_url` or `image_ref`) populated with the trimmed legacy value. If `source_kind` is `"image"` or `"git"`, ensure the respective field (`image_ref` or `git_url`) is present (or fall back to `source`), trim it, and return a copy with that field set. If `source_kind` is `"dockerfile_template"`, ensure `dockerfile_template_id` is provided.
+        
+        Returns:
+            RunFromSourceRequest: A validated and possibly normalized copy of the request model.
+        
+        Raises:
+            ValueError: When a required source field is missing or empty for the selected deployment kind.
+        """
         kind = self.source_kind
         if kind is None:
             legacy = (self.source or "").strip()

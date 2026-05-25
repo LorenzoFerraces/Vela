@@ -4,6 +4,15 @@ import { DockerfileTemplatesSection } from './builder/DockerfileTemplatesSection
 import type { BuilderBanner } from './builder/types'
 import { useDockerfileTemplates } from './builder/useDockerfileTemplates'
 
+/**
+ * Page component that displays the Builder UI and manages its banner state.
+ *
+ * Renders controls and lists for managing Dockerfile templates, wires the
+ * template hook's state and handlers into the DockerfileTemplatesSection, and
+ * passes banner state to BuilderMessageBanner.
+ *
+ * @returns The JSX element for the Builder page.
+ */
 export default function BuilderPage() {
   const [banner, setBanner] = useState<BuilderBanner>(null)
 

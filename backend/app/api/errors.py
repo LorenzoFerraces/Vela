@@ -39,7 +39,14 @@ from app.core.exceptions import (
 
 
 def register_exception_handlers(app) -> None:
-    """Register handlers for Vela domain errors."""
+    """
+    Register exception handlers on a FastAPI application that translate Vela domain errors into JSON HTTP responses.
+    
+    Each installed handler maps a VelaError subclass (and related exceptions) to an appropriate HTTP status code and JSON response body (for some exceptions the handler uses the exception's api_response_content()). The registered handlers also add authentication headers where applicable.
+    
+    Parameters:
+        app (FastAPI): The FastAPI application on which to register the exception handlers.
+    """
 
     @app.exception_handler(ImageNotFoundError)
     async def image_not_found_handler(
@@ -63,6 +70,16 @@ def register_exception_handlers(app) -> None:
     @app.exception_handler(ContainerNotFoundError)
     @app.exception_handler(DockerfileTemplateNotFoundError)
     async def not_found_handler(_request: Request, exc: VelaError) -> JSONResponse:
+        """
+        Produce a 404 Not Found JSON response for the given domain error.
+        
+        Parameters:
+            _request (Request): The incoming HTTP request (unused).
+            exc (VelaError): The domain error to convert into the response.
+        
+        Returns:
+            JSONResponse: Response with HTTP 404 and body `{"detail": str(exc)}`.
+        """
         return JSONResponse(
             status_code=status.HTTP_404_NOT_FOUND,
             content={"detail": str(exc)},
@@ -72,6 +89,16 @@ def register_exception_handlers(app) -> None:
     @app.exception_handler(ContainerNotRunningError)
     @app.exception_handler(DuplicateDockerfileNameError)
     async def conflict_handler(_request: Request, exc: VelaError) -> JSONResponse:
+        """
+        Map a domain conflict error to an HTTP 409 Conflict JSON response.
+        
+        Parameters:
+            _request (Request): Incoming request (unused).
+            exc (VelaError): Domain-layer error whose message will be placed in the response `detail`.
+        
+        Returns:
+            JSONResponse: Response with status code 409 and body `{"detail": str(exc)}`.
+        """
         return JSONResponse(
             status_code=status.HTTP_409_CONFLICT,
             content={"detail": str(exc)},

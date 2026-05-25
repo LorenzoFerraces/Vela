@@ -81,6 +81,20 @@ class DefaultImageBuilder(ImageBuilder):
         tag: str,
         access_token: str | None = None,
     ) -> BuildResult:
+        """
+        Builds a container image from the given project source (either a Git repository or a local directory) and returns metadata about the completed build.
+        
+        Parameters:
+            source (ProjectSource): Source describing either a Git repository (git_url, optional branch) or a local filesystem path (local_path).
+            tag (str): Image tag to apply to the built image.
+            access_token (str | None): Optional access token used when cloning private Git repositories.
+        
+        Returns:
+            BuildResult: Contains the built image identifier and tag, the selected build strategy, an (empty) build log, and the analyzed ProjectInfo for the build context.
+        
+        Raises:
+            AnalysisError: If neither `git_url` nor `local_path` is provided on `source`, or if local path validation fails.
+        """
         tmp_parent: Path | None = None
         project_path: str
         if source.git_url:
@@ -120,7 +134,21 @@ class DefaultImageBuilder(ImageBuilder):
         *,
         tag: str,
     ) -> BuildResult:
-        """Build from saved Dockerfile text in an ephemeral context directory."""
+        """
+        Builds a container image from provided Dockerfile text using a temporary build context.
+        
+        Writes the trimmed Dockerfile text into an ephemeral directory, analyzes that context to produce project metadata, invokes the container orchestrator to build the image, and removes the temporary directory before returning.
+        
+        Parameters:
+            dockerfile_contents (str): Dockerfile contents to use for the build; whitespace-only input is rejected.
+            tag (str): Image tag to assign to the built image.
+        
+        Returns:
+            BuildResult: Result containing the built image ID and tag, `strategy` set to `BuildStrategy.DOCKERFILE_EXISTS`, an empty `build_log`, and `project_info` produced by analyzing the ephemeral context.
+        
+        Raises:
+            AnalysisError: If `dockerfile_contents` is empty or only whitespace.
+        """
         trimmed = dockerfile_contents.strip()
         if not trimmed:
             raise AnalysisError("", "Dockerfile contents cannot be empty.")

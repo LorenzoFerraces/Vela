@@ -6,6 +6,16 @@ import {
   E2E_USER_PASSWORD,
 } from './constants'
 
+/**
+ * Obtain an API access token by logging in with the provided credentials.
+ *
+ * Uses the Playwright page request to POST to the authentication endpoint and returns the `access_token` from the JSON response.
+ *
+ * @param email - Email address to authenticate with; defaults to `E2E_USER_EMAIL` when omitted
+ * @param password - Password to authenticate with; defaults to `E2E_USER_PASSWORD` when omitted
+ * @returns The `access_token` string returned by the authentication endpoint
+ * @throws Error if the login request is not successful; the error message includes the email used, HTTP status, and response body text
+ */
 async function accessTokenForPage(
   page: Page,
   email: string = E2E_USER_EMAIL,
@@ -21,6 +31,14 @@ async function accessTokenForPage(
   return body.access_token
 }
 
+/**
+ * Starts a new container from the given image and exposes it with a public route.
+ *
+ * @param imageRef - Image reference to run (e.g., `owner/name:tag` or a registry URL)
+ * @param containerName - Optional name for the created container; if omitted, no name is set
+ * @param credentials - Optional credentials to authenticate the request; if omitted, E2E defaults are used
+ * @returns The HTTP response returned by the containers run API endpoint
+ */
 export async function deployImageContainer(
   page: Page,
   imageRef: string,
@@ -44,6 +62,12 @@ export async function deployImageContainer(
   })
 }
 
+/**
+ * Stops a running container identified by its ID via the backend API.
+ *
+ * @param containerId - The ID of the container to stop.
+ * @returns The Playwright API response for the stop request.
+ */
 export async function stopContainer(page: Page, containerId: string) {
   const token = await accessTokenForPage(page)
   return page.request.post(`${apiBase}/api/containers/${containerId}/stop`, {
@@ -51,6 +75,13 @@ export async function stopContainer(page: Page, containerId: string) {
   })
 }
 
+/**
+ * Creates a Dockerfile template resource using the application's API.
+ *
+ * @param name - The name to assign to the Dockerfile template
+ * @param contents - The Dockerfile contents to store in the template
+ * @returns The server's HTTP response for the create request
+ */
 export async function createDockerfileTemplate(
   page: Page,
   name: string,

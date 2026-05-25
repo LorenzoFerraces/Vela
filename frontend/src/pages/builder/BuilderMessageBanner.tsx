@@ -4,6 +4,12 @@ type BuilderMessageBannerProps = {
   banner: BuilderBanner
 }
 
+/**
+ * Renders an alert banner for a provided BuilderBanner.
+ *
+ * @param banner - The banner object to display; if falsy, the component renders nothing.
+ * @returns The banner element containing `banner.text` when `banner` is provided, otherwise `null`.
+ */
 export function BuilderMessageBanner({ banner }: BuilderMessageBannerProps) {
   if (!banner) {
     return null

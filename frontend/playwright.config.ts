@@ -15,15 +15,14 @@ const baseURL = `http://127.0.0.1:${e2eVitePort}`
 const apiHealthURL = `http://127.0.0.1:${e2eApiPort}/api/health`
 
 /**
- * Pick the Python interpreter for the API web server.
+ * Determine the command string used to start the API web server with uvicorn.
  *
- * Preference order:
- *   1. `PW_API_SERVER_COMMAND` env var — caller overrides everything.
- *   2. `<repoRoot>/.venv/Scripts/python.exe` or `<repoRoot>/.venv/bin/python`
- *      if it exists. This is the venv created by the "Backend" section in the
- *      README, so following those steps makes `npm run test:e2e` just work.
- *   3. Plain `python` on PATH — assumes the backend (and its deps like
- *      `python-dotenv`, `fastapi`, ...) were installed into that interpreter.
+ * If `PW_API_SERVER_COMMAND` is set it is returned unchanged. Otherwise, prefers
+ * the Python interpreter from a repository virtualenv at `<repoRoot>/.venv/...`
+ * if present, falling back to `python` on PATH. The resulting command runs
+ * `app.api.app:app` on `127.0.0.1:${e2eApiPort}`.
+ *
+ * @returns The shell command that starts the API server with uvicorn bound to 127.0.0.1 on the configured API port
  */
 function resolveApiServerCommand(): string {
   if (process.env.PW_API_SERVER_COMMAND) {

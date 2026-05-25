@@ -88,6 +88,11 @@ def test_dockerfile_not_found(api_client: TestClient) -> None:
 def test_deploy_sources_includes_dockerfile_template(
     api_client: TestClient,
 ) -> None:
+    """
+    Verify that Dockerfile templates created by the user appear in the deploy-sources suggestions for a matching query.
+    
+    Creates a Dockerfile template named "nginx-static", queries the deploy-sources endpoint with q="nginx", and asserts at least one suggestion with kind "dockerfile_template" has name "nginx-static".
+    """
     create = api_client.post(
         "/api/dockerfiles/",
         json={"name": "nginx-static", "contents": "FROM nginx:alpine\n"},

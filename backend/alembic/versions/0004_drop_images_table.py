@@ -20,10 +20,26 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
+    """
+    Drop the "images" table from the database schema.
+    
+    This migration step removes the images table and all data it contains.
+    """
     op.drop_table("images")
 
 
 def downgrade() -> None:
+    """
+    Recreates the `images` table with its original schema, constraints, and index.
+    
+    Creates an `images` table containing:
+    - `id`: UUID primary key, not nullable
+    - `owner_id`: UUID, not nullable, foreign key to `users.id` with ON DELETE CASCADE (constraint name `fk_images_owner`)
+    - `ref`: string (max length 512), not nullable
+    - `created_at`: timezone-aware DateTime, not nullable
+    
+    Also adds a unique constraint on (`owner_id`, `ref`) named `uq_images_owner_ref` and a non-unique index `ix_images_owner_id` on `owner_id`.
+    """
     op.create_table(
         "images",
         sa.Column("id", sa.Uuid(), primary_key=True, nullable=False),
