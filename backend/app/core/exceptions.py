@@ -163,7 +163,46 @@ class InvalidCredentialsError(AuthError):
 
 class NotAuthenticatedError(AuthError):
     def __init__(self, message: str = "Not authenticated.") -> None:
+        """
+        Initialize the NotAuthenticatedError with an optional custom message.
+        
+        Parameters:
+            message (str): Error message to use for this exception. Defaults to "Not authenticated."
+        """
         super().__init__(message)
+
+
+# ---------------------------------------------------------------------------
+# User library (saved images, Dockerfile templates)
+# ---------------------------------------------------------------------------
+
+
+class UserLibraryError(VelaError):
+    """Base exception for per-user saved image / Dockerfile template operations."""
+
+
+class DockerfileTemplateNotFoundError(UserLibraryError):
+    def __init__(self, template_id: str) -> None:
+        """
+        Initialize an exception for a missing Dockerfile template.
+        
+        Parameters:
+            template_id (str): Identifier of the Dockerfile template that was not found. The exception message will be "Dockerfile template not found: {template_id}".
+        """
+        self.template_id = template_id
+        super().__init__(f"Dockerfile template not found: {template_id}")
+
+
+class DuplicateDockerfileNameError(UserLibraryError):
+    def __init__(self, name: str) -> None:
+        """
+        Initialize the error for attempting to create a Dockerfile template with a name that already exists.
+        
+        Parameters:
+            name (str): The duplicate Dockerfile template name.
+        """
+        self.name = name
+        super().__init__(f"You already have a Dockerfile template named {name!r}.")
 
 
 # ---------------------------------------------------------------------------

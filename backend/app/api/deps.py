@@ -16,6 +16,7 @@ from app.core.auth.service import get_user_by_id
 from app.core.auth.tokens import decode_access_token
 from app.core.default_image_builder import DefaultImageBuilder
 from app.core.docker_orchestrator import DockerOrchestrator
+from app.core.orchestrator import ContainerOrchestrator
 from app.core.exceptions import NotAuthenticatedError, TrafficRouterError
 from app.core.kubernetes_traffic_router import KubernetesTrafficRouter
 from app.core.traffic_router import NoopTrafficRouter, TrafficRouter
@@ -25,8 +26,19 @@ from app.db.models import User
 
 
 @lru_cache(maxsize=1)
-def get_orchestrator() -> DockerOrchestrator:
-    """Shared Docker-backed orchestrator (one client per process)."""
+def get_orchestrator() -> ContainerOrchestrator:
+    """
+    Provide the shared container orchestrator instance for the application.
+    
+    Returns:
+        ContainerOrchestrator: Shared orchestrator instance. If the environment variable
+        VELA_FAKE_ORCHESTRATOR is set to "1" (after trimming), returns the shared in-memory
+        fake orchestrator; otherwise returns a DockerOrchestrator instance.
+    """
+    if os.environ.get("VELA_FAKE_ORCHESTRATOR", "").strip() == "1":
+        from app.core.fake_orchestrator import get_shared_fake_orchestrator
+
+        return get_shared_fake_orchestrator()
     return DockerOrchestrator()
 
 

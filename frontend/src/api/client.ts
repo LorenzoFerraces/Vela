@@ -208,6 +208,14 @@ export async function apiGet<T>(path: string): Promise<T> {
   return apiRequest<T>(path, { method: 'GET' })
 }
 
+/**
+ * Send a JSON POST request to the API and return the parsed JSON response.
+ *
+ * @param path - Path relative to the API base (leading slash optional)
+ * @param body - Value to JSON-serialize and send as the request body
+ * @param options - Optional request options; when `options.skipAuth` is true the Authorization header is not attached and 401 handling that clears stored tokens is skipped
+ * @returns The response body parsed as JSON mapped to `TResponse`
+ */
 export async function apiPost<TResponse, TBody = unknown>(
   path: string,
   body: TBody,
@@ -220,6 +228,31 @@ export async function apiPost<TResponse, TBody = unknown>(
   )
 }
 
+/**
+ * Send a PATCH request with a JSON body to the given API path and return the parsed response.
+ *
+ * @param path - API path (will be resolved against the configured API base URL)
+ * @param body - Payload to serialize as JSON and include in the request body
+ * @returns The parsed JSON response as `TResponse`
+ */
+export async function apiPatch<TResponse, TBody = unknown>(
+  path: string,
+  body: TBody
+): Promise<TResponse> {
+  return apiRequest<TResponse>(path, {
+    method: 'PATCH',
+    body: JSON.stringify(body),
+  })
+}
+
+/**
+ * Send a DELETE request to the API for the given path.
+ *
+ * Attaches an `Authorization: Bearer <token>` header when an access token is available.
+ * On a 401 response the stored access token is cleared and registered unauthorized listeners are notified.
+ *
+ * @param path - API path relative to the configured API base URL (leading `/` is optional)
+ */
 export async function apiDelete(path: string): Promise<void> {
   const url = `${getApiBaseUrl()}${path.startsWith('/') ? path : `/${path}`}`
   const headers = new Headers({ Accept: 'application/json' })
@@ -268,8 +301,14 @@ export interface ContainerInfo {
   access_url?: string | null
 }
 
+export type RunSourceKind = 'image' | 'git' | 'dockerfile_template'
+
 export interface RunFromSourceRequest {
-  source: string
+  source_kind?: RunSourceKind
+  source?: string
+  image_ref?: string
+  git_url?: string
+  dockerfile_template_id?: string
   container_name?: string | null
   host_port?: number | null
   container_port?: number
@@ -282,7 +321,7 @@ export interface RunFromSourceRequest {
 
 export interface RunFromSourceResponse {
   container: ContainerInfo
-  kind: 'image' | 'git'
+  kind: RunSourceKind
   image: string
   route_wired: boolean
   public_url?: string | null
@@ -316,6 +355,46 @@ export interface ImageSuggestion {
   source: ImageSuggestionSource
 }
 
+export type DeploySourceSuggestion =
+  | { kind: 'image'; ref: string; label: string }
+  | {
+      kind: 'git'
+      url: string
+      name: string
+      default_branch: string
+    }
+  | { kind: 'dockerfile_template'; id: string; name: string }
+
+/**
+ * Fetches deploy source suggestions that match the provided query.
+ *
+ * @param query - Search string used to find matching deploy sources
+ * @param options - Optional parameters for the request
+ * @param options.limit - Maximum number of suggestions to return
+ * @returns An array of DeploySourceSuggestion objects matching the query
+ */
+export async function getDeploySourceSuggestions(
+  query: string,
+  options: { limit?: number } = {}
+): Promise<DeploySourceSuggestion[]> {
+  const params = new URLSearchParams({ q: query })
+  if (options.limit != null) {
+    params.set('limit', String(options.limit))
+  }
+  const data = await apiGet<{ suggestions: DeploySourceSuggestion[] }>(
+    `/api/containers/deploy-sources?${params.toString()}`
+  )
+  return data.suggestions
+}
+
+/**
+ * Fetches image suggestions that match the given query.
+ *
+ * @param query - The search text used to find image suggestions
+ * @param options - Optional settings for the request
+ * @param options.limit - Maximum number of suggestions to return
+ * @returns The list of matching image suggestion objects
+ */
 export async function getImageSuggestions(
   query: string,
   options: { limit?: number } = {}
@@ -624,7 +703,16 @@ export async function fetchAllGithubRepos(): Promise<GithubRepo[]> {
 }
 
 /**
- * Filter repos by ``query``: tries case-insensitive ``RegExp``; if the pattern is invalid, falls back to substring match on ``full_name`` and ``description``.
+ * Filter a list of GitHub repositories by a search query.
+ *
+ * The function trims `query` and, if non-empty, attempts a case-insensitive
+ * `RegExp` match against each repo's `full_name` and `description`. If the
+ * regex is invalid, it falls back to a case-insensitive substring search.
+ * An empty or whitespace-only `query` returns the original `repos` array.
+ *
+ * @param repos - Array of repositories to filter
+ * @param query - Search string or regular-expression pattern
+ * @returns The repositories whose `full_name` or `description` match `query`
  */
 export function filterGithubReposByQuery(
   repos: GithubRepo[],
@@ -653,6 +741,74 @@ export function filterGithubReposByQuery(
   }
 }
 
+// --- User library (Dockerfile templates) ---
+
+export interface DockerfileTemplate {
+  id: string
+  name: string
+  contents: string
+  created_at: string
+  updated_at: string
+}
+
+/**
+ * Retrieves all Dockerfile templates in the user's library.
+ *
+ * @returns An array of `DockerfileTemplate` objects
+ */
+export async function listDockerfileTemplates(): Promise<DockerfileTemplate[]> {
+  return apiGet<DockerfileTemplate[]>('/api/dockerfiles/')
+}
+
+/**
+ * Create a new Dockerfile template.
+ *
+ * @param body - The template payload containing `name` and `contents`
+ * @returns The created `DockerfileTemplate`
+ */
+export async function createDockerfileTemplate(body: {
+  name: string
+  contents: string
+}): Promise<DockerfileTemplate> {
+  return apiPost<DockerfileTemplate, { name: string; contents: string }>(
+    '/api/dockerfiles/',
+    body
+  )
+}
+
+/**
+ * Update an existing Dockerfile template.
+ *
+ * @param templateId - The identifier of the Dockerfile template to update
+ * @param body - Partial template fields to change; may include `name` and/or `contents`
+ * @returns The updated DockerfileTemplate
+ */
+export async function updateDockerfileTemplate(
+  templateId: string,
+  body: { name?: string; contents?: string }
+): Promise<DockerfileTemplate> {
+  return apiPatch<DockerfileTemplate, { name?: string; contents?: string }>(
+    `/api/dockerfiles/${encodeURIComponent(templateId)}`,
+    body
+  )
+}
+
+/**
+ * Delete a Dockerfile template by its identifier.
+ *
+ * @param templateId - The ID of the Dockerfile template to remove
+ */
+export async function deleteDockerfileTemplate(templateId: string): Promise<void> {
+  await apiDelete(`/api/dockerfiles/${encodeURIComponent(templateId)}`)
+}
+
+/**
+ * Fetches the branches for a GitHub repository identified by its full name.
+ *
+ * @param fullName - The repository full name in the form `owner/repo`
+ * @returns The list of repository branches
+ * @throws Error when `fullName` is not in the `owner/repo` format
+ */
 export async function listGithubRepoBranches(
   fullName: string
 ): Promise<GithubBranch[]> {

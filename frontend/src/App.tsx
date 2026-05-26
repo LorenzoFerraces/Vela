@@ -6,9 +6,16 @@ import ContainersPage from './pages/ContainersPage'
 import LoginPage from './pages/LoginPage'
 import RegisterPage from './pages/RegisterPage'
 import DashboardPage from './pages/DashboardPage'
-import PlaceholderPage from './pages/PlaceholderPage'
+import BuilderPage from './pages/BuilderPage'
 import SettingsPage from './pages/SettingsPage'
 
+/**
+ * Defines the application's client-side routes and layout.
+ *
+ * Renders public routes for /login and /register, and nested routes within the main Layout: / (Home), and protected routes /dashboard, /containers, /builder, and /settings which are wrapped with RequireAuth.
+ *
+ * @returns The top-level routing JSX element that configures the application's routes.
+ */
 export default function App() {
   return (
     <Routes>
@@ -36,15 +43,7 @@ export default function App() {
           path="/builder"
           element={
             <RequireAuth>
-              <PlaceholderPage title="Builder" />
-            </RequireAuth>
-          }
-        />
-        <Route
-          path="/images"
-          element={
-            <RequireAuth>
-              <PlaceholderPage title="Images" />
+              <BuilderPage />
             </RequireAuth>
           }
         />

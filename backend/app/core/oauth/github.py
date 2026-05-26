@@ -157,14 +157,34 @@ async def list_user_repos(
     page: int = 1,
     per_page: int = 30,
 ) -> list[GitHubRepo]:
-    """List repos the authenticated user has access to (sorted by recent activity).
-
-    When ``query`` is set, results are filtered server-side via the GitHub search
-    API (``in:name``) so private repos are included.
+    """
+    List repositories the authenticated user can access, ordered by recent activity.
+    
+    When `query` is provided, the function uses the GitHub search API (searching `in:name` and including forks and private repos accessible to the user). When `query` is empty or blank, the function lists repositories from the authenticated user's repositories endpoint and includes owner, collaborator, and organization member affiliations. Pagination parameters are clamped: `page` is at least 1 and `per_page` is between 1 and 100. For end-to-end testing, this function first consults `app.e2e_support.e2e_github_repos_if_enabled(...)` and returns any non-`None` fixture list immediately.
+    
+    Parameters:
+        access_token (str): A valid GitHub access token for the authenticated user.
+        query (str | None): Optional search string; blank or `None` triggers the standard user repos listing.
+        page (int): Page number for pagination (minimum 1).
+        per_page (int): Number of results per page (clamped to the range 1–100).
+    
+    Returns:
+        list[GitHubRepo]: A list of parsed repository records representing the matching repositories.
     """
     per_page = max(1, min(per_page, 100))
     page = max(1, page)
     cleaned_query = (query or "").strip()
+
+    from app.e2e_support import e2e_github_repos_if_enabled
+
+    fixture_repos = e2e_github_repos_if_enabled(
+        access_token,
+        query=cleaned_query or None,
+        page=page,
+        per_page=per_page,
+    )
+    if fixture_repos is not None:
+        return fixture_repos
 
     if cleaned_query:
         search_q = f"{cleaned_query} in:name user:@me fork:true"

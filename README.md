@@ -89,6 +89,16 @@ API: **http://127.0.0.1:8000** — health: `GET /api/health` (no auth).
 
 Most **`/api/containers/**`** routes require that bearer token. Containers are scoped per user (Docker label `vela.owner_id`).
 
+### User library (Dockerfile templates)
+
+Per-user Dockerfile templates are stored in PostgreSQL (not the Docker engine):
+
+- **`GET/POST /api/dockerfiles/`**, **`GET/PATCH/DELETE /api/dockerfiles/{id}`** — named Dockerfile snippets. Manage them on the **Builder** page; pick them when deploying from **Containers** (`GET /api/containers/deploy-sources`).
+
+Template names are unique per user.
+
+**`/api/images`** is separate: it lists tags on the **local Docker host**, pulls images, and builds from a server path — it does not read the `dockerfiles` table.
+
 ### GitHub integration (private repos)
 
 To deploy private GitHub repos, connect a GitHub account from the **Settings** page in the UI. The flow is a standard OAuth App authorization:

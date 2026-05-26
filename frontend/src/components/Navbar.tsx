@@ -5,7 +5,6 @@ const navItems = [
   { to: '/dashboard', label: 'Dashboard' },
   { to: '/containers', label: 'Containers' },
   { to: '/builder', label: 'Builder' },
-  { to: '/images', label: 'Images' },
   { to: '/settings', label: 'Settings' },
 ] as const
 

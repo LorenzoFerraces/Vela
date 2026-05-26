@@ -2,6 +2,9 @@
 
 Conventions for tooling, dependencies, naming, and Python style. Follow this file when changing the repo.
 
+## Repo management
+- **Keep the readme concise** when adding or updating the readme file, prevent it from being too verbose, prefer short explanations
+
 ## Package management (pnpm / npm)
 
 - **Do not introduce caret (`^`) or tilde (`~`) ranges** when adding or updating dependencies in `package.json`. Prefer **exact versions** (e.g. `"18.2.0"`, not `"^18.2.0"`).
@@ -35,8 +38,16 @@ When adding a feature, place logic in the right layer instead of growing “god�
 
 ## Backend testing
 
-- **Core functionality** (auth, container ownership, orchestration boundaries, and other user-visible or safety-critical behavior) should be covered by **integration tests** in `backend/tests/` — typically exercising HTTP routes and real-ish wiring (e.g. `TestClient`, DB overrides where the suite uses SQLite, Docker mocks as the project already does).
-- **Model / unit tests** for pure domain helpers (e.g. `app/core/` without HTTP) are **optional** but encouraged when logic is non-trivial, easy to isolate, and cheaper to test than a full API path.
+- Prefer **real wiring** over mocks. Do not add tests that mock away the behavior you are trying to verify.
+- **Unit tests** are for **isolated** logic only: small models, validators, parsing helpers, and other pure functions in `app/core/` that do not need HTTP, DB, or Docker.
+- **Integration tests** are the default for API and user-visible behavior: exercise routes with `TestClient`, the real app factory, and in-memory SQLite (the existing `conftest` DB override). Call through to **core and route layers**; avoid replacing orchestrators, builders, or auth with `MagicMock` except where Docker, GitHub, or other external services are genuinely unavailable in CI — and keep any such mock narrowly scoped to that boundary.
+- When testing safety-critical paths (auth, ownership, deploy contracts), assert on **HTTP responses and persisted state**, not on whether a mock method was called.
+
+## Frontend testing
+
+- **E2E tests** (`frontend/e2e/`) should run the **real frontend against the real local API** (Playwright `webServer` config). Do **not** stub `/api/**` with `page.route` to fake responses for flows you are verifying; those tests should reflect end-to-end behavior.
+- Reserve browser network interception for **external systems** the app cannot control in dev (e.g. third-party OAuth redirects). Document why when interception is unavoidable.
+- **Unit or component tests** (if added) belong on small utilities and presentational pieces; page-level behavior belongs in unmocked E2E, not in tests that replace the API client with fixtures.
 
 ## Cleaning AI-generated changes (deslop)
 

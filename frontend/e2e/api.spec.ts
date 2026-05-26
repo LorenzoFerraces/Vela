@@ -1,7 +1,6 @@
 import { expect, test } from '@playwright/test'
 
-/** Matches Playwright webServer (backend) default. */
-const apiBase = process.env.PW_API_URL ?? 'http://127.0.0.1:8000'
+import { apiBase } from './constants'
 
 test.describe('live backend API', () => {
   test('GET /api/health returns ok', async ({ request }) => {

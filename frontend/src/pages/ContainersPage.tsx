@@ -1,5 +1,4 @@
 import { useCallback, useState } from 'react'
-import { useAuth } from '../auth/AuthContext'
 import {
   formatApiError,
   getImageAvailability,
@@ -7,36 +6,41 @@ import {
   runContainerFromSource,
   startContainer,
   stopContainer,
-  type GithubRepo,
+  type RunFromSourceRequest,
 } from '../api/client'
 import { ContainersFormMessageBanner } from './containers/ContainersFormMessageBanner'
-import { ContainersGithubRepoPickerPanel } from './containers/ContainersGithubRepoPickerPanel'
-import { ContainersGithubSourceAside } from './containers/ContainersGithubSourceAside'
 import { ContainersRunFormFields } from './containers/ContainersRunFormFields'
-import { ContainersSourceField } from './containers/ContainersSourceField'
+import { DeploySourceCombobox } from './containers/DeploySourceCombobox'
 import { WorkloadsTable } from '../components/workloads/WorkloadsTable'
 import type { FormMessage } from './containers/types'
-import { sourceLooksLikeGitUrl } from './containers/sourceKind'
+import {
+  selectionNeedsRegistryCheck,
+  selectionShowsGitBranch,
+} from './containers/deploySourceTypes'
 import { useContainerList } from './containers/useContainerList'
-import { useGithubForContainersForm } from './containers/useGithubForContainersForm'
+import { useDeploySourceSelection } from './containers/useDeploySourceSelection'
 import { useImageRefAvailability } from './containers/useImageRefAvailability'
-import { useRunFormSource } from './containers/useRunFormSource'
 
+/**
+ * Render the Containers page UI for building, running, and managing container workloads.
+ *
+ * The component maintains form state for container name, Git branch, and port; coordinates
+ * a deploy-source selection flow (image, Git, or Dockerfile template); performs optional
+ * image registry availability checks; submits run requests; and displays and controls the
+ * list of running workloads (start, stop, remove).
+ *
+ * @returns The Containers page React element
+ */
 export default function ContainersPage() {
-  const { user, status: authStatus } = useAuth()
   const [containerName, setContainerName] = useState('')
   const [gitBranch, setGitBranch] = useState('main')
+  const [containerPort, setContainerPort] = useState('80')
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState<FormMessage | null>(null)
   const [rowBusy, setRowBusy] = useState<string | null>(null)
 
-  const {
-    source,
-    containerPort,
-    showGitBranch,
-    updateSourceInput,
-    setContainerPort,
-  } = useRunFormSource()
+  const deploySource = useDeploySourceSelection()
+  const showGitBranch = selectionShowsGitBranch(deploySource.selection)
 
   const reportListLoadError = useCallback((detail: string) => {
     setMessage({ type: 'err', text: detail })
@@ -44,39 +48,90 @@ export default function ContainersPage() {
 
   const { rows, listLoading, refresh } = useContainerList(reportListLoadError)
 
-  const {
-    githubStatus,
-    githubReposCache,
-    repoPickerOpen,
-    repoQuery,
-    filteredGithubRepos,
-    setRepoQuery,
-    toggleRepoPicker,
-    setRepoPickerOpen,
-  } = useGithubForContainersForm({
-    authStatus,
-    userId: user?.id,
-  })
+  const imageRefForCheck =
+    deploySource.selection?.kind === 'image'
+      ? deploySource.selection.ref
+      : ''
 
   const { imageRefCheck, setImageRefCheck, runImageRefAvailabilityCheck } =
-    useImageRefAvailability(source)
+    useImageRefAvailability(imageRefForCheck)
 
-  function pickRepo(repo: GithubRepo) {
-    updateSourceInput(`${repo.html_url}.git`)
-    setGitBranch(repo.default_branch || 'main')
-    setImageRefCheck({ status: 'idle' })
-    setRepoPickerOpen(false)
-    setRepoQuery('')
-  }
-
-  async function onSubmit(e: React.FormEvent) {
-    e.preventDefault()
-    const trimmed = source.trim()
-    if (!trimmed) {
-      setMessage({ type: 'err', text: 'Enter a Docker image or a Git URL.' })
+  function applyDeploySuggestion(
+    suggestion: Parameters<typeof deploySource.applySuggestion>[0]
+  ) {
+    deploySource.applySuggestion(suggestion)
+    if (suggestion.kind === 'git') {
+      setGitBranch(suggestion.default_branch || 'main')
+      setContainerPort((portString) =>
+        portString === '80' ? '5173' : portString
+      )
+      setImageRefCheck({ status: 'idle' })
       return
     }
-    if (!sourceLooksLikeGitUrl(trimmed)) {
+    if (suggestion.kind === 'dockerfile_template') {
+      setContainerPort((portString) =>
+        portString === '5173' ? '80' : portString
+      )
+      setImageRefCheck({ status: 'idle' })
+      return
+    }
+    setContainerPort((portString) =>
+      portString === '5173' ? '80' : portString
+    )
+    setImageRefCheck({ status: 'idle' })
+  }
+
+  function buildRunRequest(
+    parsedPort: number
+  ): RunFromSourceRequest | null {
+    const selection = deploySource.selection
+    if (!selection) {
+      return null
+    }
+    const base = {
+      container_name: containerName.trim() || null,
+      host_port: null,
+      container_port: parsedPort,
+      git_branch: gitBranch.trim() || 'main',
+      route_host: null,
+      route_path_prefix: '/',
+      route_tls: false,
+      public_route: true,
+    }
+    switch (selection.kind) {
+      case 'image':
+        return {
+          ...base,
+          source_kind: 'image',
+          image_ref: selection.ref,
+        }
+      case 'git':
+        return {
+          ...base,
+          source_kind: 'git',
+          git_url: selection.url,
+        }
+      case 'dockerfile_template':
+        return {
+          ...base,
+          source_kind: 'dockerfile_template',
+          dockerfile_template_id: selection.templateId,
+        }
+    }
+  }
+
+  async function onSubmit(event: React.FormEvent) {
+    event.preventDefault()
+    const selection = deploySource.selection
+    if (!selection) {
+      setMessage({
+        type: 'err',
+        text: 'Choose a deploy source from the search results.',
+      })
+      return
+    }
+    if (selection.kind === 'image') {
+      const trimmed = selection.ref
       const alreadyOkForRef =
         imageRefCheck.status === 'ok' && imageRefCheck.ref === trimmed
       if (!alreadyOkForRef) {
@@ -114,30 +169,29 @@ export default function ContainersPage() {
           ? 5173
           : 80
         : parsedPort
-      const res = await runContainerFromSource({
-        source: trimmed,
-        container_name: containerName.trim() || null,
-        host_port: null,
-        container_port,
-        git_branch: gitBranch.trim() || 'main',
-        route_host: null,
-        route_path_prefix: '/',
-        route_tls: false,
-        public_route: true,
-      })
-      const routeNote = res.route_wired
+      const requestBody = buildRunRequest(container_port)
+      if (!requestBody) {
+        setMessage({
+          type: 'err',
+          text: 'Choose a deploy source from the search results.',
+        })
+        return
+      }
+      const response = await runContainerFromSource(requestBody)
+      const routeNote = response.route_wired
         ? ' Traefik route registered.'
         : ''
       const publicUrl =
-        typeof res.public_url === 'string' && res.public_url.length > 0
-          ? res.public_url
+        typeof response.public_url === 'string' &&
+        response.public_url.length > 0
+          ? response.public_url
           : undefined
       setMessage({
         type: 'ok',
-        text: `Started (${res.kind}) as ${res.container.name} — image ${res.image}.${routeNote}`,
+        text: `Started (${response.kind}) as ${response.container.name} — image ${response.image}.${routeNote}`,
         publicUrl,
       })
-      updateSourceInput('')
+      deploySource.clearSelection()
       await refresh()
     } catch (error) {
       setMessage({ type: 'err', text: formatApiError(error) })
@@ -190,7 +244,8 @@ export default function ContainersPage() {
     <section className="containers-page">
       <h1 className="containers-page__title">Containers</h1>
       <p className="containers-page__lead">
-        Image or Git URL → build and run on the Vela network.
+        Search for a registry image, GitHub repository, or saved Dockerfile, then
+        build and run on the Vela network.
       </p>
 
       <form
@@ -198,32 +253,21 @@ export default function ContainersPage() {
         onSubmit={onSubmit}
         aria-busy={busy}
       >
-        <div className="containers-form__source-header">
-          <label className="containers-form__label" htmlFor="source-input">
-            Image or Git URL
-          </label>
-          <ContainersGithubSourceAside
-            authStatus={authStatus}
-            userId={user?.id}
-            githubStatus={githubStatus}
-            repoPickerOpen={repoPickerOpen}
-            onToggleRepoPicker={toggleRepoPicker}
-          />
-        </div>
-        {repoPickerOpen ? (
-          <ContainersGithubRepoPickerPanel
-            githubReposCache={githubReposCache}
-            filteredRepos={filteredGithubRepos}
-            repoQuery={repoQuery}
-            onRepoQueryChange={setRepoQuery}
-            onPickRepo={pickRepo}
-          />
-        ) : null}
-        <ContainersSourceField
-          source={source}
-          showGitBranch={showGitBranch}
+        <label className="containers-form__label" htmlFor="deploy-source-input">
+          Deploy source
+        </label>
+        <DeploySourceCombobox
+          listboxId={deploySource.listboxId}
+          rootRef={deploySource.rootRef}
+          displayValue={deploySource.displayValue}
+          selection={deploySource.selection}
+          suggestions={deploySource.suggestions}
+          listOpen={deploySource.listOpen}
+          searchLoading={deploySource.searchLoading}
           imageRefCheck={imageRefCheck}
-          onSourceChange={updateSourceInput}
+          onInputChange={deploySource.onInputChange}
+          onInputFocus={deploySource.onInputFocus}
+          onPickSuggestion={applyDeploySuggestion}
           onRequestImageCheck={runImageRefAvailabilityCheck}
         />
         <ContainersRunFormFields
@@ -242,7 +286,8 @@ export default function ContainersPage() {
             className="btn btn--primary"
             disabled={
               busy ||
-              (!showGitBranch &&
+              !deploySource.selection ||
+              (selectionNeedsRegistryCheck(deploySource.selection) &&
                 imageRefCheck.status === 'unavailable' &&
                 !imageRefCheck.canAttemptDeploy)
             }

@@ -7,6 +7,7 @@ import tempfile
 from pathlib import Path
 
 from app.core.builder import ImageBuilder
+from app.core.enums import BuildStrategy
 from app.core.exceptions import AnalysisError
 from app.core.git_ops import git_shallow_clone, rm_tree
 from app.core.models import BuildResult, ProjectInfo, ProjectSource
@@ -80,6 +81,20 @@ class DefaultImageBuilder(ImageBuilder):
         tag: str,
         access_token: str | None = None,
     ) -> BuildResult:
+        """
+        Builds a container image from the given project source (either a Git repository or a local directory) and returns metadata about the completed build.
+        
+        Parameters:
+            source (ProjectSource): Source describing either a Git repository (git_url, optional branch) or a local filesystem path (local_path).
+            tag (str): Image tag to apply to the built image.
+            access_token (str | None): Optional access token used when cloning private Git repositories.
+        
+        Returns:
+            BuildResult: Contains the built image identifier and tag, the selected build strategy, an (empty) build log, and the analyzed ProjectInfo for the build context.
+        
+        Raises:
+            AnalysisError: If neither `git_url` nor `local_path` is provided on `source`, or if local path validation fails.
+        """
         tmp_parent: Path | None = None
         project_path: str
         if source.git_url:
@@ -112,3 +127,51 @@ class DefaultImageBuilder(ImageBuilder):
         finally:
             if tmp_parent is not None:
                 rm_tree(tmp_parent)
+
+    async def build_from_dockerfile_template(
+        self,
+        dockerfile_contents: str,
+        *,
+        tag: str,
+    ) -> BuildResult:
+        """
+        Builds a container image from provided Dockerfile text using a temporary build context.
+        
+        Writes the trimmed Dockerfile text into an ephemeral directory, analyzes that context to produce project metadata, invokes the container orchestrator to build the image, and removes the temporary directory before returning.
+        
+        Parameters:
+            dockerfile_contents (str): Dockerfile contents to use for the build; whitespace-only input is rejected.
+            tag (str): Image tag to assign to the built image.
+        
+        Returns:
+            BuildResult: Result containing the built image ID and tag, `strategy` set to `BuildStrategy.DOCKERFILE_EXISTS`, an empty `build_log`, and `project_info` produced by analyzing the ephemeral context.
+        
+        Raises:
+            AnalysisError: If `dockerfile_contents` is empty or only whitespace.
+        """
+        trimmed = dockerfile_contents.strip()
+        if not trimmed:
+            raise AnalysisError("", "Dockerfile contents cannot be empty.")
+
+        tmp_parent = Path(tempfile.mkdtemp(prefix="vela-template-"))
+        project_path = tmp_parent / "ctx"
+        project_path.mkdir(parents=True, exist_ok=True)
+        dockerfile_path = project_path / "Dockerfile"
+        dockerfile_path.write_text(trimmed, encoding="utf-8")
+
+        try:
+            info = analyze_project(project_path)
+            image_id = await self._orchestrator.build_image(
+                str(project_path.resolve()),
+                tag=tag,
+                dockerfile="Dockerfile",
+            )
+            return BuildResult(
+                image_id=image_id,
+                image_tag=tag,
+                strategy=BuildStrategy.DOCKERFILE_EXISTS,
+                build_log="",
+                project_info=info,
+            )
+        finally:
+            rm_tree(tmp_parent)

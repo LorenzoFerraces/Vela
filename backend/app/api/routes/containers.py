@@ -47,6 +47,11 @@ from app.core.exceptions import (
     ProviderConnectionError,
     RegistryAccessDeniedError,
 )
+from app.core.deploy_source_suggestions import (
+    DeploySourcesResponse,
+    collect_deploy_source_suggestions,
+)
+from app.core import user_library
 from app.core.registry_image_suggestions import (
     fetch_docker_hub_suggestions,
     merge_image_suggestions,
@@ -211,9 +216,14 @@ async def image_availability(
     orchestrator: Annotated[ContainerOrchestrator, Depends(get_orchestrator)],
     _current_user: Annotated[User, Depends(get_current_user)],
 ) -> ImageAvailabilityResponse:
-    """Check whether a registry image reference exists (local engine or remote manifest).
-
-    Git clone URLs are returned with ``checked=false`` so the UI can skip gating.
+    """
+    Determine whether the given Docker image reference or Git source is available.
+    
+    Parameters:
+        ref (str): A Docker image reference or a Git clone URL.
+    
+    Returns:
+        ImageAvailabilityResponse: For Git clone URLs, `available` is `true` and `checked` is `false`. For image references, `checked` is `true` and `available` is `true` when the image manifest or local image is found. If the image does not exist, `available` is `false`, `can_attempt_deploy` is `false`, and `detail`/`error_code` contain registry error information. If access to the registry is denied, `available` is `false`, `can_attempt_deploy` is `true`, and `detail`/`error_code` contain registry error information.
     """
     stripped = ref.strip()
     kind, source = _infer_source_kind(stripped)
@@ -255,6 +265,33 @@ async def image_availability(
     )
 
 
+@router.get("/deploy-sources", response_model=DeploySourcesResponse)
+async def deploy_source_suggestions(
+    orchestrator: Annotated[ContainerOrchestrator, Depends(get_orchestrator)],
+    current_user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[AsyncSession, Depends(get_db)],
+    q: Annotated[str, Query(max_length=128)] = "",
+    limit: Annotated[int, Query(ge=1, le=40)] = 22,
+) -> DeploySourcesResponse:
+    """
+    Provide unified autocomplete suggestions for registry images, GitHub repositories, and user Dockerfile templates.
+    
+    Parameters:
+        q (str): Search query to match suggestions; empty string returns broad suggestions.
+        limit (int): Maximum number of suggestions to return (1–40).
+    
+    Returns:
+        DeploySourcesResponse: Aggregated suggestion list combining registry images, GitHub repositories, and the current user's Dockerfile templates.
+    """
+    return await collect_deploy_source_suggestions(
+        session=session,
+        user=current_user,
+        orchestrator=orchestrator,
+        query=q,
+        limit=limit,
+    )
+
+
 @router.get("/image/suggestions", response_model=ImageSuggestionsResponse)
 async def image_suggestions(
     orchestrator: Annotated[ContainerOrchestrator, Depends(get_orchestrator)],
@@ -262,7 +299,16 @@ async def image_suggestions(
     q: Annotated[str, Query(max_length=128)] = "",
     limit: Annotated[int, Query(ge=1, le=40)] = 20,
 ) -> ImageSuggestionsResponse:
-    """Autocomplete registry images: local engine tags plus Docker Hub (sorted by pull count)."""
+    """
+    Return image autocomplete suggestions combining local engine tags and Docker Hub results.
+    
+    Parameters:
+    	q (str): Query string to match image refs; leading/trailing whitespace is ignored.
+    	limit (int): Maximum number of suggestions to return.
+    
+    Returns:
+    	ImageSuggestionsResponse: Suggestions limited to `limit`, merged from local engine tags and Docker Hub (sorted/merged by relevance and pull count). If the orchestrator is unreachable, local tags are treated as empty and only Docker Hub results (when `q` is non-empty) are used.
+    """
     stripped = q.strip()
     try:
         local_tags = await orchestrator.list_images()
@@ -321,22 +367,26 @@ async def run_from_user_source(
     current_user: Annotated[User, Depends(get_current_user)],
     session: Annotated[AsyncSession, Depends(get_db)],
 ) -> RunFromSourceResponse:
-    """Pull or build an image from ``source``, then deploy a container.
-
-    * **Image** — registry reference (e.g. ``nginx:alpine``). The image is
-      pulled if missing, then a container is started.
-    * **Git URL** — shallow clone, ensure a ``Dockerfile`` (existing or
-      generated from ``package.json`` / Python / Go markers), ``docker build``,
-      then start a container from the new image tag.
-
-    For GitHub HTTPS URLs we transparently use the caller's stored OAuth token
-    (when they have connected GitHub in Settings) so private repos clone too.
     """
-    kind, source = _infer_source_kind(body.source)
+    Deploy a container by pulling or building an image from the user's specified source and return the deployment result.
+    
+    Depending on body.source_kind this will:
+    - "image": use the provided image reference (pull if needed) and deploy it.
+    - "dockerfile_template": build an ephemeral image from the user's saved Dockerfile template, then deploy it.
+    - "git": clone the Git source (using the caller's GitHub token for GitHub HTTPS URLs when available), build an image from the source, then deploy it.
+    When a public route is requested, route-related fields are adjusted and a Traefik route may be registered; private-repo clone failures on GitHub produce a CloneError with guidance to connect GitHub when applicable.
+    
+    Returns:
+        RunFromSourceResponse: deployment result containing the created container info, the source kind, built/pulled image tag, whether a route was wired, and an optional public URL.
+    """
+    source_kind = body.source_kind
+    if source_kind is None:
+        raise ValueError("source_kind must be set after request validation.")
 
-    if kind == "image":
+    if source_kind == "image":
+        image_ref = (body.image_ref or "").strip()
         cfg = _deploy_config_for_image(
-            image=source,
+            image=image_ref,
             container_name=body.container_name,
             host_port=body.host_port,
             container_port=body.container_port,
@@ -356,27 +406,67 @@ async def run_from_user_source(
         return RunFromSourceResponse(
             container=info,
             kind="image",
-            image=source,
+            image=image_ref,
             route_wired=route_wired,
             public_url=public_url,
         )
 
-    access_token = await _github_token_for_url(session, current_user, source)
+    if source_kind == "dockerfile_template":
+        template_id = body.dockerfile_template_id
+        if template_id is None:
+            raise ValueError("dockerfile_template_id is required.")
+        template = await user_library.get_dockerfile_template(
+            session, current_user.id, template_id
+        )
+        tag = f"vela/templatebuild:{uuid.uuid4().hex[:12]}"
+        build_result = await image_builder.build_from_dockerfile_template(
+            template.contents,
+            tag=tag,
+        )
+        cfg = _deploy_config_for_image(
+            image=build_result.image_tag,
+            container_name=body.container_name,
+            host_port=body.host_port,
+            container_port=body.container_port,
+        ).model_copy(
+            update={
+                "restart_policy": RestartPolicy.UNLESS_STOPPED,
+                "route_host": None if body.public_route else body.route_host,
+                "route_path_prefix": body.route_path_prefix,
+                "route_tls": body.route_tls if not body.public_route else False,
+                "public_route": body.public_route,
+            }
+        )
+        cfg = _with_owner_label(cfg, str(current_user.id))
+        cfg = await apply_public_route_to_deploy_config(cfg, traffic_router)
+        info, route_wired, public_url = await _deploy_and_maybe_wire_route(
+            orchestrator, traffic_router, cfg
+        )
+        return RunFromSourceResponse(
+            container=info,
+            kind="dockerfile_template",
+            image=build_result.image_tag,
+            route_wired=route_wired,
+            public_url=public_url,
+        )
+
+    git_url = (body.git_url or "").strip()
+    access_token = await _github_token_for_url(session, current_user, git_url)
     tag = f"vela/gitbuild:{uuid.uuid4().hex[:12]}"
     try:
         build_result = await image_builder.build_from_source(
-            ProjectSource(git_url=source, branch=body.git_branch),
+            ProjectSource(git_url=git_url, branch=body.git_branch),
             tag=tag,
             access_token=access_token,
         )
     except CloneError as exc:
         if (
             access_token is None
-            and _is_github_https_url(source)
+            and _is_github_https_url(git_url)
             and _looks_like_auth_failure(str(exc))
         ):
             raise CloneError(
-                source,
+                git_url,
                 "Repository looks private. Connect GitHub in Settings to deploy private repos.",
             ) from exc
         raise
