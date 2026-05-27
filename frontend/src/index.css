@@ -1039,7 +1039,7 @@ body {
 }
 
 .dashboard-page__actions {
-  margin-bottom: 0.5rem;
+  margin-top: 1.25rem;
 }
 
 /* --- Workloads table + log panel --- */
@@ -1330,19 +1330,6 @@ body {
 
 .deployment-history {
   margin-top: 2rem;
-}
-
-.deployment-history__title-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
-  margin-top: 1.5rem;
-  margin-bottom: 0.65rem;
-}
-
-.deployment-history__title-row .dashboard-page__subtitle {
-  margin: 0;
 }
 
 .deployment-history__body {

@@ -34,7 +34,11 @@ function formatSourceCell(row: DeploymentRecord): string {
   return label
 }
 
-export function DeploymentHistorySection() {
+export function DeploymentHistorySection({
+  refreshSignal = 0,
+}: {
+  refreshSignal?: number
+}) {
   const [rows, setRows] = useState<DeploymentRecord[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -58,7 +62,7 @@ export function DeploymentHistorySection() {
 
   useEffect(() => {
     void reload()
-  }, [reload])
+  }, [reload, refreshSignal])
 
   async function onCompare() {
     if (!leftId || !rightId || leftId === rightId) {
@@ -79,17 +83,7 @@ export function DeploymentHistorySection() {
 
   return (
     <section className="deployment-history">
-      <div className="deployment-history__title-row">
-        <h2 className="dashboard-page__subtitle">Deploy history</h2>
-        <button
-          type="button"
-          className="btn btn--ghost btn--sm"
-          onClick={() => void reload()}
-          disabled={loading}
-        >
-          Refresh
-        </button>
-      </div>
+      <h2 className="dashboard-page__subtitle">Deploy history</h2>
 
       <div aria-live="polite" className="deployment-history__body">
         {loading && rows.length === 0 ? (

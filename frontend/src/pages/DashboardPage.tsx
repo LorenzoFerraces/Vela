@@ -14,6 +14,7 @@ export default function DashboardPage() {
     null,
   )
   const [rowBusy, setRowBusy] = useState<string | null>(null)
+  const [historyRefreshSignal, setHistoryRefreshSignal] = useState(0)
 
   const reportListLoadError = useCallback((detail: string) => {
     setBanner({ tone: 'err', text: detail })
@@ -78,20 +79,6 @@ export default function DashboardPage() {
         </div>
       ) : null}
 
-      <div className="dashboard-page__actions">
-        <button
-          type="button"
-          className="btn btn--ghost"
-          onClick={() => {
-            setBanner(null)
-            void refresh()
-          }}
-          disabled={listLoading}
-        >
-          Refresh
-        </button>
-      </div>
-
       <h2 className="dashboard-page__subtitle">Running workloads</h2>
       <WorkloadsTable
         listLoading={listLoading}
@@ -103,7 +90,22 @@ export default function DashboardPage() {
         prioritizeProblemWorkloads
       />
 
-      <DeploymentHistorySection />
+      <DeploymentHistorySection refreshSignal={historyRefreshSignal} />
+
+      <div className="dashboard-page__actions">
+        <button
+          type="button"
+          className="btn btn--ghost"
+          onClick={() => {
+            setBanner(null)
+            void refresh()
+            setHistoryRefreshSignal((signal) => signal + 1)
+          }}
+          disabled={listLoading}
+        >
+          Refresh
+        </button>
+      </div>
     </section>
   )
 }
