@@ -1309,18 +1309,33 @@ body {
 
 .containers-env-list {
   list-style: none;
-  margin: 0;
+  margin: 0 0 0.5rem;
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 0.35rem;
+  gap: 0.5rem;
+  width: 100%;
 }
 
 .containers-env-list__row {
   display: grid;
-  grid-template-columns: 1fr 1fr auto;
-  gap: 0.35rem;
-  align-items: center;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 5.25rem;
+  gap: 0.5rem;
+  align-items: stretch;
+  width: 100%;
+}
+
+.containers-env-list__row .containers-form__input {
+  margin-bottom: 0;
+  min-width: 0;
+}
+
+.containers-env-list__row .btn {
+  margin-bottom: 0;
+  align-self: stretch;
+  justify-self: stretch;
+  padding-left: 0.5rem;
+  padding-right: 0.5rem;
 }
 
 .btn--compact {
