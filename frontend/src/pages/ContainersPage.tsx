@@ -343,7 +343,7 @@ export default function ContainersPage() {
             }}
             disabled={listLoading || busy}
           >
-            Refresh list
+            Refresh
           </button>
         </div>
       </form>
