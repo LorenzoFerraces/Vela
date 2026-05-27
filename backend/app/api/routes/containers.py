@@ -51,6 +51,7 @@ from app.core.deploy_source_suggestions import (
     DeploySourcesResponse,
     collect_deploy_source_suggestions,
 )
+from app.core.deployment_history import DeploymentSnapshot, record_deployment
 from app.core import user_library
 from app.core.registry_image_suggestions import (
     fetch_docker_hub_suggestions,
@@ -181,6 +182,8 @@ def _deploy_config_for_image(
     container_name: str | None,
     host_port: int | None,
     container_port: int,
+    env_vars: dict[str, str] | None = None,
+    command: list[str] | None = None,
 ) -> DeployConfig:
     ports: list[PortMapping] = []
     if host_port is not None:
@@ -190,6 +193,48 @@ def _deploy_config_for_image(
         name=container_name,
         ports=ports,
         container_listen_port=container_port,
+        env_vars=env_vars or {},
+        command=command,
+    )
+
+
+def _route_updates_from_run_body(body: RunFromSourceRequest) -> dict[str, object]:
+    return {
+        "route_host": None if body.public_route else body.route_host,
+        "route_path_prefix": body.route_path_prefix,
+        "route_tls": body.route_tls if not body.public_route else False,
+        "public_route": body.public_route,
+    }
+
+
+async def _persist_run_deployment(
+    session: AsyncSession,
+    user: User,
+    body: RunFromSourceRequest,
+    info: ContainerInfo,
+    *,
+    source_kind: str,
+    source_ref: str,
+    image_tag: str,
+    dockerfile_snapshot: str | None,
+    public_url: str | None,
+) -> None:
+    await record_deployment(
+        session,
+        user_id=user.id,
+        snapshot=DeploymentSnapshot(
+            container_id=info.id,
+            container_name=info.name or body.container_name,
+            source_kind=source_kind,
+            source_ref=source_ref,
+            git_branch=body.git_branch if source_kind == "git" else None,
+            image_tag=image_tag,
+            container_port=body.container_port,
+            env_vars=dict(body.env_vars),
+            command=list(body.command) if body.command else None,
+            dockerfile_snapshot=dockerfile_snapshot,
+            public_url=public_url,
+        ),
     )
 
 
@@ -390,18 +435,24 @@ async def run_from_user_source(
             container_name=body.container_name,
             host_port=body.host_port,
             container_port=body.container_port,
-        ).model_copy(
-            update={
-                "route_host": None if body.public_route else body.route_host,
-                "route_path_prefix": body.route_path_prefix,
-                "route_tls": body.route_tls if not body.public_route else False,
-                "public_route": body.public_route,
-            }
-        )
+            env_vars=body.env_vars,
+            command=body.command,
+        ).model_copy(update=_route_updates_from_run_body(body))
         cfg = _with_owner_label(cfg, str(current_user.id))
         cfg = await apply_public_route_to_deploy_config(cfg, traffic_router)
         info, route_wired, public_url = await _deploy_and_maybe_wire_route(
             orchestrator, traffic_router, cfg
+        )
+        await _persist_run_deployment(
+            session,
+            current_user,
+            body,
+            info,
+            source_kind="image",
+            source_ref=image_ref,
+            image_tag=image_ref,
+            dockerfile_snapshot=None,
+            public_url=public_url,
         )
         return RunFromSourceResponse(
             container=info,
@@ -428,19 +479,29 @@ async def run_from_user_source(
             container_name=body.container_name,
             host_port=body.host_port,
             container_port=body.container_port,
+            env_vars=body.env_vars,
+            command=body.command,
         ).model_copy(
             update={
                 "restart_policy": RestartPolicy.UNLESS_STOPPED,
-                "route_host": None if body.public_route else body.route_host,
-                "route_path_prefix": body.route_path_prefix,
-                "route_tls": body.route_tls if not body.public_route else False,
-                "public_route": body.public_route,
+                **_route_updates_from_run_body(body),
             }
         )
         cfg = _with_owner_label(cfg, str(current_user.id))
         cfg = await apply_public_route_to_deploy_config(cfg, traffic_router)
         info, route_wired, public_url = await _deploy_and_maybe_wire_route(
             orchestrator, traffic_router, cfg
+        )
+        await _persist_run_deployment(
+            session,
+            current_user,
+            body,
+            info,
+            source_kind="dockerfile_template",
+            source_ref=str(template_id),
+            image_tag=build_result.image_tag,
+            dockerfile_snapshot=build_result.dockerfile_snapshot or template.contents,
+            public_url=public_url,
         )
         return RunFromSourceResponse(
             container=info,
@@ -476,19 +537,29 @@ async def run_from_user_source(
         container_name=body.container_name,
         host_port=body.host_port,
         container_port=body.container_port,
+        env_vars=body.env_vars,
+        command=body.command,
     ).model_copy(
         update={
             "restart_policy": RestartPolicy.UNLESS_STOPPED,
-            "route_host": None if body.public_route else body.route_host,
-            "route_path_prefix": body.route_path_prefix,
-            "route_tls": body.route_tls if not body.public_route else False,
-            "public_route": body.public_route,
+            **_route_updates_from_run_body(body),
         }
     )
     cfg = _with_owner_label(cfg, str(current_user.id))
     cfg = await apply_public_route_to_deploy_config(cfg, traffic_router)
     info, route_wired, public_url = await _deploy_and_maybe_wire_route(
         orchestrator, traffic_router, cfg
+    )
+    await _persist_run_deployment(
+        session,
+        current_user,
+        body,
+        info,
+        source_kind="git",
+        source_ref=git_url,
+        image_tag=build_result.image_tag,
+        dockerfile_snapshot=build_result.dockerfile_snapshot,
+        public_url=public_url,
     )
     return RunFromSourceResponse(
         container=info,

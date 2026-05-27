@@ -56,4 +56,16 @@ test.describe('Settings page', () => {
     ).toBeVisible()
     await expect(authenticatedPage).toHaveURL(/\/settings$/)
   })
+
+  test('renders AI deploy analysis preferences', async ({
+    authenticatedPage,
+  }) => {
+    await authenticatedPage.goto('/settings')
+    await expect(
+      authenticatedPage.getByRole('heading', { name: 'AI deploy analysis', level: 3 }),
+    ).toBeVisible()
+    await expect(
+      authenticatedPage.getByRole('checkbox', { name: 'Container port' }),
+    ).toBeChecked()
+  })
 })

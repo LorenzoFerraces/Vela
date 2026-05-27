@@ -1,6 +1,6 @@
 """Drop per-user saved image refs table (images).
 
-Revision ID: 0004_drop_images
+Revision ID: 0004_drop_images_table
 Revises: 0003_user_library_constraints
 Create Date: 2026-05-18
 
@@ -22,7 +22,7 @@ depends_on: str | Sequence[str] | None = None
 def upgrade() -> None:
     """
     Drop the "images" table from the database schema.
-    
+
     This migration step removes the images table and all data it contains.
     """
     op.drop_table("images")
@@ -31,13 +31,13 @@ def upgrade() -> None:
 def downgrade() -> None:
     """
     Recreates the `images` table with its original schema, constraints, and index.
-    
+
     Creates an `images` table containing:
     - `id`: UUID primary key, not nullable
     - `owner_id`: UUID, not nullable, foreign key to `users.id` with ON DELETE CASCADE (constraint name `fk_images_owner`)
     - `ref`: string (max length 512), not nullable
     - `created_at`: timezone-aware DateTime, not nullable
-    
+
     Also adds a unique constraint on (`owner_id`, `ref`) named `uq_images_owner_ref` and a non-unique index `ix_images_owner_id` on `owner_id`.
     """
     op.create_table(

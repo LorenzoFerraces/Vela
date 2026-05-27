@@ -82,6 +82,30 @@ def e2e_github_repos_if_enabled(
     return repos
 
 
+def e2e_git_source_analysis_if_enabled(
+    git_url: str,
+    git_branch: str,
+) -> "GitSourceAnalysis | None":
+    from app.api.schemas import GitSourceAnalysis
+
+    if not e2e_mode_enabled():
+        return None
+    _ = git_url
+    branch = (git_branch or "main").strip() or "main"
+    return GitSourceAnalysis(
+        git_branch=branch,
+        container_port=5173,
+        container_name="repo",
+        env_vars={"NODE_ENV": "development"},
+        start_command=None,
+        language="typescript",
+        framework="vite",
+        has_dockerfile=False,
+        build_strategy="generated_dockerfile",
+        summary_hint="E2E fixture: Vite dev server on port 5173.",
+    )
+
+
 async def ensure_e2e_database() -> None:
     """
     Prepare the database schema and idempotently seed E2E users and a GitHub OAuth identity when E2E mode is enabled.
@@ -93,6 +117,7 @@ async def ensure_e2e_database() -> None:
 
     engine = get_engine()
     async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.drop_all)
         await connection.run_sync(Base.metadata.create_all)
 
     session_factory = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)

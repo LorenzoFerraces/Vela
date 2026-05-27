@@ -6,8 +6,12 @@ import {
   disconnectGithub,
   formatApiError,
   getAccessToken,
+  getAiPrefillPreferences,
+  getGeminiConfigStatus,
   getGithubAuthorizeUrl,
   getGithubStatusWithRetry,
+  patchAiPrefillPreferences,
+  type AiPrefillPreferences,
 } from '../api/client'
 
 type StatusState =
@@ -201,7 +205,120 @@ export default function SettingsPage() {
           <DisconnectedGithubCard onConnect={handleConnect} busy={busy} />
         )}
       </div>
+
+      <AiPrefillSettingsCard />
     </section>
+  )
+}
+
+const AI_PREFILL_LABELS: Record<keyof AiPrefillPreferences, string> = {
+  git_branch: 'Git branch',
+  container_port: 'Container port',
+  container_name: 'Container name',
+  env_vars: 'Environment variables',
+  start_command: 'Start command',
+}
+
+function AiPrefillSettingsCard() {
+  const [preferences, setPreferences] = useState<AiPrefillPreferences | null>(
+    null
+  )
+  const [geminiConfigured, setGeminiConfigured] = useState<boolean | null>(
+    null
+  )
+  const [loading, setLoading] = useState(true)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    void Promise.all([getAiPrefillPreferences(), getGeminiConfigStatus()])
+      .then(([prefs, geminiStatus]) => {
+        if (!cancelled) {
+          setPreferences(prefs)
+          setGeminiConfigured(geminiStatus.configured)
+        }
+      })
+      .catch((loadError) => {
+        if (!cancelled) {
+          setError(formatApiError(loadError))
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setLoading(false)
+        }
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  async function onToggle(field: keyof AiPrefillPreferences, enabled: boolean) {
+    if (!preferences) {
+      return
+    }
+    setBusy(true)
+    setError(null)
+    try {
+      const updated = await patchAiPrefillPreferences({ [field]: enabled })
+      setPreferences(updated)
+    } catch (patchError) {
+      setError(formatApiError(patchError))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="settings-card">
+      <div className="settings-card__header">
+        <div>
+          <h3 className="settings-card__title">AI deploy analysis</h3>
+          <p className="settings-card__subtitle">
+            When you pick a GitHub repo, Vela can analyze it and pre-fill the
+            run form.
+          </p>
+        </div>
+      </div>
+      <div className="settings-card__body">
+        {loading ? (
+          <p className="settings-card__muted">Loading preferences…</p>
+        ) : null}
+        {error ? (
+          <p className="settings-banner settings-banner--err" role="alert">
+            {error}
+          </p>
+        ) : null}
+        {geminiConfigured === false ? (
+          <p className="settings-card__muted">
+            AI analysis is unavailable until the server sets VELA_GEMINI_API_KEY.
+            Deterministic fallbacks may still apply when analyzing repos.
+          </p>
+        ) : null}
+        {preferences ? (
+          <ul className="settings-ai-prefill-list">
+            {(Object.keys(AI_PREFILL_LABELS) as Array<keyof AiPrefillPreferences>).map(
+              (field) => (
+                <li key={field} className="settings-ai-prefill-list__row">
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={preferences[field]}
+                      disabled={busy}
+                      onChange={(event) =>
+                        void onToggle(field, event.target.checked)
+                      }
+                    />
+                    {AI_PREFILL_LABELS[field]}
+                  </label>
+                </li>
+              )
+            )}
+          </ul>
+        ) : null}
+      </div>
+    </div>
   )
 }
 

@@ -14,9 +14,11 @@ from app.api.routes import (
     auth,
     builder,
     containers,
+    deployments,
     dockerfile_templates,
     github,
     images,
+    settings,
     traffic,
 )
 
@@ -109,6 +111,16 @@ def create_app() -> FastAPI:
         github.router_resource,
         prefix=f"{API_PREFIX}/github",
         tags=["github"],
+    )
+    application.include_router(
+        settings.router,
+        prefix=f"{API_PREFIX}/settings",
+        tags=["settings"],
+    )
+    application.include_router(
+        deployments.router,
+        prefix=f"{API_PREFIX}/deployments",
+        tags=["deployments"],
     )
 
     @application.get(f"{API_PREFIX}/health", tags=["health"])

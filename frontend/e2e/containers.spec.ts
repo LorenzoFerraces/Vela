@@ -33,7 +33,7 @@ test.describe('Containers page', () => {
     await sourceInput.click()
     await sourceInput.fill('nginx')
     await authenticatedPage
-      .getByRole('option', { name: 'nginx:alpine' })
+      .getByRole('option', { name: 'nginx:alpine', exact: true })
       .click()
     await expect(
       authenticatedPage.getByText('Image reference found.'),
@@ -58,5 +58,32 @@ test.describe('Containers page', () => {
     await expect(
       authenticatedPage.getByLabel('Git branch'),
     ).toBeVisible()
+    await authenticatedPage.getByRole('button', { name: 'Analyze repository' }).click()
+    await expect(
+      authenticatedPage.getByText('E2E fixture: Vite dev server on port 5173.'),
+    ).toBeVisible()
+    await expect(authenticatedPage.getByLabel('Container port')).toHaveValue('5173')
   })
+
+  test('advanced env and start command can be set before build', async ({
+    authenticatedPage,
+  }) => {
+    await authenticatedPage.goto('/containers')
+    const sourceInput = authenticatedPage.getByLabel('Deploy source')
+    await sourceInput.click()
+    await sourceInput.fill('nginx')
+    await authenticatedPage.getByRole('option', { name: 'nginx:alpine', exact: true }).click()
+    await expect(
+      authenticatedPage.getByText('Image reference found.'),
+    ).toBeVisible()
+    await authenticatedPage.getByRole('button', { name: 'Advanced options' }).click()
+    await authenticatedPage.getByLabel('Environment variable name 1').fill('FOO')
+    await authenticatedPage.getByLabel('Environment variable value 1').fill('bar')
+    await authenticatedPage.getByLabel('Start command').fill('nginx -g daemon off;')
+    await authenticatedPage.getByRole('button', { name: 'Build' }).click()
+    await expect(
+      authenticatedPage.getByRole('alert').filter({ hasText: 'Started' }),
+    ).toBeVisible()
+  })
+
 })

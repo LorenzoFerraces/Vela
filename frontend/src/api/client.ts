@@ -317,6 +317,8 @@ export interface RunFromSourceRequest {
   route_path_prefix?: string
   route_tls?: boolean
   public_route?: boolean
+  env_vars?: Record<string, string>
+  command?: string[] | null
 }
 
 export interface RunFromSourceResponse {
@@ -520,6 +522,113 @@ export async function runContainerFromSource(
   return apiPost<RunFromSourceResponse, RunFromSourceRequest>(
     '/api/containers/run',
     body
+  )
+}
+
+export type AiPrefillPreferences = {
+  git_branch: boolean
+  container_port: boolean
+  container_name: boolean
+  env_vars: boolean
+  start_command: boolean
+}
+
+export type AiPrefillPreferencesUpdate = Partial<AiPrefillPreferences>
+
+export type GitSourceAnalysis = {
+  git_branch: string | null
+  container_port: number
+  container_name: string | null
+  env_vars: Record<string, string>
+  start_command: string[] | null
+  language: string | null
+  framework: string | null
+  has_dockerfile: boolean
+  build_strategy: 'dockerfile_exists' | 'generated_dockerfile'
+  summary_hint: string
+}
+
+export type DeploymentRecord = {
+  id: string
+  user_id: string
+  author_email: string
+  container_id: string
+  container_name: string | null
+  source_kind: RunSourceKind
+  source_ref: string
+  git_branch: string | null
+  image_tag: string
+  container_port: number
+  env_vars: Record<string, string>
+  command: string[] | null
+  dockerfile_snapshot: string | null
+  public_url: string | null
+  created_at: string
+}
+
+export type DeploymentEnvDiff = {
+  added: Record<string, string>
+  removed: Record<string, string>
+  changed: Record<string, { before: string; after: string }>
+}
+
+export type DeploymentDiffResponse = {
+  left_id: string
+  right_id: string
+  env: DeploymentEnvDiff
+  dockerfile_diff: string[]
+}
+
+export async function getAiPrefillPreferences(): Promise<AiPrefillPreferences> {
+  return apiGet<AiPrefillPreferences>('/api/settings/ai-prefill')
+}
+
+export async function patchAiPrefillPreferences(
+  patch: AiPrefillPreferencesUpdate
+): Promise<AiPrefillPreferences> {
+  return apiPatch<AiPrefillPreferences, AiPrefillPreferencesUpdate>(
+    '/api/settings/ai-prefill',
+    patch
+  )
+}
+
+export async function getGeminiConfigStatus(): Promise<{ configured: boolean }> {
+  return apiGet<{ configured: boolean }>('/api/settings/gemini-status')
+}
+
+export async function analyzeGitSource(body: {
+  git_url: string
+  git_branch: string
+}): Promise<GitSourceAnalysis> {
+  return apiPost<GitSourceAnalysis, typeof body>(
+    '/api/builder/analyze-source',
+    body
+  )
+}
+
+export async function listDeployments(options: {
+  container_name?: string
+  limit?: number
+} = {}): Promise<DeploymentRecord[]> {
+  const params = new URLSearchParams()
+  if (options.container_name) {
+    params.set('container_name', options.container_name)
+  }
+  if (options.limit != null) {
+    params.set('limit', String(options.limit))
+  }
+  const query = params.toString()
+  return apiGet<DeploymentRecord[]>(
+    query ? `/api/deployments/?${query}` : '/api/deployments/'
+  )
+}
+
+export async function getDeploymentDiff(
+  leftId: string,
+  rightId: string
+): Promise<DeploymentDiffResponse> {
+  return apiGet<DeploymentDiffResponse>(
+    `/api/deployments/${encodeURIComponent(leftId)}/diff/${encodeURIComponent(rightId)}`
   )
 }
 

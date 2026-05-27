@@ -1,5 +1,6 @@
 import { NavLink, useNavigate } from 'react-router-dom'
 import { useAuth } from '../auth/AuthContext'
+import { VelaMarkIcon } from './VelaMarkIcon'
 
 const navItems = [
   { to: '/dashboard', label: 'Dashboard' },
@@ -22,8 +23,8 @@ export default function Navbar() {
   return (
     <header className="navbar">
       <NavLink to="/" className="navbar__brand" end>
-        <span className="navbar__logo" aria-hidden>
-          ▲
+        <span className="navbar__logo vela-mark-btn" aria-hidden>
+          <VelaMarkIcon size={12} />
         </span>
         <span className="navbar__title">Vela</span>
       </NavLink>

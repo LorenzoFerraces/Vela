@@ -181,6 +181,58 @@ def test_get_container(api_client: TestClient) -> None:
     assert response.json()["id"] == "cid-1"
 
 
+def test_run_from_image_with_env_and_command(
+    api_client: TestClient,
+    fake_orchestrator: FakeContainerOrchestrator,
+) -> None:
+    response = api_client.post(
+        "/api/containers/run",
+        json={
+            "source_kind": "image",
+            "image_ref": "nginx:alpine",
+            "public_route": True,
+            "container_port": 80,
+            "env_vars": {"NODE_ENV": "production", "APP_HOST": "0.0.0.0"},
+            "command": ["nginx", "-g", "daemon off;"],
+        },
+    )
+    assert response.status_code == 200
+    assert fake_orchestrator.last_deploy_config is not None
+    assert fake_orchestrator.last_deploy_config.env_vars == {
+        "NODE_ENV": "production",
+        "APP_HOST": "0.0.0.0",
+    }
+    assert fake_orchestrator.last_deploy_config.command == [
+        "nginx",
+        "-g",
+        "daemon off;",
+    ]
+
+
+def test_run_rejects_empty_env_key(api_client: TestClient) -> None:
+    response = api_client.post(
+        "/api/containers/run",
+        json={
+            "source_kind": "image",
+            "image_ref": "nginx:alpine",
+            "env_vars": {"": "value"},
+        },
+    )
+    assert response.status_code == 422
+
+
+def test_run_rejects_empty_command(api_client: TestClient) -> None:
+    response = api_client.post(
+        "/api/containers/run",
+        json={
+            "source_kind": "image",
+            "image_ref": "nginx:alpine",
+            "command": [],
+        },
+    )
+    assert response.status_code == 422
+
+
 def test_run_from_image_public_route(
     api_client: TestClient,
     fake_orchestrator: FakeContainerOrchestrator,

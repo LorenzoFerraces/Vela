@@ -7,6 +7,7 @@ import {
 } from '../api/client'
 import { WorkloadsTable } from '../components/workloads/WorkloadsTable'
 import { useContainerList } from './containers/useContainerList'
+import { DeploymentHistorySection } from './containers/DeploymentHistorySection'
 
 export default function DashboardPage() {
   const [banner, setBanner] = useState<{ tone: 'err'; text: string } | null>(
@@ -101,6 +102,8 @@ export default function DashboardPage() {
         onRemove={onRemove}
         prioritizeProblemWorkloads
       />
+
+      <DeploymentHistorySection />
     </section>
   )
 }

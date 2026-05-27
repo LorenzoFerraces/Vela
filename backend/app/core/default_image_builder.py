@@ -114,6 +114,12 @@ class DefaultImageBuilder(ImageBuilder):
             strategy, info = ensure_dockerfile_for_build(
                 Path(project_path), from_git_clone=source.git_url is not None
             )
+            dockerfile_path = Path(project_path) / "Dockerfile"
+            dockerfile_snapshot = (
+                dockerfile_path.read_text(encoding="utf-8")
+                if dockerfile_path.is_file()
+                else None
+            )
             image_id = await self._orchestrator.build_image(
                 project_path, tag=tag, dockerfile="Dockerfile"
             )
@@ -123,6 +129,7 @@ class DefaultImageBuilder(ImageBuilder):
                 strategy=strategy,
                 build_log="",
                 project_info=info,
+                dockerfile_snapshot=dockerfile_snapshot,
             )
         finally:
             if tmp_parent is not None:
@@ -172,6 +179,7 @@ class DefaultImageBuilder(ImageBuilder):
                 strategy=BuildStrategy.DOCKERFILE_EXISTS,
                 build_log="",
                 project_info=info,
+                dockerfile_snapshot=trimmed,
             )
         finally:
             rm_tree(tmp_parent)

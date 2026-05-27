@@ -8,6 +8,7 @@ from app.core.exceptions import (
     AuthError,
     BuilderError,
     CloneError,
+    GitSourceAnalysisError,
     UnsupportedProjectError,
     ContainerAlreadyRunningError,
     ContainerNotFoundError,
@@ -238,6 +239,15 @@ def register_exception_handlers(app) -> None:
     ) -> JSONResponse:
         return JSONResponse(
             status_code=status.HTTP_502_BAD_GATEWAY,
+            content={"detail": str(exc)},
+        )
+
+    @app.exception_handler(GitSourceAnalysisError)
+    async def git_source_analysis_handler(
+        _request: Request, exc: GitSourceAnalysisError
+    ) -> JSONResponse:
+        return JSONResponse(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             content={"detail": str(exc)},
         )
 

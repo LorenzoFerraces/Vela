@@ -152,3 +152,4 @@ class BuildResult(BaseModel):
     strategy: BuildStrategy
     build_log: str
     project_info: ProjectInfo
+    dockerfile_snapshot: str | None = None

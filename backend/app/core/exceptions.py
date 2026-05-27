@@ -113,6 +113,10 @@ class AnalysisError(BuilderError):
         super().__init__(f"Project analysis failed for {path}: {message}")
 
 
+class GitSourceAnalysisError(BuilderError):
+    """Gemini or repository analysis for deploy pre-fill failed."""
+
+
 class DockerfileGenerationError(BuilderError):
     def __init__(self, language: str, message: str) -> None:
         self.language = language
