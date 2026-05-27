@@ -365,7 +365,6 @@ export default function ContainersPage() {
         onRemove={onRemove}
       />
 
-      <DeploymentHistorySection key={historyRefreshKey} />
     </section>
   )
 }

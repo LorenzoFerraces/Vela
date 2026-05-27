@@ -15,6 +15,25 @@ function formatWhen(iso: string): string {
   return date.toLocaleString()
 }
 
+function formatSourceKind(sourceKind: DeploymentRecord['source_kind']): string {
+  switch (sourceKind) {
+    case 'image':
+      return 'Image'
+    case 'git':
+      return 'Git'
+    case 'dockerfile_template':
+      return 'Dockerfile'
+  }
+}
+
+function formatSourceCell(row: DeploymentRecord): string {
+  const label = formatSourceKind(row.source_kind)
+  if (row.git_branch) {
+    return `${label} @ ${row.git_branch}`
+  }
+  return label
+}
+
 export function DeploymentHistorySection() {
   const [rows, setRows] = useState<DeploymentRecord[]>([])
   const [loading, setLoading] = useState(true)
@@ -60,11 +79,11 @@ export function DeploymentHistorySection() {
 
   return (
     <section className="deployment-history">
-      <div className="deployment-history__header">
+      <div className="deployment-history__title-row">
         <h2 className="dashboard-page__subtitle">Deploy history</h2>
         <button
           type="button"
-          className="btn btn--ghost btn--compact"
+          className="btn btn--ghost btn--sm"
           onClick={() => void reload()}
           disabled={loading}
         >
@@ -72,54 +91,55 @@ export function DeploymentHistorySection() {
         </button>
       </div>
 
-      {loading ? (
-        <p className="containers-muted">Loading deploy history…</p>
-      ) : null}
-      {error ? (
-        <p className="containers-form-message containers-form-message--err" role="alert">
-          {error}
-        </p>
-      ) : null}
+      <div aria-live="polite" className="deployment-history__body">
+        {loading && rows.length === 0 ? (
+          <p className="containers-muted">Loading deploy history…</p>
+        ) : null}
+        {error ? (
+          <p className="containers-form-message containers-form-message--err" role="alert">
+            {error}
+          </p>
+        ) : null}
 
-      {!loading && rows.length === 0 ? (
-        <p className="containers-muted">No deployments recorded yet.</p>
-      ) : null}
+        {!loading && rows.length === 0 ? (
+          <p className="containers-muted">No deployments recorded yet.</p>
+        ) : null}
 
-      {rows.length > 0 ? (
-        <div className="deployment-history__table-wrap">
-          <table className="workloads-table">
-            <thead>
-              <tr>
-                <th>When</th>
-                <th>Author</th>
-                <th>Source</th>
-                <th>Image</th>
-                <th>Name</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((row) => (
-                <tr key={row.id}>
-                  <td>{formatWhen(row.created_at)}</td>
-                  <td>{row.author_email}</td>
-                  <td>
-                    {row.source_kind}
-                    {row.git_branch ? ` @ ${row.git_branch}` : ''}
-                  </td>
-                  <td>{row.image_tag}</td>
-                  <td>{row.container_name ?? '—'}</td>
+        {rows.length > 0 ? (
+          <div className="containers-table-wrap workloads-table-wrap">
+            <table className="containers-table workloads-table deployment-history__table">
+              <thead>
+                <tr>
+                  <th>When</th>
+                  <th>Author</th>
+                  <th>Source</th>
+                  <th>Image</th>
+                  <th>Name</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      ) : null}
+              </thead>
+              <tbody>
+                {rows.map((row) => (
+                  <tr key={row.id}>
+                    <td className="deployment-history__when">{formatWhen(row.created_at)}</td>
+                    <td className="deployment-history__author">{row.author_email}</td>
+                    <td>
+                      <span className="containers-status">{formatSourceCell(row)}</span>
+                    </td>
+                    <td className="containers-table__mono">{row.image_tag}</td>
+                    <td>{row.container_name ?? '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : null}
+      </div>
 
       {rows.length >= 2 ? (
         <div className="deployment-history__compare">
           <h3 className="deployment-history__compare-title">Compare versions</h3>
           <div className="deployment-history__compare-controls">
-            <label>
+            <label className="deployment-history__compare-field">
               <span className="containers-form__label">Older</span>
               <select
                 className="containers-form__input"
@@ -134,7 +154,7 @@ export function DeploymentHistorySection() {
                 ))}
               </select>
             </label>
-            <label>
+            <label className="deployment-history__compare-field">
               <span className="containers-form__label">Newer</span>
               <select
                 className="containers-form__input"
@@ -151,7 +171,7 @@ export function DeploymentHistorySection() {
             </label>
             <button
               type="button"
-              className="btn btn--ghost"
+              className="btn btn--ghost btn--sm"
               disabled={!leftId || !rightId || leftId === rightId || diffLoading}
               onClick={() => void onCompare()}
             >
@@ -161,7 +181,7 @@ export function DeploymentHistorySection() {
 
           {diff ? (
             <div className="deployment-history__diff">
-              <h4>Environment changes</h4>
+              <h4 className="deployment-history__diff-heading">Environment changes</h4>
               {Object.keys(diff.env.added).length === 0 &&
               Object.keys(diff.env.removed).length === 0 &&
               Object.keys(diff.env.changed).length === 0 ? (
@@ -181,7 +201,7 @@ export function DeploymentHistorySection() {
                   ))}
                 </ul>
               )}
-              <h4>Dockerfile diff</h4>
+              <h4 className="deployment-history__diff-heading">Dockerfile diff</h4>
               {diff.dockerfile_diff.length === 0 ? (
                 <p className="containers-muted">No Dockerfile diff.</p>
               ) : (

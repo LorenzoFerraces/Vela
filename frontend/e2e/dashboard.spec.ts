@@ -75,4 +75,26 @@ test.describe('Dashboard page', () => {
       authenticatedPage.getByText(deployBody.container.name),
     ).toBeVisible()
   })
+
+  test('deploy history lists recent deployments', async ({
+    authenticatedPage,
+  }) => {
+    const deployResponse = await deployImageContainer(
+      authenticatedPage,
+      'nginx:alpine',
+      `dash-history-${Date.now()}`,
+    )
+    expect(deployResponse.ok()).toBeTruthy()
+
+    await authenticatedPage.goto('/dashboard')
+    await expect(
+      authenticatedPage.getByRole('heading', { name: 'Deploy history', level: 2 }),
+    ).toBeVisible()
+    await expect(
+      authenticatedPage
+        .locator('.deployment-history')
+        .getByRole('cell', { name: 'nginx:alpine' })
+        .first(),
+    ).toBeVisible()
+  })
 })
