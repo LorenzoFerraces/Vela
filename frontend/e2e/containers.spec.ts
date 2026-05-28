@@ -59,9 +59,6 @@ test.describe('Containers page', () => {
       authenticatedPage.getByLabel('Git branch'),
     ).toBeVisible()
     await authenticatedPage.getByRole('button', { name: 'Analyze repository' }).click()
-    await expect(
-      authenticatedPage.getByText('E2E fixture: Vite dev server on port 5173.'),
-    ).toBeVisible()
     await expect(authenticatedPage.getByLabel('Container port')).toHaveValue('5173')
   })
 

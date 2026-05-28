@@ -184,7 +184,11 @@ def test_get_container(api_client: TestClient) -> None:
 def test_run_from_image_with_env_and_command(
     api_client: TestClient,
     fake_orchestrator: FakeContainerOrchestrator,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setenv("VELA_PUBLIC_ROUTE_DOMAIN", "apps.example.com")
+    monkeypatch.setenv("VELA_PUBLIC_URL_SCHEME", "https")
+
     response = api_client.post(
         "/api/containers/run",
         json={
