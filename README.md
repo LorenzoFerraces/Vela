@@ -1,4 +1,14 @@
+<p align="center">
+  <img src="docs/assets/vela-logo.png" alt="Vela" width="320" />
+  <br />
+  <sub>Logo by Fedra Bacigalupo</a></sub>
+</p>
+
 # Vela
+
+[![Backend tests](https://github.com/LorenzoFerraces/Vela/actions/workflows/backend-tests.yml/badge.svg)](https://github.com/LorenzoFerraces/Vela/actions/workflows/backend-tests.yml)
+[![E2E](https://github.com/LorenzoFerraces/Vela/actions/workflows/e2e.yml/badge.svg)](https://github.com/LorenzoFerraces/Vela/actions/workflows/e2e.yml)
+[![License: GPL-3.0](https://img.shields.io/github/license/LorenzoFerraces/Vela)](LICENSE)
 
 FastAPI backend, Vite/React frontend, optional Traefik as an edge proxy, and PostgreSQL for users and related data.
 
