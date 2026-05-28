@@ -6,8 +6,7 @@
 
 # Vela
 
-[![Backend tests](https://github.com/LorenzoFerraces/Vela/actions/workflows/backend-tests.yml/badge.svg)](https://github.com/LorenzoFerraces/Vela/actions/workflows/backend-tests.yml)
-[![E2E](https://github.com/LorenzoFerraces/Vela/actions/workflows/e2e.yml/badge.svg)](https://github.com/LorenzoFerraces/Vela/actions/workflows/e2e.yml)
+[![CI](https://github.com/LorenzoFerraces/Vela/actions/workflows/ci.yml/badge.svg)](https://github.com/LorenzoFerraces/Vela/actions/workflows/ci.yml)
 [![License: GPL-3.0](https://img.shields.io/github/license/LorenzoFerraces/Vela)](LICENSE)
 
 FastAPI backend, Vite/React frontend, optional Traefik as an edge proxy, and PostgreSQL for users and related data.
@@ -181,7 +180,7 @@ Useful variants:
 | `npm run test:e2e:headed` | Watch the browser |
 | `npm run test:e2e:ui` | Open the Playwright UI runner |
 
-The CI workflow (`.github/workflows/e2e.yml`) installs Python + Node + Chromium and runs the full suite on every push and pull request that touches `frontend/` or `backend/`.
+The CI workflow (`.github/workflows/ci.yml`) installs Python + Node + Chromium and runs backend pytest and the Playwright suite on every push and pull request that touches `frontend/` or `backend/`.
 
 ## Troubleshooting
 
