@@ -59,7 +59,7 @@ test.describe('Containers page', () => {
       authenticatedPage.getByLabel('Git branch'),
     ).toBeVisible()
     await authenticatedPage.getByRole('button', { name: 'Analyze repository' }).click()
-    await expect(authenticatedPage.getByLabel('Container port')).toHaveValue('5173')
+    await expect(authenticatedPage.getByLabel('Container port')).toHaveValue('80')
   })
 
   test('advanced env and start command can be set before build', async ({
