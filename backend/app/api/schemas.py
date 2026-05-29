@@ -87,6 +87,49 @@ class RunFromSourceRequest(BaseModel):
             "route_host from this request is ignored."
         ),
     )
+    env_vars: dict[str, str] = Field(
+        default_factory=dict,
+        description="Environment variables injected into the container at start.",
+    )
+    command: list[str] | None = Field(
+        default=None,
+        description="Optional command override (Docker CMD) when starting the container.",
+    )
+
+    @field_validator("env_vars")
+    @classmethod
+    def validate_env_vars(cls, value: dict[str, str]) -> dict[str, str]:
+        validated: dict[str, str] = {}
+        original_keys_by_trimmed: dict[str, str] = {}
+        for key, env_value in value.items():
+            trimmed_key = key.strip()
+            if not trimmed_key:
+                msg = "Environment variable keys cannot be empty."
+                raise ValueError(msg)
+            if len(trimmed_key) > 256:
+                msg = "Environment variable keys cannot exceed 256 characters."
+                raise ValueError(msg)
+            if trimmed_key in original_keys_by_trimmed:
+                prior_key = original_keys_by_trimmed[trimmed_key]
+                msg = (
+                    f"Duplicate environment variable keys after trimming: "
+                    f"{prior_key!r} and {key!r} both map to {trimmed_key!r}."
+                )
+                raise ValueError(msg)
+            original_keys_by_trimmed[trimmed_key] = key
+            validated[trimmed_key] = env_value
+        return validated
+
+    @field_validator("command")
+    @classmethod
+    def validate_command(cls, value: list[str] | None) -> list[str] | None:
+        if value is None:
+            return None
+        tokens = [token.strip() for token in value if token.strip()]
+        if not tokens:
+            msg = "command must contain at least one non-empty token when provided."
+            raise ValueError(msg)
+        return tokens
 
     @field_validator("route_path_prefix")
     @classmethod
@@ -251,6 +294,92 @@ class ContainerDeployResponse(BaseModel):
         default=None,
         description="Canonical URL when public_route was used and the route was wired.",
     )
+
+
+# ---------------------------------------------------------------------------
+# Git source analysis (Gemini pre-fill)
+# ---------------------------------------------------------------------------
+
+
+class AnalyzeGitSourceRequest(BaseModel):
+    git_url: str = Field(..., min_length=1, max_length=2048)
+    git_branch: str = Field(default="main", max_length=256)
+
+
+class GitSourceAnalysis(BaseModel):
+    git_branch: str | None = None
+    container_port: int = Field(default=80, ge=1, le=65535)
+    container_name: str | None = None
+    env_vars: dict[str, str] = Field(default_factory=dict)
+    start_command: list[str] | None = None
+    language: str | None = None
+    framework: str | None = None
+    has_dockerfile: bool = False
+    build_strategy: Literal["dockerfile_exists", "generated_dockerfile"] = (
+        "generated_dockerfile"
+    )
+    summary_hint: str = ""
+
+
+class AiPrefillPreferences(BaseModel):
+    git_branch: bool = True
+    container_port: bool = True
+    container_name: bool = True
+    env_vars: bool = True
+    start_command: bool = True
+
+
+class AiPrefillPreferencesUpdate(BaseModel):
+    git_branch: bool | None = None
+    container_port: bool | None = None
+    container_name: bool | None = None
+    env_vars: bool | None = None
+    start_command: bool | None = None
+
+
+class GeminiConfigStatus(BaseModel):
+    configured: bool
+
+
+# ---------------------------------------------------------------------------
+# Deployment history
+# ---------------------------------------------------------------------------
+
+
+class DeploymentRecordPublic(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    user_id: uuid.UUID
+    author_email: str
+    container_id: str
+    container_name: str | None
+    source_kind: Literal["image", "git", "dockerfile_template"]
+    source_ref: str
+    git_branch: str | None
+    image_tag: str
+    container_port: int
+    env_vars: dict[str, str]
+    command: list[str] | None
+    dockerfile_snapshot: str | None
+    public_url: str | None
+    created_at: datetime
+
+
+class DeploymentEnvDiff(BaseModel):
+    added: dict[str, str] = Field(default_factory=dict)
+    removed: dict[str, str] = Field(default_factory=dict)
+    changed: dict[str, dict[str, str]] = Field(
+        default_factory=dict,
+        description="Keys map to {before, after} env values.",
+    )
+
+
+class DeploymentDiffResponse(BaseModel):
+    left_id: uuid.UUID
+    right_id: uuid.UUID
+    env: DeploymentEnvDiff
+    dockerfile_diff: list[str]
 
 
 # ---------------------------------------------------------------------------

@@ -1,4 +1,13 @@
+<p align="center">
+  <img src="docs/assets/vela-logo.png" alt="Vela" width="320" />
+  <br />
+  <sub>Logo by Fedra Bacigalupo</sub>
+</p>
+
 # Vela
+
+[![CI](https://github.com/LorenzoFerraces/Vela/actions/workflows/ci.yml/badge.svg)](https://github.com/LorenzoFerraces/Vela/actions/workflows/ci.yml)
+[![License: GPL-3.0](https://img.shields.io/github/license/LorenzoFerraces/Vela)](LICENSE)
 
 FastAPI backend, Vite/React frontend, optional Traefik as an edge proxy, and PostgreSQL for users and related data.
 
@@ -74,6 +83,8 @@ Create `backend/.env` as needed. Common variables:
 | `VELA_GITHUB_OAUTH_REDIRECT_URI` | Public URL of `GET /api/auth/github/callback`, e.g. `http://localhost:8000/api/auth/github/callback` |
 | `VELA_GITHUB_OAUTH_SCOPES` | Comma-separated scopes requested from GitHub (default `repo,read:user`) |
 | `VELA_TOKEN_ENCRYPTION_KEY` | Fernet key used to encrypt third-party access tokens at rest. Generate with `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"` |
+| `VELA_GEMINI_API_KEY` | Google Gemini API key for GitHub repo analysis (pre-fill on Containers). Optional; without it, analysis uses deterministic project detection |
+| `VELA_GEMINI_MODEL` | Optional Gemini model id (default `gemini-2.0-flash`) |
 
 ```powershell
 python run.py
@@ -169,7 +180,7 @@ Useful variants:
 | `npm run test:e2e:headed` | Watch the browser |
 | `npm run test:e2e:ui` | Open the Playwright UI runner |
 
-The CI workflow (`.github/workflows/e2e.yml`) installs Python + Node + Chromium and runs the full suite on every push and pull request that touches `frontend/` or `backend/`.
+The CI workflow (`.github/workflows/ci.yml`) installs Python + Node + Chromium and runs backend pytest and the Playwright suite on every push and pull request that touches `frontend/` or `backend/`.
 
 ## Troubleshooting
 

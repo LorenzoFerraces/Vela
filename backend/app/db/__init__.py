@@ -7,7 +7,7 @@ from app.db.engine import (
     get_engine,
     get_session_factory,
 )
-from app.db.models import Dockerfile, User, UserOAuthIdentity
+from app.db.models import Dockerfile, DeploymentRecord, User, UserOAuthIdentity
 
 __all__ = [
     "Base",

@@ -5,9 +5,9 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import DateTime, ForeignKey, LargeBinary, String, Text, UniqueConstraint
+from sqlalchemy import DateTime, ForeignKey, Integer, LargeBinary, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
-from sqlalchemy.types import Uuid
+from sqlalchemy.types import JSON, Uuid
 
 from app.db.base import Base
 
@@ -31,6 +31,7 @@ class User(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=_utcnow
     )
+    ai_prefill_preferences: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
     oauth_identities: Mapped[list["UserOAuthIdentity"]] = relationship(
         back_populates="user", cascade="all, delete-orphan"
@@ -115,3 +116,35 @@ class Dockerfile(Base):
     )
 
     owner: Mapped[User] = relationship(back_populates="dockerfiles")
+
+
+class DeploymentRecord(Base):
+    __tablename__ = "deployment_records"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    container_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    container_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    source_kind: Mapped[str] = mapped_column(String(32), nullable=False)
+    source_ref: Mapped[str] = mapped_column(String(2048), nullable=False)
+    git_branch: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    image_tag: Mapped[str] = mapped_column(String(512), nullable=False)
+    container_port: Mapped[int] = mapped_column(Integer, nullable=False)
+    env_vars: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    command: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    dockerfile_snapshot: Mapped[str | None] = mapped_column(Text, nullable=True)
+    public_url: Mapped[str | None] = mapped_column(String(2048), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utcnow, index=True
+    )
+
+    user: Mapped[User] = relationship()

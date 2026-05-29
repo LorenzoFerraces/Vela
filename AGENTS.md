@@ -69,7 +69,7 @@ After substantive agent-generated edits on a branch, run the **deslop** Cursor s
 - **Keep form fields short and concise** (labels, placeholders, helper text). Prefer tight copy over verbose prose.
 - **Avoid long explanations** inline on the form; if something needs detail, link to docs or a collapsible help pattern rather than wall-of-text above fields.
 - **Long forms are fine to split**: use **multi-step flows** or **modals** (and related patterns) so users are not overwhelmed by a single scrolling page of inputs.
-- **Containers** (`frontend/src/pages/ContainersPage.tsx`): the run form always uses **public routes** (`public_route: true`), fixed **container port 80**, no host port mapping, and shows **Git branch** only when the source looks like a Git URL (same `git@` / `http(s)://` / `ssh://` prefix rules as `POST /api/containers/run` on the server).
+- **Containers** (`frontend/src/pages/ContainersPage.tsx`): the run form always uses **public routes** (`public_route: true`), a user-selected **container port** (defaults to 80; Git analysis may pre-fill when enabled in settings), no host port mapping, and shows **Git branch** only when the source looks like a Git URL (same `git@` / `http(s)://` / `ssh://` prefix rules as `POST /api/containers/run` on the server).
 
 ## Errors shown to users (frontend and API)
 

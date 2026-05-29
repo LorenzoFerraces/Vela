@@ -43,7 +43,9 @@ test.describe('Dashboard page', () => {
     expect(stopResponse.ok()).toBeTruthy()
 
     await authenticatedPage.goto('/dashboard')
-    const tableRows = authenticatedPage.locator('table.workloads-table tbody tr')
+    const tableRows = authenticatedPage.locator(
+      '.workloads-table-wrap-outer table.workloads-table tbody tr',
+    )
     await expect(tableRows.first()).toBeVisible()
 
     await expect(tableRows.first()).toContainText(stoppedBody.container.name)
@@ -66,13 +68,37 @@ test.describe('Dashboard page', () => {
     }
 
     await authenticatedPage.goto('/dashboard')
+    const workloadsSection = authenticatedPage.locator('.workloads-table-wrap-outer')
     await expect(
-      authenticatedPage.getByText(deployBody.container.name),
+      workloadsSection.getByRole('cell', { name: deployBody.container.name }),
     ).toBeVisible()
 
+    await authenticatedPage.getByRole('button', { name: 'Refresh' }).scrollIntoViewIfNeeded()
     await authenticatedPage.getByRole('button', { name: 'Refresh' }).click()
     await expect(
-      authenticatedPage.getByText(deployBody.container.name),
+      workloadsSection.getByRole('cell', { name: deployBody.container.name }),
+    ).toBeVisible()
+  })
+
+  test('deploy history lists recent deployments', async ({
+    authenticatedPage,
+  }) => {
+    const deployResponse = await deployImageContainer(
+      authenticatedPage,
+      'nginx:alpine',
+      `dash-history-${Date.now()}`,
+    )
+    expect(deployResponse.ok()).toBeTruthy()
+
+    await authenticatedPage.goto('/dashboard')
+    await expect(
+      authenticatedPage.getByRole('heading', { name: 'Deploy history', level: 2 }),
+    ).toBeVisible()
+    await expect(
+      authenticatedPage
+        .locator('.deployment-history')
+        .getByRole('cell', { name: 'nginx:alpine' })
+        .first(),
     ).toBeVisible()
   })
 })

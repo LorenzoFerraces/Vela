@@ -1,21 +1,39 @@
-name: E2E
+name: CI
 
 on:
   push:
     paths:
-      - "frontend/**"
       - "backend/**"
-      - "backend/pyproject.toml"
-      - ".github/workflows/e2e.yml"
+      - "frontend/**"
+      - ".github/workflows/ci.yml"
   pull_request:
     paths:
-      - "frontend/**"
       - "backend/**"
-      - "backend/pyproject.toml"
-      - ".github/workflows/e2e.yml"
+      - "frontend/**"
+      - ".github/workflows/ci.yml"
 
 jobs:
-  playwright:
+  backend-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/pyproject.toml
+
+      - name: Install package and dev dependencies
+        run: pip install -e "backend/[dev]"
+
+      - name: Run pytest
+        working-directory: backend
+        run: pytest -q
+
+  e2e:
     runs-on: ubuntu-latest
     timeout-minutes: 15
 

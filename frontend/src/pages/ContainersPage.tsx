@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import {
   formatApiError,
   getImageAvailability,
@@ -9,6 +9,7 @@ import {
   type RunFromSourceRequest,
 } from '../api/client'
 import { ContainersFormMessageBanner } from './containers/ContainersFormMessageBanner'
+import { ContainersRunAdvancedFields } from './containers/ContainersRunAdvancedFields'
 import { ContainersRunFormFields } from './containers/ContainersRunFormFields'
 import { DeploySourceCombobox } from './containers/DeploySourceCombobox'
 import { WorkloadsTable } from '../components/workloads/WorkloadsTable'
@@ -19,28 +20,38 @@ import {
 } from './containers/deploySourceTypes'
 import { useContainerList } from './containers/useContainerList'
 import { useDeploySourceSelection } from './containers/useDeploySourceSelection'
+import { useGitSourceAnalysis } from './containers/useGitSourceAnalysis'
 import { useImageRefAvailability } from './containers/useImageRefAvailability'
+import {
+  parseStartCommand,
+  recordFromEnvRows,
+  type EnvVarRow,
+} from './containers/runFormAdvanced'
 
-/**
- * Render the Containers page UI for building, running, and managing container workloads.
- *
- * The component maintains form state for container name, Git branch, and port; coordinates
- * a deploy-source selection flow (image, Git, or Dockerfile template); performs optional
- * image registry availability checks; submits run requests; and displays and controls the
- * list of running workloads (start, stop, remove).
- *
- * @returns The Containers page React element
- */
 export default function ContainersPage() {
   const [containerName, setContainerName] = useState('')
   const [gitBranch, setGitBranch] = useState('main')
   const [containerPort, setContainerPort] = useState('80')
+  const [envRows, setEnvRows] = useState<EnvVarRow[]>([{ key: '', value: '' }])
+  const [startCommand, setStartCommand] = useState('')
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState<FormMessage | null>(null)
   const [rowBusy, setRowBusy] = useState<string | null>(null)
-
   const deploySource = useDeploySourceSelection()
   const showGitBranch = selectionShowsGitBranch(deploySource.selection)
+
+  const gitAnalysisSetters = useMemo(
+    () => ({
+      setGitBranch,
+      setContainerPort,
+      setContainerName,
+      setEnvRows,
+      setStartCommand,
+    }),
+    []
+  )
+
+  const gitAnalysis = useGitSourceAnalysis(gitAnalysisSetters)
 
   const reportListLoadError = useCallback((detail: string) => {
     setMessage({ type: 'err', text: detail })
@@ -56,47 +67,52 @@ export default function ContainersPage() {
   const { imageRefCheck, setImageRefCheck, runImageRefAvailabilityCheck } =
     useImageRefAvailability(imageRefForCheck)
 
+  function resetAdvancedFields() {
+    setEnvRows([{ key: '', value: '' }])
+    setStartCommand('')
+  }
+
   function applyDeploySuggestion(
     suggestion: Parameters<typeof deploySource.applySuggestion>[0]
   ) {
     deploySource.applySuggestion(suggestion)
     if (suggestion.kind === 'git') {
       setGitBranch(suggestion.default_branch || 'main')
-      setContainerPort((portString) =>
-        portString === '80' ? '5173' : portString
-      )
       setImageRefCheck({ status: 'idle' })
+      resetAdvancedFields()
+      gitAnalysis.clearAnalysis()
       return
     }
-    if (suggestion.kind === 'dockerfile_template') {
-      setContainerPort((portString) =>
-        portString === '5173' ? '80' : portString
-      )
-      setImageRefCheck({ status: 'idle' })
-      return
-    }
-    setContainerPort((portString) =>
-      portString === '5173' ? '80' : portString
-    )
+    gitAnalysis.clearAnalysis()
+    resetAdvancedFields()
     setImageRefCheck({ status: 'idle' })
   }
 
-  function buildRunRequest(
-    parsedPort: number
-  ): RunFromSourceRequest | null {
+  function onAnalyzeGitSource() {
+    const selection = deploySource.selection
+    if (selection?.kind !== 'git') {
+      return
+    }
+    void gitAnalysis.runAnalysis(selection.url, gitBranch.trim() || 'main')
+  }
+
+  function buildRunRequest(container_port: number): RunFromSourceRequest | null {
     const selection = deploySource.selection
     if (!selection) {
       return null
     }
+    const command = parseStartCommand(startCommand)
     const base = {
       container_name: containerName.trim() || null,
       host_port: null,
-      container_port: parsedPort,
+      container_port,
       git_branch: gitBranch.trim() || 'main',
       route_host: null,
       route_path_prefix: '/',
       route_tls: false,
       public_route: true,
+      env_vars: recordFromEnvRows(envRows),
+      command,
     }
     switch (selection.kind) {
       case 'image':
@@ -160,16 +176,23 @@ export default function ContainersPage() {
         }
       }
     }
+    const parsedPort = parseInt(containerPort.trim(), 10)
+    if (
+      Number.isNaN(parsedPort) ||
+      parsedPort < 1 ||
+      parsedPort > 65535
+    ) {
+      setMessage({
+        type: 'err',
+        text: 'Enter a container port between 1 and 65535.',
+      })
+      return
+    }
+
     setBusy(true)
     setMessage(null)
     try {
-      const parsedPort = parseInt(containerPort.trim(), 10)
-      const container_port = Number.isNaN(parsedPort)
-        ? showGitBranch
-          ? 5173
-          : 80
-        : parsedPort
-      const requestBody = buildRunRequest(container_port)
+      const requestBody = buildRunRequest(parsedPort)
       if (!requestBody) {
         setMessage({
           type: 'err',
@@ -192,6 +215,10 @@ export default function ContainersPage() {
         publicUrl,
       })
       deploySource.clearSelection()
+      setContainerName('')
+      setGitBranch('main')
+      setContainerPort('80')
+      resetAdvancedFields()
       await refresh()
     } catch (error) {
       setMessage({ type: 'err', text: formatApiError(error) })
@@ -274,10 +301,19 @@ export default function ContainersPage() {
           showGitBranch={showGitBranch}
           containerName={containerName}
           onContainerNameChange={setContainerName}
-          gitBranch={gitBranch}
-          onGitBranchChange={setGitBranch}
           containerPort={containerPort}
           onContainerPortChange={setContainerPort}
+          gitBranch={gitBranch}
+          onGitBranchChange={setGitBranch}
+          gitAnalysisLoading={gitAnalysis.analysisLoading}
+          gitAnalysisError={gitAnalysis.analysisError}
+          onAnalyzeGit={showGitBranch ? onAnalyzeGitSource : undefined}
+        />
+        <ContainersRunAdvancedFields
+          envRows={envRows}
+          onEnvRowsChange={setEnvRows}
+          startCommand={startCommand}
+          onStartCommandChange={setStartCommand}
         />
 
         <div className="containers-form__actions">
@@ -286,6 +322,7 @@ export default function ContainersPage() {
             className="btn btn--primary"
             disabled={
               busy ||
+              gitAnalysis.analysisLoading ||
               !deploySource.selection ||
               (selectionNeedsRegistryCheck(deploySource.selection) &&
                 imageRefCheck.status === 'unavailable' &&
@@ -303,7 +340,7 @@ export default function ContainersPage() {
             }}
             disabled={listLoading || busy}
           >
-            Refresh list
+            Refresh
           </button>
         </div>
       </form>
@@ -324,6 +361,7 @@ export default function ContainersPage() {
         onStop={onStop}
         onRemove={onRemove}
       />
+
     </section>
   )
 }

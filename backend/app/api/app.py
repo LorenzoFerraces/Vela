@@ -14,9 +14,11 @@ from app.api.routes import (
     auth,
     builder,
     containers,
+    deployments,
     dockerfile_templates,
     github,
     images,
+    settings,
     traffic,
 )
 
@@ -40,7 +42,7 @@ def create_app() -> FastAPI:
     """
     Create and configure the FastAPI application used by the service.
     
-    The returned application is configured with a custom startup/shutdown lifespan, CORS middleware, global exception handlers, mounted API routers under the `/api` prefix (containers, builder, images, dockerfiles, traffic, auth, github), and a health endpoint at `/api/health`.
+    The returned application is configured with a custom startup/shutdown lifespan, CORS middleware, global exception handlers, mounted API routers under the `/api` prefix (containers, builder, images, dockerfiles, traffic, auth, github, settings, deployments), and a health endpoint at `/api/health`.
     
     Returns:
         FastAPI: A configured FastAPI application instance.
@@ -109,6 +111,16 @@ def create_app() -> FastAPI:
         github.router_resource,
         prefix=f"{API_PREFIX}/github",
         tags=["github"],
+    )
+    application.include_router(
+        settings.router,
+        prefix=f"{API_PREFIX}/settings",
+        tags=["settings"],
+    )
+    application.include_router(
+        deployments.router,
+        prefix=f"{API_PREFIX}/deployments",
+        tags=["deployments"],
     )
 
     @application.get(f"{API_PREFIX}/health", tags=["health"])
