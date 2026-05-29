@@ -79,26 +79,19 @@ body {
   color: var(--accent);
 }
 
-.navbar__logo {
+.vela-icon-box {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
   color: var(--accent);
   border: 1px solid var(--border);
   border-radius: 6px;
   background: var(--bg-elevated);
 }
 
-.vela-mark-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--accent);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--bg-elevated);
+.navbar__logo {
+  width: 28px;
+  height: 28px;
 }
 
 .navbar__title {
@@ -991,7 +984,7 @@ body {
   font-size: 0.9375rem;
   color: var(--text-heading);
   font-weight: 500;
-  word-break: break-word;
+  overflow-wrap: anywhere;
 }
 
 .containers-github-picker__badge {
@@ -1105,7 +1098,7 @@ body {
   border: 1px solid var(--border);
   border-radius: 6px;
   white-space: pre-wrap;
-  word-break: break-word;
+  overflow-wrap: anywhere;
 }
 
 .workloads-log-panel__line--warn {
@@ -1405,6 +1398,17 @@ body {
   color: var(--text-heading);
 }
 
+.deployment-history__env-value {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.deployment-history__env-reveal {
+  padding: 0 0.35rem;
+  font-size: 0.7rem;
+}
+
 .deployment-history__env-diff {
   margin: 0.25rem 0 1rem;
   padding-left: 1.25rem;
@@ -1423,7 +1427,7 @@ body {
   line-height: 1.45;
   font-family: ui-monospace, 'Cascadia Code', monospace;
   white-space: pre-wrap;
-  word-break: break-word;
+  overflow-wrap: anywhere;
 }
 
 .settings-ai-prefill-list {

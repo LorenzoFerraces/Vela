@@ -34,6 +34,78 @@ function formatSourceCell(row: DeploymentRecord): string {
   return label
 }
 
+function maskEnvValue(value: string): string {
+  if (value.length <= 4) {
+    return '****'
+  }
+  return `****${value.slice(-4)}`
+}
+
+function EnvDiffValue({
+  itemKey,
+  value,
+}: {
+  itemKey: string
+  value: string
+}) {
+  const [revealed, setRevealed] = useState(false)
+  const displayValue = revealed ? value : maskEnvValue(value)
+
+  return (
+    <span className="deployment-history__env-value">
+      {displayValue}
+      <button
+        type="button"
+        className="btn btn--ghost btn--sm deployment-history__env-reveal"
+        onClick={() => setRevealed((previous) => !previous)}
+        aria-pressed={revealed}
+        aria-label={revealed ? `Hide value for ${itemKey}` : `Reveal value for ${itemKey}`}
+      >
+        {revealed ? 'Hide' : 'Reveal'}
+      </button>
+    </span>
+  )
+}
+
+function EnvDiffLine({
+  lineKey,
+  prefix,
+  envKey,
+  value,
+}: {
+  lineKey: string
+  prefix: string
+  envKey: string
+  value: string
+}) {
+  return (
+    <li key={lineKey}>
+      {prefix} {envKey}=<EnvDiffValue itemKey={envKey} value={value} />
+    </li>
+  )
+}
+
+function EnvChangeLine({
+  lineKey,
+  envKey,
+  before,
+  after,
+}: {
+  lineKey: string
+  envKey: string
+  before: string
+  after: string
+}) {
+  return (
+    <li key={lineKey}>
+      ~ {envKey}:{' '}
+      <EnvDiffValue itemKey={`${envKey}-before`} value={before} />
+      {' → '}
+      <EnvDiffValue itemKey={`${envKey}-after`} value={after} />
+    </li>
+  )
+}
+
 export function DeploymentHistorySection({
   refreshSignal = 0,
 }: {
@@ -183,15 +255,31 @@ export function DeploymentHistorySection({
               ) : (
                 <ul className="deployment-history__env-diff">
                   {Object.entries(diff.env.added).map(([key, value]) => (
-                    <li key={`add-${key}`}>+ {key}={value}</li>
+                    <EnvDiffLine
+                      key={`add-${key}`}
+                      lineKey={`add-${key}`}
+                      prefix="+"
+                      envKey={key}
+                      value={value}
+                    />
                   ))}
                   {Object.entries(diff.env.removed).map(([key, value]) => (
-                    <li key={`remove-${key}`}>- {key}={value}</li>
+                    <EnvDiffLine
+                      key={`remove-${key}`}
+                      lineKey={`remove-${key}`}
+                      prefix="-"
+                      envKey={key}
+                      value={value}
+                    />
                   ))}
                   {Object.entries(diff.env.changed).map(([key, change]) => (
-                    <li key={`change-${key}`}>
-                      ~ {key}: {change.before} → {change.after}
-                    </li>
+                    <EnvChangeLine
+                      key={`change-${key}`}
+                      lineKey={`change-${key}`}
+                      envKey={key}
+                      before={change.before}
+                      after={change.after}
+                    />
                   ))}
                 </ul>
               )}

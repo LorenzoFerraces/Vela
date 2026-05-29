@@ -48,6 +48,7 @@ const e2eDatabasePath = path.join(backendRoot, '.e2e-playwright.db')
 /** Env for the API webServer during Playwright runs (see backend/app/e2e_support.py). */
 const e2eApiEnv: Record<string, string> = {
   VELA_E2E: '1',
+  VELA_E2E_ALLOW_DB_RESET: '1',
   VELA_FAKE_ORCHESTRATOR: '1',
   VELA_DATABASE_URL: `sqlite+aiosqlite:///${e2eDatabasePath.replace(/\\/g, '/')}`,
   VELA_AUTH_SECRET: 'e2e-test-secret-do-not-use-in-prod',

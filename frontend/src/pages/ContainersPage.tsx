@@ -43,7 +43,6 @@ export default function ContainersPage() {
   const gitAnalysisSetters = useMemo(
     () => ({
       setGitBranch,
-      setContainerPort,
       setContainerName,
       setEnvRows,
       setStartCommand,
@@ -79,10 +78,12 @@ export default function ContainersPage() {
     if (suggestion.kind === 'git') {
       setGitBranch(suggestion.default_branch || 'main')
       setImageRefCheck({ status: 'idle' })
+      resetAdvancedFields()
       gitAnalysis.clearAnalysis()
       return
     }
     gitAnalysis.clearAnalysis()
+    resetAdvancedFields()
     if (suggestion.kind === 'dockerfile_template') {
       setContainerPort((portString) =>
         portString === '5173' ? '80' : portString
@@ -104,9 +105,7 @@ export default function ContainersPage() {
     void gitAnalysis.runAnalysis(selection.url, gitBranch.trim() || 'main')
   }
 
-  function buildRunRequest(
-    parsedPort: number
-  ): RunFromSourceRequest | null {
+  function buildRunRequest(): RunFromSourceRequest | null {
     const selection = deploySource.selection
     if (!selection) {
       return null
@@ -115,7 +114,7 @@ export default function ContainersPage() {
     const base = {
       container_name: containerName.trim() || null,
       host_port: null,
-      container_port: parsedPort,
+      container_port: 80,
       git_branch: gitBranch.trim() || 'main',
       route_host: null,
       route_path_prefix: '/',
@@ -189,13 +188,7 @@ export default function ContainersPage() {
     setBusy(true)
     setMessage(null)
     try {
-      const parsedPort = parseInt(containerPort.trim(), 10)
-      const container_port = Number.isNaN(parsedPort)
-        ? showGitBranch
-          ? 5173
-          : 80
-        : parsedPort
-      const requestBody = buildRunRequest(container_port)
+      const requestBody = buildRunRequest()
       if (!requestBody) {
         setMessage({
           type: 'err',

@@ -225,6 +225,18 @@ def test_run_rejects_empty_env_key(api_client: TestClient) -> None:
     assert response.status_code == 422
 
 
+def test_run_rejects_duplicate_env_keys_after_trim(api_client: TestClient) -> None:
+    response = api_client.post(
+        "/api/containers/run",
+        json={
+            "source_kind": "image",
+            "image_ref": "nginx:alpine",
+            "env_vars": {"FOO": "one", " FOO ": "two"},
+        },
+    )
+    assert response.status_code == 422
+
+
 def test_run_rejects_empty_command(api_client: TestClient) -> None:
     response = api_client.post(
         "/api/containers/run",

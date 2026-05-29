@@ -1,7 +1,7 @@
 <p align="center">
   <img src="docs/assets/vela-logo.png" alt="Vela" width="320" />
   <br />
-  <sub>Logo by Fedra Bacigalupo</a></sub>
+  <sub>Logo by Fedra Bacigalupo</sub>
 </p>
 
 # Vela

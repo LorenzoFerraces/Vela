@@ -20,15 +20,28 @@ export function deploySourceLabel(selection: DeploySourceSelection): string {
   }
 }
 
+export function sourceLooksLikeGitUrl(source: string): boolean {
+  const stripped = source.trim()
+  return (
+    stripped.startsWith('git@') ||
+    stripped.startsWith('http://') ||
+    stripped.startsWith('https://') ||
+    stripped.startsWith('ssh://')
+  )
+}
+
 /**
- * Determines whether the selection represents a Git deployment source.
+ * Determines whether the run form should show the Git branch field.
  *
- * @returns `true` if `selection` is a Git source (`kind === 'git'`), `false` otherwise.
+ * @returns `true` when the selection is a Git source with a Git URL prefix, `false` otherwise.
  */
 export function selectionShowsGitBranch(
   selection: DeploySourceSelection | null
 ): boolean {
-  return selection?.kind === 'git'
+  if (!selection || selection.kind !== 'git') {
+    return false
+  }
+  return sourceLooksLikeGitUrl(selection.url)
 }
 
 /**

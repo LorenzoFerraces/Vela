@@ -8,6 +8,14 @@ import {
 } from '../../api/client'
 import { applyGitSourceAnalysis, type GitAnalysisFormSetters } from './applyGitSourceAnalysis'
 
+const DEFAULT_AI_PREFILL_PREFERENCES: AiPrefillPreferences = {
+  git_branch: true,
+  container_port: true,
+  container_name: true,
+  env_vars: true,
+  start_command: true,
+}
+
 export function useGitSourceAnalysis(setters: GitAnalysisFormSetters) {
   const [preferences, setPreferences] = useState<AiPrefillPreferences | null>(
     null
@@ -25,13 +33,7 @@ export function useGitSourceAnalysis(setters: GitAnalysisFormSetters) {
       })
       .catch(() => {
         if (!cancelled) {
-          setPreferences({
-            git_branch: true,
-            container_port: true,
-            container_name: true,
-            env_vars: true,
-            start_command: true,
-          })
+          setPreferences(DEFAULT_AI_PREFILL_PREFERENCES)
         }
       })
     return () => {
@@ -49,9 +51,15 @@ export function useGitSourceAnalysis(setters: GitAnalysisFormSetters) {
       setAnalysisLoading(true)
       setAnalysisError(null)
       try {
-        const prefs =
-          preferences ??
-          (await getAiPrefillPreferences())
+        let prefs = preferences
+        if (!prefs) {
+          try {
+            prefs = await getAiPrefillPreferences()
+          } catch (loadError) {
+            console.debug('AI prefill preferences unavailable:', loadError)
+            prefs = DEFAULT_AI_PREFILL_PREFERENCES
+          }
+        }
         const analysis: GitSourceAnalysis = await analyzeGitSource({
           git_url: gitUrl,
           git_branch: gitBranch,

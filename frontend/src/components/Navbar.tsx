@@ -23,7 +23,7 @@ export default function Navbar() {
   return (
     <header className="navbar">
       <NavLink to="/" className="navbar__brand" end>
-        <span className="navbar__logo vela-mark-btn" aria-hidden>
+        <span className="vela-icon-box navbar__logo" aria-hidden>
           <VelaMarkIcon size={12} />
         </span>
         <span className="navbar__title">Vela</span>

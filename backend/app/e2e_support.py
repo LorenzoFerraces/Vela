@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import uuid
+from typing import TYPE_CHECKING
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -15,6 +16,9 @@ from app.core.security.secrets import encrypt_secret
 from app.db.base import Base
 from app.db.engine import get_engine
 from app.db.models import User, UserOAuthIdentity
+
+if TYPE_CHECKING:
+    from app.api.schemas import GitSourceAnalysis
 
 E2E_USER_EMAIL = "e2e@example.com"
 E2E_USER_PASSWORD = "e2e-test-password-min-8"
@@ -38,11 +42,32 @@ _E2E_GITHUB_REPOS = (
 def e2e_mode_enabled() -> bool:
     """
     Check whether end-to-end (E2E) mode is enabled via environment.
-    
+
     Returns:
         bool: `True` if the VELA_E2E environment variable, after trimming whitespace, equals "1", `False` otherwise.
     """
     return os.environ.get("VELA_E2E", "").strip() == "1"
+
+
+def _assert_e2e_db_reset_allowed() -> None:
+    if os.environ.get("VELA_E2E_ALLOW_DB_RESET", "").strip() != "1":
+        msg = (
+            "Refusing E2E database reset: set VELA_E2E_ALLOW_DB_RESET=1 to opt in."
+        )
+        raise RuntimeError(msg)
+
+    database_url = os.environ.get("VELA_DATABASE_URL", "").strip().lower()
+    if not database_url:
+        msg = "Refusing E2E database reset: VELA_DATABASE_URL is not set."
+        raise RuntimeError(msg)
+
+    safe_markers = (".e2e", "e2e-", "/e2e", "test", "sqlite")
+    if not any(marker in database_url for marker in safe_markers):
+        msg = (
+            "Refusing E2E database reset: VELA_DATABASE_URL does not look like "
+            "a local or test database."
+        )
+        raise RuntimeError(msg)
 
 
 def e2e_github_repos_if_enabled(
@@ -54,13 +79,13 @@ def e2e_github_repos_if_enabled(
 ) -> list[GitHubRepo] | None:
     """
     Return fixture GitHub repositories when E2E mode is enabled and the provided access token matches the fixture token.
-    
+
     Parameters:
         access_token (str): The GitHub access token to validate against the E2E fixture token.
         query (str | None): Optional search string; trimmed and matched case-insensitively against repo full name and html_url.
         page (int): Ignored in E2E mode (present for API compatibility).
         per_page (int): Ignored in E2E mode (present for API compatibility).
-    
+
     Returns:
         list[GitHubRepo] | None: A list of fixture `GitHubRepo` objects filtered by `query` when E2E mode is enabled and the token matches;
         an empty list if E2E mode is enabled but the token does not match; `None` if E2E mode is not enabled.
@@ -85,7 +110,7 @@ def e2e_github_repos_if_enabled(
 def e2e_git_source_analysis_if_enabled(
     git_url: str,
     git_branch: str,
-) -> "GitSourceAnalysis | None":
+) -> GitSourceAnalysis | None:
     from app.api.schemas import GitSourceAnalysis
 
     if not e2e_mode_enabled():
@@ -109,11 +134,13 @@ def e2e_git_source_analysis_if_enabled(
 async def ensure_e2e_database() -> None:
     """
     Prepare the database schema and idempotently seed E2E users and a GitHub OAuth identity when E2E mode is enabled.
-    
+
     If E2E mode is not enabled, the function returns immediately. When enabled, it creates any missing tables, ensures a primary E2E user and a second user without GitHub identity exist (inserting them only if absent), and ensures a GitHub OAuth identity record exists for the primary E2E user. All inserts are committed as they are performed to make the operation safe to run repeatedly.
     """
     if not e2e_mode_enabled():
         return
+
+    _assert_e2e_db_reset_allowed()
 
     engine = get_engine()
     async with engine.begin() as connection:

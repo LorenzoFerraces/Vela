@@ -23,7 +23,7 @@ function GitAnalysisButton({
   return (
     <button
       type="button"
-      className="btn btn--ghost containers-form__analyze-btn vela-mark-btn"
+      className="btn btn--ghost containers-form__analyze-btn vela-icon-box"
       onClick={onClick}
       disabled={loading}
       aria-label="Analyze repository"

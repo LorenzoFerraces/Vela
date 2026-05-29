@@ -42,7 +42,7 @@ def create_app() -> FastAPI:
     """
     Create and configure the FastAPI application used by the service.
     
-    The returned application is configured with a custom startup/shutdown lifespan, CORS middleware, global exception handlers, mounted API routers under the `/api` prefix (containers, builder, images, dockerfiles, traffic, auth, github), and a health endpoint at `/api/health`.
+    The returned application is configured with a custom startup/shutdown lifespan, CORS middleware, global exception handlers, mounted API routers under the `/api` prefix (containers, builder, images, dockerfiles, traffic, auth, github, settings, deployments), and a health endpoint at `/api/health`.
     
     Returns:
         FastAPI: A configured FastAPI application instance.

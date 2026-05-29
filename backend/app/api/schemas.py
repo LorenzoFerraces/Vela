@@ -100,6 +100,7 @@ class RunFromSourceRequest(BaseModel):
     @classmethod
     def validate_env_vars(cls, value: dict[str, str]) -> dict[str, str]:
         validated: dict[str, str] = {}
+        original_keys_by_trimmed: dict[str, str] = {}
         for key, env_value in value.items():
             trimmed_key = key.strip()
             if not trimmed_key:
@@ -108,6 +109,14 @@ class RunFromSourceRequest(BaseModel):
             if len(trimmed_key) > 256:
                 msg = "Environment variable keys cannot exceed 256 characters."
                 raise ValueError(msg)
+            if trimmed_key in original_keys_by_trimmed:
+                prior_key = original_keys_by_trimmed[trimmed_key]
+                msg = (
+                    f"Duplicate environment variable keys after trimming: "
+                    f"{prior_key!r} and {key!r} both map to {trimmed_key!r}."
+                )
+                raise ValueError(msg)
+            original_keys_by_trimmed[trimmed_key] = key
             validated[trimmed_key] = env_value
         return validated
 

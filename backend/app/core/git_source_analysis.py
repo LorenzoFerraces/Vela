@@ -178,7 +178,11 @@ async def _call_gemini(context: str, git_url: str, git_branch: str) -> GitSource
         body = response.json()
         text = body["candidates"][0]["content"]["parts"][0]["text"]
         parsed = json.loads(text)
-        return GitSourceAnalysis.model_validate(parsed)
+        analysis = GitSourceAnalysis.model_validate(parsed)
+        sanitized_name = sanitize_container_name(analysis.container_name)
+        if sanitized_name != analysis.container_name:
+            return analysis.model_copy(update={"container_name": sanitized_name})
+        return analysis
     except (KeyError, IndexError, json.JSONDecodeError, ValidationError) as exc:
         logger.info("Gemini analysis response parse failed: %s", exc)
         raise GitSourceAnalysisError(

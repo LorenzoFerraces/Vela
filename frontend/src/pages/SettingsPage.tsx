@@ -232,23 +232,31 @@ function AiPrefillSettingsCard() {
 
   useEffect(() => {
     let cancelled = false
-    void Promise.all([getAiPrefillPreferences(), getGeminiConfigStatus()])
-      .then(([prefs, geminiStatus]) => {
-        if (!cancelled) {
-          setPreferences(prefs)
-          setGeminiConfigured(geminiStatus.configured)
-        }
-      })
-      .catch((loadError) => {
-        if (!cancelled) {
-          setError(formatApiError(loadError))
-        }
-      })
-      .finally(() => {
-        if (!cancelled) {
-          setLoading(false)
-        }
-      })
+    void Promise.allSettled([
+      getAiPrefillPreferences(),
+      getGeminiConfigStatus(),
+    ]).then((results) => {
+      if (cancelled) {
+        return
+      }
+      const [prefsResult, geminiResult] = results
+      if (prefsResult.status === 'fulfilled') {
+        setPreferences(prefsResult.value)
+      } else {
+        setError(formatApiError(prefsResult.reason))
+      }
+      if (geminiResult.status === 'fulfilled') {
+        setGeminiConfigured(geminiResult.value.configured)
+      } else {
+        setError((previous) =>
+          previous ?? formatApiError(geminiResult.reason)
+        )
+      }
+    }).finally(() => {
+      if (!cancelled) {
+        setLoading(false)
+      }
+    })
     return () => {
       cancelled = true
     }

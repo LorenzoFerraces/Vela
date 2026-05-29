@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import uuid
 from typing import Annotated
 from urllib.parse import urlparse
@@ -47,6 +48,7 @@ from app.core.exceptions import (
     ProviderConnectionError,
     RegistryAccessDeniedError,
 )
+
 from app.core.deploy_source_suggestions import (
     DeploySourcesResponse,
     collect_deploy_source_suggestions,
@@ -70,6 +72,8 @@ from app.core.oauth import decrypt_identity_token, get_github_identity
 from app.core.orchestrator import ContainerOrchestrator
 from app.core.traffic_router import TrafficRouter
 from app.db.models import User
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -219,23 +223,29 @@ async def _persist_run_deployment(
     dockerfile_snapshot: str | None,
     public_url: str | None,
 ) -> None:
-    await record_deployment(
-        session,
-        user_id=user.id,
-        snapshot=DeploymentSnapshot(
-            container_id=info.id,
-            container_name=info.name or body.container_name,
-            source_kind=source_kind,
-            source_ref=source_ref,
-            git_branch=body.git_branch if source_kind == "git" else None,
-            image_tag=image_tag,
-            container_port=body.container_port,
-            env_vars=dict(body.env_vars),
-            command=list(body.command) if body.command else None,
-            dockerfile_snapshot=dockerfile_snapshot,
-            public_url=public_url,
-        ),
-    )
+    try:
+        await record_deployment(
+            session,
+            user_id=user.id,
+            snapshot=DeploymentSnapshot(
+                container_id=info.id,
+                container_name=info.name or body.container_name,
+                source_kind=source_kind,
+                source_ref=source_ref,
+                git_branch=body.git_branch if source_kind == "git" else None,
+                image_tag=image_tag,
+                container_port=body.container_port,
+                env_vars=dict(body.env_vars),
+                command=list(body.command) if body.command else None,
+                dockerfile_snapshot=dockerfile_snapshot,
+                public_url=public_url,
+            ),
+        )
+    except Exception:
+        logger.exception(
+            "Failed to persist deployment history for container %s",
+            info.id,
+        )
 
 
 @router.get("/", response_model=list[ContainerInfo])
