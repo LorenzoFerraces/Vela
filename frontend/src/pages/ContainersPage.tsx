@@ -43,6 +43,7 @@ export default function ContainersPage() {
   const gitAnalysisSetters = useMemo(
     () => ({
       setGitBranch,
+      setContainerPort,
       setContainerName,
       setEnvRows,
       setStartCommand,
@@ -84,16 +85,6 @@ export default function ContainersPage() {
     }
     gitAnalysis.clearAnalysis()
     resetAdvancedFields()
-    if (suggestion.kind === 'dockerfile_template') {
-      setContainerPort((portString) =>
-        portString === '5173' ? '80' : portString
-      )
-      setImageRefCheck({ status: 'idle' })
-      return
-    }
-    setContainerPort((portString) =>
-      portString === '5173' ? '80' : portString
-    )
     setImageRefCheck({ status: 'idle' })
   }
 
@@ -105,7 +96,7 @@ export default function ContainersPage() {
     void gitAnalysis.runAnalysis(selection.url, gitBranch.trim() || 'main')
   }
 
-  function buildRunRequest(): RunFromSourceRequest | null {
+  function buildRunRequest(container_port: number): RunFromSourceRequest | null {
     const selection = deploySource.selection
     if (!selection) {
       return null
@@ -114,7 +105,7 @@ export default function ContainersPage() {
     const base = {
       container_name: containerName.trim() || null,
       host_port: null,
-      container_port: 80,
+      container_port,
       git_branch: gitBranch.trim() || 'main',
       route_host: null,
       route_path_prefix: '/',
@@ -185,10 +176,23 @@ export default function ContainersPage() {
         }
       }
     }
+    const parsedPort = parseInt(containerPort.trim(), 10)
+    if (
+      Number.isNaN(parsedPort) ||
+      parsedPort < 1 ||
+      parsedPort > 65535
+    ) {
+      setMessage({
+        type: 'err',
+        text: 'Enter a container port between 1 and 65535.',
+      })
+      return
+    }
+
     setBusy(true)
     setMessage(null)
     try {
-      const requestBody = buildRunRequest()
+      const requestBody = buildRunRequest(parsedPort)
       if (!requestBody) {
         setMessage({
           type: 'err',
@@ -297,10 +301,10 @@ export default function ContainersPage() {
           showGitBranch={showGitBranch}
           containerName={containerName}
           onContainerNameChange={setContainerName}
-          gitBranch={gitBranch}
-          onGitBranchChange={setGitBranch}
           containerPort={containerPort}
           onContainerPortChange={setContainerPort}
+          gitBranch={gitBranch}
+          onGitBranchChange={setGitBranch}
           gitAnalysisLoading={gitAnalysis.analysisLoading}
           gitAnalysisError={gitAnalysis.analysisError}
           onAnalyzeGit={showGitBranch ? onAnalyzeGitSource : undefined}

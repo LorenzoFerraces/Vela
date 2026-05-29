@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import uuid
 from typing import TYPE_CHECKING
+from urllib.parse import unquote, urlparse
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -49,6 +50,19 @@ def e2e_mode_enabled() -> bool:
     return os.environ.get("VELA_E2E", "").strip() == "1"
 
 
+_E2E_ALLOWED_DB_SCHEMES = frozenset({"sqlite", "postgres", "postgresql", "mysql"})
+_E2E_ALLOWED_DB_HOSTS = frozenset({"localhost", "127.0.0.1"})
+
+
+def _e2e_database_name_is_safe(database_name: str) -> bool:
+    lowered = database_name.lower()
+    if lowered == "test":
+        return True
+    if lowered.startswith("e2e-"):
+        return True
+    return lowered.endswith(".e2e")
+
+
 def _assert_e2e_db_reset_allowed() -> None:
     if os.environ.get("VELA_E2E_ALLOW_DB_RESET", "").strip() != "1":
         msg = (
@@ -56,16 +70,44 @@ def _assert_e2e_db_reset_allowed() -> None:
         )
         raise RuntimeError(msg)
 
-    database_url = os.environ.get("VELA_DATABASE_URL", "").strip().lower()
+    database_url = os.environ.get("VELA_DATABASE_URL", "").strip()
     if not database_url:
         msg = "Refusing E2E database reset: VELA_DATABASE_URL is not set."
         raise RuntimeError(msg)
 
-    safe_markers = (".e2e", "e2e-", "/e2e", "test", "sqlite")
-    if not any(marker in database_url for marker in safe_markers):
+    parsed = urlparse(database_url)
+    base_scheme = parsed.scheme.split("+", maxsplit=1)[0].lower()
+    if base_scheme not in _E2E_ALLOWED_DB_SCHEMES:
         msg = (
-            "Refusing E2E database reset: VELA_DATABASE_URL does not look like "
-            "a local or test database."
+            "Refusing E2E database reset: VELA_DATABASE_URL must use a local or "
+            "test database scheme (sqlite, postgres, postgresql, mysql)."
+        )
+        raise RuntimeError(msg)
+
+    if base_scheme == "sqlite":
+        database_path = unquote(parsed.path.lstrip("/")).replace("\\", "/")
+        database_name = os.path.basename(database_path)
+        if not _e2e_database_name_is_safe(database_name):
+            msg = (
+                "Refusing E2E database reset: SQLite database file name must be "
+                "'test', start with 'e2e-', or end with '.e2e'."
+            )
+            raise RuntimeError(msg)
+        return
+
+    hostname = (parsed.hostname or "").lower()
+    if hostname not in _E2E_ALLOWED_DB_HOSTS:
+        msg = (
+            "Refusing E2E database reset: database host must be localhost or "
+            "127.0.0.1."
+        )
+        raise RuntimeError(msg)
+
+    database_name = parsed.path.lstrip("/").split("/", maxsplit=1)[0]
+    if not _e2e_database_name_is_safe(database_name):
+        msg = (
+            "Refusing E2E database reset: database name must be 'test', start with "
+            "'e2e-', or end with '.e2e'."
         )
         raise RuntimeError(msg)
 

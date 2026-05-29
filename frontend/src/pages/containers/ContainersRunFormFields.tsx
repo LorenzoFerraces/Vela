@@ -4,10 +4,10 @@ type ContainersRunFormFieldsProps = {
   showGitBranch: boolean
   containerName: string
   onContainerNameChange: (value: string) => void
-  gitBranch: string
-  onGitBranchChange: (value: string) => void
   containerPort: string
   onContainerPortChange: (value: string) => void
+  gitBranch: string
+  onGitBranchChange: (value: string) => void
   gitAnalysisLoading?: boolean
   gitAnalysisError?: string | null
   onAnalyzeGit?: () => void
@@ -38,10 +38,10 @@ export function ContainersRunFormFields({
   showGitBranch,
   containerName,
   onContainerNameChange,
-  gitBranch,
-  onGitBranchChange,
   containerPort,
   onContainerPortChange,
+  gitBranch,
+  onGitBranchChange,
   gitAnalysisLoading = false,
   gitAnalysisError = null,
   onAnalyzeGit,

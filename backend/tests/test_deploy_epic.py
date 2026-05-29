@@ -72,7 +72,7 @@ def test_run_creates_deployment_record(
     rows = listed.json()
     assert len(rows) >= 1
     latest = rows[0]
-    assert latest["env_vars"] == {"FOO": "bar"}
+    assert latest["env_vars"] == {"FOO": "<REDACTED>"}
     assert latest["command"] == ["nginx", "-g", "daemon off;"]
     assert latest["source_kind"] == "image"
     assert fake_orchestrator.last_deploy_config is not None
@@ -112,6 +112,5 @@ def test_deployment_diff(api_client: TestClient, monkeypatch: pytest.MonkeyPatch
     diff = api_client.get(f"/api/deployments/{left_id}/diff/{right_id}")
     assert diff.status_code == 200
     env_diff = diff.json()["env"]
-    assert env_diff["added"] == {"B": "3"}
-    assert env_diff["changed"]["A"]["before"] == "1"
-    assert env_diff["changed"]["A"]["after"] == "2"
+    assert env_diff["added"] == {"B": "<REDACTED>"}
+    assert env_diff["changed"] == {}

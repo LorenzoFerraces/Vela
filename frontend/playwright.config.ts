@@ -43,7 +43,7 @@ function resolveApiServerCommand(): string {
 
 const apiServerCommand = resolveApiServerCommand()
 
-const e2eDatabasePath = path.join(backendRoot, '.e2e-playwright.db')
+const e2eDatabasePath = path.join(backendRoot, 'e2e-playwright.db')
 
 /** Env for the API webServer during Playwright runs (see backend/app/e2e_support.py). */
 const e2eApiEnv: Record<string, string> = {

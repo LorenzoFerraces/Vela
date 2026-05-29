@@ -211,6 +211,13 @@ def _route_updates_from_run_body(body: RunFromSourceRequest) -> dict[str, object
     }
 
 
+_DEPLOYMENT_ENV_VALUE_REDACTED = "<REDACTED>"
+
+
+def _redacted_env_vars_for_history(env_vars: dict[str, str]) -> dict[str, str]:
+    return {key: _DEPLOYMENT_ENV_VALUE_REDACTED for key in env_vars}
+
+
 async def _persist_run_deployment(
     session: AsyncSession,
     user: User,
@@ -223,6 +230,7 @@ async def _persist_run_deployment(
     dockerfile_snapshot: str | None,
     public_url: str | None,
 ) -> None:
+    sanitized_env_vars = _redacted_env_vars_for_history(body.env_vars)
     try:
         await record_deployment(
             session,
@@ -235,7 +243,7 @@ async def _persist_run_deployment(
                 git_branch=body.git_branch if source_kind == "git" else None,
                 image_tag=image_tag,
                 container_port=body.container_port,
-                env_vars=dict(body.env_vars),
+                env_vars=sanitized_env_vars,
                 command=list(body.command) if body.command else None,
                 dockerfile_snapshot=dockerfile_snapshot,
                 public_url=public_url,

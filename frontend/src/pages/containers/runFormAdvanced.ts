@@ -84,6 +84,10 @@ export function parseStartCommand(input: string): string[] | null {
     index += 1
   }
 
+  if (quote !== null) {
+    return null
+  }
+
   if (current.length > 0) {
     tokens.push(current)
   }
