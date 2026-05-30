@@ -91,9 +91,14 @@ test.describe('Dashboard page', () => {
     expect(deployResponse.ok()).toBeTruthy()
 
     await authenticatedPage.goto('/dashboard')
-    await expect(
-      authenticatedPage.getByRole('heading', { name: 'Deploy history', level: 2 }),
-    ).toBeVisible()
+    const historyToggle = authenticatedPage.getByRole('button', {
+      name: 'Deploy history',
+      exact: true,
+    })
+    await expect(historyToggle).toBeVisible()
+    await expect(historyToggle).toHaveAttribute('aria-expanded', 'false')
+    await historyToggle.click()
+    await expect(historyToggle).toHaveAttribute('aria-expanded', 'true')
     await expect(
       authenticatedPage
         .locator('.deployment-history')

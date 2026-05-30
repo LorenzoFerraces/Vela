@@ -15,6 +15,7 @@ from app.core.docker_orchestrator import (
     VELA_ROUTE_PATH_PREFIX_LABEL,
     VELA_ROUTE_TLS_LABEL,
     _access_url_from_route_labels,
+    deploy_source_fields_from_labels,
 )
 from app.core.enums import ContainerStatus, HealthStatus
 from app.core.exceptions import (
@@ -107,6 +108,7 @@ class FakeContainerOrchestrator(ContainerOrchestrator):
 
         container_id = f"fake-{uuid.uuid4().hex[:12]}"
         name = config.name or f"vela-{container_id[-8:]}"
+        source_kind, source_label = deploy_source_fields_from_labels(labels)
         info = ContainerInfo(
             id=container_id,
             name=name,
@@ -117,6 +119,8 @@ class FakeContainerOrchestrator(ContainerOrchestrator):
             labels=labels,
             health=HealthStatus.NONE,
             access_url=_access_url_from_route_labels(labels),
+            source_kind=source_kind,
+            source_label=source_label,
         )
         self._containers[container_id] = info
         return info

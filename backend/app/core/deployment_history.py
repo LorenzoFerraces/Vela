@@ -11,6 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.schemas import DeploymentDiffResponse, DeploymentEnvDiff, DeploymentRecordPublic
+from app.core.deploy_source_display import resolve_deploy_source_label
 from app.db.models import DeploymentRecord, User
 
 
@@ -55,7 +56,18 @@ async def record_deployment(
     return row
 
 
-def _to_public(row: DeploymentRecord, author_email: str) -> DeploymentRecordPublic:
+async def _to_public(
+    session: AsyncSession,
+    user_id: uuid.UUID,
+    row: DeploymentRecord,
+    author_email: str,
+) -> DeploymentRecordPublic:
+    source_ref = await resolve_deploy_source_label(
+        session,
+        user_id,
+        source_kind=row.source_kind,
+        source_ref=row.source_ref,
+    )
     return DeploymentRecordPublic(
         id=row.id,
         user_id=row.user_id,
@@ -63,7 +75,7 @@ def _to_public(row: DeploymentRecord, author_email: str) -> DeploymentRecordPubl
         container_id=row.container_id,
         container_name=row.container_name,
         source_kind=row.source_kind,  # type: ignore[arg-type]
-        source_ref=row.source_ref,
+        source_ref=source_ref,
         git_branch=row.git_branch,
         image_tag=row.image_tag,
         container_port=row.container_port,
@@ -73,6 +85,29 @@ def _to_public(row: DeploymentRecord, author_email: str) -> DeploymentRecordPubl
         public_url=row.public_url,
         created_at=row.created_at,
     )
+
+
+async def latest_source_by_container_ids(
+    session: AsyncSession,
+    user_id: uuid.UUID,
+    container_ids: list[str],
+) -> dict[str, tuple[str, str]]:
+    """Most recent ``(source_kind, source_ref)`` per container id for history fallback."""
+    if not container_ids:
+        return {}
+    result = await session.execute(
+        select(DeploymentRecord)
+        .where(
+            DeploymentRecord.user_id == user_id,
+            DeploymentRecord.container_id.in_(container_ids),
+        )
+        .order_by(DeploymentRecord.created_at.desc())
+    )
+    out: dict[str, tuple[str, str]] = {}
+    for row in result.scalars():
+        if row.container_id not in out:
+            out[row.container_id] = (row.source_kind, row.source_ref)
+    return out
 
 
 async def list_deployments(
@@ -94,10 +129,10 @@ async def list_deployments(
     if trimmed_name:
         query = query.where(DeploymentRecord.container_name == trimmed_name)
     result = await session.execute(query)
-    return [
-        _to_public(row, email)
-        for row, email in result.all()
-    ]
+    public_rows: list[DeploymentRecordPublic] = []
+    for row, email in result.all():
+        public_rows.append(await _to_public(session, user_id, row, email))
+    return public_rows
 
 
 async def get_deployment(
@@ -117,7 +152,7 @@ async def get_deployment(
     if row is None:
         return None
     deployment, email = row
-    return _to_public(deployment, email)
+    return await _to_public(session, user_id, deployment, email)
 
 
 def _diff_env(

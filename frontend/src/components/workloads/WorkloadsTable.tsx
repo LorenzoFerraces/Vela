@@ -12,6 +12,7 @@ import {
   formatApiError,
   openContainerLogWebSocket,
 } from '../../api/client'
+import { deploySourceImageLabel } from '../../pages/containers/deploySourceDisplay'
 
 const ERROR_LINE_PATTERN = /\b(error|exception|fatal|traceback)\b/i
 
@@ -284,7 +285,17 @@ export function WorkloadsTable({
                   <Fragment key={containerRow.id}>
                     <tr>
                       <td>{containerRow.name}</td>
-                      <td className="containers-table__mono">{containerRow.image}</td>
+                      <td
+                        className="containers-table__mono"
+                        title={
+                          containerRow.source_kind === 'dockerfile_template' ||
+                          containerRow.source_kind === 'git'
+                            ? containerRow.image
+                            : undefined
+                        }
+                      >
+                        {deploySourceImageLabel(containerRow)}
+                      </td>
                       <td>
                         <span className="containers-status">{containerRow.status}</span>
                       </td>

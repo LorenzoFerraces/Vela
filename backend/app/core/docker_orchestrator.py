@@ -38,6 +38,8 @@ from app.core.public_route_host import build_public_url
 VELA_MANAGED_LABEL = "vela.managed"
 VELA_MANAGED_VALUE = "true"
 VELA_OWNER_LABEL = "vela.owner_id"
+VELA_SOURCE_KIND_LABEL = "vela.source_kind"
+VELA_SOURCE_REF_LABEL = "vela.source_ref"
 VELA_ROUTE_HOST_LABEL = "vela.route_host"
 VELA_ROUTE_PATH_PREFIX_LABEL = "vela.route_path_prefix"
 VELA_ROUTE_TLS_LABEL = "vela.route_tls"
@@ -46,6 +48,28 @@ _NS_PER_SEC = 1_000_000_000
 
 def _max_concurrent_log_streams() -> int:
     return max(1, int(os.environ.get("VELA_MAX_LOG_STREAMS", "64")))
+
+
+def deploy_source_fields_from_labels(
+    labels: dict[str, str],
+) -> tuple[str | None, str | None]:
+    """Return ``(source_kind, source_label)`` from Vela deploy labels, if present."""
+    kind = (labels.get(VELA_SOURCE_KIND_LABEL) or "").strip() or None
+    label = (labels.get(VELA_SOURCE_REF_LABEL) or "").strip() or None
+    return kind, label
+
+
+def with_deploy_source_labels(
+    config: DeployConfig,
+    *,
+    source_kind: str,
+    source_ref: str,
+) -> DeployConfig:
+    """Attach user-facing deploy source metadata to the container labels."""
+    labels = dict(config.labels)
+    labels[VELA_SOURCE_KIND_LABEL] = source_kind
+    labels[VELA_SOURCE_REF_LABEL] = source_ref
+    return config.model_copy(update={"labels": labels})
 
 
 def _access_url_from_route_labels(labels: dict[str, Any]) -> str | None:
@@ -194,6 +218,7 @@ def _inspect_to_container_info(data: dict[str, Any]) -> ContainerInfo:
     cfg = data.get("Config") or {}
     image_ref = cfg.get("Image", "")
     labels = dict(cfg.get("Labels") or {})
+    source_kind, source_label = deploy_source_fields_from_labels(labels)
 
     return ContainerInfo(
         id=cid,
@@ -205,6 +230,8 @@ def _inspect_to_container_info(data: dict[str, Any]) -> ContainerInfo:
         labels=labels,
         health=health,
         access_url=_access_url_from_route_labels(labels),
+        source_kind=source_kind,
+        source_label=source_label,
     )
 
 

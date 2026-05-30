@@ -299,6 +299,10 @@ export interface ContainerInfo {
   health: string
   /** Public edge URL when Traefik route labels are present on the container. */
   access_url?: string | null
+  /** From vela.source_kind label when the workload was deployed via the run API. */
+  source_kind?: RunSourceKind | null
+  /** User-facing source (template name, image ref, Git URL) from vela.source_ref. */
+  source_label?: string | null
 }
 
 export type RunSourceKind = 'image' | 'git' | 'dockerfile_template'

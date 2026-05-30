@@ -95,6 +95,14 @@ class ContainerInfo(BaseModel):
         default=None,
         description="HTTPS or HTTP URL for the Traefik edge route when route labels are present.",
     )
+    source_kind: str | None = Field(
+        default=None,
+        description="Deploy source kind from vela.source_kind label (image, git, dockerfile_template).",
+    )
+    source_label: str | None = Field(
+        default=None,
+        description="User-facing deploy source from vela.source_ref (template name, image ref, Git URL).",
+    )
 
 
 class ContainerStats(BaseModel):

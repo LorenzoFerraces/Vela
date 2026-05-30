@@ -312,6 +312,26 @@ def test_run_from_dockerfile_template(
     assert body["image"].startswith("vela/templatebuild:")
     assert any(tag.startswith("vela/templatebuild:") for tag in fake_orchestrator._built_tags)
 
+    history = api_client.get("/api/deployments/")
+    assert history.status_code == 200
+    template_rows = [
+        row
+        for row in history.json()
+        if row["source_kind"] == "dockerfile_template"
+    ]
+    assert template_rows
+    assert template_rows[0]["source_ref"] == "minimal"
+
+    listed_containers = api_client.get("/api/containers/")
+    assert listed_containers.status_code == 200
+    deployed = next(
+        row
+        for row in listed_containers.json()
+        if row["image"].startswith("vela/templatebuild:")
+    )
+    assert deployed["source_kind"] == "dockerfile_template"
+    assert deployed["source_label"] == "minimal"
+
 
 def test_run_from_git_url(
     api_client: TestClient,

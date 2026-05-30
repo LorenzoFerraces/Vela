@@ -6,6 +6,7 @@ import {
   type DeploymentDiffResponse,
   type DeploymentRecord,
 } from '../../api/client'
+import { deploySourceImageLabel } from './deploySourceDisplay'
 
 function formatWhen(iso: string): string {
   const date = new Date(iso)
@@ -15,23 +16,19 @@ function formatWhen(iso: string): string {
   return date.toLocaleString()
 }
 
-function formatSourceKind(sourceKind: DeploymentRecord['source_kind']): string {
-  switch (sourceKind) {
-    case 'image':
-      return 'Image'
-    case 'git':
-      return 'Git'
-    case 'dockerfile_template':
-      return 'Dockerfile'
-  }
-}
-
 function formatSourceCell(row: DeploymentRecord): string {
-  const label = formatSourceKind(row.source_kind)
-  if (row.git_branch) {
+  const label = deploySourceImageLabel(row)
+  if (row.source_kind === 'git' && row.git_branch) {
     return `${label} @ ${row.git_branch}`
   }
+  if (row.source_kind === 'dockerfile_template') {
+    return `Dockerfile: ${label}`
+  }
   return label
+}
+
+function formatCompareOptionLabel(row: DeploymentRecord): string {
+  return `${formatWhen(row.created_at)} — ${deploySourceImageLabel(row)}`
 }
 
 function maskEnvValue(value: string): string {
@@ -111,8 +108,9 @@ export function DeploymentHistorySection({
 }: {
   refreshSignal?: number
 }) {
+  const [expanded, setExpanded] = useState(false)
   const [rows, setRows] = useState<DeploymentRecord[]>([])
-  const [loading, setLoading] = useState(true)
+  const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [leftId, setLeftId] = useState<string>('')
   const [rightId, setRightId] = useState<string>('')
@@ -133,8 +131,11 @@ export function DeploymentHistorySection({
   }, [])
 
   useEffect(() => {
+    if (!expanded) {
+      return
+    }
     void reload()
-  }, [reload, refreshSignal])
+  }, [reload, refreshSignal, expanded])
 
   async function onCompare() {
     if (!leftId || !rightId || leftId === rightId) {
@@ -155,8 +156,20 @@ export function DeploymentHistorySection({
 
   return (
     <section className="deployment-history">
-      <h2 className="dashboard-page__subtitle">Deploy history</h2>
+      <button
+        type="button"
+        className="deployment-history__toggle"
+        aria-expanded={expanded}
+        onClick={() => setExpanded((open) => !open)}
+      >
+        <span className="deployment-history__title">Deploy history</span>
+        <span className="deployment-history__chevron" aria-hidden="true">
+          ›
+        </span>
+      </button>
 
+      {expanded ? (
+      <>
       <div aria-live="polite" className="deployment-history__body">
         {loading && rows.length === 0 ? (
           <p className="containers-muted">Loading deploy history…</p>
@@ -191,7 +204,17 @@ export function DeploymentHistorySection({
                     <td>
                       <span className="containers-status">{formatSourceCell(row)}</span>
                     </td>
-                    <td className="containers-table__mono">{row.image_tag}</td>
+                    <td
+                      className="containers-table__mono"
+                      title={
+                        row.source_kind === 'dockerfile_template' ||
+                        row.source_kind === 'git'
+                          ? row.image_tag
+                          : undefined
+                      }
+                    >
+                      {deploySourceImageLabel(row)}
+                    </td>
                     <td>{row.container_name ?? '—'}</td>
                   </tr>
                 ))}
@@ -215,7 +238,7 @@ export function DeploymentHistorySection({
                 <option value="">Select…</option>
                 {rows.map((row) => (
                   <option key={row.id} value={row.id}>
-                    {formatWhen(row.created_at)} — {row.image_tag}
+                    {formatCompareOptionLabel(row)}
                   </option>
                 ))}
               </select>
@@ -230,7 +253,7 @@ export function DeploymentHistorySection({
                 <option value="">Select…</option>
                 {rows.map((row) => (
                   <option key={row.id} value={row.id}>
-                    {formatWhen(row.created_at)} — {row.image_tag}
+                    {formatCompareOptionLabel(row)}
                   </option>
                 ))}
               </select>
@@ -294,6 +317,8 @@ export function DeploymentHistorySection({
             </div>
           ) : null}
         </div>
+      ) : null}
+      </>
       ) : null}
     </section>
   )

@@ -33,7 +33,14 @@ from app.api.schemas import (
 )
 from app.core.auth.service import get_user_by_id
 from app.core.auth.tokens import decode_access_token
-from app.core.docker_orchestrator import VELA_OWNER_LABEL
+from app.core.deploy_source_display import resolve_deploy_source_label
+from app.core.deployment_history import latest_source_by_container_ids
+from app.core.docker_orchestrator import (
+    VELA_OWNER_LABEL,
+    VELA_SOURCE_KIND_LABEL,
+    VELA_SOURCE_REF_LABEL,
+    with_deploy_source_labels,
+)
 from app.core.public_route_host import (
     apply_public_route_to_deploy_config,
     build_public_url,
@@ -256,19 +263,60 @@ async def _persist_run_deployment(
         )
 
 
+async def _enrich_container_source_labels(
+    session: AsyncSession,
+    user: User,
+    containers: list[ContainerInfo],
+) -> list[ContainerInfo]:
+    """Fill ``source_label`` from labels or deployment history (Builder template name)."""
+    history_by_container = await latest_source_by_container_ids(
+        session,
+        user.id,
+        [row.id for row in containers],
+    )
+    enriched: list[ContainerInfo] = []
+    for info in containers:
+        source_kind = info.source_kind or info.labels.get(VELA_SOURCE_KIND_LABEL)
+        source_ref = info.source_label or info.labels.get(VELA_SOURCE_REF_LABEL) or ""
+        if not source_ref and info.id in history_by_container:
+            history_kind, history_ref = history_by_container[info.id]
+            source_kind = source_kind or history_kind
+            source_ref = history_ref
+        if not source_kind or not source_ref:
+            enriched.append(info)
+            continue
+        display_ref = await resolve_deploy_source_label(
+            session,
+            user.id,
+            source_kind=source_kind,
+            source_ref=source_ref,
+        )
+        enriched.append(
+            info.model_copy(
+                update={
+                    "source_kind": source_kind,
+                    "source_label": display_ref,
+                }
+            )
+        )
+    return enriched
+
+
 @router.get("/", response_model=list[ContainerInfo])
 async def list_containers(
     orchestrator: Annotated[ContainerOrchestrator, Depends(get_orchestrator)],
     current_user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[AsyncSession, Depends(get_db)],
     container_status: Annotated[
         ContainerStatus | None,
         Query(alias="status", description="Filter by container status"),
     ] = None,
 ) -> list[ContainerInfo]:
     """List the caller's Vela-managed containers, optionally filtered by status."""
-    return await orchestrator.list(
+    containers = await orchestrator.list(
         status=container_status, owner_id=str(current_user.id)
     )
+    return await _enrich_container_source_labels(session, current_user, containers)
 
 
 @router.get("/image/availability", response_model=ImageAvailabilityResponse)
@@ -456,6 +504,7 @@ async def run_from_user_source(
             env_vars=body.env_vars,
             command=body.command,
         ).model_copy(update=_route_updates_from_run_body(body))
+        cfg = with_deploy_source_labels(cfg, source_kind="image", source_ref=image_ref)
         cfg = _with_owner_label(cfg, str(current_user.id))
         cfg = await apply_public_route_to_deploy_config(cfg, traffic_router)
         info, route_wired, public_url = await _deploy_and_maybe_wire_route(
@@ -505,6 +554,11 @@ async def run_from_user_source(
                 **_route_updates_from_run_body(body),
             }
         )
+        cfg = with_deploy_source_labels(
+            cfg,
+            source_kind="dockerfile_template",
+            source_ref=template.name,
+        )
         cfg = _with_owner_label(cfg, str(current_user.id))
         cfg = await apply_public_route_to_deploy_config(cfg, traffic_router)
         info, route_wired, public_url = await _deploy_and_maybe_wire_route(
@@ -516,7 +570,7 @@ async def run_from_user_source(
             body,
             info,
             source_kind="dockerfile_template",
-            source_ref=str(template_id),
+            source_ref=template.name,
             image_tag=build_result.image_tag,
             dockerfile_snapshot=build_result.dockerfile_snapshot or template.contents,
             public_url=public_url,
@@ -563,6 +617,7 @@ async def run_from_user_source(
             **_route_updates_from_run_body(body),
         }
     )
+    cfg = with_deploy_source_labels(cfg, source_kind="git", source_ref=git_url)
     cfg = _with_owner_label(cfg, str(current_user.id))
     cfg = await apply_public_route_to_deploy_config(cfg, traffic_router)
     info, route_wired, public_url = await _deploy_and_maybe_wire_route(
