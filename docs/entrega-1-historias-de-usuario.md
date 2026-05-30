@@ -4,219 +4,87 @@
 
 ## User stories
 
-### 1. Proteger rutas de contenedores con autenticación
+### 1. Cuentas, sesión y workloads aislados por usuario
 
-**Trello:** [Proteger rutas de contenedores con autenticación](https://trello.com/c/2VUyyyoh/22-proteger-rutas-de-contenedores-con-autenticaci%C3%B3n)
+**Trello:** [Modelo de usuario y contenedores en PostgreSQL](https://trello.com/c/iCO5Qpwz/20-modelo-de-usuario-y-contenedores-en-postgresql) · [Backend: API y flujo de registro o login](https://trello.com/c/3sFDjJ0H/21-backend-api-y-flujo-de-registro-o-login) · [Frontend: pantallas de login y sesión](https://trello.com/c/4j13iZ0Z/24-frontend-pantallas-de-login-y-sesi%C3%B3n) · [Proteger rutas de contenedores con autenticación](https://trello.com/c/2VUyyyoh/22-proteger-rutas-de-contenedores-con-autenticaci%C3%B3n) · [Filtrar contenedores por usuario creador](https://trello.com/c/D0V2Qu2Q/23-filtrar-contenedores-por-usuario-creador)
 
-
-| Campo                       | Descripción                                                                                                                                                                                                                                                                                                                                         |
-| --------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Actor(es)**               | Usuario autenticado que usa la API o la SPA; cliente anónimo (recibe 401).                                                                                                                                                                                                                                                                          |
-| **Funcionalidad**           | Las rutas bajo el prefijo `**/api/containers/`** (listado, run, start/stop/remove, logs, WebSocket de logs, sugerencias de imagen, etc.) exigen `**Authorization: Bearer`** válido vía `get_current_user`. Las operaciones sobre un contenedor concreto pasan por `_require_owned` (404 si la etiqueta `vela.owner_id` no coincide con el usuario). |
-| **Valor**                   | Ningún cliente puede orquestar ni inspeccionar cargas ajenas por la API.                                                                                                                                                                                                                                                                            |
-| **Criterios de aceptación** | Sin token: respuestas **401** en rutas protegidas; con token de otro usuario: **404** en recurso no propio; tests de integración cubren anonimato vs autenticado.                                                                                                                                                                                   |
-
+| Campo | Descripción |
+|--------|-------------|
+| **Actor(es)** | Persona que se registra o inicia sesión; usuario autenticado que opera la plataforma; cliente anónimo (recibe 401). |
+| **Funcionalidad** | **Persistencia:** PostgreSQL con tabla `users` (email único, hash de contraseña), `user_oauth_identities` y modelos de dominio asociados (`images`, `dockerfiles`); migraciones Alembic. Los contenedores en ejecución siguen en Docker; el vínculo usuario↔workload es la etiqueta `vela.owner_id`, no una fila “container” en SQL. **Auth API:** `POST /api/auth/register`, `POST /api/auth/login` y `GET /api/auth/me` con JWT Bearer. **SPA:** rutas `/login` y `/register`, `AuthProvider` con token en `localStorage` (`vela.access_token`), cliente HTTP con encabezado Bearer y `RequireAuth` en dashboard, containers, builder y settings. **Multitenencia:** rutas bajo `/api/containers/` exigen usuario autenticado; en deploy se aplica `vela.owner_id`; `GET /api/containers/` lista solo workloads del dueño; operaciones sobre un id concreto pasan por `_require_owned` (404 si la etiqueta no coincide). |
+| **Valor** | Cada cuenta tiene identidad persistente, sesión en el navegador y un inventario de cargas que no se mezcla con el de otros usuarios ni se manipula sin credenciales. |
+| **Criterios de aceptación** | `alembic upgrade head` aplica el esquema; register/login/me cubiertos por tests de integración; sin token → **401** en rutas protegidas; con token de otro usuario → **404** en recurso ajeno; tras desplegar con usuarios A y B, cada listado devuelve solo sus filas; registro o login exitoso lleva al área autenticada y la recarga conserva sesión mientras el JWT sea válido; rutas protegidas sin token redirigen a `/login?next=…`; E2E en `frontend/e2e/auth.spec.ts` ejercitan flujos de auth. |
 
 ---
 
-### 2. Filtrar contenedores por usuario creador
+### 2. Integración GitHub: conectar cuenta y desplegar repos privados
 
-**Trello:** [Filtrar contenedores por usuario creador](https://trello.com/c/D0V2Qu2Q/23-filtrar-contenedores-por-usuario-creador)
+**Trello:** [OAuth GitHub: callback y almacenamiento de tokens](https://trello.com/c/d39gvNme/26-oauth-github-callback-y-almacenamiento-de-tokens) · [Frontend: conectar y mostrar estado de cuenta GitHub](https://trello.com/c/Lnwy7kfO/27-frontend-conectar-y-mostrar-estado-de-cuenta-github) · [Build y clone con repos privados usando token del usuario](https://trello.com/c/YSvNDKIj/28-build-y-clone-con-repos-privados-usando-token-del-usuario)
 
-
-| Campo                       | Descripción                                                                                                                                                                                                                                                          |
-| --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Actor(es)**               | Usuario autenticado que consulta su inventario.                                                                                                                                                                                                                      |
-| **Funcionalidad**           | En el **deploy**, la configuración lleva la etiqueta `**vela.owner_id`** con el UUID del usuario. `**GET /api/containers/`** invoca `orchestrator.list(..., owner_id=str(current_user.id))`, de modo que Docker filtra por etiqueta además del flag de gestión Vela. |
-| **Valor**                   | Cada cuenta ve solo sus propios workloads aunque compartan motor Docker.                                                                                                                                                                                             |
-| **Criterios de aceptación** | Tras desplegar con usuario A y B, cada `GET /api/containers/` devuelve solo filas del dueño; pruebas de integración validan el filtrado con etiquetas esperadas.                                                                                                     |
-
+| Campo | Descripción |
+|--------|-------------|
+| **Actor(es)** | Usuario autenticado que enlaza GitHub en Settings y despliega desde URLs `https://github.com/…`. |
+| **Funcionalidad** | **OAuth:** `GET /api/auth/github/start` devuelve la URL de autorización; `GET /api/auth/github/callback` intercambia el código, obtiene perfil, cifra el access token (Fernet, `VELA_TOKEN_ENCRYPTION_KEY`) y hace upsert en `user_oauth_identities`; redirección al frontend (`/settings?github=connected` o `?github=error&reason=…`) sin exponer el token en JSON; `GET /api/auth/github/status` y `DELETE /api/auth/github` para consulta y desconexión. **UI Settings:** estado conectado/desconectado, login y avatar, flujo guiado de conexión y banners tras el callback. **Deploy privado:** en `POST /api/containers/run` (y análisis de fuente git en builder cuando aplica), el backend resuelve el token del usuario y configura clone vía `git -c http.extraheader=Authorization: Basic …` sin pegar PAT en el formulario ni filtrar el secreto en URLs o logs. |
+| **Valor** | Repos privados desplegables con OAuth estándar; el usuario ve en todo momento si GitHub está vinculado y puede revocar la integración sin editar variables locales con tokens en claro. |
+| **Criterios de aceptación** | Callback persiste identidad cifrada y redirige a Settings (tests en `test_github_oauth.py`); `/github/status` nunca devuelve el token; tras OAuth exitoso la UI muestra “conectado” y tras disconnect, desconectado; despliegue de repo privado sin GitHub conectado falla con mensaje que orienta a Settings; con identidad almacenada el clone/build puede completarse; README documenta `VELA_GITHUB_*`, `VELA_FRONTEND_BASE_URL` y `VELA_TOKEN_ENCRYPTION_KEY`. |
 
 ---
 
-### 3. Frontend: pantallas de login y sesión
+### 3. Inventario y monitoreo de workloads en ejecución
 
-**Trello:** [Frontend: pantallas de login y sesión](https://trello.com/c/4j13iZ0Z/24-frontend-pantallas-de-login-y-sesi%C3%B3n)
+**Trello:** [Lista running workloads: copiar URL de acceso al contenedor](https://trello.com/c/PZaFCaHI/37-lista-running-workloads-copiar-url-de-acceso-al-contenedor) · [Lista running workloads: vista opcional o expandible de logs por contenedor](https://trello.com/c/lCkjLb0X/49-lista-running-workloads-vista-opcional-o-expandible-de-logs-por-contenedor) · [Dashboard de monitoreo: panel de logs del contenedor con errores de arranque y ejecución](https://trello.com/c/fPo2TqYE/48-dashboard-de-monitoreo-panel-de-logs-del-contenedor-con-errores-de-arranque-y-ejecuci%C3%B3n)
 
-
-| Campo                       | Descripción                                                                                                                                                                                                                         |
-| --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Actor(es)**               | Persona que se registra o inicia sesión; visitante redirigido a login si intenta rutas protegidas.                                                                                                                                  |
-| **Funcionalidad**           | Rutas `**/login`** y `**/register`**; `AuthProvider` guarda el **access token** en `localStorage` (`vela.access_token`); el cliente HTTP adjunta el encabezado Bearer; `RequireAuth` envuelve dashboard, containers, settings, etc. |
-| **Valor**                   | Sesión persistente en el navegador y gating de la SPA coherente con la API.                                                                                                                                                         |
-| **Criterios de aceptación** | Registro o login exitoso lleva al área autenticada; recarga conserva sesión mientras el token siga siendo válido; rutas protegidas sin token redirigen a `/login`. E2E cubren flujos de auth.                                       |
-
+| Campo | Descripción |
+|--------|-------------|
+| **Actor(es)** | Usuario autenticado en **Containers** o **Dashboard** que opera y diagnostica cargas ya desplegadas. |
+| **Funcionalidad** | Tabla compartida `WorkloadsTable` en ambas páginas: columna **Access URL** con botón **Copy** (`access_url` al portapapeles, feedback Copied/Copy failed, **—** si no hay ruta pública Traefik); columna **Logs** con **Show/Hide** que despliega panel bajo la fila — snapshot vía `GET …/logs` si no está running, **WebSocket** `…/logs/stream` en vivo si está running (token en query `access_token`), opción **Highlight error lines** y **Refresh snapshot**. En **Dashboard**, `prioritizeProblemWorkloads` ordena primero contenedores detenidos, en reinicio o con health no saludable. Rutas y WS validan Bearer y propiedad antes de streamear. |
+| **Valor** | Una sola superficie para ver qué está fallando, abrir o copiar la URL pública y leer trazas de arranque o runtime sin salir de la app ni usar `docker logs` a mano. |
+| **Criterios de aceptación** | Con `access_url` informada, copiar deja la URL exacta en el portapapeles; expandir logs muestra trazas y estados Connecting/Live/Ended/Error; colapsar cierra el socket; en Dashboard el orden prioriza cargas problemáticas; `/dashboard` y `/containers` exigen `RequireAuth`; backend rechaza acceso a logs de contenedor ajeno; verificación manual o E2E en `dashboard.spec.ts` / `containers.spec.ts` donde existan. |
 
 ---
 
-### 4. Backend: API y flujo de registro o login
-
-**Trello:** [Backend: API y flujo de registro o login](https://trello.com/c/3sFDjJ0H/21-backend-api-y-flujo-de-registro-o-login)
-
-
-| Campo                       | Descripción                                                                                                                                                                                                    |
-| --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Actor(es)**               | Cliente SPA o consumidor de la API.                                                                                                                                                                            |
-| **Funcionalidad**           | `POST /api/auth/register` crea usuario y devuelve `access_token` + `user`; `POST /api/auth/login` valida email/contraseña y devuelve el mismo shape; `GET /api/auth/me` devuelve el usuario actual con Bearer. |
-| **Valor**                   | Autenticación stateless basada en JWT alineada con el resto de rutas protegidas.                                                                                                                               |
-| **Criterios de aceptación** | Credenciales inválidas → 401 u error de dominio mapeado; registro duplicado manejado; tests de integración ejercitan register/login/me.                                                                        |
-
-
----
-
-### 5. Modelo de usuario y contenedores en PostgreSQL
-
-**Trello:** [Modelo de usuario y contenedores en PostgreSQL](https://trello.com/c/iCO5Qpwz/20-modelo-de-usuario-y-contenedores-en-postgresql)
-
-
-| Campo                       | Descripción                                                                                                                                                                                                                                                                                                                                                                           |
-| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Actor(es)**               | La aplicación API; operador de base de datos.                                                                                                                                                                                                                                                                                                                                         |
-| **Funcionalidad**           | Tabla `**users`** (email único, hash de contraseña, timestamps); `**user_oauth_identities`** para GitHub; modelos adicionales de dominio (`images`, `dockerfiles`) con FK al usuario. Los **contenedores en ejecución** siguen en Docker; el **vínculo usuario↔contenedor** es la etiqueta `vela.owner_id` en el contenedor, no una fila “container” en SQL. Migraciones **Alembic**. |
-| **Valor**                   | Persistencia transaccional para identidad y tokens; la orquestación sigue siendo responsabilidad del motor de contenedores.                                                                                                                                                                                                                                                           |
-| **Criterios de aceptación** | `alembic upgrade head` aplica el esquema; las rutas de auth leen/escriben en Postgres vía sesión async; README documenta `VELA_DATABASE_URL` y uso de Postgres en desarrollo.                                                                                                                                                                                                         |
-
-
----
-
-### 6. Agregar testeo con Cypress / Playwright
-
-**Trello:** [Agregar testeo con Cypress / Playwright](https://trello.com/c/AGS7zQqy/6-agregar-testeo-con-cypress-playwright)
-
-
-| Campo                       | Descripción                                                                                                                                                                                                                                                                                          |
-| --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Actor(es)**               | CI y desarrolladores que ejecutan E2E localmente.                                                                                                                                                                                                                                                    |
-| **Funcionalidad**           | Suite **Playwright** en `frontend/e2e/` (auth, settings, dashboard, containers, health API); `playwright.config.ts` levanta Vite + uvicorn en modo test; workflow `**.github/workflows/e2e.yml`** con Chromium. **Cypress** no está integrado en el monorepo: la entrega se consolidó en Playwright. |
-| **Valor**                   | Regresión automática de flujos críticos en navegador real sin servicios externos en la mayoría de specs (mocks HTTP donde aplica).                                                                                                                                                                   |
-| **Criterios de aceptación** | `npm run test:e2e` pasa en limpio con dependencias del README; el workflow de GitHub Actions adjunta el reporte Playwright como artefacto (retención acotada).                                                                                                                                       |
-
-
----
-
-### 7. Build y clone con repos privados usando token del usuario
-
-**Trello:** [Build y clone con repos privados usando token del usuario](https://trello.com/c/YSvNDKIj/28-build-y-clone-con-repos-privados-usando-token-del-usuario)
-
-
-| Campo                       | Descripción                                                                                                                                                                                                                                                                    |
-| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **Actor(es)**               | Usuario con cuenta GitHub conectada que despliega desde URL `https://github.com/...`.                                                                                                                                                                                          |
-| **Funcionalidad**           | Tras OAuth, el token de GitHub se guarda cifrado (Fernet) y, en `POST /api/containers/run` con fuente privada en GitHub, el backend obtiene el token del usuario y configura **clone** vía cabecera extra (`git -c http.extraheader=...`) sin exponer el token en logs ni URL. |
-| **Valor**                   | Repos privados desplegables sin pegar PAT en el formulario.                                                                                                                                                                                                                    |
-| **Criterios de aceptación** | Sin GitHub conectado, despliegue de repo privado falla con mensaje claro; con identidad almacenada, el flujo de build puede clonar; README documenta variables OAuth y `VELA_TOKEN_ENCRYPTION_KEY`.                                                                            |
-
-
----
-
-### 8. Lista running workloads: vista opcional o expandible de logs por contenedor
-
-**Trello:** [Lista running workloads: vista opcional o expandible de logs por contenedor](https://trello.com/c/lCkjLb0X/49-lista-running-workloads-vista-opcional-o-expandible-de-logs-por-contenedor)
-
-
-| Campo                       | Descripción                                                                                                                                                                                                                                                                                                                                                                |
-| --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Actor(es)**               | Usuario en **Containers** o **Dashboard** que inspecciona una fila concreta.                                                                                                                                                                                                                                                                                               |
-| **Funcionalidad**           | En `WorkloadsTable`, columna **Logs** con **Show / Hide** que despliega un panel bajo la fila: si el contenedor **no está running**, snapshot vía `GET .../logs`; si **está running**, **WebSocket** `.../logs/stream` con chunks binarios; opción **Highlight error lines** y **Refresh snapshot**. Autenticación del WS con query `access_token` (patrón del navegador). |
-| **Valor**                   | Diagnóstico rápido sin salir de la tabla ni usar `docker logs` manualmente.                                                                                                                                                                                                                                                                                                |
-| **Criterios de aceptación** | Expandir muestra trazas; colapsar cierra el socket; estados Connecting / Live / Ended / Error visibles; backend valida token y propiedad antes de streamear.                                                                                                                                                                                                               |
-
-
----
-
-### 9. Backend y UI: autocompletado de imágenes según las más pulleadas del registry
+### 4. Autocompletado de imágenes al desplegar un contenedor
 
 **Trello:** [Backend y UI: autocompletado de imágenes según las más pulleadas del registry](https://trello.com/c/ztqfVIcc/42-backend-y-ui-autocompletado-de-im%C3%A1genes-seg%C3%BAn-las-m%C3%A1s-pulleadas-del-registry)
 
-
-| Campo                       | Descripción                                                                                                                                                                                                                                |
-| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **Actor(es)**               | Usuario que completa el campo de imagen en el formulario de run.                                                                                                                                                                           |
-| **Funcionalidad**           | `GET /api/containers/image/suggestions` (autenticado) fusiona imágenes locales del motor con sugerencias de **Docker Hub** (`merge_image_suggestions`, conteos de pull); la UI consume el endpoint en el flujo del formulario (debounced). |
-| **Valor**                   | Menos errores de tipeo y descubrimiento de imágenes populares sin consultar el hub a mano.                                                                                                                                                 |
-| **Criterios de aceptación** | Query vacío omite llamada al hub donde el código lo define; respuesta incluye `ref`, `pull_count`, `source`; tests `test_image_suggestions_`* pasan.                                                                                       |
-
+| Campo | Descripción |
+|--------|-------------|
+| **Actor(es)** | Usuario autenticado que completa el campo de imagen en el formulario de run en **Containers**. |
+| **Funcionalidad** | `GET /api/containers/image/suggestions` (autenticado) fusiona imágenes locales del motor Docker con sugerencias de **Docker Hub** (`merge_image_suggestions`, metadatos de pull); la UI consume el endpoint con búsqueda debounced en el flujo del formulario. |
+| **Valor** | Menos errores de tipeo y descubrimiento de imágenes populares sin consultar el hub manualmente. |
+| **Criterios de aceptación** | Sin autenticación → 401; query vacío devuelve refs locales sin invocar Hub donde el código lo define; con `q=` la respuesta incluye `ref`, `pull_count` y `source`; tests `test_image_suggestions_*` en integración pasan. |
 
 ---
 
-### 10. Lista running workloads: copiar URL de acceso al contenedor
+### 5. Regresión end-to-end con Playwright en CI
 
-**Trello:** [Lista running workloads: copiar URL de acceso al contenedor](https://trello.com/c/PZaFCaHI/37-lista-running-workloads-copiar-url-de-acceso-al-contenedor)
+**Trello:** [Agregar testeo con Cypress / Playwright](https://trello.com/c/AGS7zQqy/6-agregar-testeo-con-cypress-playwright)
 
-
-| Campo                       | Descripción                                                                                                                                                                                                     |
-| --------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Actor(es)**               | Usuario que necesita compartir o abrir la URL pública del workload.                                                                                                                                             |
-| **Funcionalidad**           | Columna **Access URL** en `WorkloadsTable`: botón **Copy** que escribe `access_url` en el portapapeles; feedback **Copied** / **Copy failed**; si no hay ruta Traefik, se muestra **—** con título explicativo. |
-| **Valor**                   | Misma conveniencia que el banner post-run, pero desde el inventario en curso.                                                                                                                                   |
-| **Criterios de aceptación** | Con `access_url` informada por la API, el portapapeles contiene la URL exacta; sin URL, no hay botón de copia; verificación manual o cobertura E2E si existe.                                                   |
-
-
----
-
-### 11. Dashboard de monitoreo: panel de logs del contenedor con errores de arranque y ejecución
-
-**Trello:** [Dashboard de monitoreo: panel de logs del contenedor con errores de arranque y ejecución](https://trello.com/c/fPo2TqYE/48-dashboard-de-monitoreo-panel-de-logs-del-contenedor-con-errores-de-arranque-y-ejecuci%C3%B3n)
-
-
-| Campo                       | Descripción                                                                                                                                                                                                                                                                               |
-| --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Actor(es)**               | Usuario autenticado en `**/dashboard`**.                                                                                                                                                                                                                                                  |
-| **Funcionalidad**           | Página **Dashboard** con `WorkloadsTable` en modo `**prioritizeProblemWorkloads`**: contenedores detenidos, en reinicio o con health no saludable aparecen primero. Los logs expandibles y el resaltado de líneas de error cubren arranque y runtime en el mismo panel que en Containers. |
-| **Valor**                   | Vista operativa centrada en “qué está roto o inestable” y por qué (logs), separada del flujo de creación.                                                                                                                                                                                 |
-| **Criterios de aceptación** | Orden de filas coherente con la política de prioridad; logs accesibles como en la lista de Containers; ruta protegida por `RequireAuth`.                                                                                                                                                  |
-
-
----
-
-### 12. OAuth GitHub: callback y almacenamiento de tokens
-
-**Trello:** [OAuth GitHub: callback y almacenamiento de tokens](https://trello.com/c/d39gvNme/26-oauth-github-callback-y-almacenamiento-de-tokens)
-
-
-| Campo                       | Descripción                                                                                                                                                                                                                                                                                                                                                            |
-| --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Actor(es)**               | Usuario que conecta GitHub; el servidor que intercambia `code` por token.                                                                                                                                                                                                                                                                                              |
-| **Funcionalidad**           | `GET /api/auth/github/start` devuelve URL de autorización; `GET /api/auth/github/callback` intercambia el código, obtiene perfil, **cifra** el access token y hace upsert en `user_oauth_identities`; redirección al frontend con `?github=connected` o error; `DELETE /api/auth/github` revoca fila y token. Variables `VELA_GITHUB_`* y `VELA_TOKEN_ENCRYPTION_KEY`. |
-| **Valor**                   | Integración OAuth estándar sin almacenar secretos en claro en base de datos.                                                                                                                                                                                                                                                                                           |
-| **Criterios de aceptación** | El callback no expone el token al navegador en JSON; estado y desconexión por rutas documentadas en README; pruebas cubren ramas relevantes donde existan.                                                                                                                                                                                                             |
-
-
----
-
-### 13. Frontend: conectar y mostrar estado de cuenta GitHub
-
-**Trello:** [Frontend: conectar y mostrar estado de cuenta GitHub](https://trello.com/c/Lnwy7kfO/27-frontend-conectar-y-mostrar-estado-de-cuenta-github)
-
-
-| Campo                       | Descripción                                                                                                                                                                                                              |
-| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **Actor(es)**               | Usuario en **Settings** que enlaza o desvincula GitHub.                                                                                                                                                                  |
-| **Funcionalidad**           | UI que llama a `GET /api/auth/github/status` y muestra conexión, login y avatar si aplica; acción para abrir **start** OAuth; manejo de query `github=connected` / error al volver del callback; desconexión vía DELETE. |
-| **Valor**                   | Transparencia del estado de integración y flujo guiado sin editar `.env` con tokens manuales.                                                                                                                            |
-| **Criterios de aceptación** | Tras OAuth exitoso, la pantalla refleja “conectado”; tras disconnect, estado desconectado; mensajes de error legibles según `detail` de la API.                                                                          |
-
+| Campo | Descripción |
+|--------|-------------|
+| **Actor(es)** | Equipo de desarrollo y revisores de PR; pipeline de GitHub Actions. |
+| **Funcionalidad** | Suite **Playwright** en `frontend/e2e/` (auth, settings, dashboard, containers, builder, smoke, API health) contra frontend y API reales vía `playwright.config.ts` (Vite + uvicorn en modo test). Workflow `.github/workflows/e2e.yml` con Chromium y artefacto de reporte (retención acotada). **Cypress** no está integrado: la entrega consolidó un solo harness E2E. |
+| **Valor** | Regresión automática de flujos críticos en navegador real, alineada con la política del repo de no stubear `/api/**` en specs de producto. |
+| **Criterios de aceptación** | `npm run test:e2e` pasa en entorno limpio según README; el workflow se dispara con los `paths` configurados y adjunta el reporte Playwright; en la rama/tag **Entrega-1** la suite refleja el alcance descrito arriba. |
 
 ---
 
 ## Resumen ejecutivo
 
-### Qué se agregó o modificó en esta iteración
+### Qué se entregó en esta iteración
 
-- **Autenticación** JWT (registro, login, `/me`) y **protección** de la API de contenedores y rutas relacionadas.
-- **PostgreSQL** para usuarios, identidades OAuth y modelos asociados; **multitenencia** en Docker vía etiqueta `**vela.owner_id`**.
-- **GitHub OAuth** (callback, cifrado en reposo, estado y desconexión) y **clone/build de repos privados** con el token del usuario.
-- **UX de workloads**: **URL de acceso** con copia, **sugerencias de imágenes**, tabla compartida en **Containers** y **Dashboard**.
-- **Observabilidad**: logs por HTTP y **WebSocket**; fila expandible con resaltado de errores; en Dashboard, **priorización** de cargas problemáticas.
-- **CI E2E** con Playwright y documentación de ejecución en README (alineado con las notas del release).
+- **Plataforma multiusuario:** identidad en PostgreSQL, JWT, login/registro en la SPA y API de contenedores acotada por dueño (`vela.owner_id` + comprobación de propiedad).
+- **GitHub como proveedor de identidad y clone:** OAuth con token cifrado, Settings con estado visible y despliegue de repos privados sin PAT en el formulario.
+- **Operación de workloads:** tabla unificada en Containers y Dashboard con copia de URL pública, logs por HTTP/WebSocket y vista de monitoreo que prioriza cargas problemáticas.
+- **UX de despliegue:** sugerencias de imagen locales + Docker Hub en el formulario de run.
+- **Calidad:** E2E con Playwright en local y CI (sin Cypress).
 
 ### Decisiones tomadas (prioridades, diseño, riesgos)
 
-- **Playwright** como herramienta E2E en el repo (sin Cypress) para un solo harness y menos mantenimiento.
-- **Propiedad de contenedores** con etiquetas Docker en lugar de tabla SQL de contenedores: simplicidad operativa; inventario depende también del estado del motor.
-- **WebSocket de logs** con `access_token` en query y validación de usuario en handler; sesión DB inyectada donde aplica para coherencia con el resto de la API.
-- **Endpoints WebSocket** para acceso a logs, facilitando el acceso a una consola en un futuro
-- **Sugerencias de imágenes**: mezcla motor local + metadatos públicos Docker Hub; comportamiento sin query acotado en código.
+- **Playwright** como única herramienta E2E del monorepo para reducir mantenimiento frente a Cypress.
+- **Propiedad de contenedores** vía etiquetas Docker en lugar de tabla SQL de inventario: simplicidad operativa; el listado depende del estado del motor además del dueño.
+- **WebSocket de logs** con `access_token` en query y validación de usuario en el handler, coherente con limitaciones del API de WebSocket en navegador.
+- **Sugerencias de imágenes:** mezcla motor local + metadatos públicos de Docker Hub; consultas vacías acotadas para no golpear el hub innecesariamente.
+- **Callback OAuth** siempre redirige a la SPA (nunca JSON de error en bruto) para no dejar al usuario fuera de la interfaz.
 
 ---
-
