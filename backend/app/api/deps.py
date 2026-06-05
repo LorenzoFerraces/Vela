@@ -14,13 +14,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth.service import get_user_by_id
 from app.core.auth.tokens import decode_access_token
-from app.core.default_image_builder import DefaultImageBuilder
-from app.core.docker_orchestrator import DockerOrchestrator
-from app.core.orchestrator import ContainerOrchestrator
+from app.core.build.default_image_builder import DefaultImageBuilder
+from app.core.containers.docker_orchestrator import DockerOrchestrator
+from app.core.containers.orchestrator import ContainerOrchestrator
 from app.core.exceptions import NotAuthenticatedError, TrafficRouterError
-from app.core.kubernetes_traffic_router import KubernetesTrafficRouter
-from app.core.traffic_router import NoopTrafficRouter, TrafficRouter
-from app.core.traefik_file_traffic_router import TraefikFileTrafficRouter
+from app.core.traffic.kubernetes_traffic_router import KubernetesTrafficRouter
+from app.core.traffic.traffic_router import NoopTrafficRouter, TrafficRouter
+from app.core.traffic.traefik_file_traffic_router import TraefikFileTrafficRouter
 from app.db.engine import get_session_factory
 from app.db.models import User
 
@@ -36,7 +36,7 @@ def get_orchestrator() -> ContainerOrchestrator:
         fake orchestrator; otherwise returns a DockerOrchestrator instance.
     """
     if os.environ.get("VELA_FAKE_ORCHESTRATOR", "").strip() == "1":
-        from app.core.fake_orchestrator import get_shared_fake_orchestrator
+        from app.core.containers.fake_orchestrator import get_shared_fake_orchestrator
 
         return get_shared_fake_orchestrator()
     return DockerOrchestrator()

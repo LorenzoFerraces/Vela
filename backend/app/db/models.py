@@ -148,3 +148,62 @@ class DeploymentRecord(Base):
     )
 
     user: Mapped[User] = relationship()
+
+
+class EmailPreference(Base):
+    __tablename__ = "email_preferences"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True,
+        index=True,
+    )
+    email: Mapped[str] = mapped_column(String(320), nullable=False)
+    alerts_enabled: Mapped[bool] = mapped_column(nullable=False, default=True)
+    alert_types: Mapped[list] = mapped_column(
+        JSON, nullable=False, default=lambda: ["stop", "failure", "unhealthy"]
+    )
+    alert_frequency: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="immediate"
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utcnow
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow
+    )
+
+    user: Mapped[User] = relationship()
+
+
+class AlertHistory(Base):
+    __tablename__ = "alert_history"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    container_id: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    event_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    alert_hash: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    sent_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utcnow, index=True
+    )
+    email_sent_to: Mapped[str | None] = mapped_column(String(320), nullable=True)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="sent")
+
+    user: Mapped[User] = relationship()

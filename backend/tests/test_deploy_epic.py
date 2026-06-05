@@ -5,8 +5,8 @@ from __future__ import annotations
 import pytest
 from fastapi.testclient import TestClient
 
-from app.core.docker_orchestrator import VELA_OWNER_LABEL
-from app.core.fake_orchestrator import FakeContainerOrchestrator
+from app.core.containers.docker_orchestrator import VELA_OWNER_LABEL
+from app.core.containers.fake_orchestrator import FakeContainerOrchestrator
 
 
 def test_ai_prefill_defaults(api_client: TestClient) -> None:

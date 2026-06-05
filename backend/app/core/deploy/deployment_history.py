@@ -11,7 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.schemas import DeploymentDiffResponse, DeploymentEnvDiff, DeploymentRecordPublic
-from app.core.deploy_source_display import resolve_deploy_source_label
+from app.core.deploy.deploy_source_display import resolve_deploy_source_label
 from app.db.models import DeploymentRecord, User
 
 

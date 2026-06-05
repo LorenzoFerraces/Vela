@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from app.core.git_source_analysis import (
+from app.core.git.git_source_analysis import (
     _collect_context_excerpts,
     _env_vars_from_payload,
     _extract_env_vars_from_context,

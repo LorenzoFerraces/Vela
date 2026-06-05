@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import app.bootstrap_env  # noqa: F401 — loads backend/.env before other app imports.
 
+import asyncio
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -30,12 +31,23 @@ async def _lifespan(_application: FastAPI):
     """
     Lifespan context manager that ensures the end-to-end test database is prepared before the application starts.
     
-    This async context manager runs once at startup to await e2e database setup, then yields control for the application runtime. No special shutdown actions are performed.
+    This async context manager runs once at startup to await e2e database setup, starts the container monitoring loop, then yields control for the application runtime. On shutdown, the monitoring task is cancelled.
     """
     from app.e2e_support import ensure_e2e_database
+    from app.core.notifications.container_monitor import run_monitoring_loop
 
     await ensure_e2e_database()
-    yield
+
+    monitor_task = asyncio.create_task(run_monitoring_loop())
+
+    try:
+        yield
+    finally:
+        monitor_task.cancel()
+        try:
+            await monitor_task
+        except asyncio.CancelledError:
+            pass
 
 
 def create_app() -> FastAPI:

@@ -8,7 +8,7 @@ import secrets
 from fastapi import HTTPException
 
 from app.core.models import DeployConfig
-from app.core.traffic_router import TrafficRouter
+from app.core.traffic.traffic_router import TrafficRouter
 
 _MAX_ALLOCATION_ATTEMPTS = 64
 

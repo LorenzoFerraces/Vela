@@ -13,6 +13,7 @@ import {
   patchAiPrefillPreferences,
   type AiPrefillPreferences,
 } from '../api/client'
+import { EmailNotificationSettingsCard } from '../components/EmailNotificationSettings'
 
 type StatusState =
   | { kind: 'loading' }
@@ -207,6 +208,8 @@ export default function SettingsPage() {
       </div>
 
       <AiPrefillSettingsCard />
+
+      <EmailNotificationSettingsCard />
     </section>
   )
 }

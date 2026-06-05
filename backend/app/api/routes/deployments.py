@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db
 from app.api.schemas import DeploymentDiffResponse, DeploymentRecordPublic
-from app.core import deployment_history
+from app.core.deploy import deployment_history
 from app.db.models import User
 
 router = APIRouter()

@@ -36,6 +36,14 @@ Keep new and refactored code aligned with this separation of concerns under `bac
 
 When adding a feature, place logic in the right layer instead of growing “god” route modules.
 
+### `app/core/` domain packages
+
+Group related modules under `app/core/<domain>/` when that domain has **three or more** Python modules (count submodules in the package, not `__init__.py`). Smaller areas stay as single modules at `app/core/` root (e.g. `enums.py`, `models.py`, `exceptions.py`, `user_library.py`).
+
+Existing domains: `auth/`, `oauth/`, `security/`, `traffic/`, `containers/`, `build/`, `git/`, `deploy/`, `notifications/`. Prefer imports from the concrete module (e.g. `from app.core.traffic.traffic_router import TrafficRouter`) or the package’s public surface in `__init__.py` when re-exporting a small API.
+
+When a new feature grows past two modules in the same area, create or extend a domain package instead of adding more flat files at `app/core/`.
+
 ## Backend testing
 
 - Prefer **real wiring** over mocks. Do not add tests that mock away the behavior you are trying to verify.

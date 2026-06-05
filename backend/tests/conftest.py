@@ -1,6 +1,6 @@
 """Fixtures for pytest API integration tests.
 
-Uses in-memory SQLite and :class:`~app.core.fake_orchestrator.FakeContainerOrchestrator`
+Uses in-memory SQLite and :class:`~app.core.containers.fake_orchestrator.FakeContainerOrchestrator`
 so tests exercise real route and builder wiring without Docker.
 """
 
@@ -31,21 +31,22 @@ from app.api.deps import (
 )
 from app.core.auth.passwords import hash_password
 from app.core.auth.tokens import create_access_token
-from app.core.default_image_builder import DefaultImageBuilder
-from app.core.docker_orchestrator import (
+from app.core.build.default_image_builder import DefaultImageBuilder
+from app.core.containers.docker_orchestrator import (
     VELA_MANAGED_LABEL,
     VELA_MANAGED_VALUE,
     VELA_OWNER_LABEL,
 )
 from app.core.enums import ContainerStatus, HealthStatus
-from app.core.fake_orchestrator import FakeContainerOrchestrator
+from app.core.containers.fake_orchestrator import FakeContainerOrchestrator
 from app.core.models import ContainerInfo
-from app.core.traffic_router import NoopTrafficRouter
+from app.core.traffic.traffic_router import NoopTrafficRouter
 from app.db.base import Base
 from app.db.models import User
 
 os.environ.setdefault("VELA_AUTH_SECRET", "test-secret-please-do-not-use-in-prod")
 os.environ.setdefault("VELA_AUTH_ACCESS_TOKEN_TTL_MINUTES", "60")
+os.environ.setdefault("VELA_FAKE_ORCHESTRATOR", "1")
 
 
 def make_container_info(*, owner_id: uuid.UUID | str, **overrides: object) -> ContainerInfo:

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.core.image_not_found_payload import IMAGE_NOT_FOUND_USER_MESSAGE
+from app.core.build.image_not_found_payload import IMAGE_NOT_FOUND_USER_MESSAGE
 
 REGISTRY_ACCESS_DENIED_CODE = "registry_access_denied"
 

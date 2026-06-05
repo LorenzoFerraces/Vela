@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from app.core.registry_image_suggestions import merge_image_suggestions
+from app.core.build.registry_image_suggestions import merge_image_suggestions
 
 
 def test_merge_empty_query_includes_defaults_then_local() -> None:

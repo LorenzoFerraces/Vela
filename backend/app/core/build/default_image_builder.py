@@ -1,4 +1,4 @@
-"""Concrete :class:`~app.core.builder.ImageBuilder` using Git clone + Dockerfile bootstrap."""
+"""Concrete :class:`~app.core.build.builder.ImageBuilder` using Git clone + Dockerfile bootstrap."""
 
 from __future__ import annotations
 
@@ -6,13 +6,13 @@ import os
 import tempfile
 from pathlib import Path
 
-from app.core.builder import ImageBuilder
+from app.core.build.builder import ImageBuilder
 from app.core.enums import BuildStrategy
 from app.core.exceptions import AnalysisError
-from app.core.git_ops import git_shallow_clone, rm_tree
+from app.core.git.git_ops import git_shallow_clone, rm_tree
 from app.core.models import BuildResult, ProjectInfo, ProjectSource
-from app.core.orchestrator import ContainerOrchestrator
-from app.core.project_analysis import (
+from app.core.containers.orchestrator import ContainerOrchestrator
+from app.core.git.project_analysis import (
     analyze_project,
     dockerfile_contents_for,
     ensure_dockerfile_for_build,

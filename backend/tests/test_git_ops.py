@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from app.core import git_ops
+from app.core.git import git_ops
 from app.core.exceptions import CloneError
 
 

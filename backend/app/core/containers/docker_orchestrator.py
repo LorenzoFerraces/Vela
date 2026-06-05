@@ -32,8 +32,8 @@ from app.core.models import (
     HealthResult,
     PortMapping,
 )
-from app.core.orchestrator import ContainerOrchestrator
-from app.core.public_route_host import build_public_url
+from app.core.containers.orchestrator import ContainerOrchestrator
+from app.core.traffic.public_route_host import build_public_url
 
 VELA_MANAGED_LABEL = "vela.managed"
 VELA_MANAGED_VALUE = "true"
