@@ -32,6 +32,10 @@ jobs:
       - name: Run pytest
         working-directory: backend
         run: pytest -q
+        env:
+          VELA_DATABASE_URL: sqlite+aiosqlite:///:memory:
+          VELA_AUTH_SECRET: test-secret-for-ci-only
+          VELA_FAKE_ORCHESTRATOR: "1"
 
   e2e:
     runs-on: ubuntu-latest

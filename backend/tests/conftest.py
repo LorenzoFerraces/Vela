@@ -8,6 +8,16 @@ from __future__ import annotations
 
 import asyncio
 import os
+
+# Set before any ``app`` import so lifespan/CI (no backend/.env) can build an engine.
+os.environ.setdefault(
+    "VELA_DATABASE_URL",
+    "sqlite+aiosqlite:///:memory:",
+)
+os.environ.setdefault("VELA_AUTH_SECRET", "test-secret-please-do-not-use-in-prod")
+os.environ.setdefault("VELA_AUTH_ACCESS_TOKEN_TTL_MINUTES", "60")
+os.environ.setdefault("VELA_FAKE_ORCHESTRATOR", "1")
+
 import uuid
 from collections.abc import AsyncIterator, Iterator
 from contextlib import contextmanager
@@ -43,10 +53,6 @@ from app.core.models import ContainerInfo
 from app.core.traffic.traffic_router import NoopTrafficRouter
 from app.db.base import Base
 from app.db.models import User
-
-os.environ.setdefault("VELA_AUTH_SECRET", "test-secret-please-do-not-use-in-prod")
-os.environ.setdefault("VELA_AUTH_ACCESS_TOKEN_TTL_MINUTES", "60")
-os.environ.setdefault("VELA_FAKE_ORCHESTRATOR", "1")
 
 
 def make_container_info(*, owner_id: uuid.UUID | str, **overrides: object) -> ContainerInfo:
