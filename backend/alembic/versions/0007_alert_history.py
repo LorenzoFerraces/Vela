@@ -26,7 +26,12 @@ def upgrade() -> None:
         sa.Column("container_id", sa.String(length=128), nullable=False),
         sa.Column("event_type", sa.String(length=32), nullable=False),
         sa.Column("alert_hash", sa.String(length=64), nullable=False),
-        sa.Column("sent_at", sa.DateTime(timezone=True), nullable=False),
+        sa.Column(
+            "sent_at",
+            sa.DateTime(timezone=True),
+            nullable=False,
+            server_default=sa.func.now(),
+        ),
         sa.Column("email_sent_to", sa.String(length=320), nullable=True),
         sa.Column("status", sa.String(length=32), nullable=False, server_default="sent"),
         sa.ForeignKeyConstraint(["user_id"], ["users.id"], ondelete="CASCADE"),

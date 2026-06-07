@@ -57,7 +57,7 @@ class AlertService:
             )
 
         user = await self.session.get(User, user_id)
-        if user is None:
+        if user is None or not user.email.strip():
             return None
 
         return EffectiveEmailPreferences(
@@ -86,8 +86,10 @@ class AlertService:
 
         if recent_alert:
             logger.debug(
-                f"Alert deduped: {container_id} {event_type} "
-                f"(last sent {DEDUP_WINDOW_MINUTES} min ago)"
+                "Alert deduped: %s %s (last sent %s min ago)",
+                container_id,
+                event_type,
+                DEDUP_WINDOW_MINUTES,
             )
             return False
 
@@ -105,17 +107,18 @@ class AlertService:
         try:
             effective = await self._resolve_effective_preferences(user_id)
             if effective is None or not effective.alerts_enabled:
-                logger.debug(f"Alerts disabled for user {user_id}")
+                logger.debug("Alerts disabled for user %s", user_id)
                 return False
 
             if event_type not in effective.alert_types:
-                logger.debug(f"Event type {event_type} not in user alert types")
+                logger.debug("Event type %s not in user alert types", event_type)
                 return False
 
             if effective.alert_frequency != DEFAULT_ALERT_FREQUENCY:
                 logger.debug(
-                    f"Skipping alert for user {user_id}: "
-                    f"frequency {effective.alert_frequency!r} is not supported yet"
+                    "Skipping alert for user %s: frequency %r is not supported yet",
+                    user_id,
+                    effective.alert_frequency,
                 )
                 return False
 
@@ -149,8 +152,8 @@ class AlertService:
 
             return True
 
-        except Exception as e:
-            logger.error(f"Error sending alert: {e}", exc_info=True)
+        except Exception:
+            logger.exception("Error sending alert for user %s", user_id)
             return False
 
     async def get_recent_alerts(

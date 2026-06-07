@@ -72,7 +72,7 @@ async def get_email_notification_settings(
     if not prefs:
         # Return defaults if not yet created
         return EmailNotificationPreferences(
-            id=current_user.id,
+            id=None,
             user_id=current_user.id,
             email=current_user.email,
             alerts_enabled=True,

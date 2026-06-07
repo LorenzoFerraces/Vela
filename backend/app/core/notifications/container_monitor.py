@@ -147,7 +147,7 @@ async def get_vela_containers(
         _tracked_container_count = len(vela_containers)
         return vela_containers
     except Exception as e:
-        logger.error(f"Failed to list containers: {e}", exc_info=True)
+        logger.exception("Failed to list containers: %s", e)
         return {}
 
 
@@ -170,7 +170,7 @@ async def get_container_owner(
         user = await session.scalar(stmt)
         return user
     except Exception as e:
-        logger.error(f"Failed to get container owner: {e}", exc_info=True)
+        logger.exception("Failed to get container owner: %s", e)
         return None
 
 
@@ -278,7 +278,7 @@ async def monitor_containers_once(
         )
 
     except Exception as e:
-        logger.error(f"Error during monitoring pass: {e}", exc_info=True)
+        logger.exception("Error during monitoring pass: %s", e)
 
 
 async def run_monitoring_loop() -> None:
@@ -316,6 +316,6 @@ async def run_monitoring_loop() -> None:
         except ProviderConnectionError:
             logger.debug("Docker unavailable; skipping container monitor pass")
         except Exception as e:
-            logger.error(f"Unexpected error in monitoring loop: {e}", exc_info=True)
+            logger.exception("Unexpected error in monitoring loop: %s", e)
 
         await asyncio.sleep(MONITOR_INTERVAL_SECONDS)

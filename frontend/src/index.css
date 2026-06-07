@@ -1495,6 +1495,10 @@ body {
   border-color: rgba(90, 180, 130, 0.45);
 }
 
+.toast--err {
+  border-color: rgba(220, 90, 90, 0.55);
+}
+
 .toast__text {
   margin: 0;
   flex: 1;

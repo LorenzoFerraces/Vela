@@ -15,6 +15,7 @@ export function EmailNotificationSettingsCard() {
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [historyError, setHistoryError] = useState<string | null>(null)
   const [showHistory, setShowHistory] = useState(false)
 
   const loadPreferences = useCallback(async () => {
@@ -31,10 +32,11 @@ export function EmailNotificationSettingsCard() {
 
   const loadHistory = useCallback(async () => {
     try {
+      setHistoryError(null)
       const history = await getAlertHistory({ limit: 10 })
       setAlertHistory(history)
     } catch (err) {
-      console.error('Failed to load alert history:', err)
+      setHistoryError(formatApiError(err))
     }
   }, [])
 
@@ -164,7 +166,13 @@ export function EmailNotificationSettingsCard() {
                   </button>
                 </div>
 
-                {showHistory && alertHistory.length > 0 ? (
+                {showHistory && historyError ? (
+                  <p className="settings-banner settings-banner--err" role="alert">
+                    {historyError}
+                  </p>
+                ) : null}
+
+                {showHistory && !historyError && alertHistory.length > 0 ? (
                   <div className="alert-history">
                     <h4 className="alert-history__title">Recent Alerts</h4>
                     <ul className="alert-history__list">
@@ -194,7 +202,7 @@ export function EmailNotificationSettingsCard() {
                       ))}
                     </ul>
                   </div>
-                ) : showHistory ? (
+                ) : showHistory && !historyError ? (
                   <p className="settings-card__muted">No recent alerts</p>
                 ) : null}
               </>

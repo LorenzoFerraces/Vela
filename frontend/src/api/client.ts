@@ -603,7 +603,7 @@ export async function getGeminiConfigStatus(): Promise<{ configured: boolean }> 
 // --- Email Notifications ---
 
 export type EmailNotificationPreferences = {
-  id: string
+  id: string | null
   user_id: string
   email: string
   alerts_enabled: boolean

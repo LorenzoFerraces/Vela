@@ -5,7 +5,7 @@ from __future__ import annotations
 import app.bootstrap_env  # noqa: F401 — loads backend/.env before other app imports.
 
 import asyncio
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -44,10 +44,8 @@ async def _lifespan(_application: FastAPI):
         yield
     finally:
         monitor_task.cancel()
-        try:
+        with suppress(asyncio.CancelledError):
             await monitor_task
-        except asyncio.CancelledError:
-            pass
 
 
 def create_app() -> FastAPI:

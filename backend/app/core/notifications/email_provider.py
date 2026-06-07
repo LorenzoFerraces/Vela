@@ -37,7 +37,7 @@ class EmailProvider(ABC):
     @abstractmethod
     async def send_alert(self, alert: EmailAlert) -> bool:
         """Send an alert email. Return True if successful."""
-        pass
+        ...
 
 
 def format_alert_email(alert: EmailAlert) -> tuple[str, str]:
@@ -74,10 +74,6 @@ class BrevoProvider(EmailProvider):
 
     async def send_alert(self, alert: EmailAlert) -> bool:
         """Send alert via Brevo transactional email API."""
-        if not self.api_key or not self.sender_email:
-            logger.warning("Brevo not configured. Skipping email send.")
-            return False
-
         subject, body = format_alert_email(alert)
         try:
             result = await self._client.transactional_emails.send_transac_email(
@@ -92,10 +88,14 @@ class BrevoProvider(EmailProvider):
                 request_options={"timeout_in_seconds": 10},
             )
         except ApiError as error:
-            logger.error("Brevo API error: %s %s", error.status_code, error.body)
+            logger.exception(
+                "Brevo API error: %s %s",
+                error.status_code,
+                error.body,
+            )
             return False
-        except Exception as error:
-            logger.error("Failed to send email via Brevo: %s", error)
+        except Exception:
+            logger.exception("Failed to send email via Brevo")
             return False
 
         message_id = getattr(result, "message_id", None)
@@ -113,13 +113,16 @@ class ConsoleProvider(EmailProvider):
 
     async def send_alert(self, alert: EmailAlert) -> bool:
         logger.info(
-            f"[ALERT] To: {alert.to} | Container: {alert.container_name} | "
-            f"Event: {alert.event_type} | Time: {alert.timestamp.isoformat()}"
+            "[ALERT] To: %s | Container: %s | Event: %s | Time: %s",
+            alert.to,
+            alert.container_name,
+            alert.event_type,
+            alert.timestamp.isoformat(),
         )
         return True
 
 
-def get_email_provider(use_console: bool = False) -> EmailProvider:
+def get_email_provider(*, use_console: bool = False) -> EmailProvider:
     """Factory to get configured email provider."""
     import os
 
