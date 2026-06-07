@@ -6,9 +6,11 @@ Periodically checks container status and triggers alerts on state changes.
 from __future__ import annotations
 
 import asyncio
+import itertools
 import logging
 import os
-from typing import Any
+from collections.abc import Iterator
+from typing import Any, Literal, NamedTuple
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -120,6 +122,51 @@ class ContainerStateSnapshot:
         return None
 
 
+class _ContainerAlertEvent(NamedTuple):
+    container_id: str
+    container_name: str
+    event_type: str
+    details: str
+    source: Literal["change", "disappeared"]
+
+
+def _iter_state_change_events(
+    containers: dict[str, tuple[str, ContainerStatus, HealthStatus]],
+    state: ContainerStateSnapshot,
+) -> Iterator[_ContainerAlertEvent]:
+    for container_id, (container_name, status, health) in containers.items():
+        event_type = state.detect_change(container_id, status, health)
+        state.update(container_id, container_name, status, health)
+        if event_type is None:
+            continue
+        yield _ContainerAlertEvent(
+            container_id=container_id,
+            container_name=container_name,
+            event_type=event_type,
+            details=f"Container status: {status}, Health: {health}",
+            source="change",
+        )
+
+
+def _iter_disappeared_events(
+    state: ContainerStateSnapshot,
+    seen_ids: set[str],
+) -> Iterator[_ContainerAlertEvent]:
+    for container_id in state.state.keys() - seen_ids:
+        event_type = state.detect_disappeared(container_id)
+        previous = state.pop_state(container_id)
+        if event_type is None or previous is None:
+            continue
+        container_name = str(previous.get("name") or container_id[:12])
+        yield _ContainerAlertEvent(
+            container_id=container_id,
+            container_name=container_name,
+            event_type=event_type,
+            details="Container no longer listed by Docker (removed or unreachable)",
+            source="disappeared",
+        )
+
+
 async def get_vela_containers(
     orchestrator: ContainerOrchestrator,
 ) -> dict[str, tuple[str, ContainerStatus, HealthStatus]]:
@@ -132,18 +179,11 @@ async def get_vela_containers(
 
     try:
         containers = await orchestrator.list()
-        vela_containers: dict[str, tuple[str, ContainerStatus, HealthStatus]] = {}
-
-        for container in containers:
-            if VELA_OWNER_LABEL not in container.labels:
-                continue
-
-            vela_containers[container.id] = (
-                container.name,
-                container.status,
-                container.health,
-            )
-
+        vela_containers = {
+            container.id: (container.name, container.status, container.health)
+            for container in containers
+            if VELA_OWNER_LABEL in container.labels
+        }
         _tracked_container_count = len(vela_containers)
         return vela_containers
     except Exception as e:
@@ -172,6 +212,41 @@ async def get_container_owner(
     except Exception as e:
         logger.exception("Failed to get container owner: %s", e)
         return None
+
+
+async def _dispatch_container_alert(
+    event: _ContainerAlertEvent,
+    *,
+    email_provider: EmailProvider,
+    session: AsyncSession,
+) -> bool:
+    """Look up owner and send alert. Returns True when dispatch was attempted."""
+    owner = await get_container_owner(session, event.container_id)
+    if owner is None:
+        if event.source == "change":
+            logger.warning(
+                "Container %s (%s) changed to %s but has no deployment owner; skipping alert",
+                event.container_name,
+                event.container_id[:12],
+                event.event_type,
+            )
+        else:
+            logger.warning(
+                "Container %s disappeared but has no deployment owner; skipping alert",
+                event.container_name,
+            )
+        return False
+
+    await _send_alert_if_configured(
+        email_provider=email_provider,
+        session=session,
+        owner=owner,
+        container_id=event.container_id,
+        container_name=event.container_name,
+        event_type=event.event_type,
+        details=event.details,
+    )
+    return True
 
 
 async def _send_alert_if_configured(
@@ -211,69 +286,22 @@ async def monitor_containers_once(
     """Single monitoring pass: detect state changes and send alerts."""
     try:
         containers = await get_vela_containers(orchestrator)
-        seen_ids = set(containers.keys())
+        alert_events = itertools.chain(
+            _iter_state_change_events(containers, state),
+            _iter_disappeared_events(state, set(containers)),
+        )
         alerts_queued = 0
-
-        for container_id, (container_name, status, health) in containers.items():
-            event_type = state.detect_change(container_id, status, health)
-            state.update(container_id, container_name, status, health)
-
-            if not event_type:
-                continue
-
+        for event in alert_events:
             alerts_queued += 1
-            owner = await get_container_owner(session, container_id)
-            if not owner:
-                logger.warning(
-                    "Container %s (%s) changed to %s but has no deployment owner; skipping alert",
-                    container_name,
-                    container_id[:12],
-                    event_type,
-                )
-                continue
-
-            await _send_alert_if_configured(
+            await _dispatch_container_alert(
+                event,
                 email_provider=email_provider,
                 session=session,
-                owner=owner,
-                container_id=container_id,
-                container_name=container_name,
-                event_type=event_type,
-                details=f"Container status: {status}, Health: {health}",
-            )
-
-        for container_id in list(state.state.keys()):
-            if container_id in seen_ids:
-                continue
-
-            event_type = state.detect_disappeared(container_id)
-            previous = state.pop_state(container_id)
-            if not event_type or previous is None:
-                continue
-
-            container_name = str(previous.get("name") or container_id[:12])
-            alerts_queued += 1
-            owner = await get_container_owner(session, container_id)
-            if not owner:
-                logger.warning(
-                    "Container %s disappeared but has no deployment owner; skipping alert",
-                    container_name,
-                )
-                continue
-
-            await _send_alert_if_configured(
-                email_provider=email_provider,
-                session=session,
-                owner=owner,
-                container_id=container_id,
-                container_name=container_name,
-                event_type=event_type,
-                details="Container no longer listed by Docker (removed or unreachable)",
             )
 
         logger.debug(
             "Container monitor pass: tracked=%s alerts_queued=%s",
-            len(seen_ids),
+            len(containers),
             alerts_queued,
         )
 
