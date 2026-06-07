@@ -102,6 +102,7 @@ class AlertService:
         container_name: str,
         event_type: str,
         details: str | None = None,
+        container_logs: str | None = None,
     ) -> bool:
         """Send alert for container event if user has enabled notifications."""
         try:
@@ -131,6 +132,7 @@ class AlertService:
                 event_type=event_type,
                 timestamp=datetime.now(timezone.utc),
                 details=details,
+                container_logs=container_logs,
             )
 
             success = await self.email_provider.send_alert(alert)

@@ -6,12 +6,17 @@ See https://developers.brevo.com/guides/python
 
 from __future__ import annotations
 
+import base64
 import logging
+import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from datetime import datetime
 from brevo import AsyncBrevo
 from brevo.core.api_error import ApiError
+from brevo.transactional_emails.types.send_transac_email_request_attachment_item import (
+    SendTransacEmailRequestAttachmentItem,
+)
 from brevo.transactional_emails.types.send_transac_email_request_sender import (
     SendTransacEmailRequestSender,
 )
@@ -31,6 +36,25 @@ class EmailAlert:
     event_type: str
     timestamp: datetime
     details: str | None = None
+    container_logs: str | None = None
+
+
+def container_logs_attachment_filename(container_name: str) -> str:
+    safe_name = re.sub(r"[^\w.-]+", "_", container_name).strip("._") or "container"
+    return f"{safe_name}-logs.txt"
+
+
+def _build_log_attachments(
+    alert: EmailAlert,
+) -> list[SendTransacEmailRequestAttachmentItem] | None:
+    if not alert.container_logs:
+        return None
+    return [
+        SendTransacEmailRequestAttachmentItem(
+            name=container_logs_attachment_filename(alert.container_name),
+            content=base64.b64encode(alert.container_logs.encode("utf-8")).decode("ascii"),
+        )
+    ]
 
 
 class EmailProvider(ABC):
@@ -44,12 +68,18 @@ def format_alert_email(alert: EmailAlert) -> tuple[str, str]:
     """Return (subject, plain-text body) for a container alert."""
     subject = f"[Vela Alert] {alert.container_name} - {alert.event_type.upper()}"
     details_line = f"Details: {alert.details}\n\n" if alert.details else ""
+    logs_line = (
+        "Recent container logs are attached as a .txt file for debugging.\n\n"
+        if alert.container_logs
+        else ""
+    )
     body = (
         "Container Alert Notification\n\n"
         f"Container: {alert.container_name}\n"
         f"Event: {alert.event_type}\n"
         f"Time: {alert.timestamp.isoformat()}\n\n"
         f"{details_line}"
+        f"{logs_line}"
         "This is an automated alert from Vela container platform.\n"
         "Please check your container status immediately."
     )
@@ -75,17 +105,23 @@ class BrevoProvider(EmailProvider):
     async def send_alert(self, alert: EmailAlert) -> bool:
         """Send alert via Brevo transactional email API."""
         subject, body = format_alert_email(alert)
+        attachments = _build_log_attachments(alert)
+        send_request: dict[str, object] = {
+            "subject": subject,
+            "text_content": body,
+            "sender": SendTransacEmailRequestSender(
+                email=self.sender_email,
+                name=self.sender_name,
+            ),
+            "to": [SendTransacEmailRequestToItem(email=alert.to)],
+            "tags": [BREVO_ALERT_TAG],
+            "request_options": {"timeout_in_seconds": 10},
+        }
+        if attachments is not None:
+            send_request["attachment"] = attachments
         try:
             result = await self._client.transactional_emails.send_transac_email(
-                subject=subject,
-                text_content=body,
-                sender=SendTransacEmailRequestSender(
-                    email=self.sender_email,
-                    name=self.sender_name,
-                ),
-                to=[SendTransacEmailRequestToItem(email=alert.to)],
-                tags=[BREVO_ALERT_TAG],
-                request_options={"timeout_in_seconds": 10},
+                **send_request,
             )
         except ApiError as error:
             logger.exception(
@@ -119,6 +155,12 @@ class ConsoleProvider(EmailProvider):
             alert.event_type,
             alert.timestamp.isoformat(),
         )
+        if alert.container_logs:
+            logger.info(
+                "[ALERT] Attached logs: %s (%s bytes)",
+                container_logs_attachment_filename(alert.container_name),
+                len(alert.container_logs.encode("utf-8")),
+            )
         return True
 
 

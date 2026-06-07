@@ -30,6 +30,9 @@ MONITOR_INTERVAL_SECONDS = int(
     os.environ.get("VELA_CONTAINER_MONITOR_INTERVAL_SECONDS", "15")
 )
 MONITOR_ENABLED = os.environ.get("VELA_CONTAINER_MONITOR_ENABLED", "1").strip() != "0"
+ALERT_LOG_TAIL_LINES = max(
+    1, int(os.environ.get("VELA_ALERT_LOG_TAIL_LINES", "200"))
+)
 
 _tracked_container_count = 0
 
@@ -191,6 +194,28 @@ async def get_vela_containers(
         return {}
 
 
+async def _fetch_alert_container_logs(
+    orchestrator: ContainerOrchestrator,
+    container_id: str,
+    container_name: str,
+) -> str | None:
+    """Fetch recent container logs for alert email attachments."""
+    try:
+        logs = await orchestrator.logs(container_id, tail=ALERT_LOG_TAIL_LINES)
+    except Exception:
+        logger.debug(
+            "Could not fetch logs for alert attachment (%s / %s)",
+            container_name,
+            container_id[:12],
+            exc_info=True,
+        )
+        return None
+
+    if not logs.strip():
+        return None
+    return logs
+
+
 async def get_container_owner(
     session: AsyncSession, container_id: str
 ) -> User | None:
@@ -217,6 +242,7 @@ async def get_container_owner(
 async def _dispatch_container_alert(
     event: _ContainerAlertEvent,
     *,
+    orchestrator: ContainerOrchestrator,
     email_provider: EmailProvider,
     session: AsyncSession,
 ) -> bool:
@@ -237,6 +263,11 @@ async def _dispatch_container_alert(
             )
         return False
 
+    container_logs = await _fetch_alert_container_logs(
+        orchestrator,
+        event.container_id,
+        event.container_name,
+    )
     await _send_alert_if_configured(
         email_provider=email_provider,
         session=session,
@@ -245,6 +276,7 @@ async def _dispatch_container_alert(
         container_name=event.container_name,
         event_type=event.event_type,
         details=event.details,
+        container_logs=container_logs,
     )
     return True
 
@@ -258,6 +290,7 @@ async def _send_alert_if_configured(
     container_name: str,
     event_type: str,
     details: str,
+    container_logs: str | None = None,
 ) -> None:
     alert_service = AlertService(email_provider, session)
     success = await alert_service.send_container_alert(
@@ -266,6 +299,7 @@ async def _send_alert_if_configured(
         container_name=container_name,
         event_type=event_type,
         details=details,
+        container_logs=container_logs,
     )
     if success:
         logger.info("Alert sent for %s: %s", container_name, event_type)
@@ -295,6 +329,7 @@ async def monitor_containers_once(
             alerts_queued += 1
             await _dispatch_container_alert(
                 event,
+                orchestrator=orchestrator,
                 email_provider=email_provider,
                 session=session,
             )
