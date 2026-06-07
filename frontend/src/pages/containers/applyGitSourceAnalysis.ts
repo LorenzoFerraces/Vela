@@ -28,11 +28,7 @@ export function applyGitSourceAnalysis(
     setters.setContainerName(analysis.container_name ?? '')
   }
   if (preferences.env_vars) {
-    setters.setEnvRows(
-      analysis.env_vars && Object.keys(analysis.env_vars).length
-        ? envRowsFromRecord(analysis.env_vars)
-        : []
-    )
+    setters.setEnvRows(envRowsFromRecord(analysis.env_vars ?? {}))
   }
   if (preferences.start_command) {
     setters.setStartCommand(

@@ -22,6 +22,7 @@ export function useGitSourceAnalysis(setters: GitAnalysisFormSetters) {
   )
   const [analysisLoading, setAnalysisLoading] = useState(false)
   const [analysisError, setAnalysisError] = useState<string | null>(null)
+  const [successToast, setSuccessToast] = useState<string | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -44,12 +45,18 @@ export function useGitSourceAnalysis(setters: GitAnalysisFormSetters) {
   const clearAnalysis = useCallback(() => {
     setAnalysisLoading(false)
     setAnalysisError(null)
+    setSuccessToast(null)
+  }, [])
+
+  const dismissSuccessToast = useCallback(() => {
+    setSuccessToast(null)
   }, [])
 
   const runAnalysis = useCallback(
     async (gitUrl: string, gitBranch: string) => {
       setAnalysisLoading(true)
       setAnalysisError(null)
+      setSuccessToast(null)
       try {
         let prefs = preferences
         if (!prefs) {
@@ -65,6 +72,10 @@ export function useGitSourceAnalysis(setters: GitAnalysisFormSetters) {
           git_branch: gitBranch,
         })
         applyGitSourceAnalysis(analysis, prefs, setters)
+        const hint = analysis.summary_hint?.trim()
+        setSuccessToast(
+          hint || 'Repository analyzed. Deploy settings updated.'
+        )
       } catch (error) {
         setAnalysisError(formatApiError(error))
       } finally {
@@ -77,6 +88,8 @@ export function useGitSourceAnalysis(setters: GitAnalysisFormSetters) {
   return {
     analysisLoading,
     analysisError,
+    successToast,
+    dismissSuccessToast,
     runAnalysis,
     clearAnalysis,
   }

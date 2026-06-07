@@ -15,15 +15,15 @@ from starlette.websockets import WebSocketDisconnect
 
 from app.api.app import create_app
 from app.core.auth.tokens import create_access_token
-from app.core.docker_orchestrator import (
+from app.core.containers.docker_orchestrator import (
     VELA_OWNER_LABEL,
     VELA_ROUTE_HOST_LABEL,
     VELA_ROUTE_PATH_PREFIX_LABEL,
     VELA_ROUTE_TLS_LABEL,
 )
 from app.core.exceptions import CloneError, ImageNotFoundError, RegistryAccessDeniedError
-from app.core.fake_orchestrator import FakeContainerOrchestrator
-from app.core.traffic_router import NoopTrafficRouter
+from app.core.containers.fake_orchestrator import FakeContainerOrchestrator
+from app.core.traffic.traffic_router import NoopTrafficRouter
 from app.db.models import User
 from tests.conftest import make_container_info
 
@@ -340,7 +340,7 @@ def test_run_from_git_url(
     monkeypatch.setenv("VELA_PUBLIC_ROUTE_DOMAIN", "apps.example.com")
     monkeypatch.setenv("VELA_PUBLIC_URL_SCHEME", "https")
     monkeypatch.setattr(
-        "app.core.default_image_builder.git_shallow_clone",
+        "app.core.build.default_image_builder.git_shallow_clone",
         _stub_git_shallow_clone,
     )
 
@@ -522,7 +522,7 @@ def test_run_from_github_uses_stored_token(
     monkeypatch.setenv("VELA_TOKEN_ENCRYPTION_KEY", Fernet.generate_key().decode())
     reset_token_cipher_for_tests()
     monkeypatch.setattr(
-        "app.core.default_image_builder.git_shallow_clone",
+        "app.core.build.default_image_builder.git_shallow_clone",
         recording_clone,
     )
 
@@ -601,7 +601,7 @@ def test_run_from_github_without_connection_does_not_send_token(
     monkeypatch.setenv("VELA_PUBLIC_ROUTE_DOMAIN", "apps.example.com")
     monkeypatch.setenv("VELA_PUBLIC_URL_SCHEME", "https")
     monkeypatch.setattr(
-        "app.core.default_image_builder.git_shallow_clone",
+        "app.core.build.default_image_builder.git_shallow_clone",
         recording_clone,
     )
 
@@ -642,7 +642,7 @@ def test_run_private_github_clone_failure_hints_settings(
     monkeypatch.setenv("VELA_PUBLIC_ROUTE_DOMAIN", "apps.example.com")
     monkeypatch.setenv("VELA_PUBLIC_URL_SCHEME", "https")
     monkeypatch.setattr(
-        "app.core.default_image_builder.git_shallow_clone",
+        "app.core.build.default_image_builder.git_shallow_clone",
         failing_clone,
     )
 

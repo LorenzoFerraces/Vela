@@ -7,8 +7,8 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Response, status
 
 from app.api.deps import get_traffic_router
-from app.core.traffic_models import RouteInfo, RouteSpec
-from app.core.traffic_router import TrafficRouter
+from app.core.traffic.traffic_models import RouteInfo, RouteSpec
+from app.core.traffic.traffic_router import TrafficRouter
 
 router = APIRouter()
 

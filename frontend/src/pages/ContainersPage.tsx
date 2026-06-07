@@ -12,6 +12,7 @@ import { ContainersFormMessageBanner } from './containers/ContainersFormMessageB
 import { ContainersRunAdvancedFields } from './containers/ContainersRunAdvancedFields'
 import { ContainersRunFormFields } from './containers/ContainersRunFormFields'
 import { DeploySourceCombobox } from './containers/DeploySourceCombobox'
+import { Toast } from '../components/Toast'
 import { WorkloadsTable } from '../components/workloads/WorkloadsTable'
 import type { FormMessage } from './containers/types'
 import {
@@ -362,6 +363,10 @@ export default function ContainersPage() {
         onRemove={onRemove}
       />
 
+      <Toast
+        message={gitAnalysis.successToast}
+        onDismiss={gitAnalysis.dismissSuccessToast}
+      />
     </section>
   )
 }

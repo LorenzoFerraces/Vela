@@ -5,7 +5,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 
 from app.core.exceptions import RouteNotFoundError
-from app.core.traffic_models import RouteInfo, RouteSpec
+from app.core.traffic.traffic_models import RouteInfo, RouteSpec
 
 
 class TrafficRouter(ABC):

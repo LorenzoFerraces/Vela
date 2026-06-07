@@ -3,7 +3,7 @@
 Example::
 
     import asyncio
-    from app.core.docker_orchestrator import DockerOrchestrator
+    from app.core.containers.docker_orchestrator import DockerOrchestrator
     from app.core.smoke import SMOKE_DEPLOY
 
     async def main() -> None:

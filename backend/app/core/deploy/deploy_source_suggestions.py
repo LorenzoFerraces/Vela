@@ -13,8 +13,8 @@ from app.core import user_library
 from app.core.exceptions import ProviderConnectionError
 from app.core.oauth import decrypt_identity_token, get_github_identity, list_user_repos
 from app.core.oauth.github import GitHubRepo
-from app.core.orchestrator import ContainerOrchestrator
-from app.core.registry_image_suggestions import (
+from app.core.containers.orchestrator import ContainerOrchestrator
+from app.core.build.registry_image_suggestions import (
     fetch_docker_hub_suggestions,
     merge_image_suggestions,
 )

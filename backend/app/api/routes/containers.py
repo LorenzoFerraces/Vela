@@ -1,4 +1,4 @@
-"""Container orchestration API backed by :class:`~app.core.docker_orchestrator.DockerOrchestrator`."""
+"""Container orchestration API backed by :class:`~app.core.containers.docker_orchestrator.DockerOrchestrator`."""
 
 from __future__ import annotations
 
@@ -33,15 +33,15 @@ from app.api.schemas import (
 )
 from app.core.auth.service import get_user_by_id
 from app.core.auth.tokens import decode_access_token
-from app.core.deploy_source_display import resolve_deploy_source_label
-from app.core.deployment_history import latest_source_by_container_ids
-from app.core.docker_orchestrator import (
+from app.core.deploy.deploy_source_display import resolve_deploy_source_label
+from app.core.deploy.deployment_history import latest_source_by_container_ids
+from app.core.containers.docker_orchestrator import (
     VELA_OWNER_LABEL,
     VELA_SOURCE_KIND_LABEL,
     VELA_SOURCE_REF_LABEL,
     with_deploy_source_labels,
 )
-from app.core.public_route_host import (
+from app.core.traffic.public_route_host import (
     apply_public_route_to_deploy_config,
     build_public_url,
     read_public_route_settings,
@@ -56,17 +56,17 @@ from app.core.exceptions import (
     RegistryAccessDeniedError,
 )
 
-from app.core.deploy_source_suggestions import (
+from app.core.deploy.deploy_source_suggestions import (
     DeploySourcesResponse,
     collect_deploy_source_suggestions,
 )
-from app.core.deployment_history import DeploymentSnapshot, record_deployment
+from app.core.deploy.deployment_history import DeploymentSnapshot, record_deployment
 from app.core import user_library
-from app.core.registry_image_suggestions import (
+from app.core.build.registry_image_suggestions import (
     fetch_docker_hub_suggestions,
     merge_image_suggestions,
 )
-from app.core.default_image_builder import DefaultImageBuilder
+from app.core.build.default_image_builder import DefaultImageBuilder
 from app.core.models import (
     ContainerInfo,
     ContainerStats,
@@ -76,8 +76,8 @@ from app.core.models import (
     ProjectSource,
 )
 from app.core.oauth import decrypt_identity_token, get_github_identity
-from app.core.orchestrator import ContainerOrchestrator
-from app.core.traffic_router import TrafficRouter
+from app.core.containers.orchestrator import ContainerOrchestrator
+from app.core.traffic.traffic_router import TrafficRouter
 from app.db.models import User
 
 logger = logging.getLogger(__name__)

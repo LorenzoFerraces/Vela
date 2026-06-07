@@ -1,5 +1,5 @@
-from app.core.image_not_found_payload import image_not_found_api_content
-from app.core.registry_access_payload import registry_access_denied_api_content
+from app.core.build.image_not_found_payload import image_not_found_api_content
+from app.core.build.registry_access_payload import registry_access_denied_api_content
 
 
 class VelaError(Exception):

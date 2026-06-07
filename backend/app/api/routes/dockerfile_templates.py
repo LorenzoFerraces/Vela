@@ -137,7 +137,7 @@ async def delete_dockerfile_template(
     template_id: uuid.UUID,
     session: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
-) -> None:
+):
     """
     Delete the Dockerfile template identified by `template_id` that belongs to the authenticated user.
     

@@ -467,3 +467,62 @@ class DockerfileTemplatePublic(BaseModel):
     contents: str
     created_at: datetime
     updated_at: datetime
+
+
+# ---------------------------------------------------------------------------
+# Email notifications
+# ---------------------------------------------------------------------------
+
+
+class EmailNotificationPreferences(BaseModel):
+    """Get/set user email notification preferences."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID | None = None
+    user_id: uuid.UUID
+    email: EmailStr
+    alerts_enabled: bool
+    alert_types: list[Literal["stop", "failure", "unhealthy"]] = Field(
+        default=["stop", "failure", "unhealthy"]
+    )
+    alert_frequency: Literal["immediate", "daily_digest", "weekly_summary"] = Field(
+        default="immediate"
+    )
+    created_at: datetime
+    updated_at: datetime
+
+
+class EmailNotificationPreferencesUpdate(BaseModel):
+    """Update email notification preferences."""
+
+    email: EmailStr | None = None
+    alerts_enabled: bool | None = None
+    alert_types: list[Literal["stop", "failure", "unhealthy"]] | None = None
+    alert_frequency: Literal["immediate", "daily_digest", "weekly_summary"] | None = None
+
+
+class AlertHistoryEntry(BaseModel):
+    """Alert sent to user."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    container_id: str
+    event_type: str
+    sent_at: datetime
+    email_sent_to: str | None
+    status: Literal["sent", "failed"]
+
+
+# ---------------------------------------------------------------------------
+# Container Monitoring
+# ---------------------------------------------------------------------------
+
+
+class ContainerMonitoringStatus(BaseModel):
+    """Status of container monitoring system."""
+
+    enabled: bool
+    interval_seconds: int
+    total_containers_tracked: int

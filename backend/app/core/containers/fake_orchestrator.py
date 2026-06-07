@@ -7,7 +7,7 @@ from collections.abc import AsyncIterator
 from datetime import datetime, timezone
 from typing import Callable
 
-from app.core.docker_orchestrator import (
+from app.core.containers.docker_orchestrator import (
     VELA_MANAGED_LABEL,
     VELA_MANAGED_VALUE,
     VELA_OWNER_LABEL,
@@ -25,7 +25,7 @@ from app.core.exceptions import (
     RegistryAccessDeniedError,
 )
 from app.core.models import ContainerInfo, ContainerStats, DeployConfig, HealthResult
-from app.core.orchestrator import ContainerOrchestrator
+from app.core.containers.orchestrator import ContainerOrchestrator
 
 
 class FakeContainerOrchestrator(ContainerOrchestrator):

@@ -37,14 +37,14 @@ from app.core.models import (
     ProjectInfo,
     ProjectSource,
 )
-from app.core.traffic_models import RouteInfo, RouteSpec
-from app.core.traffic_router import NoopTrafficRouter, TrafficRouter
-from app.core.builder import ImageBuilder
-from app.core.default_image_builder import DefaultImageBuilder
-from app.core.docker_orchestrator import DockerOrchestrator
-from app.core.kubernetes_traffic_router import KubernetesTrafficRouter
-from app.core.traefik_file_traffic_router import TraefikFileTrafficRouter
-from app.core.orchestrator import ContainerOrchestrator
+from app.core.traffic.traffic_models import RouteInfo, RouteSpec
+from app.core.traffic.traffic_router import NoopTrafficRouter, TrafficRouter
+from app.core.build.builder import ImageBuilder
+from app.core.build.default_image_builder import DefaultImageBuilder
+from app.core.containers.docker_orchestrator import DockerOrchestrator
+from app.core.traffic.kubernetes_traffic_router import KubernetesTrafficRouter
+from app.core.traffic.traefik_file_traffic_router import TraefikFileTrafficRouter
+from app.core.containers.orchestrator import ContainerOrchestrator
 from app.core.smoke import SMOKE_DEPLOY
 
 __all__ = [
