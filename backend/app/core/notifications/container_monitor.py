@@ -30,9 +30,7 @@ MONITOR_INTERVAL_SECONDS = int(
     os.environ.get("VELA_CONTAINER_MONITOR_INTERVAL_SECONDS", "15")
 )
 MONITOR_ENABLED = os.environ.get("VELA_CONTAINER_MONITOR_ENABLED", "1").strip() != "0"
-ALERT_LOG_TAIL_LINES = max(
-    1, int(os.environ.get("VELA_ALERT_LOG_TAIL_LINES", "200"))
-)
+ALERT_LOG_TAIL_LINES = max(1, int(os.environ.get("VELA_ALERT_LOG_TAIL_LINES", "200")))
 
 _tracked_container_count = 0
 
@@ -189,8 +187,10 @@ async def get_vela_containers(
         }
         _tracked_container_count = len(vela_containers)
         return vela_containers
-    except Exception as e:
-        logger.exception("Failed to list containers: %s", e)
+    except ProviderConnectionError:
+        raise
+    except Exception:
+        logger.exception("Failed to list containers")
         return {}
 
 
@@ -216,9 +216,7 @@ async def _fetch_alert_container_logs(
     return logs
 
 
-async def get_container_owner(
-    session: AsyncSession, container_id: str
-) -> User | None:
+async def get_container_owner(session: AsyncSession, container_id: str) -> User | None:
     """Look up the user who owns a container via deployment record."""
     try:
         stmt = (
