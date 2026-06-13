@@ -13,8 +13,8 @@ import docker.errors
 from pydantic import ValidationError
 
 from app.core.exceptions import RouteConfigurationError, RouteNotFoundError, TrafficRouterError
-from app.core.traffic_models import RouteInfo, RouteSpec
-from app.core.traffic_router import TrafficRouter
+from app.core.traffic.traffic_models import RouteInfo, RouteSpec
+from app.core.traffic.traffic_router import TrafficRouter
 
 logger = logging.getLogger(__name__)
 

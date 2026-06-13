@@ -11,6 +11,7 @@ import {
 import { ContainersFormMessageBanner } from './containers/ContainersFormMessageBanner'
 import { ContainersRunAdvancedFields } from './containers/ContainersRunAdvancedFields'
 import { ContainersRunFormFields } from './containers/ContainersRunFormFields'
+import { DeployProjectSelect } from './containers/DeployProjectSelect'
 import { DeploySourceCombobox } from './containers/DeploySourceCombobox'
 import { Toast } from '../components/Toast'
 import { WorkloadsTable } from '../components/workloads/WorkloadsTable'
@@ -21,6 +22,7 @@ import {
 } from './containers/deploySourceTypes'
 import { useContainerList } from './containers/useContainerList'
 import { useDeploySourceSelection } from './containers/useDeploySourceSelection'
+import { useDeployProjects } from './containers/useDeployProjects'
 import { useGitSourceAnalysis } from './containers/useGitSourceAnalysis'
 import { useImageRefAvailability } from './containers/useImageRefAvailability'
 import {
@@ -59,6 +61,7 @@ export default function ContainersPage() {
   }, [])
 
   const { rows, listLoading, refresh } = useContainerList(reportListLoadError)
+  const deployProjects = useDeployProjects()
 
   const imageRefForCheck =
     deploySource.selection?.kind === 'image'
@@ -99,7 +102,7 @@ export default function ContainersPage() {
 
   function buildRunRequest(container_port: number): RunFromSourceRequest | null {
     const selection = deploySource.selection
-    if (!selection) {
+    if (!selection || !deployProjects.selectedProjectId) {
       return null
     }
     const command = parseStartCommand(startCommand)
@@ -114,6 +117,7 @@ export default function ContainersPage() {
       public_route: true,
       env_vars: recordFromEnvRows(envRows),
       command,
+      project_id: deployProjects.selectedProjectId,
     }
     switch (selection.kind) {
       case 'image':
@@ -298,6 +302,13 @@ export default function ContainersPage() {
           onPickSuggestion={applyDeploySuggestion}
           onRequestImageCheck={runImageRefAvailabilityCheck}
         />
+        <DeployProjectSelect
+          projects={deployProjects.projects}
+          selectedProjectId={deployProjects.selectedProjectId}
+          onSelectedProjectIdChange={deployProjects.setSelectedProjectId}
+          loading={deployProjects.loading}
+          error={deployProjects.error}
+        />
         <ContainersRunFormFields
           showGitBranch={showGitBranch}
           containerName={containerName}
@@ -323,6 +334,8 @@ export default function ContainersPage() {
             className="btn btn--primary"
             disabled={
               busy ||
+              deployProjects.loading ||
+              deployProjects.projects.length === 0 ||
               gitAnalysis.analysisLoading ||
               !deploySource.selection ||
               (selectionNeedsRegistryCheck(deploySource.selection) &&

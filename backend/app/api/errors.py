@@ -27,6 +27,15 @@ from app.core.exceptions import (
     IntegrationError,
     InvalidCredentialsError,
     NotAuthenticatedError,
+    AlreadyProjectMemberError,
+    DuplicateInvitationError,
+    InvitationAlreadyRespondedError,
+    InvitationNotFoundError,
+    ProjectAccessDeniedError,
+    ProjectError,
+    ProjectMemberNotFoundError,
+    ProjectNotFoundError,
+    UserNotRegisteredError,
     OrchestratorError,
     RegistryAccessDeniedError,
     ProviderConnectionError,
@@ -37,6 +46,10 @@ from app.core.exceptions import (
     UnsupportedLanguageError,
     VelaError,
 )
+
+
+def _project_error_payload(exc: ProjectError, error_code: str) -> dict[str, str]:
+    return {"error": error_code, "detail": str(exc)}
 
 
 def register_exception_handlers(app) -> None:
@@ -65,6 +78,56 @@ def register_exception_handlers(app) -> None:
         return JSONResponse(
             status_code=status.HTTP_403_FORBIDDEN,
             content=exc.api_response_content(),
+        )
+
+    @app.exception_handler(ProjectNotFoundError)
+    @app.exception_handler(ProjectMemberNotFoundError)
+    @app.exception_handler(InvitationNotFoundError)
+    async def project_not_found_handler(
+        _request: Request, exc: ProjectError
+    ) -> JSONResponse:
+        codes = {
+            ProjectNotFoundError: "project_not_found",
+            ProjectMemberNotFoundError: "project_member_not_found",
+            InvitationNotFoundError: "invitation_not_found",
+        }
+        return JSONResponse(
+            status_code=status.HTTP_404_NOT_FOUND,
+            content=_project_error_payload(exc, codes[type(exc)]),
+        )
+
+    @app.exception_handler(ProjectAccessDeniedError)
+    async def project_access_denied_handler(
+        _request: Request, exc: ProjectAccessDeniedError
+    ) -> JSONResponse:
+        return JSONResponse(
+            status_code=status.HTTP_403_FORBIDDEN,
+            content=_project_error_payload(exc, "project_access_denied"),
+        )
+
+    @app.exception_handler(UserNotRegisteredError)
+    async def user_not_registered_handler(
+        _request: Request, exc: UserNotRegisteredError
+    ) -> JSONResponse:
+        return JSONResponse(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            content=_project_error_payload(exc, "user_not_registered"),
+        )
+
+    @app.exception_handler(AlreadyProjectMemberError)
+    @app.exception_handler(DuplicateInvitationError)
+    @app.exception_handler(InvitationAlreadyRespondedError)
+    async def project_conflict_handler(
+        _request: Request, exc: ProjectError
+    ) -> JSONResponse:
+        codes = {
+            AlreadyProjectMemberError: "already_project_member",
+            DuplicateInvitationError: "duplicate_invitation",
+            InvitationAlreadyRespondedError: "invitation_already_responded",
+        }
+        return JSONResponse(
+            status_code=status.HTTP_409_CONFLICT,
+            content=_project_error_payload(exc, codes[type(exc)]),
         )
 
     @app.exception_handler(RouteNotFoundError)

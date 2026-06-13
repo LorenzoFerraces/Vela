@@ -95,6 +95,10 @@ class RunFromSourceRequest(BaseModel):
         default=None,
         description="Optional command override (Docker CMD) when starting the container.",
     )
+    project_id: uuid.UUID | None = Field(
+        default=None,
+        description="Target project for deploy; defaults to the caller's personal project.",
+    )
 
     @field_validator("env_vars")
     @classmethod
@@ -342,6 +346,65 @@ class GeminiConfigStatus(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Team / projects
+# ---------------------------------------------------------------------------
+
+
+ProjectRoleLiteral = Literal["owner", "operator", "viewer"]
+InvitableRoleLiteral = Literal["operator", "viewer"]
+
+
+class ProjectPublic(BaseModel):
+    id: uuid.UUID
+    name: str
+    is_personal: bool
+    role: ProjectRoleLiteral
+    owner_email: str
+
+
+class ProjectCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=255)
+
+
+class ProjectMemberPublic(BaseModel):
+    user_id: uuid.UUID
+    email: str
+    role: ProjectRoleLiteral
+    created_at: datetime
+
+
+class ProjectMemberUpdate(BaseModel):
+    role: InvitableRoleLiteral
+
+
+class ProjectInvitationCreate(BaseModel):
+    email: EmailStr
+    role: InvitableRoleLiteral
+
+
+class ProjectInvitationPublic(BaseModel):
+    id: uuid.UUID
+    invitee_user_id: uuid.UUID
+    email: str
+    role: InvitableRoleLiteral
+    created_at: datetime
+
+
+class IncomingProjectInvitationPublic(BaseModel):
+    id: uuid.UUID
+    project_id: uuid.UUID
+    project_name: str
+    inviter_email: str
+    role: InvitableRoleLiteral
+    created_at: datetime
+
+
+class MyProjectRolePublic(BaseModel):
+    project_id: uuid.UUID
+    role: ProjectRoleLiteral
+
+
+# ---------------------------------------------------------------------------
 # Deployment history
 # ---------------------------------------------------------------------------
 
@@ -351,6 +414,7 @@ class DeploymentRecordPublic(BaseModel):
 
     id: uuid.UUID
     user_id: uuid.UUID
+    project_id: uuid.UUID | None = None
     author_email: str
     container_id: str
     container_name: str | None
@@ -467,3 +531,62 @@ class DockerfileTemplatePublic(BaseModel):
     contents: str
     created_at: datetime
     updated_at: datetime
+
+
+# ---------------------------------------------------------------------------
+# Email notifications
+# ---------------------------------------------------------------------------
+
+
+class EmailNotificationPreferences(BaseModel):
+    """Get/set user email notification preferences."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID | None = None
+    user_id: uuid.UUID
+    email: EmailStr
+    alerts_enabled: bool
+    alert_types: list[Literal["stop", "failure", "unhealthy"]] = Field(
+        default=["stop", "failure", "unhealthy"]
+    )
+    alert_frequency: Literal["immediate", "daily_digest", "weekly_summary"] = Field(
+        default="immediate"
+    )
+    created_at: datetime
+    updated_at: datetime
+
+
+class EmailNotificationPreferencesUpdate(BaseModel):
+    """Update email notification preferences."""
+
+    email: EmailStr | None = None
+    alerts_enabled: bool | None = None
+    alert_types: list[Literal["stop", "failure", "unhealthy"]] | None = None
+    alert_frequency: Literal["immediate", "daily_digest", "weekly_summary"] | None = None
+
+
+class AlertHistoryEntry(BaseModel):
+    """Alert sent to user."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    container_id: str
+    event_type: str
+    sent_at: datetime
+    email_sent_to: str | None
+    status: Literal["sent", "failed"]
+
+
+# ---------------------------------------------------------------------------
+# Container Monitoring
+# ---------------------------------------------------------------------------
+
+
+class ContainerMonitoringStatus(BaseModel):
+    """Status of container monitoring system."""
+
+    enabled: bool
+    interval_seconds: int
+    total_containers_tracked: int

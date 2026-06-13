@@ -5,6 +5,7 @@ import os
 import re
 import sys
 import threading
+import uuid
 from collections.abc import AsyncIterator, Callable
 from datetime import datetime, timezone
 from typing import Any, TypeVar
@@ -32,12 +33,13 @@ from app.core.models import (
     HealthResult,
     PortMapping,
 )
-from app.core.orchestrator import ContainerOrchestrator
-from app.core.public_route_host import build_public_url
+from app.core.containers.orchestrator import ContainerOrchestrator
+from app.core.traffic.public_route_host import build_public_url
 
 VELA_MANAGED_LABEL = "vela.managed"
 VELA_MANAGED_VALUE = "true"
 VELA_OWNER_LABEL = "vela.owner_id"
+VELA_PROJECT_LABEL = "vela.project_id"
 VELA_SOURCE_KIND_LABEL = "vela.source_kind"
 VELA_SOURCE_REF_LABEL = "vela.source_ref"
 VELA_ROUTE_HOST_LABEL = "vela.route_host"
@@ -580,6 +582,8 @@ class DockerOrchestrator(ContainerOrchestrator):
         *,
         status: ContainerStatus | None = None,
         owner_id: str | None = None,
+        project_ids: set[uuid.UUID] | None = None,
+        user_id: uuid.UUID | None = None,
     ) -> list[ContainerInfo]:
         label_filters = [f"{VELA_MANAGED_LABEL}={VELA_MANAGED_VALUE}"]
         if owner_id is not None:
@@ -591,9 +595,20 @@ class DockerOrchestrator(ContainerOrchestrator):
                 filters={"label": label_filters},
             )
             out: list[ContainerInfo] = []
-            for c in containers:
-                c.reload()
-                info = _inspect_to_container_info(c.attrs)
+            for container in containers:
+                labels = container.labels or {}
+                if project_ids is not None and user_id is not None:
+                    project_label = labels.get(VELA_PROJECT_LABEL)
+                    if project_label:
+                        try:
+                            if uuid.UUID(project_label) not in project_ids:
+                                continue
+                        except ValueError:
+                            continue
+                    elif labels.get(VELA_OWNER_LABEL) != str(user_id):
+                        continue
+                container.reload()
+                info = _inspect_to_container_info(container.attrs)
                 if status is None or info.status == status:
                     out.append(info)
             return out

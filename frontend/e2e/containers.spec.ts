@@ -15,6 +15,9 @@ test.describe('Containers page', () => {
       authenticatedPage.getByLabel('Deploy source'),
     ).toBeVisible()
     await expect(
+      authenticatedPage.getByLabel('Team / workspace'),
+    ).toBeVisible()
+    await expect(
       authenticatedPage.getByRole('button', { name: 'Build' }),
     ).toBeVisible()
     await expect(

@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import app.bootstrap_env  # noqa: F401 — loads backend/.env before other app imports.
 
-from contextlib import asynccontextmanager
+import asyncio
+from contextlib import asynccontextmanager, suppress
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -18,6 +19,7 @@ from app.api.routes import (
     dockerfile_templates,
     github,
     images,
+    projects,
     settings,
     traffic,
 )
@@ -30,12 +32,21 @@ async def _lifespan(_application: FastAPI):
     """
     Lifespan context manager that ensures the end-to-end test database is prepared before the application starts.
     
-    This async context manager runs once at startup to await e2e database setup, then yields control for the application runtime. No special shutdown actions are performed.
+    This async context manager runs once at startup to await e2e database setup, starts the container monitoring loop, then yields control for the application runtime. On shutdown, the monitoring task is cancelled.
     """
     from app.e2e_support import ensure_e2e_database
+    from app.core.notifications.container_monitor import run_monitoring_loop
 
     await ensure_e2e_database()
-    yield
+
+    monitor_task = asyncio.create_task(run_monitoring_loop())
+
+    try:
+        yield
+    finally:
+        monitor_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await monitor_task
 
 
 def create_app() -> FastAPI:
@@ -121,6 +132,11 @@ def create_app() -> FastAPI:
         deployments.router,
         prefix=f"{API_PREFIX}/deployments",
         tags=["deployments"],
+    )
+    application.include_router(
+        projects.router,
+        prefix=f"{API_PREFIX}/projects",
+        tags=["projects"],
     )
 
     @application.get(f"{API_PREFIX}/health", tags=["health"])

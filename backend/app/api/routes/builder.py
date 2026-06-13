@@ -16,8 +16,8 @@ from app.api.schemas import (
     BuilderBuildRequest,
     GitSourceAnalysis,
 )
-from app.core.default_image_builder import DefaultImageBuilder, validate_local_build_context
-from app.core.git_source_analysis import analyze_git_source
+from app.core.build.default_image_builder import DefaultImageBuilder, validate_local_build_context
+from app.core.git.git_source_analysis import analyze_git_source
 from app.core.models import BuildResult, ProjectInfo
 from app.core.oauth import decrypt_identity_token, get_github_identity
 from app.db.models import User

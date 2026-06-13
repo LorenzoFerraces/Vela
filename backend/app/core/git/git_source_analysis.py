@@ -12,9 +12,9 @@ import httpx
 from pydantic import ValidationError
 
 from app.api.schemas import GitSourceAnalysis
-from app.core.default_image_builder import DefaultImageBuilder
+from app.core.build.default_image_builder import DefaultImageBuilder
 from app.core.exceptions import GitSourceAnalysisError
-from app.core.project_analysis import analyze_project
+from app.core.git.project_analysis import analyze_project
 from app.e2e_support import e2e_git_source_analysis_if_enabled
 
 logger = logging.getLogger(__name__)
@@ -407,7 +407,7 @@ async def analyze_git_source(
         analysis = await _call_gemini(context, git_url, git_branch)
         return _merge_env_fallback(analysis, context)
     finally:
-        from app.core.git_ops import rm_tree
+        from app.core.git.git_ops import rm_tree
 
         rm_tree(parent)
 

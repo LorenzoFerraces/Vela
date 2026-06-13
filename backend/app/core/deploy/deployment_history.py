@@ -11,7 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.schemas import DeploymentDiffResponse, DeploymentEnvDiff, DeploymentRecordPublic
-from app.core.deploy_source_display import resolve_deploy_source_label
+from app.core.deploy.deploy_source_display import resolve_deploy_source_label
 from app.db.models import DeploymentRecord, User
 
 
@@ -34,10 +34,12 @@ async def record_deployment(
     session: AsyncSession,
     *,
     user_id: uuid.UUID,
+    project_id: uuid.UUID,
     snapshot: DeploymentSnapshot,
 ) -> DeploymentRecord:
     row = DeploymentRecord(
         user_id=user_id,
+        project_id=project_id,
         container_id=snapshot.container_id,
         container_name=snapshot.container_name,
         source_kind=snapshot.source_kind,
@@ -71,6 +73,7 @@ async def _to_public(
     return DeploymentRecordPublic(
         id=row.id,
         user_id=row.user_id,
+        project_id=row.project_id,
         author_email=author_email,
         container_id=row.container_id,
         container_name=row.container_name,
@@ -95,11 +98,14 @@ async def latest_source_by_container_ids(
     """Most recent ``(source_kind, source_ref)`` per container id for history fallback."""
     if not container_ids:
         return {}
+    from app.core.projects.repository import list_project_ids_for_user
+
+    project_ids = await list_project_ids_for_user(session, user_id)
     result = await session.execute(
         select(DeploymentRecord)
         .where(
-            DeploymentRecord.user_id == user_id,
             DeploymentRecord.container_id.in_(container_ids),
+            DeploymentRecord.project_id.in_(project_ids),
         )
         .order_by(DeploymentRecord.created_at.desc())
     )
@@ -117,11 +123,16 @@ async def list_deployments(
     container_name: str | None = None,
     limit: int = 50,
 ) -> list[DeploymentRecordPublic]:
+    from app.core.projects.repository import list_project_ids_for_user
+
+    project_ids = await list_project_ids_for_user(session, user_id)
+    if not project_ids:
+        return []
     bounded_limit = max(1, min(limit, 100))
     query = (
         select(DeploymentRecord, User.email)
         .join(User, User.id == DeploymentRecord.user_id)
-        .where(DeploymentRecord.user_id == user_id)
+        .where(DeploymentRecord.project_id.in_(project_ids))
         .order_by(DeploymentRecord.created_at.desc())
         .limit(bounded_limit)
     )
@@ -140,18 +151,20 @@ async def get_deployment(
     user_id: uuid.UUID,
     deployment_id: uuid.UUID,
 ) -> DeploymentRecordPublic | None:
+    from app.core.projects.repository import list_project_ids_for_user
+
+    project_ids = set(await list_project_ids_for_user(session, user_id))
     result = await session.execute(
         select(DeploymentRecord, User.email)
         .join(User, User.id == DeploymentRecord.user_id)
-        .where(
-            DeploymentRecord.id == deployment_id,
-            DeploymentRecord.user_id == user_id,
-        )
+        .where(DeploymentRecord.id == deployment_id)
     )
     row = result.one_or_none()
     if row is None:
         return None
     deployment, email = row
+    if deployment.project_id not in project_ids:
+        return None
     return await _to_public(session, user_id, deployment, email)
 
 
@@ -194,11 +207,14 @@ async def diff_deployments(
     left_id: uuid.UUID,
     right_id: uuid.UUID,
 ) -> DeploymentDiffResponse | None:
+    from app.core.projects.repository import list_project_ids_for_user
+
+    project_ids = set(await list_project_ids_for_user(session, user_id))
     left = await session.get(DeploymentRecord, left_id)
     right = await session.get(DeploymentRecord, right_id)
     if left is None or right is None:
         return None
-    if left.user_id != user_id or right.user_id != user_id:
+    if left.project_id not in project_ids or right.project_id not in project_ids:
         return None
     return DeploymentDiffResponse(
         left_id=left_id,

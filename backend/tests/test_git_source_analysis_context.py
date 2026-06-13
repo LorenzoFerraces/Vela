@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from app.core.git_source_analysis import (
+from app.core.git.git_source_analysis import (
     _collect_context_excerpts,
     _env_vars_from_payload,
     _extract_env_vars_from_context,
@@ -31,7 +31,9 @@ def test_readme_is_included_before_other_files_when_budget_is_tight(
 
 
 def test_readme_variant_readme_without_extension(tmp_path: Path) -> None:
-    (tmp_path / "README").write_text("VITE_API_BASE_URL=http://localhost:8000\n", encoding="utf-8")
+    (tmp_path / "README").write_text(
+        "VITE_API_BASE_URL=http://localhost:8000\n", encoding="utf-8"
+    )
 
     context = _collect_context_excerpts(tmp_path)
 
@@ -48,7 +50,10 @@ def test_extract_env_vars_from_readme_table() -> None:
 """
     env_vars = _extract_env_vars_from_context(snippet)
 
-    assert env_vars["VELA_DATABASE_URL"] == "postgresql+asyncpg://vela:vela@127.0.0.1:15432/Vela"
+    assert (
+        env_vars["VELA_DATABASE_URL"]
+        == "postgresql+asyncpg://vela:vela@127.0.0.1:15432/Vela"
+    )
     assert env_vars["VELA_AUTH_SECRET"] == ""
 
 

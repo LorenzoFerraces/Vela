@@ -48,7 +48,7 @@ export function deploySourceImageLabel(
     return sourceRef
   }
 
-  if (row.source_label?.trim()) {
+  if ('source_label' in row && row.source_label?.trim()) {
     return row.source_label.trim()
   }
 
