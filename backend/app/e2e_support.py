@@ -10,6 +10,7 @@ from urllib.parse import unquote, urlparse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from app.core.auth.passwords import hash_password
 from app.core.projects.bootstrap import ensure_personal_workspace
 from app.core.oauth.github import GitHubRepo
 from app.core.oauth.identity import GITHUB_PROVIDER
