@@ -10,7 +10,7 @@ from urllib.parse import unquote, urlparse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.core.auth.passwords import hash_password
+from app.core.projects.bootstrap import ensure_personal_workspace
 from app.core.oauth.github import GitHubRepo
 from app.core.oauth.identity import GITHUB_PROVIDER
 from app.core.security.secrets import encrypt_secret
@@ -193,25 +193,29 @@ async def ensure_e2e_database() -> None:
     async with session_factory() as session:
         existing = await session.get(User, E2E_USER_ID)
         if existing is None:
-            session.add(
-                User(
-                    id=E2E_USER_ID,
-                    email=E2E_USER_EMAIL,
-                    password_hash=hash_password(E2E_USER_PASSWORD),
-                )
+            user = User(
+                id=E2E_USER_ID,
+                email=E2E_USER_EMAIL,
+                password_hash=hash_password(E2E_USER_PASSWORD),
             )
-            await session.commit()
+            session.add(user)
+            await session.flush()
+            await ensure_personal_workspace(session, user)
+        else:
+            await ensure_personal_workspace(session, existing)
 
         no_github = await session.get(User, E2E_USER_NO_GITHUB_ID)
         if no_github is None:
-            session.add(
-                User(
-                    id=E2E_USER_NO_GITHUB_ID,
-                    email=E2E_USER_NO_GITHUB_EMAIL,
-                    password_hash=hash_password(E2E_USER_NO_GITHUB_PASSWORD),
-                )
+            user_no_github = User(
+                id=E2E_USER_NO_GITHUB_ID,
+                email=E2E_USER_NO_GITHUB_EMAIL,
+                password_hash=hash_password(E2E_USER_NO_GITHUB_PASSWORD),
             )
-            await session.commit()
+            session.add(user_no_github)
+            await session.flush()
+            await ensure_personal_workspace(session, user_no_github)
+        else:
+            await ensure_personal_workspace(session, no_github)
 
         identity_result = await session.execute(
             select(UserOAuthIdentity).where(

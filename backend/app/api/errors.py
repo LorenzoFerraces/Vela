@@ -27,6 +27,15 @@ from app.core.exceptions import (
     IntegrationError,
     InvalidCredentialsError,
     NotAuthenticatedError,
+    AlreadyProjectMemberError,
+    DuplicateInvitationError,
+    InvitationAlreadyRespondedError,
+    InvitationNotFoundError,
+    ProjectAccessDeniedError,
+    ProjectError,
+    ProjectMemberNotFoundError,
+    ProjectNotFoundError,
+    UserNotRegisteredError,
     OrchestratorError,
     RegistryAccessDeniedError,
     ProviderConnectionError,
@@ -65,6 +74,46 @@ def register_exception_handlers(app) -> None:
         return JSONResponse(
             status_code=status.HTTP_403_FORBIDDEN,
             content=exc.api_response_content(),
+        )
+
+    @app.exception_handler(ProjectNotFoundError)
+    @app.exception_handler(ProjectMemberNotFoundError)
+    @app.exception_handler(InvitationNotFoundError)
+    async def project_not_found_handler(
+        _request: Request, exc: ProjectError
+    ) -> JSONResponse:
+        return JSONResponse(
+            status_code=status.HTTP_404_NOT_FOUND,
+            content={"detail": str(exc)},
+        )
+
+    @app.exception_handler(ProjectAccessDeniedError)
+    async def project_access_denied_handler(
+        _request: Request, exc: ProjectAccessDeniedError
+    ) -> JSONResponse:
+        return JSONResponse(
+            status_code=status.HTTP_403_FORBIDDEN,
+            content={"detail": str(exc)},
+        )
+
+    @app.exception_handler(UserNotRegisteredError)
+    async def user_not_registered_handler(
+        _request: Request, exc: UserNotRegisteredError
+    ) -> JSONResponse:
+        return JSONResponse(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            content={"detail": str(exc)},
+        )
+
+    @app.exception_handler(AlreadyProjectMemberError)
+    @app.exception_handler(DuplicateInvitationError)
+    @app.exception_handler(InvitationAlreadyRespondedError)
+    async def project_conflict_handler(
+        _request: Request, exc: ProjectError
+    ) -> JSONResponse:
+        return JSONResponse(
+            status_code=status.HTTP_409_CONFLICT,
+            content={"detail": str(exc)},
         )
 
     @app.exception_handler(RouteNotFoundError)

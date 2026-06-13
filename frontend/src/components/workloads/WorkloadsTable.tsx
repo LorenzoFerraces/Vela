@@ -8,6 +8,7 @@ import {
 } from 'react'
 import type { ContainerInfo, ContainerStatus } from '../../api/client'
 import {
+  containerWriteAllowed,
   fetchContainerLogs,
   formatApiError,
   openContainerLogWebSocket,
@@ -281,6 +282,7 @@ export function WorkloadsTable({
               {displayRows.map((containerRow) => {
                 const isExpanded = expandedRowId === containerRow.id
                 const accessUrl = containerRow.access_url?.trim() || ''
+                const canModify = containerWriteAllowed(containerRow)
                 return (
                   <Fragment key={containerRow.id}>
                     <tr>
@@ -346,6 +348,7 @@ export function WorkloadsTable({
                           type="button"
                           className="btn btn--sm btn--ghost"
                           disabled={
+                            !canModify ||
                             rowBusyId === containerRow.id ||
                             containerRow.status === 'running'
                           }
@@ -357,6 +360,7 @@ export function WorkloadsTable({
                           type="button"
                           className="btn btn--sm btn--ghost"
                           disabled={
+                            !canModify ||
                             rowBusyId === containerRow.id ||
                             containerRow.status !== 'running'
                           }
@@ -367,7 +371,7 @@ export function WorkloadsTable({
                         <button
                           type="button"
                           className="btn btn--sm btn--danger"
-                          disabled={rowBusyId === containerRow.id}
+                          disabled={!canModify || rowBusyId === containerRow.id}
                           onClick={() => void onRemove(containerRow.id)}
                         >
                           Remove

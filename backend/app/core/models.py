@@ -103,6 +103,10 @@ class ContainerInfo(BaseModel):
         default=None,
         description="User-facing deploy source from vela.source_ref (template name, image ref, Git URL).",
     )
+    access_role: str | None = Field(
+        default=None,
+        description="Caller's role for this container's project (owner, operator, viewer).",
+    )
 
 
 class ContainerStats(BaseModel):

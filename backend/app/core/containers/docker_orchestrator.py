@@ -38,6 +38,7 @@ from app.core.traffic.public_route_host import build_public_url
 VELA_MANAGED_LABEL = "vela.managed"
 VELA_MANAGED_VALUE = "true"
 VELA_OWNER_LABEL = "vela.owner_id"
+VELA_PROJECT_LABEL = "vela.project_id"
 VELA_SOURCE_KIND_LABEL = "vela.source_kind"
 VELA_SOURCE_REF_LABEL = "vela.source_ref"
 VELA_ROUTE_HOST_LABEL = "vela.route_host"

@@ -164,6 +164,8 @@ def _seed_user(
     email: str,
     password: str | None,
 ) -> User:
+    from app.core.projects.bootstrap import ensure_personal_workspace
+
     async def run() -> User:
         async with factory() as session:
             user = User(
@@ -172,7 +174,8 @@ def _seed_user(
                 password_hash=hash_password(password) if password else None,
             )
             session.add(user)
-            await session.commit()
+            await session.flush()
+            await ensure_personal_workspace(session, user)
             await session.refresh(user)
             return user
 

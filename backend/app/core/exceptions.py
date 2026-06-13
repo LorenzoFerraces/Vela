@@ -255,3 +255,54 @@ class GitHubAccountAlreadyLinkedError(IntegrationError):
         ),
     ) -> None:
         super().__init__(message)
+
+
+# ---------------------------------------------------------------------------
+# Team / project errors
+# ---------------------------------------------------------------------------
+
+
+class ProjectError(VelaError):
+    """Base exception for project and team operations."""
+
+
+class ProjectNotFoundError(ProjectError):
+    def __init__(self, project_id: str) -> None:
+        self.project_id = project_id
+        super().__init__(f"Project not found: {project_id}")
+
+
+class ProjectMemberNotFoundError(ProjectError):
+    def __init__(self, project_id: str, user_id: str) -> None:
+        super().__init__(f"Not a member of project {project_id}.")
+
+
+class ProjectAccessDeniedError(ProjectError):
+    def __init__(self, message: str = "You do not have permission for this project action.") -> None:
+        super().__init__(message)
+
+
+class UserNotRegisteredError(ProjectError):
+    def __init__(self, email: str) -> None:
+        self.email = email
+        super().__init__(f"No registered user with email {email!r}.")
+
+
+class InvitationNotFoundError(ProjectError):
+    def __init__(self, invitation_id: str) -> None:
+        super().__init__(f"Invitation not found: {invitation_id}")
+
+
+class InvitationAlreadyRespondedError(ProjectError):
+    def __init__(self, invitation_id: str) -> None:
+        super().__init__(f"Invitation {invitation_id} is no longer pending.")
+
+
+class DuplicateInvitationError(ProjectError):
+    def __init__(self, email: str) -> None:
+        super().__init__(f"A pending invitation already exists for {email!r}.")
+
+
+class AlreadyProjectMemberError(ProjectError):
+    def __init__(self, email: str) -> None:
+        super().__init__(f"{email!r} is already a member of this project.")

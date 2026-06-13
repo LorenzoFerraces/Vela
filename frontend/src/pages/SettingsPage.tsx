@@ -149,7 +149,7 @@ export default function SettingsPage() {
     <section className="settings-page">
       <h1 className="settings-page__title">Settings</h1>
       <p className="settings-page__lead">
-        Account info and third-party integrations.
+        Account info, notifications, and third-party integrations.
       </p>
 
       <h2 className="settings-page__section-title">Account</h2>
