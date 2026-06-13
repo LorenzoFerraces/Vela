@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import uuid
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator
 
@@ -61,8 +62,10 @@ class ContainerOrchestrator(ABC):
         *,
         status: ContainerStatus | None = None,
         owner_id: str | None = None,
+        project_ids: set[uuid.UUID] | None = None,
+        user_id: uuid.UUID | None = None,
     ) -> list[ContainerInfo]:
-        """List all managed containers, optionally filtered by status and owner."""
+        """List managed containers, optionally filtered by status, owner, or project access."""
 
     @abstractmethod
     async def logs(self, container_id: str, *, tail: int = 100) -> str:

@@ -71,7 +71,7 @@ async def require_container_access(
         raise ProjectAccessDeniedError("You do not have read access to this container.")
     if action == "write" and not can_write(role):
         raise ProjectAccessDeniedError("You do not have permission to modify this container.")
-    return info
+    return info.model_copy(update={"access_role": role.value})
 
 
 def container_visible_to_user(

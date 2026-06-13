@@ -1740,6 +1740,13 @@ body {
   margin-bottom: 1rem;
 }
 
+@media (max-width: 640px) {
+  .settings-team-invite {
+    grid-template-columns: 1fr;
+    align-items: start;
+  }
+}
+
 .settings-team-invite label {
   display: flex;
   flex-direction: column;
@@ -2075,6 +2082,13 @@ body {
   }
   100% {
     background-position: -100% 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skeleton {
+    animation: none;
+    background-position: 0 0;
   }
 }
 

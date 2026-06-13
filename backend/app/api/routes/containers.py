@@ -79,7 +79,6 @@ from app.core.models import (
 )
 from app.core.oauth import decrypt_identity_token, get_github_identity
 from app.core.projects.access import (
-    container_visible_to_user,
     list_accessible_project_ids,
     membership_role_for_container,
     require_container_access,
@@ -360,16 +359,11 @@ async def _list_user_containers(
     container_status: ContainerStatus | None,
 ) -> list[ContainerInfo]:
     project_ids = await list_accessible_project_ids(session, user.id)
-    all_containers = await orchestrator.list(status=container_status)
-    return [
-        container
-        for container in all_containers
-        if container_visible_to_user(
-            container,
-            project_ids=project_ids,
-            user_id=user.id,
-        )
-    ]
+    return await orchestrator.list(
+        status=container_status,
+        project_ids=project_ids,
+        user_id=user.id,
+    )
 
 
 @router.get("/", response_model=list[ContainerInfo])
@@ -532,7 +526,7 @@ async def deploy(
 ) -> ContainerDeployResponse:
     """Create and start a container from configuration."""
     project_id = await _resolve_deploy_project_id_for_config(
-        session, current_user, None
+        session, current_user, config.project_id
     )
     config = _apply_deploy_labels(
         config,
@@ -756,10 +750,11 @@ async def start_container(
     session: Annotated[AsyncSession, Depends(get_db)],
 ) -> ContainerInfo:
     """Start a stopped container."""
-    await require_container_access(
+    access_info = await require_container_access(
         session, orchestrator, current_user, container_id, action="write"
     )
-    return await orchestrator.start(container_id)
+    updated = await orchestrator.start(container_id)
+    return updated.model_copy(update={"access_role": access_info.access_role})
 
 
 @router.post("/{container_id}/stop", response_model=ContainerInfo)
@@ -771,10 +766,11 @@ async def stop_container(
     timeout: int = 10,
 ) -> ContainerInfo:
     """Gracefully stop a running container."""
-    await require_container_access(
+    access_info = await require_container_access(
         session, orchestrator, current_user, container_id, action="write"
     )
-    return await orchestrator.stop(container_id, timeout=timeout)
+    updated = await orchestrator.stop(container_id, timeout=timeout)
+    return updated.model_copy(update={"access_role": access_info.access_role})
 
 
 @router.post("/{container_id}/restart", response_model=ContainerInfo)
@@ -786,10 +782,11 @@ async def restart_container(
     timeout: int = 10,
 ) -> ContainerInfo:
     """Restart a container."""
-    await require_container_access(
+    access_info = await require_container_access(
         session, orchestrator, current_user, container_id, action="write"
     )
-    return await orchestrator.restart(container_id, timeout=timeout)
+    updated = await orchestrator.restart(container_id, timeout=timeout)
+    return updated.model_copy(update={"access_role": access_info.access_role})
 
 
 @router.delete("/{container_id}", status_code=status.HTTP_204_NO_CONTENT)

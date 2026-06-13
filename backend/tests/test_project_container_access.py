@@ -21,7 +21,10 @@ def _register(client: TestClient, email: str) -> tuple[str, str, str]:
     token = body["access_token"]
     user_id = body["user"]["id"]
     client.headers.update({"Authorization": f"Bearer {token}"})
-    projects = client.get("/api/projects/").json()
+    projects_response = client.get("/api/projects/")
+    assert projects_response.status_code == 200, projects_response.text
+    projects = projects_response.json()
+    assert projects, "expected at least one project after register"
     return token, projects[0]["id"], user_id
 
 

@@ -242,7 +242,9 @@ async def remove_member(
                 )
             )
         )
-        if len(owners) <= 1 and target_user_id == owners[0].user_id:
+        if not owners:
+            raise ProjectAccessDeniedError("No project owners found.")
+        if len(owners) == 1 and owners[0].user_id == target_user_id:
             raise ProjectAccessDeniedError("Cannot remove the sole project owner.")
     await session.delete(membership)
     await session.commit()
@@ -384,7 +386,9 @@ async def accept_invitation(
         session, project_id=invitation.project_id, user_id=user_id
     )
     if existing is not None:
-        raise AlreadyProjectMemberError("You are already a member of this project.")
+        invitee = await session.get(User, user_id)
+        member_email = invitee.email if invitee is not None else "member"
+        raise AlreadyProjectMemberError(member_email)
     invitation.status = InvitationStatus.ACCEPTED
     invitation.responded_at = _utcnow()
     membership = ProjectMembership(

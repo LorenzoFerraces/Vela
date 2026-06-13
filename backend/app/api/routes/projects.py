@@ -157,13 +157,10 @@ async def get_project(
     current_user: Annotated[User, Depends(get_current_user)],
     session: Annotated[AsyncSession, Depends(get_db)],
 ) -> ProjectPublic:
-    await require_membership(
-        session, project_id=project_id, user_id=current_user.id
-    )
-    project = await require_project(session, project_id)
     membership = await require_membership(
         session, project_id=project_id, user_id=current_user.id
     )
+    project = await require_project(session, project_id)
     owner_email = await owner_email_for_project(session, project_id)
     return _project_public(
         project_id=project.id,

@@ -700,8 +700,8 @@ export async function createProject(name: string): Promise<Project> {
   return apiPost<Project, { name: string }>('/api/projects/', { name })
 }
 
-export async function leaveProject(projectId: string): Promise<void> {
-  const url = `${getApiBaseUrl()}/api/projects/${encodeURIComponent(projectId)}/leave`
+export async function apiPostEmpty(path: string): Promise<void> {
+  const url = `${getApiBaseUrl()}${path.startsWith('/') ? path : `/${path}`}`
   const headers = new Headers({ Accept: 'application/json', 'Content-Type': 'application/json' })
   const token = getAccessToken()
   if (token) {
@@ -709,6 +709,12 @@ export async function leaveProject(projectId: string): Promise<void> {
   }
   const response = await fetch(url, { method: 'POST', headers, body: '{}' })
   await readEmptyOk(response)
+}
+
+export async function leaveProject(projectId: string): Promise<void> {
+  await apiPostEmpty(
+    `/api/projects/${encodeURIComponent(projectId)}/leave`,
+  )
 }
 
 export async function listProjectMembers(projectId: string): Promise<ProjectMember[]> {
@@ -752,14 +758,9 @@ export async function acceptProjectInvitation(invitationId: string): Promise<Pro
 }
 
 export async function rejectProjectInvitation(invitationId: string): Promise<void> {
-  const url = `${getApiBaseUrl()}/api/projects/invitations/${encodeURIComponent(invitationId)}/reject`
-  const headers = new Headers({ Accept: 'application/json', 'Content-Type': 'application/json' })
-  const token = getAccessToken()
-  if (token) {
-    headers.set('Authorization', `Bearer ${token}`)
-  }
-  const response = await fetch(url, { method: 'POST', headers, body: '{}' })
-  await readEmptyOk(response)
+  await apiPostEmpty(
+    `/api/projects/invitations/${encodeURIComponent(invitationId)}/reject`,
+  )
 }
 
 export async function updateProjectMemberRole(
@@ -783,9 +784,6 @@ export async function removeProjectMember(
 }
 
 export function containerWriteAllowed(container: ContainerInfo): boolean {
-  if (!container.access_role) {
-    return true
-  }
   return container.access_role === 'owner' || container.access_role === 'operator'
 }
 

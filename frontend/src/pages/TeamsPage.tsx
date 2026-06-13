@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import {
   acceptProjectInvitation,
@@ -67,6 +67,7 @@ export default function TeamsPage() {
   const [newTeamName, setNewTeamName] = useState('')
   const [inviteEmail, setInviteEmail] = useState('')
   const [inviteRole, setInviteRole] = useState<'viewer' | 'operator'>('viewer')
+  const detailRequestRef = useRef(0)
 
   const selectedProject = useMemo(() => {
     if (projects.length === 0) {
@@ -91,20 +92,33 @@ export default function TeamsPage() {
   }, [])
 
   const loadTeamDetail = useCallback(async (project: Project) => {
+    const requestId = detailRequestRef.current + 1
+    detailRequestRef.current = requestId
     setDetailLoading(true)
     try {
       const memberRows = await listProjectMembers(project.id)
+      if (detailRequestRef.current !== requestId) {
+        return
+      }
       setMembers(memberRows)
       if (project.role === 'owner') {
         const invitationRows = await listProjectInvitations(project.id)
+        if (detailRequestRef.current !== requestId) {
+          return
+        }
         setPendingInvitations(invitationRows)
       } else {
         setPendingInvitations([])
       }
     } catch (error) {
+      if (detailRequestRef.current !== requestId) {
+        return
+      }
       setBanner({ tone: 'err', text: formatApiError(error) })
     } finally {
-      setDetailLoading(false)
+      if (detailRequestRef.current === requestId) {
+        setDetailLoading(false)
+      }
     }
   }, [])
 

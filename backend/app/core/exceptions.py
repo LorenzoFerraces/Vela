@@ -269,12 +269,14 @@ class ProjectError(VelaError):
 class ProjectNotFoundError(ProjectError):
     def __init__(self, project_id: str) -> None:
         self.project_id = project_id
-        super().__init__(f"Project not found: {project_id}")
+        super().__init__("Requested project not found.")
 
 
 class ProjectMemberNotFoundError(ProjectError):
     def __init__(self, project_id: str, user_id: str) -> None:
-        super().__init__(f"Not a member of project {project_id}.")
+        self.project_id = project_id
+        self.user_id = user_id
+        super().__init__("Not a member of the project.")
 
 
 class ProjectAccessDeniedError(ProjectError):
@@ -285,24 +287,28 @@ class ProjectAccessDeniedError(ProjectError):
 class UserNotRegisteredError(ProjectError):
     def __init__(self, email: str) -> None:
         self.email = email
-        super().__init__(f"No registered user with email {email!r}.")
+        super().__init__("No registered user found for the provided email.")
 
 
 class InvitationNotFoundError(ProjectError):
     def __init__(self, invitation_id: str) -> None:
-        super().__init__(f"Invitation not found: {invitation_id}")
+        self.invitation_id = invitation_id
+        super().__init__("Invitation not found.")
 
 
 class InvitationAlreadyRespondedError(ProjectError):
     def __init__(self, invitation_id: str) -> None:
-        super().__init__(f"Invitation {invitation_id} is no longer pending.")
+        self.invitation_id = invitation_id
+        super().__init__("Invitation is no longer pending.")
 
 
 class DuplicateInvitationError(ProjectError):
     def __init__(self, email: str) -> None:
-        super().__init__(f"A pending invitation already exists for {email!r}.")
+        self.email = email
+        super().__init__("A pending invitation already exists.")
 
 
 class AlreadyProjectMemberError(ProjectError):
     def __init__(self, email: str) -> None:
-        super().__init__(f"{email!r} is already a member of this project.")
+        self.email = email
+        super().__init__("User is already a member of this project.")

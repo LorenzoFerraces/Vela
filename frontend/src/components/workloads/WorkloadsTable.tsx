@@ -16,6 +16,8 @@ import {
 import { deploySourceImageLabel } from '../../pages/containers/deploySourceDisplay'
 
 const ERROR_LINE_PATTERN = /\b(error|exception|fatal|traceback)\b/i
+const VIEWER_ACTION_DISABLED_TITLE =
+  'Insufficient permissions to modify this workload (viewer role).'
 
 type WorkloadsTableProps = {
   listLoading: boolean
@@ -283,6 +285,7 @@ export function WorkloadsTable({
                 const isExpanded = expandedRowId === containerRow.id
                 const accessUrl = containerRow.access_url?.trim() || ''
                 const canModify = containerWriteAllowed(containerRow)
+                const modifyDisabledTitle = canModify ? undefined : VIEWER_ACTION_DISABLED_TITLE
                 return (
                   <Fragment key={containerRow.id}>
                     <tr>
@@ -347,6 +350,10 @@ export function WorkloadsTable({
                         <button
                           type="button"
                           className="btn btn--sm btn--ghost"
+                          title={modifyDisabledTitle}
+                          aria-label={
+                            canModify ? 'Start container' : `Start container — ${VIEWER_ACTION_DISABLED_TITLE}`
+                          }
                           disabled={
                             !canModify ||
                             rowBusyId === containerRow.id ||
@@ -359,6 +366,10 @@ export function WorkloadsTable({
                         <button
                           type="button"
                           className="btn btn--sm btn--ghost"
+                          title={modifyDisabledTitle}
+                          aria-label={
+                            canModify ? 'Stop container' : `Stop container — ${VIEWER_ACTION_DISABLED_TITLE}`
+                          }
                           disabled={
                             !canModify ||
                             rowBusyId === containerRow.id ||
@@ -371,6 +382,12 @@ export function WorkloadsTable({
                         <button
                           type="button"
                           className="btn btn--sm btn--danger"
+                          title={modifyDisabledTitle}
+                          aria-label={
+                            canModify
+                              ? 'Remove container'
+                              : `Remove container — ${VIEWER_ACTION_DISABLED_TITLE}`
+                          }
                           disabled={!canModify || rowBusyId === containerRow.id}
                           onClick={() => void onRemove(containerRow.id)}
                         >

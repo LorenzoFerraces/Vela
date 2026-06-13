@@ -48,17 +48,29 @@ def test_member_can_leave_shared_project(db_app: Any) -> None:
         owner_client.headers.update(_auth_headers(owner_token))
         member_client.headers.update(_auth_headers(member_token))
 
-        project_id = owner_client.post(
+        project_response = owner_client.post(
             "/api/projects/",
             json={"name": "Temporary team"},
-        ).json()["id"]
+        )
+        assert project_response.status_code == 201, project_response.text
+        project_id = project_response.json()["id"]
 
-        invitation = owner_client.post(
+        invitation_response = owner_client.post(
             f"/api/projects/{project_id}/invitations",
             json={"email": "leave-member@example.com", "role": "viewer"},
-        ).json()
-        invitation_id = member_client.get("/api/projects/invitations/incoming").json()[0]["id"]
-        member_client.post(f"/api/projects/invitations/{invitation_id}/accept")
+        )
+        assert invitation_response.status_code == 201, invitation_response.text
+
+        incoming_response = member_client.get("/api/projects/invitations/incoming")
+        assert incoming_response.status_code == 200, incoming_response.text
+        incoming = incoming_response.json()
+        assert incoming, "expected incoming invitation"
+        invitation_id = incoming[0]["id"]
+
+        accept_response = member_client.post(
+            f"/api/projects/invitations/{invitation_id}/accept",
+        )
+        assert accept_response.status_code == 200, accept_response.text
 
         leave_response = member_client.post(f"/api/projects/{project_id}/leave")
         assert leave_response.status_code == 204

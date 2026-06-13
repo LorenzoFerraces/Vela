@@ -23,7 +23,7 @@ def upgrade() -> None:
     op.create_table(
         "organizations",
         sa.Column("id", sa.Uuid(as_uuid=True), nullable=False),
-        sa.Column("name", sa.String(length=255), nullable=False),
+        sa.Column("name", sa.String(length=320), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.PrimaryKeyConstraint("id"),
     )
@@ -126,54 +126,71 @@ def upgrade() -> None:
 
 def _backfill_personal_workspaces() -> None:
     bind = op.get_bind()
-    users = bind.execute(sa.text("SELECT id, email, created_at FROM users")).fetchall()
-    for user_row in users:
-        user_id = user_row[0]
-        email = user_row[1]
-        created_at = user_row[2]
-        org_id = uuid.uuid4()
-        project_id = uuid.uuid4()
-        membership_id = uuid.uuid4()
-        org_name = f"{email} workspace"
-        bind.execute(
+    batch_size = 500
+    offset = 0
+    while True:
+        users = bind.execute(
             sa.text(
-                "INSERT INTO organizations (id, name, created_at) "
-                "VALUES (:id, :name, :created_at)"
+                "SELECT id, email, created_at FROM users "
+                "ORDER BY id LIMIT :limit OFFSET :offset"
             ),
-            {"id": org_id, "name": org_name, "created_at": created_at},
-        )
-        bind.execute(
-            sa.text(
-                "INSERT INTO projects (id, organization_id, name, is_personal, created_at) "
-                "VALUES (:id, :organization_id, :name, :is_personal, :created_at)"
-            ),
-            {
-                "id": project_id,
-                "organization_id": org_id,
-                "name": "Personal",
-                "is_personal": True,
-                "created_at": created_at,
-            },
-        )
-        bind.execute(
-            sa.text(
-                "INSERT INTO project_memberships (id, project_id, user_id, role, created_at) "
-                "VALUES (:id, :project_id, :user_id, :role, :created_at)"
-            ),
-            {
-                "id": membership_id,
-                "project_id": project_id,
-                "user_id": user_id,
-                "role": "owner",
-                "created_at": created_at,
-            },
-        )
-        bind.execute(
-            sa.text(
-                "UPDATE users SET personal_project_id = :project_id WHERE id = :user_id"
-            ),
-            {"project_id": project_id, "user_id": user_id},
-        )
+            {"limit": batch_size, "offset": offset},
+        ).fetchall()
+        if not users:
+            break
+        for user_row in users:
+            user_id = user_row[0]
+            email = user_row[1]
+            created_at = user_row[2]
+            org_id = uuid.uuid4()
+            project_id = uuid.uuid4()
+            membership_id = uuid.uuid4()
+            email_text = str(email)
+            suffix = " workspace"
+            max_email_length = 320 - len(suffix)
+            if len(email_text) > max_email_length:
+                email_text = email_text[:max_email_length]
+            org_name = f"{email_text}{suffix}"
+            bind.execute(
+                sa.text(
+                    "INSERT INTO organizations (id, name, created_at) "
+                    "VALUES (:id, :name, :created_at)"
+                ),
+                {"id": org_id, "name": org_name, "created_at": created_at},
+            )
+            bind.execute(
+                sa.text(
+                    "INSERT INTO projects (id, organization_id, name, is_personal, created_at) "
+                    "VALUES (:id, :organization_id, :name, :is_personal, :created_at)"
+                ),
+                {
+                    "id": project_id,
+                    "organization_id": org_id,
+                    "name": "Personal",
+                    "is_personal": True,
+                    "created_at": created_at,
+                },
+            )
+            bind.execute(
+                sa.text(
+                    "INSERT INTO project_memberships (id, project_id, user_id, role, created_at) "
+                    "VALUES (:id, :project_id, :user_id, :role, :created_at)"
+                ),
+                {
+                    "id": membership_id,
+                    "project_id": project_id,
+                    "user_id": user_id,
+                    "role": "owner",
+                    "created_at": created_at,
+                },
+            )
+            bind.execute(
+                sa.text(
+                    "UPDATE users SET personal_project_id = :project_id WHERE id = :user_id"
+                ),
+                {"project_id": project_id, "user_id": user_id},
+            )
+        offset += batch_size
 
 
 def downgrade() -> None:

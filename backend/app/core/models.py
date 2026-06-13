@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import uuid
 from datetime import datetime
 
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -71,6 +72,10 @@ class DeployConfig(BaseModel):
             "If true, allocate route_host under VELA_PUBLIC_ROUTE_DOMAIN and set route_tls from "
             "VELA_PUBLIC_URL_SCHEME; client-supplied route_host is ignored."
         ),
+    )
+    project_id: uuid.UUID | None = Field(
+        default=None,
+        description="Target project for the deployment; defaults to the caller's personal workspace.",
     )
 
     @field_validator("route_path_prefix")

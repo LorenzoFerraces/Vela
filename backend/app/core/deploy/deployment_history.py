@@ -34,7 +34,7 @@ async def record_deployment(
     session: AsyncSession,
     *,
     user_id: uuid.UUID,
-    project_id: uuid.UUID | None,
+    project_id: uuid.UUID,
     snapshot: DeploymentSnapshot,
 ) -> DeploymentRecord:
     row = DeploymentRecord(

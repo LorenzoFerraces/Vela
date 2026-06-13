@@ -48,6 +48,10 @@ from app.core.exceptions import (
 )
 
 
+def _project_error_payload(exc: ProjectError, error_code: str) -> dict[str, str]:
+    return {"error": error_code, "detail": str(exc)}
+
+
 def register_exception_handlers(app) -> None:
     """
     Register exception handlers on a FastAPI application that translate Vela domain errors into JSON HTTP responses.
@@ -82,9 +86,14 @@ def register_exception_handlers(app) -> None:
     async def project_not_found_handler(
         _request: Request, exc: ProjectError
     ) -> JSONResponse:
+        codes = {
+            ProjectNotFoundError: "project_not_found",
+            ProjectMemberNotFoundError: "project_member_not_found",
+            InvitationNotFoundError: "invitation_not_found",
+        }
         return JSONResponse(
             status_code=status.HTTP_404_NOT_FOUND,
-            content={"detail": str(exc)},
+            content=_project_error_payload(exc, codes[type(exc)]),
         )
 
     @app.exception_handler(ProjectAccessDeniedError)
@@ -93,7 +102,7 @@ def register_exception_handlers(app) -> None:
     ) -> JSONResponse:
         return JSONResponse(
             status_code=status.HTTP_403_FORBIDDEN,
-            content={"detail": str(exc)},
+            content=_project_error_payload(exc, "project_access_denied"),
         )
 
     @app.exception_handler(UserNotRegisteredError)
@@ -102,7 +111,7 @@ def register_exception_handlers(app) -> None:
     ) -> JSONResponse:
         return JSONResponse(
             status_code=status.HTTP_400_BAD_REQUEST,
-            content={"detail": str(exc)},
+            content=_project_error_payload(exc, "user_not_registered"),
         )
 
     @app.exception_handler(AlreadyProjectMemberError)
@@ -111,9 +120,14 @@ def register_exception_handlers(app) -> None:
     async def project_conflict_handler(
         _request: Request, exc: ProjectError
     ) -> JSONResponse:
+        codes = {
+            AlreadyProjectMemberError: "already_project_member",
+            DuplicateInvitationError: "duplicate_invitation",
+            InvitationAlreadyRespondedError: "invitation_already_responded",
+        }
         return JSONResponse(
             status_code=status.HTTP_409_CONFLICT,
-            content={"detail": str(exc)},
+            content=_project_error_payload(exc, codes[type(exc)]),
         )
 
     @app.exception_handler(RouteNotFoundError)
