@@ -8,6 +8,7 @@ import RegisterPage from './pages/RegisterPage'
 import DashboardPage from './pages/DashboardPage'
 import BuilderPage from './pages/BuilderPage'
 import SettingsPage from './pages/SettingsPage'
+import TeamsPage from './pages/TeamsPage'
 
 /**
  * Defines the application's client-side routes and layout.
@@ -44,6 +45,14 @@ export default function App() {
           element={
             <RequireAuth>
               <BuilderPage />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/teams/:projectId?"
+          element={
+            <RequireAuth>
+              <TeamsPage />
             </RequireAuth>
           }
         />

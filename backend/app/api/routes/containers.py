@@ -37,6 +37,7 @@ from app.core.deploy.deploy_source_display import resolve_deploy_source_label
 from app.core.deploy.deployment_history import latest_source_by_container_ids
 from app.core.containers.docker_orchestrator import (
     VELA_OWNER_LABEL,
+    VELA_PROJECT_LABEL,
     VELA_SOURCE_KIND_LABEL,
     VELA_SOURCE_REF_LABEL,
     with_deploy_source_labels,
@@ -52,6 +53,7 @@ from app.core.exceptions import (
     ContainerNotFoundError,
     ImageNotFoundError,
     NotAuthenticatedError,
+    ProjectAccessDeniedError,
     ProviderConnectionError,
     RegistryAccessDeniedError,
 )
@@ -76,6 +78,13 @@ from app.core.models import (
     ProjectSource,
 )
 from app.core.oauth import decrypt_identity_token, get_github_identity
+from app.core.projects.access import (
+    list_accessible_project_ids,
+    membership_role_for_container,
+    require_container_access,
+)
+from app.core.projects.enums import can_write
+from app.core.projects.repository import get_personal_project_id, require_membership
 from app.core.containers.orchestrator import ContainerOrchestrator
 from app.core.traffic.traffic_router import TrafficRouter
 from app.db.models import User
@@ -94,16 +103,51 @@ def _with_owner_label(config: DeployConfig, owner_id: str) -> DeployConfig:
     return config.model_copy(update={"labels": labels})
 
 
-async def _require_owned(
-    orchestrator: ContainerOrchestrator,
-    container_id: str,
-    current_user: User,
-) -> ContainerInfo:
-    """Load a container and confirm it belongs to ``current_user`` (404 otherwise)."""
-    info = await orchestrator.get(container_id)
-    if info.labels.get(VELA_OWNER_LABEL) != str(current_user.id):
-        raise ContainerNotFoundError(container_id)
-    return info
+def _with_project_label(config: DeployConfig, project_id: uuid.UUID) -> DeployConfig:
+    labels = dict(config.labels)
+    labels[VELA_PROJECT_LABEL] = str(project_id)
+    return config.model_copy(update={"labels": labels})
+
+
+def _apply_deploy_labels(
+    config: DeployConfig,
+    *,
+    owner_id: str,
+    project_id: uuid.UUID,
+) -> DeployConfig:
+    return _with_project_label(_with_owner_label(config, owner_id), project_id)
+
+
+async def _resolve_deploy_project_id(
+    session: AsyncSession,
+    user: User,
+    body: RunFromSourceRequest,
+) -> uuid.UUID:
+    project_id = body.project_id or await get_personal_project_id(session, user)
+    membership = await require_membership(
+        session, project_id=project_id, user_id=user.id
+    )
+    if not can_write(membership.role):
+        raise ProjectAccessDeniedError(
+            "You do not have permission to deploy to this project."
+        )
+    return project_id
+
+
+async def _resolve_deploy_project_id_for_config(
+    session: AsyncSession,
+    user: User,
+    project_id: uuid.UUID | None,
+) -> uuid.UUID:
+    resolved = project_id or await get_personal_project_id(session, user)
+    membership = await require_membership(
+        session, project_id=resolved, user_id=user.id
+    )
+    if not can_write(membership.role):
+        raise ProjectAccessDeniedError(
+            "You do not have permission to deploy to this project."
+        )
+    return resolved
 
 
 async def _deploy_and_maybe_wire_route(
@@ -231,6 +275,7 @@ async def _persist_run_deployment(
     body: RunFromSourceRequest,
     info: ContainerInfo,
     *,
+    project_id: uuid.UUID,
     source_kind: str,
     source_ref: str,
     image_tag: str,
@@ -242,6 +287,7 @@ async def _persist_run_deployment(
         await record_deployment(
             session,
             user_id=user.id,
+            project_id=project_id,
             snapshot=DeploymentSnapshot(
                 container_id=info.id,
                 container_name=info.name or body.container_name,
@@ -268,7 +314,7 @@ async def _enrich_container_source_labels(
     user: User,
     containers: list[ContainerInfo],
 ) -> list[ContainerInfo]:
-    """Fill ``source_label`` from labels or deployment history (Builder template name)."""
+    """Fill ``source_label`` and ``access_role`` for listed containers."""
     history_by_container = await latest_source_by_container_ids(
         session,
         user.id,
@@ -276,6 +322,8 @@ async def _enrich_container_source_labels(
     )
     enriched: list[ContainerInfo] = []
     for info in containers:
+        role = await membership_role_for_container(session, user.id, info)
+        access_role = role.value if role is not None else None
         source_kind = info.source_kind or info.labels.get(VELA_SOURCE_KIND_LABEL)
         source_ref = info.source_label or info.labels.get(VELA_SOURCE_REF_LABEL) or ""
         if not source_ref and info.id in history_by_container:
@@ -283,7 +331,7 @@ async def _enrich_container_source_labels(
             source_kind = source_kind or history_kind
             source_ref = history_ref
         if not source_kind or not source_ref:
-            enriched.append(info)
+            enriched.append(info.model_copy(update={"access_role": access_role}))
             continue
         display_ref = await resolve_deploy_source_label(
             session,
@@ -296,10 +344,26 @@ async def _enrich_container_source_labels(
                 update={
                     "source_kind": source_kind,
                     "source_label": display_ref,
+                    "access_role": access_role,
                 }
             )
         )
     return enriched
+
+
+async def _list_user_containers(
+    orchestrator: ContainerOrchestrator,
+    session: AsyncSession,
+    user: User,
+    *,
+    container_status: ContainerStatus | None,
+) -> list[ContainerInfo]:
+    project_ids = await list_accessible_project_ids(session, user.id)
+    return await orchestrator.list(
+        status=container_status,
+        project_ids=project_ids,
+        user_id=user.id,
+    )
 
 
 @router.get("/", response_model=list[ContainerInfo])
@@ -312,9 +376,12 @@ async def list_containers(
         Query(alias="status", description="Filter by container status"),
     ] = None,
 ) -> list[ContainerInfo]:
-    """List the caller's Vela-managed containers, optionally filtered by status."""
-    containers = await orchestrator.list(
-        status=container_status, owner_id=str(current_user.id)
+    """List containers in projects the caller belongs to, optionally filtered by status."""
+    containers = await _list_user_containers(
+        orchestrator,
+        session,
+        current_user,
+        container_status=container_status,
     )
     return await _enrich_container_source_labels(session, current_user, containers)
 
@@ -455,9 +522,17 @@ async def deploy(
     orchestrator: Annotated[ContainerOrchestrator, Depends(get_orchestrator)],
     traffic_router: Annotated[TrafficRouter, Depends(get_traffic_router)],
     current_user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[AsyncSession, Depends(get_db)],
 ) -> ContainerDeployResponse:
     """Create and start a container from configuration."""
-    config = _with_owner_label(config, str(current_user.id))
+    project_id = await _resolve_deploy_project_id_for_config(
+        session, current_user, config.project_id
+    )
+    config = _apply_deploy_labels(
+        config,
+        owner_id=str(current_user.id),
+        project_id=project_id,
+    )
     config = await apply_public_route_to_deploy_config(config, traffic_router)
     info, route_wired, public_url = await _deploy_and_maybe_wire_route(
         orchestrator, traffic_router, config
@@ -494,6 +569,8 @@ async def run_from_user_source(
     if source_kind is None:
         raise ValueError("source_kind must be set after request validation.")
 
+    project_id = await _resolve_deploy_project_id(session, current_user, body)
+
     if source_kind == "image":
         image_ref = (body.image_ref or "").strip()
         cfg = _deploy_config_for_image(
@@ -505,7 +582,9 @@ async def run_from_user_source(
             command=body.command,
         ).model_copy(update=_route_updates_from_run_body(body))
         cfg = with_deploy_source_labels(cfg, source_kind="image", source_ref=image_ref)
-        cfg = _with_owner_label(cfg, str(current_user.id))
+        cfg = _apply_deploy_labels(
+            cfg, owner_id=str(current_user.id), project_id=project_id
+        )
         cfg = await apply_public_route_to_deploy_config(cfg, traffic_router)
         info, route_wired, public_url = await _deploy_and_maybe_wire_route(
             orchestrator, traffic_router, cfg
@@ -515,6 +594,7 @@ async def run_from_user_source(
             current_user,
             body,
             info,
+            project_id=project_id,
             source_kind="image",
             source_ref=image_ref,
             image_tag=image_ref,
@@ -559,7 +639,9 @@ async def run_from_user_source(
             source_kind="dockerfile_template",
             source_ref=template.name,
         )
-        cfg = _with_owner_label(cfg, str(current_user.id))
+        cfg = _apply_deploy_labels(
+            cfg, owner_id=str(current_user.id), project_id=project_id
+        )
         cfg = await apply_public_route_to_deploy_config(cfg, traffic_router)
         info, route_wired, public_url = await _deploy_and_maybe_wire_route(
             orchestrator, traffic_router, cfg
@@ -569,6 +651,7 @@ async def run_from_user_source(
             current_user,
             body,
             info,
+            project_id=project_id,
             source_kind="dockerfile_template",
             source_ref=template.name,
             image_tag=build_result.image_tag,
@@ -618,7 +701,9 @@ async def run_from_user_source(
         }
     )
     cfg = with_deploy_source_labels(cfg, source_kind="git", source_ref=git_url)
-    cfg = _with_owner_label(cfg, str(current_user.id))
+    cfg = _apply_deploy_labels(
+        cfg, owner_id=str(current_user.id), project_id=project_id
+    )
     cfg = await apply_public_route_to_deploy_config(cfg, traffic_router)
     info, route_wired, public_url = await _deploy_and_maybe_wire_route(
         orchestrator, traffic_router, cfg
@@ -628,6 +713,7 @@ async def run_from_user_source(
         current_user,
         body,
         info,
+        project_id=project_id,
         source_kind="git",
         source_ref=git_url,
         image_tag=build_result.image_tag,
@@ -648,9 +734,12 @@ async def get_container(
     container_id: str,
     orchestrator: Annotated[ContainerOrchestrator, Depends(get_orchestrator)],
     current_user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[AsyncSession, Depends(get_db)],
 ) -> ContainerInfo:
     """Return detailed information about a single managed container."""
-    return await _require_owned(orchestrator, container_id, current_user)
+    return await require_container_access(
+        session, orchestrator, current_user, container_id, action="read"
+    )
 
 
 @router.post("/{container_id}/start", response_model=ContainerInfo)
@@ -658,10 +747,14 @@ async def start_container(
     container_id: str,
     orchestrator: Annotated[ContainerOrchestrator, Depends(get_orchestrator)],
     current_user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[AsyncSession, Depends(get_db)],
 ) -> ContainerInfo:
     """Start a stopped container."""
-    await _require_owned(orchestrator, container_id, current_user)
-    return await orchestrator.start(container_id)
+    access_info = await require_container_access(
+        session, orchestrator, current_user, container_id, action="write"
+    )
+    updated = await orchestrator.start(container_id)
+    return updated.model_copy(update={"access_role": access_info.access_role})
 
 
 @router.post("/{container_id}/stop", response_model=ContainerInfo)
@@ -669,11 +762,15 @@ async def stop_container(
     container_id: str,
     orchestrator: Annotated[ContainerOrchestrator, Depends(get_orchestrator)],
     current_user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[AsyncSession, Depends(get_db)],
     timeout: int = 10,
 ) -> ContainerInfo:
     """Gracefully stop a running container."""
-    await _require_owned(orchestrator, container_id, current_user)
-    return await orchestrator.stop(container_id, timeout=timeout)
+    access_info = await require_container_access(
+        session, orchestrator, current_user, container_id, action="write"
+    )
+    updated = await orchestrator.stop(container_id, timeout=timeout)
+    return updated.model_copy(update={"access_role": access_info.access_role})
 
 
 @router.post("/{container_id}/restart", response_model=ContainerInfo)
@@ -681,11 +778,15 @@ async def restart_container(
     container_id: str,
     orchestrator: Annotated[ContainerOrchestrator, Depends(get_orchestrator)],
     current_user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[AsyncSession, Depends(get_db)],
     timeout: int = 10,
 ) -> ContainerInfo:
     """Restart a container."""
-    await _require_owned(orchestrator, container_id, current_user)
-    return await orchestrator.restart(container_id, timeout=timeout)
+    access_info = await require_container_access(
+        session, orchestrator, current_user, container_id, action="write"
+    )
+    updated = await orchestrator.restart(container_id, timeout=timeout)
+    return updated.model_copy(update={"access_role": access_info.access_role})
 
 
 @router.delete("/{container_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -694,10 +795,13 @@ async def remove_container(
     orchestrator: Annotated[ContainerOrchestrator, Depends(get_orchestrator)],
     traffic_router: Annotated[TrafficRouter, Depends(get_traffic_router)],
     current_user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[AsyncSession, Depends(get_db)],
     force: bool = False,
 ) -> Response:
     """Remove a container and drop any Traefik route keyed by its name."""
-    info = await _require_owned(orchestrator, container_id, current_user)
+    info = await require_container_access(
+        session, orchestrator, current_user, container_id, action="write"
+    )
     await remove_route_for_container_name(
         traffic_router=traffic_router,
         container_name=info.name,
@@ -711,10 +815,13 @@ async def container_logs(
     container_id: str,
     orchestrator: Annotated[ContainerOrchestrator, Depends(get_orchestrator)],
     current_user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[AsyncSession, Depends(get_db)],
     tail: Annotated[int, Query(ge=1, le=_MAX_LOG_TAIL_LINES)] = 100,
 ) -> dict[str, str]:
     """Return recent log lines for a container."""
-    await _require_owned(orchestrator, container_id, current_user)
+    await require_container_access(
+        session, orchestrator, current_user, container_id, action="read"
+    )
     text = await orchestrator.logs(container_id, tail=tail)
     return {"logs": text}
 
@@ -748,8 +855,10 @@ async def container_logs_stream(
         await websocket.close(code=1008)
         return
     try:
-        await _require_owned(orchestrator, container_id, user)
-    except ContainerNotFoundError:
+        await require_container_access(
+            session, orchestrator, user, container_id, action="read"
+        )
+    except (ContainerNotFoundError, ProjectAccessDeniedError):
         await websocket.close(code=1008)
         return
 
@@ -774,9 +883,12 @@ async def container_stats(
     container_id: str,
     orchestrator: Annotated[ContainerOrchestrator, Depends(get_orchestrator)],
     current_user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[AsyncSession, Depends(get_db)],
 ) -> ContainerStats:
     """Return resource usage snapshot for a container."""
-    await _require_owned(orchestrator, container_id, current_user)
+    await require_container_access(
+        session, orchestrator, current_user, container_id, action="read"
+    )
     return await orchestrator.get_stats(container_id)
 
 
@@ -785,7 +897,10 @@ async def container_health(
     container_id: str,
     orchestrator: Annotated[ContainerOrchestrator, Depends(get_orchestrator)],
     current_user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[AsyncSession, Depends(get_db)],
 ) -> HealthResult:
     """Return latest health check result for a container."""
-    await _require_owned(orchestrator, container_id, current_user)
+    await require_container_access(
+        session, orchestrator, current_user, container_id, action="read"
+    )
     return await orchestrator.get_health(container_id)

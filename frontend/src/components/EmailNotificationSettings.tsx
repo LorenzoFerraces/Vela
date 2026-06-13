@@ -107,59 +107,64 @@ export function EmailNotificationSettingsCard() {
         ) : null}
 
         {preferences ? (
-          <div className="email-notifications-form">
-            <div className="form-group">
-              <label className="form-label form-label--checkbox">
-                <input
-                  type="checkbox"
-                  checked={preferences.alerts_enabled}
-                  onChange={() => void toggleAlerts()}
-                  disabled={busy}
-                />
-                <span>Enable email alerts</span>
-              </label>
-            </div>
+          <div className="settings-form">
+            <label className="settings-form__checkbox">
+              <input
+                type="checkbox"
+                checked={preferences.alerts_enabled}
+                onChange={() => void toggleAlerts()}
+                disabled={busy}
+              />
+              <span>Enable email alerts</span>
+            </label>
 
             {preferences.alerts_enabled ? (
               <>
-                <div className="form-group">
-                  <label className="form-label">Email address</label>
+                <div className="settings-form__field">
+                  <label className="settings-form__label" htmlFor="alert-email">
+                    Email address
+                  </label>
                   <input
+                    id="alert-email"
                     type="email"
                     value={preferences.email}
                     readOnly
-                    className="form-input"
+                    className="settings-form__input settings-form__input--readonly"
                   />
-                  <p className="form-help">
+                  <p className="settings-form__hint">
                     Alerts are sent to your account email. Change it in your account settings.
                   </p>
                 </div>
 
-                <fieldset className="form-group">
-                  <legend className="form-label">Alert types</legend>
-                  <div className="form-checkboxes">
+                <div className="settings-form__group">
+                  <span className="settings-form__label">Alert types</span>
+                  <ul className="settings-form__checkbox-list">
                     {(Object.keys(alertTypeLabels) as Array<'stop' | 'failure' | 'unhealthy'>).map(
                       (type) => (
-                        <label key={type} className="form-label form-label--checkbox">
-                          <input
-                            type="checkbox"
-                            checked={preferences.alert_types.includes(type)}
-                            onChange={() => void toggleAlertType(type)}
-                            disabled={busy}
-                          />
-                          <span>{alertTypeLabels[type]}</span>
-                        </label>
-                      )
+                        <li key={type}>
+                          <label className="settings-form__checkbox">
+                            <input
+                              type="checkbox"
+                              checked={preferences.alert_types.includes(type)}
+                              onChange={() => void toggleAlertType(type)}
+                              disabled={busy}
+                            />
+                            <span>{alertTypeLabels[type]}</span>
+                          </label>
+                        </li>
+                      ),
                     )}
-                  </div>
-                </fieldset>
+                  </ul>
+                </div>
 
-                <p className="form-help">Alerts are sent immediately when an issue is detected.</p>
+                <p className="settings-form__hint">
+                  Alerts are sent immediately when an issue is detected.
+                </p>
 
                 <div className="settings-card__actions">
                   <button
                     type="button"
-                    className="btn btn--secondary"
+                    className="btn btn--ghost"
                     onClick={toggleShowHistory}
                   >
                     {showHistory ? 'Hide' : 'Show'} recent alerts

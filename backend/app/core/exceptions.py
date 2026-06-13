@@ -255,3 +255,60 @@ class GitHubAccountAlreadyLinkedError(IntegrationError):
         ),
     ) -> None:
         super().__init__(message)
+
+
+# ---------------------------------------------------------------------------
+# Team / project errors
+# ---------------------------------------------------------------------------
+
+
+class ProjectError(VelaError):
+    """Base exception for project and team operations."""
+
+
+class ProjectNotFoundError(ProjectError):
+    def __init__(self, project_id: str) -> None:
+        self.project_id = project_id
+        super().__init__("Requested project not found.")
+
+
+class ProjectMemberNotFoundError(ProjectError):
+    def __init__(self, project_id: str, user_id: str) -> None:
+        self.project_id = project_id
+        self.user_id = user_id
+        super().__init__("Not a member of the project.")
+
+
+class ProjectAccessDeniedError(ProjectError):
+    def __init__(self, message: str = "You do not have permission for this project action.") -> None:
+        super().__init__(message)
+
+
+class UserNotRegisteredError(ProjectError):
+    def __init__(self, email: str) -> None:
+        self.email = email
+        super().__init__("No registered user found for the provided email.")
+
+
+class InvitationNotFoundError(ProjectError):
+    def __init__(self, invitation_id: str) -> None:
+        self.invitation_id = invitation_id
+        super().__init__("Invitation not found.")
+
+
+class InvitationAlreadyRespondedError(ProjectError):
+    def __init__(self, invitation_id: str) -> None:
+        self.invitation_id = invitation_id
+        super().__init__("Invitation is no longer pending.")
+
+
+class DuplicateInvitationError(ProjectError):
+    def __init__(self, email: str) -> None:
+        self.email = email
+        super().__init__("A pending invitation already exists.")
+
+
+class AlreadyProjectMemberError(ProjectError):
+    def __init__(self, email: str) -> None:
+        self.email = email
+        super().__init__("User is already a member of this project.")

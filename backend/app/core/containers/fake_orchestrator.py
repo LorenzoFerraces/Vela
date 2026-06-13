@@ -211,23 +211,27 @@ class FakeContainerOrchestrator(ContainerOrchestrator):
         *,
         status: ContainerStatus | None = None,
         owner_id: str | None = None,
+        project_ids: set[uuid.UUID] | None = None,
+        user_id: uuid.UUID | None = None,
     ) -> list[ContainerInfo]:
-        """
-        List stored containers, optionally filtered by status and owner.
-        
-        Parameters:
-            status (ContainerStatus | None): If provided, include only containers whose `status` equals this value.
-            owner_id (str | None): If provided, include only containers whose labels contain `VELA_OWNER_LABEL` equal to this value.
-        
-        Returns:
-            list[ContainerInfo]: A list of ContainerInfo objects matching the provided filters.
-        """
         rows = list(self._containers.values())
         if owner_id is not None:
             rows = [
                 row
                 for row in rows
                 if row.labels.get(VELA_OWNER_LABEL) == owner_id
+            ]
+        if project_ids is not None and user_id is not None:
+            from app.core.projects.access import container_visible_to_user
+
+            rows = [
+                row
+                for row in rows
+                if container_visible_to_user(
+                    row,
+                    project_ids=project_ids,
+                    user_id=user_id,
+                )
             ]
         if status is not None:
             rows = [row for row in rows if row.status == status]
