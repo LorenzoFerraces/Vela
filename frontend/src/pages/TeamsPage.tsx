@@ -23,28 +23,10 @@ import { TeamDetailSkeleton, TeamsPageSkeleton } from '../components/Skeleton'
 
 type Banner = { tone: 'ok' | 'err'; text: string } | null
 
+import { teamDescription, teamDisplayName } from '../projects/teamDisplay'
+
 function formatRoleLabel(role: string): string {
   return role.charAt(0).toUpperCase() + role.slice(1)
-}
-
-function teamDisplayName(project: Project): string {
-  if (project.is_personal && project.role === 'owner') {
-    return 'Personal workspace'
-  }
-  if (project.is_personal) {
-    return `${project.owner_email}'s workspace`
-  }
-  return project.name
-}
-
-function teamDescription(project: Project): string {
-  if (project.is_personal && project.role === 'owner') {
-    return 'Your private workspace. Invite others to share your containers.'
-  }
-  if (project.is_personal) {
-    return `Shared workspace owned by ${project.owner_email}.`
-  }
-  return 'Shared team workspace for containers and deployments.'
 }
 
 export default function TeamsPage() {

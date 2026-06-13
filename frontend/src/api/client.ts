@@ -327,6 +327,7 @@ export interface RunFromSourceRequest {
   public_route?: boolean
   env_vars?: Record<string, string>
   command?: string[] | null
+  project_id?: string | null
 }
 
 export interface RunFromSourceResponse {
