@@ -85,7 +85,19 @@ API: **http://127.0.0.1:8000** — health: `GET /api/health` (no auth).
 
 - `POST /api/auth/register` — create an account; returns `{ access_token, token_type, user }`.
 - `POST /api/auth/login` — email + password; same response shape.
-- `GET /api/auth/me` — current user; requires `Authorization: Bearer <access_token>`.
+- `GET /api/auth/me` — current user (`display_name`, `pronouns`, `avatar_url`, email, `created_at`); requires bearer token.
+- `PATCH /api/users/me` — update `display_name` and/or `pronouns`.
+- `POST /api/users/me/avatar` — multipart upload (`file` field); JPEG, PNG, or WebP, max 2 MB.
+- `DELETE /api/users/me/avatar` — remove profile photo.
+
+Profile photos are stored in object storage (Cloudflare R2 in production). Set in `backend/.env`:
+
+- `VELA_OBJECT_STORAGE` — `memory` (default for dev/tests) or `r2`
+- `VELA_R2_ACCOUNT_ID`
+- `VELA_R2_ACCESS_KEY_ID`
+- `VELA_R2_SECRET_ACCESS_KEY`
+- `VELA_R2_BUCKET`
+- `VELA_R2_PUBLIC_BASE_URL` — public CDN or custom domain base URL (no trailing slash)
 
 Most **`/api/containers/**`** routes require that bearer token. Containers are scoped per user (Docker label `vela.owner_id`).
 

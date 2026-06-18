@@ -203,6 +203,14 @@ class UserPublic(BaseModel):
     id: uuid.UUID
     email: EmailStr
     created_at: datetime
+    display_name: str | None = None
+    pronouns: str | None = None
+    avatar_url: str | None = None
+
+
+class UserProfileUpdate(BaseModel):
+    display_name: str | None = Field(default=None, max_length=120)
+    pronouns: str | None = Field(default=None, max_length=40)
 
 
 class TokenResponse(BaseModel):

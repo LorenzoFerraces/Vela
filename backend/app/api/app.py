@@ -17,6 +17,7 @@ from app.api.routes import (
     images,
     saved_images,
     traffic,
+    users,
 )
 
 API_PREFIX = "/api"
@@ -79,6 +80,11 @@ def create_app() -> FastAPI:
         auth.router,
         prefix=f"{API_PREFIX}/auth",
         tags=["auth"],
+    )
+    application.include_router(
+        users.router,
+        prefix=f"{API_PREFIX}/users",
+        tags=["users"],
     )
     application.include_router(
         github.router_auth,

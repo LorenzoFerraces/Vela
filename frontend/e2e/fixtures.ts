@@ -22,6 +22,9 @@ export const fakeUser = {
   id: '11111111-1111-1111-1111-111111111111',
   email: 'e2e@vela.test',
   created_at: '2026-01-15T12:00:00.000Z',
+  display_name: null,
+  pronouns: null,
+  avatar_url: null,
 }
 
 export const disconnectedGithubStatus = {

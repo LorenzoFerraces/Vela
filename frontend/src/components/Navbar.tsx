@@ -1,5 +1,7 @@
 import { NavLink, useNavigate } from 'react-router-dom'
 import { useAuth } from '../auth/AuthContext'
+import UserAvatar from './UserAvatar'
+import { getUserDisplayLabel } from '../utils/userDisplay'
 
 const navItems = [
   { to: '/dashboard', label: 'Dashboard' },
@@ -51,8 +53,9 @@ export default function Navbar() {
       <div className="navbar__user">
         {isAuthenticated && user ? (
           <>
+            <UserAvatar user={user} className="navbar__avatar" size={28} />
             <span className="navbar__user-email" title={user.email}>
-              {user.email}
+              {getUserDisplayLabel(user)}
             </span>
             <button
               type="button"

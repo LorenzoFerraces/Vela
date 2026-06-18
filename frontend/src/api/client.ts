@@ -244,6 +244,38 @@ export async function apiDelete(path: string): Promise<void> {
   await readEmptyOk(response)
 }
 
+export async function apiUploadFile<T>(
+  path: string,
+  formData: FormData
+): Promise<T> {
+  const url = `${getApiBaseUrl()}${path.startsWith('/') ? path : `/${path}`}`
+  const headers = new Headers({ Accept: 'application/json' })
+  const token = getAccessToken()
+  if (token) {
+    headers.set('Authorization', `Bearer ${token}`)
+  }
+  const response = await fetch(url, {
+    method: 'POST',
+    body: formData,
+    headers,
+  })
+
+  if (!response.ok) {
+    const body = await response.text()
+    if (response.status === 401) {
+      clearAccessToken()
+      notifyUnauthorized()
+    }
+    throw new ApiError(
+      `Request failed: ${response.status} ${response.statusText}`,
+      response.status,
+      body
+    )
+  }
+
+  return parseJson<T>(response)
+}
+
 export async function getHealth(): Promise<HealthResponse> {
   return apiGet<HealthResponse>('/api/health')
 }
@@ -478,6 +510,14 @@ export interface UserPublic {
   id: string
   email: string
   created_at: string
+  display_name: string | null
+  pronouns: string | null
+  avatar_url: string | null
+}
+
+export interface UserProfileUpdate {
+  display_name?: string | null
+  pronouns?: string | null
 }
 
 export interface TokenResponse {
@@ -514,6 +554,20 @@ export async function login(body: LoginRequest): Promise<TokenResponse> {
 
 export async function getMe(): Promise<UserPublic> {
   return apiGet<UserPublic>('/api/auth/me')
+}
+
+export async function updateProfile(body: UserProfileUpdate): Promise<UserPublic> {
+  return apiPatch<UserPublic, UserProfileUpdate>('/api/users/me', body)
+}
+
+export async function uploadAvatar(file: File): Promise<UserPublic> {
+  const formData = new FormData()
+  formData.append('file', file)
+  return apiUploadFile<UserPublic>('/api/users/me/avatar', formData)
+}
+
+export async function deleteAvatar(): Promise<UserPublic> {
+  return apiRequest<UserPublic>('/api/users/me/avatar', { method: 'DELETE' })
 }
 
 // --- GitHub OAuth ---

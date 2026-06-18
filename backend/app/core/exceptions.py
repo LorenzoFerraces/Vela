@@ -200,6 +200,19 @@ class DuplicateDockerfileNameError(UserLibraryError):
 
 
 # ---------------------------------------------------------------------------
+# Object storage / profile avatars
+# ---------------------------------------------------------------------------
+
+
+class ObjectStorageError(VelaError):
+    """Base exception for blob storage failures."""
+
+
+class AvatarValidationError(VelaError):
+    """Raised when an uploaded avatar fails validation."""
+
+
+# ---------------------------------------------------------------------------
 # Third-party integrations (GitHub OAuth)
 # ---------------------------------------------------------------------------
 

@@ -26,6 +26,7 @@ from app.api.app import create_app
 from app.api.deps import (
     get_db,
     get_image_builder,
+    get_object_storage,
     get_orchestrator,
     get_traffic_router,
 )
@@ -40,12 +41,14 @@ from app.core.docker_orchestrator import (
 from app.core.enums import BuildStrategy, ContainerStatus, HealthStatus, SupportedLanguage
 from app.core.models import BuildResult, ContainerInfo, ContainerStats, HealthResult, ProjectInfo
 from app.core.orchestrator import ContainerOrchestrator
+from app.core.storage.memory import InMemoryObjectStorage
 from app.core.traffic_router import NoopTrafficRouter
 from app.db.base import Base
 from app.db.models import User
 
 os.environ.setdefault("VELA_AUTH_SECRET", "test-secret-please-do-not-use-in-prod")
 os.environ.setdefault("VELA_AUTH_ACCESS_TOKEN_TTL_MINUTES", "60")
+os.environ.setdefault("VELA_OBJECT_STORAGE", "memory")
 
 
 def make_container_info(*, owner_id: uuid.UUID | str, **overrides: object) -> ContainerInfo:
@@ -147,6 +150,11 @@ def mock_orchestrator(sample_container: ContainerInfo) -> MagicMock:
 
 
 @pytest.fixture
+def memory_object_storage() -> InMemoryObjectStorage:
+    return InMemoryObjectStorage()
+
+
+@pytest.fixture
 def noop_router() -> NoopTrafficRouter:
     return NoopTrafficRouter()
 
@@ -241,6 +249,7 @@ def _build_app_with_overrides(
     orchestrator: Any | None = None,
     image_builder: Any | None = None,
     traffic_router: Any | None = None,
+    object_storage: Any | None = None,
 ) -> Any:
     app = create_app()
 
@@ -255,6 +264,8 @@ def _build_app_with_overrides(
         app.dependency_overrides[get_image_builder] = lambda: image_builder
     if traffic_router is not None:
         app.dependency_overrides[get_traffic_router] = lambda: traffic_router
+    if object_storage is not None:
+        app.dependency_overrides[get_object_storage] = lambda: object_storage
     return app
 
 
@@ -264,6 +275,7 @@ def unauth_app(
     mock_orchestrator: MagicMock,
     mock_image_builder: MagicMock,
     noop_router: NoopTrafficRouter,
+    memory_object_storage: InMemoryObjectStorage,
 ) -> Iterator[Any]:
     """App with all dependencies overridden but no Authorization header on the client."""
     app = _build_app_with_overrides(
@@ -271,6 +283,7 @@ def unauth_app(
         orchestrator=mock_orchestrator,
         image_builder=mock_image_builder,
         traffic_router=noop_router,
+        object_storage=memory_object_storage,
     )
     yield app
     app.dependency_overrides.clear()

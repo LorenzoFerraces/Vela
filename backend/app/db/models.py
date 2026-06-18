@@ -28,6 +28,12 @@ class User(Base):
         String(320), unique=True, nullable=False, index=True
     )
     password_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    display_name: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    pronouns: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    avatar_object_key: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    avatar_updated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=_utcnow
     )

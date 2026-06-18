@@ -6,6 +6,7 @@ from fastapi.responses import JSONResponse
 from app.core.exceptions import (
     AnalysisError,
     AuthError,
+    AvatarValidationError,
     BuilderError,
     CloneError,
     UnsupportedProjectError,
@@ -27,6 +28,7 @@ from app.core.exceptions import (
     IntegrationError,
     InvalidCredentialsError,
     NotAuthenticatedError,
+    ObjectStorageError,
     OrchestratorError,
     RegistryAccessDeniedError,
     ProviderConnectionError,
@@ -82,6 +84,7 @@ def register_exception_handlers(app) -> None:
         )
 
     @app.exception_handler(ResourceLimitError)
+    @app.exception_handler(AvatarValidationError)
     async def bad_request_handler(_request: Request, exc: VelaError) -> JSONResponse:
         return JSONResponse(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -212,6 +215,15 @@ def register_exception_handlers(app) -> None:
     @app.exception_handler(GitHubAPIError)
     async def github_api_handler(
         _request: Request, exc: GitHubAPIError
+    ) -> JSONResponse:
+        return JSONResponse(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            content={"detail": str(exc)},
+        )
+
+    @app.exception_handler(ObjectStorageError)
+    async def object_storage_handler(
+        _request: Request, exc: ObjectStorageError
     ) -> JSONResponse:
         return JSONResponse(
             status_code=status.HTTP_502_BAD_GATEWAY,
