@@ -23,6 +23,10 @@ from app.core.containers.docker_orchestrator import (
 )
 from app.core.exceptions import CloneError, ImageNotFoundError, RegistryAccessDeniedError
 from app.core.containers.fake_orchestrator import FakeContainerOrchestrator
+from app.core.containers.volume_uploads import (
+    VOLUME_UPLOAD_MAX_BYTES,
+    VOLUME_UPLOAD_USER_QUOTA_BYTES,
+)
 from app.core.traffic.traffic_router import NoopTrafficRouter
 from app.db.models import User
 from tests.conftest import make_container_info
@@ -244,6 +248,148 @@ def test_run_rejects_empty_command(api_client: TestClient) -> None:
             "source_kind": "image",
             "image_ref": "nginx:alpine",
             "command": [],
+        },
+    )
+    assert response.status_code == 422
+
+
+def test_run_from_image_with_read_only_volumes(
+    api_client: TestClient,
+    fake_orchestrator: FakeContainerOrchestrator,
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("VELA_VOLUME_UPLOADS_DIR", str(tmp_path / "uploads"))
+
+    upload_response = api_client.post(
+        "/api/containers/volume-uploads",
+        files=[("files", ("myfolder/hello.txt", b"hello"))],
+    )
+    assert upload_response.status_code == 200
+    upload_id = upload_response.json()["upload_id"]
+
+    response = api_client.post(
+        "/api/containers/run",
+        json={
+            "source_kind": "image",
+            "image_ref": "nginx:alpine",
+            "volumes": [{"upload_id": upload_id, "target": "/data"}],
+        },
+    )
+    assert response.status_code == 200
+    assert fake_orchestrator.last_deploy_config is not None
+    assert len(fake_orchestrator.last_deploy_config.volumes) == 1
+    assert fake_orchestrator.last_deploy_config.volumes[0].target == "/data"
+    assert fake_orchestrator.last_deploy_config.volumes[0].source.endswith(
+        str(upload_id)
+    )
+
+
+def test_volume_upload_rejects_empty_folder(
+    api_client: TestClient,
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("VELA_VOLUME_UPLOADS_DIR", str(tmp_path / "uploads"))
+    response = api_client.post("/api/containers/volume-uploads", files=[])
+    assert response.status_code == 422
+
+
+def test_volume_upload_rejects_oversized_folder(
+    api_client: TestClient,
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("VELA_VOLUME_UPLOADS_DIR", str(tmp_path / "uploads"))
+    oversized = b"x" * (VOLUME_UPLOAD_MAX_BYTES + 1)
+    response = api_client.post(
+        "/api/containers/volume-uploads",
+        files=[("files", ("big/file.bin", oversized))],
+    )
+    assert response.status_code == 400
+
+
+def test_volume_upload_rejects_when_user_quota_exceeded(
+    api_client: TestClient,
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("VELA_VOLUME_UPLOADS_DIR", str(tmp_path / "uploads"))
+    first_size = VOLUME_UPLOAD_USER_QUOTA_BYTES - (50 * 1024 * 1024)
+    first_response = api_client.post(
+        "/api/containers/volume-uploads",
+        files=[("files", ("first/big.bin", b"x" * first_size))],
+    )
+    assert first_response.status_code == 200
+
+    second_response = api_client.post(
+        "/api/containers/volume-uploads",
+        files=[("files", ("second/big.bin", b"x" * (60 * 1024 * 1024)))],
+    )
+    assert second_response.status_code == 400
+
+
+def test_run_rejects_volume_without_upload_id(api_client: TestClient) -> None:
+    response = api_client.post(
+        "/api/containers/run",
+        json={
+            "source_kind": "image",
+            "image_ref": "nginx:alpine",
+            "volumes": [{"target": "/data"}],
+        },
+    )
+    assert response.status_code == 422
+
+
+def test_run_rejects_relative_volume_target(
+    api_client: TestClient,
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("VELA_VOLUME_UPLOADS_DIR", str(tmp_path / "uploads"))
+    upload_response = api_client.post(
+        "/api/containers/volume-uploads",
+        files=[("files", ("folder/a.txt", b"a"))],
+    )
+    upload_id = upload_response.json()["upload_id"]
+
+    response = api_client.post(
+        "/api/containers/run",
+        json={
+            "source_kind": "image",
+            "image_ref": "nginx:alpine",
+            "volumes": [{"upload_id": upload_id, "target": "data"}],
+        },
+    )
+    assert response.status_code == 422
+
+
+def test_run_rejects_duplicate_volume_targets(
+    api_client: TestClient,
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("VELA_VOLUME_UPLOADS_DIR", str(tmp_path / "uploads"))
+    first_upload = api_client.post(
+        "/api/containers/volume-uploads",
+        files=[("files", ("folder-a/a.txt", b"a"))],
+    )
+    second_upload = api_client.post(
+        "/api/containers/volume-uploads",
+        files=[("files", ("folder-b/b.txt", b"b"))],
+    )
+    first_id = first_upload.json()["upload_id"]
+    second_id = second_upload.json()["upload_id"]
+
+    response = api_client.post(
+        "/api/containers/run",
+        json={
+            "source_kind": "image",
+            "image_ref": "nginx:alpine",
+            "volumes": [
+                {"upload_id": first_id, "target": "/data"},
+                {"upload_id": second_id, "target": "/data"},
+            ],
         },
     )
     assert response.status_code == 422

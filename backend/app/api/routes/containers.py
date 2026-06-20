@@ -7,7 +7,7 @@ import uuid
 from typing import Annotated
 from urllib.parse import urlparse
 
-from fastapi import APIRouter, Depends, Query, Response, WebSocket, status
+from fastapi import APIRouter, Depends, File, Query, Response, UploadFile, WebSocket, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.websockets import WebSocketDisconnect
 
@@ -30,11 +30,20 @@ from app.api.schemas import (
     ImageSuggestionsResponse,
     RunFromSourceRequest,
     RunFromSourceResponse,
+    VolumeMountRequest,
+    VolumeUploadResponse,
 )
 from app.core.auth.service import get_user_by_id
 from app.core.auth.tokens import decode_access_token
 from app.core.deploy.deploy_source_display import resolve_deploy_source_label
 from app.core.deploy.deployment_history import latest_source_by_container_ids
+from app.core.containers.volume_uploads import (
+    resolve_volume_upload_path,
+    save_volume_upload,
+    user_uploads_total_bytes,
+    volume_upload_max_bytes,
+    volume_upload_user_quota_bytes,
+)
 from app.core.containers.docker_orchestrator import (
     VELA_OWNER_LABEL,
     VELA_PROJECT_LABEL,
@@ -52,10 +61,13 @@ from app.core.exceptions import (
     CloneError,
     ContainerNotFoundError,
     ImageNotFoundError,
+    InvalidVolumeUploadPathError,
     NotAuthenticatedError,
     ProjectAccessDeniedError,
     ProviderConnectionError,
     RegistryAccessDeniedError,
+    VolumeUploadTooLargeError,
+    VolumeUploadQuotaExceededError,
 )
 
 from app.core.deploy.deploy_source_suggestions import (
@@ -76,6 +88,7 @@ from app.core.models import (
     HealthResult,
     PortMapping,
     ProjectSource,
+    VolumeMount,
 )
 from app.core.oauth import decrypt_identity_token, get_github_identity
 from app.core.projects.access import (
@@ -239,6 +252,7 @@ def _deploy_config_for_image(
     container_port: int,
     env_vars: dict[str, str] | None = None,
     command: list[str] | None = None,
+    volumes: list[VolumeMount] | None = None,
 ) -> DeployConfig:
     ports: list[PortMapping] = []
     if host_port is not None:
@@ -250,7 +264,21 @@ def _deploy_config_for_image(
         container_listen_port=container_port,
         env_vars=env_vars or {},
         command=command,
+        volumes=volumes or [],
     )
+
+
+def _resolve_deploy_volumes(
+    user_id: uuid.UUID,
+    volume_requests: list[VolumeMountRequest],
+) -> list[VolumeMount]:
+    return [
+        VolumeMount(
+            source=str(resolve_volume_upload_path(user_id, mount.upload_id)),
+            target=mount.target,
+        )
+        for mount in volume_requests
+    ]
 
 
 def _route_updates_from_run_body(body: RunFromSourceRequest) -> dict[str, object]:
@@ -544,6 +572,55 @@ async def deploy(
     )
 
 
+@router.post("/volume-uploads", response_model=VolumeUploadResponse)
+async def upload_volume_folder(
+    files: Annotated[list[UploadFile], File(...)],
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> VolumeUploadResponse:
+    """Upload a local folder for read-only volume mounts (max 100 MB per folder)."""
+    if not files:
+        raise InvalidVolumeUploadPathError(
+            "Select a folder that contains at least one file."
+        )
+
+    per_folder_limit = volume_upload_max_bytes()
+    user_quota = volume_upload_user_quota_bytes()
+    current_usage = user_uploads_total_bytes(current_user.id)
+
+    payloads: list[tuple[str, bytes]] = []
+    total_bytes = 0
+    for upload in files:
+        relative_path = upload.filename or ""
+        content = await upload.read()
+        total_bytes += len(content)
+        if total_bytes > per_folder_limit:
+            limit_megabytes = per_folder_limit // (1024 * 1024)
+            raise VolumeUploadTooLargeError(
+                f"Folder exceeds the {limit_megabytes} MB upload limit."
+            )
+        if current_usage + total_bytes > user_quota:
+            limit_megabytes = user_quota // (1024 * 1024)
+            raise VolumeUploadQuotaExceededError(
+                f"Upload would exceed your {limit_megabytes} MB volume storage quota. "
+                "Use a smaller folder or remove unused uploads."
+            )
+        payloads.append((relative_path, content))
+
+    upload_id, folder_name, saved_bytes, file_count = save_volume_upload(
+        current_user.id,
+        payloads,
+    )
+    return VolumeUploadResponse(
+        upload_id=upload_id,
+        folder_name=folder_name,
+        total_bytes=saved_bytes,
+        file_count=file_count,
+        max_bytes=per_folder_limit,
+        user_quota_bytes=user_quota,
+        user_used_bytes=user_uploads_total_bytes(current_user.id),
+    )
+
+
 @router.post("/run", response_model=RunFromSourceResponse)
 async def run_from_user_source(
     body: RunFromSourceRequest,
@@ -570,6 +647,7 @@ async def run_from_user_source(
         raise ValueError("source_kind must be set after request validation.")
 
     project_id = await _resolve_deploy_project_id(session, current_user, body)
+    resolved_volumes = _resolve_deploy_volumes(current_user.id, body.volumes)
 
     if source_kind == "image":
         image_ref = (body.image_ref or "").strip()
@@ -580,6 +658,7 @@ async def run_from_user_source(
             container_port=body.container_port,
             env_vars=body.env_vars,
             command=body.command,
+            volumes=resolved_volumes,
         ).model_copy(update=_route_updates_from_run_body(body))
         cfg = with_deploy_source_labels(cfg, source_kind="image", source_ref=image_ref)
         cfg = _apply_deploy_labels(
@@ -628,6 +707,7 @@ async def run_from_user_source(
             container_port=body.container_port,
             env_vars=body.env_vars,
             command=body.command,
+            volumes=resolved_volumes,
         ).model_copy(
             update={
                 "restart_policy": RestartPolicy.UNLESS_STOPPED,
@@ -694,6 +774,7 @@ async def run_from_user_source(
         container_port=body.container_port,
         env_vars=body.env_vars,
         command=body.command,
+        volumes=resolved_volumes,
     ).model_copy(
         update={
             "restart_policy": RestartPolicy.UNLESS_STOPPED,

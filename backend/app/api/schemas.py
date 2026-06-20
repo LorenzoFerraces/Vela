@@ -8,7 +8,52 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator, model_validator
 
+from app.core.containers.volume_uploads import (
+    VOLUME_UPLOAD_MAX_BYTES,
+    VOLUME_UPLOAD_USER_QUOTA_BYTES,
+)
 from app.core.models import ContainerInfo, ProjectSource
+
+
+class VolumeMountRequest(BaseModel):
+    """Read-only volume mount from a user-uploaded folder."""
+
+    upload_id: uuid.UUID = Field(
+        ...,
+        description="Identifier returned by POST /api/containers/volume-uploads.",
+    )
+    target: str = Field(
+        ...,
+        description="Absolute path inside the container where the folder is mounted.",
+    )
+
+    @field_validator("target")
+    @classmethod
+    def target_must_be_absolute_path(cls, value: str) -> str:
+        trimmed = value.strip()
+        if not trimmed.startswith("/"):
+            msg = "Volume target must be an absolute path starting with '/'."
+            raise ValueError(msg)
+        return trimmed
+
+
+class VolumeUploadResponse(BaseModel):
+    upload_id: uuid.UUID
+    folder_name: str
+    total_bytes: int
+    file_count: int
+    max_bytes: int = Field(
+        default=VOLUME_UPLOAD_MAX_BYTES,
+        description="Maximum allowed size per folder upload in bytes.",
+    )
+    user_quota_bytes: int = Field(
+        default=VOLUME_UPLOAD_USER_QUOTA_BYTES,
+        description="Maximum total volume upload storage per user in bytes.",
+    )
+    user_used_bytes: int = Field(
+        ...,
+        description="Total bytes stored for this user after this upload.",
+    )
 
 
 class RunFromSourceRequest(BaseModel):
@@ -98,6 +143,10 @@ class RunFromSourceRequest(BaseModel):
     project_id: uuid.UUID | None = Field(
         default=None,
         description="Target project for deploy; defaults to the caller's personal project.",
+    )
+    volumes: list[VolumeMountRequest] = Field(
+        default_factory=list,
+        description="Read-only mounts from user-uploaded folders.",
     )
 
     @field_validator("env_vars")
@@ -194,6 +243,13 @@ class RunFromSourceRequest(BaseModel):
             raise ValueError(
                 "dockerfile_template_id is required for dockerfile_template deploy."
             )
+        return self
+
+    @model_validator(mode="after")
+    def validate_volume_targets_unique(self) -> RunFromSourceRequest:
+        targets = [mount.target for mount in self.volumes]
+        if len(targets) != len(set(targets)):
+            raise ValueError("Duplicate volume target paths are not allowed.")
         return self
 
 

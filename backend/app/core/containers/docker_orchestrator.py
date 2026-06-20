@@ -441,6 +441,11 @@ class DockerOrchestrator(ContainerOrchestrator):
                 kwargs["healthcheck"] = hc
             if self._default_network:
                 kwargs["network"] = self._default_network
+            if config.volumes:
+                kwargs["volumes"] = {
+                    mount.source: {"bind": mount.target, "mode": "ro"}
+                    for mount in config.volumes
+                }
 
             try:
                 container = self._client.containers.create(config.image, **kwargs)

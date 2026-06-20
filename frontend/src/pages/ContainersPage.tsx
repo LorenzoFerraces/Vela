@@ -26,9 +26,12 @@ import { useDeployProjects } from './containers/useDeployProjects'
 import { useGitSourceAnalysis } from './containers/useGitSourceAnalysis'
 import { useImageRefAvailability } from './containers/useImageRefAvailability'
 import {
+  createEmptyVolumeMountRow,
   parseStartCommand,
   recordFromEnvRows,
+  volumesFromRows,
   type EnvVarRow,
+  type VolumeMountRow,
 } from './containers/runFormAdvanced'
 
 export default function ContainersPage() {
@@ -36,6 +39,9 @@ export default function ContainersPage() {
   const [gitBranch, setGitBranch] = useState('main')
   const [containerPort, setContainerPort] = useState('80')
   const [envRows, setEnvRows] = useState<EnvVarRow[]>([{ key: '', value: '' }])
+  const [volumeRows, setVolumeRows] = useState<VolumeMountRow[]>([
+    createEmptyVolumeMountRow(),
+  ])
   const [startCommand, setStartCommand] = useState('')
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState<FormMessage | null>(null)
@@ -73,7 +79,32 @@ export default function ContainersPage() {
 
   function resetAdvancedFields() {
     setEnvRows([{ key: '', value: '' }])
+    setVolumeRows([createEmptyVolumeMountRow()])
     setStartCommand('')
+  }
+
+  function validateVolumeRows(): string | null {
+    for (const [index, row] of volumeRows.entries()) {
+      const target = row.target.trim()
+      const hasUpload = Boolean(row.uploadId)
+      const hasTarget = Boolean(target)
+      if (!hasUpload && !hasTarget) {
+        continue
+      }
+      if (row.uploading) {
+        return 'Wait for folder uploads to finish before deploying.'
+      }
+      if (!hasUpload) {
+        return `Choose a folder for volume ${index + 1}.`
+      }
+      if (!hasTarget) {
+        return `Enter a container path for volume ${index + 1}.`
+      }
+      if (!target.startsWith('/')) {
+        return `Volume ${index + 1} target must start with /.`
+      }
+    }
+    return null
   }
 
   function applyDeploySuggestion(
@@ -117,6 +148,7 @@ export default function ContainersPage() {
       public_route: true,
       env_vars: recordFromEnvRows(envRows),
       command,
+      volumes: volumesFromRows(volumeRows),
       project_id: deployProjects.selectedProjectId,
     }
     switch (selection.kind) {
@@ -191,6 +223,12 @@ export default function ContainersPage() {
         type: 'err',
         text: 'Enter a container port between 1 and 65535.',
       })
+      return
+    }
+
+    const volumeError = validateVolumeRows()
+    if (volumeError) {
+      setMessage({ type: 'err', text: volumeError })
       return
     }
 
@@ -324,6 +362,8 @@ export default function ContainersPage() {
         <ContainersRunAdvancedFields
           envRows={envRows}
           onEnvRowsChange={setEnvRows}
+          volumeRows={volumeRows}
+          onVolumeRowsChange={setVolumeRows}
           startCommand={startCommand}
           onStartCommandChange={setStartCommand}
         />

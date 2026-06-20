@@ -3,6 +3,26 @@ export type EnvVarRow = {
   value: string
 }
 
+export type VolumeMountRow = {
+  uploadId: string | null
+  folderName: string | null
+  totalBytes: number | null
+  target: string
+  uploading: boolean
+  error: string | null
+}
+
+export function createEmptyVolumeMountRow(): VolumeMountRow {
+  return {
+    uploadId: null,
+    folderName: null,
+    totalBytes: null,
+    target: '',
+    uploading: false,
+    error: null,
+  }
+}
+
 export function envRowsFromRecord(
   envVars: Record<string, string>
 ): EnvVarRow[] {
@@ -23,6 +43,31 @@ export function recordFromEnvRows(rows: EnvVarRow[]): Record<string, string> {
     result[trimmedKey] = row.value
   }
   return result
+}
+
+export function volumesFromRows(
+  rows: VolumeMountRow[]
+): Array<{ upload_id: string; target: string }> {
+  const mounts: Array<{ upload_id: string; target: string }> = []
+  for (const row of rows) {
+    const target = row.target.trim()
+    if (!row.uploadId && !target) {
+      continue
+    }
+    if (!row.uploadId || !target) {
+      continue
+    }
+    mounts.push({ upload_id: row.uploadId, target })
+  }
+  return mounts
+}
+
+export function folderTotalBytes(files: FileList | File[]): number {
+  let total = 0
+  for (const file of files) {
+    total += file.size
+  }
+  return total
 }
 
 export function parseStartCommand(input: string): string[] | null {
