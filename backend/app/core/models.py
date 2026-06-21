@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import uuid
 from datetime import datetime
 
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -72,6 +73,10 @@ class DeployConfig(BaseModel):
             "VELA_PUBLIC_URL_SCHEME; client-supplied route_host is ignored."
         ),
     )
+    project_id: uuid.UUID | None = Field(
+        default=None,
+        description="Target project for the deployment; defaults to the caller's personal workspace.",
+    )
 
     @field_validator("route_path_prefix")
     @classmethod
@@ -94,6 +99,18 @@ class ContainerInfo(BaseModel):
     access_url: str | None = Field(
         default=None,
         description="HTTPS or HTTP URL for the Traefik edge route when route labels are present.",
+    )
+    source_kind: str | None = Field(
+        default=None,
+        description="Deploy source kind from vela.source_kind label (image, git, dockerfile_template).",
+    )
+    source_label: str | None = Field(
+        default=None,
+        description="User-facing deploy source from vela.source_ref (template name, image ref, Git URL).",
+    )
+    access_role: str | None = Field(
+        default=None,
+        description="Caller's role for this container's project (owner, operator, viewer).",
     )
 
 
@@ -152,3 +169,4 @@ class BuildResult(BaseModel):
     strategy: BuildStrategy
     build_log: str
     project_info: ProjectInfo
+    dockerfile_snapshot: str | None = None

@@ -13,12 +13,15 @@ resources/
 .env
 backend/.env
 
+# Playwright E2E SQLite (see frontend/playwright.config.ts)
+backend/e2e-playwright.db
+
 # Frontend
 node_modules/
 frontend/dist/
 *.local
 
-# Playwright
+# Playwright reports
 playwright-report/
 test-results/
 blob-report/

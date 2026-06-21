@@ -14,22 +14,38 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth.service import get_user_by_id
 from app.core.auth.tokens import decode_access_token
-from app.core.default_image_builder import DefaultImageBuilder
-from app.core.docker_orchestrator import DockerOrchestrator
-from app.core.exceptions import NotAuthenticatedError, ObjectStorageError, TrafficRouterError
-from app.core.kubernetes_traffic_router import KubernetesTrafficRouter
+from app.core.build.default_image_builder import DefaultImageBuilder
+from app.core.containers.docker_orchestrator import DockerOrchestrator
+from app.core.containers.orchestrator import ContainerOrchestrator
+from app.core.exceptions import (
+    NotAuthenticatedError,
+    ObjectStorageError,
+    TrafficRouterError,
+)
+from app.core.traffic.kubernetes_traffic_router import KubernetesTrafficRouter
 from app.core.storage.memory import InMemoryObjectStorage
 from app.core.storage.object_storage import ObjectStorage
 from app.core.storage.r2 import CloudflareR2ObjectStorage
-from app.core.traffic_router import NoopTrafficRouter, TrafficRouter
-from app.core.traefik_file_traffic_router import TraefikFileTrafficRouter
+from app.core.traffic.traffic_router import NoopTrafficRouter, TrafficRouter
+from app.core.traffic.traefik_file_traffic_router import TraefikFileTrafficRouter
 from app.db.engine import get_session_factory
 from app.db.models import User
 
 
 @lru_cache(maxsize=1)
-def get_orchestrator() -> DockerOrchestrator:
-    """Shared Docker-backed orchestrator (one client per process)."""
+def get_orchestrator() -> ContainerOrchestrator:
+    """
+    Provide the shared container orchestrator instance for the application.
+
+    Returns:
+        ContainerOrchestrator: Shared orchestrator instance. If the environment variable
+        VELA_FAKE_ORCHESTRATOR is set to "1" (after trimming), returns the shared in-memory
+        fake orchestrator; otherwise returns a DockerOrchestrator instance.
+    """
+    if os.environ.get("VELA_FAKE_ORCHESTRATOR", "").strip() == "1":
+        from app.core.containers.fake_orchestrator import get_shared_fake_orchestrator
+
+        return get_shared_fake_orchestrator()
     return DockerOrchestrator()
 
 
@@ -51,7 +67,9 @@ def _traffic_router_from_env() -> TrafficRouter:
                     "VELA_TRAFFIC_ROUTER=traefik_file requires VELA_TRAEFIK_DYNAMIC_FILE "
                     "(absolute path to the dynamic JSON file Traefik loads)."
                 )
-            reload_container = os.environ.get("VELA_TRAEFIK_RELOAD_CONTAINER", "").strip()
+            reload_container = os.environ.get(
+                "VELA_TRAEFIK_RELOAD_CONTAINER", ""
+            ).strip()
             return TraefikFileTrafficRouter(
                 traefik_dynamic_file=Path(path_str),
                 reload_container=reload_container or None,
@@ -82,9 +100,7 @@ def _object_storage_from_env() -> ObjectStorage:
         case "r2":
             account_id = os.environ.get("VELA_R2_ACCOUNT_ID", "").strip()
             access_key_id = os.environ.get("VELA_R2_ACCESS_KEY_ID", "").strip()
-            secret_access_key = os.environ.get(
-                "VELA_R2_SECRET_ACCESS_KEY", ""
-            ).strip()
+            secret_access_key = os.environ.get("VELA_R2_SECRET_ACCESS_KEY", "").strip()
             bucket = os.environ.get("VELA_R2_BUCKET", "").strip()
             public_base_url = os.environ.get("VELA_R2_PUBLIC_BASE_URL", "").strip()
             missing = [

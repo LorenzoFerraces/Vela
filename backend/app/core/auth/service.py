@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth.passwords import hash_password, verify_password
 from app.core.exceptions import EmailAlreadyRegisteredError, InvalidCredentialsError
+from app.core.projects.bootstrap import ensure_personal_workspace
 from app.db.models import User
 
 
@@ -26,7 +27,8 @@ async def register_user(session: AsyncSession, *, email: str, password: str) -> 
 
     user = User(email=normalized_email, password_hash=hash_password(password))
     session.add(user)
-    await session.commit()
+    await session.flush()
+    await ensure_personal_workspace(session, user)
     await session.refresh(user)
     return user
 

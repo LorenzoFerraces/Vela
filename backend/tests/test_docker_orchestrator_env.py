@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from app.core.docker_orchestrator import DockerOrchestrator
+from app.core.containers.docker_orchestrator import DockerOrchestrator
 from app.core.models import DeployConfig
 
 

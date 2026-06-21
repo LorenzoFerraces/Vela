@@ -6,8 +6,8 @@ import logging
 
 from app.core.exceptions import RouteNotFoundError
 from app.core.models import ContainerInfo, DeployConfig
-from app.core.traffic_models import RouteSpec
-from app.core.traffic_router import TrafficRouter
+from app.core.traffic.traffic_models import RouteSpec
+from app.core.traffic.traffic_router import TrafficRouter
 
 logger = logging.getLogger(__name__)
 

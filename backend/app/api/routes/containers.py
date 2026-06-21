@@ -1,7 +1,8 @@
-"""Container orchestration API backed by :class:`~app.core.docker_orchestrator.DockerOrchestrator`."""
+"""Container orchestration API backed by :class:`~app.core.containers.docker_orchestrator.DockerOrchestrator`."""
 
 from __future__ import annotations
 
+import logging
 import uuid
 from typing import Annotated
 from urllib.parse import urlparse
@@ -32,8 +33,16 @@ from app.api.schemas import (
 )
 from app.core.auth.service import get_user_by_id
 from app.core.auth.tokens import decode_access_token
-from app.core.docker_orchestrator import VELA_OWNER_LABEL
-from app.core.public_route_host import (
+from app.core.deploy.deploy_source_display import resolve_deploy_source_label
+from app.core.deploy.deployment_history import latest_source_by_container_ids
+from app.core.containers.docker_orchestrator import (
+    VELA_OWNER_LABEL,
+    VELA_PROJECT_LABEL,
+    VELA_SOURCE_KIND_LABEL,
+    VELA_SOURCE_REF_LABEL,
+    with_deploy_source_labels,
+)
+from app.core.traffic.public_route_host import (
     apply_public_route_to_deploy_config,
     build_public_url,
     read_public_route_settings,
@@ -44,14 +53,22 @@ from app.core.exceptions import (
     ContainerNotFoundError,
     ImageNotFoundError,
     NotAuthenticatedError,
+    ProjectAccessDeniedError,
     ProviderConnectionError,
     RegistryAccessDeniedError,
 )
-from app.core.registry_image_suggestions import (
+
+from app.core.deploy.deploy_source_suggestions import (
+    DeploySourcesResponse,
+    collect_deploy_source_suggestions,
+)
+from app.core.deploy.deployment_history import DeploymentSnapshot, record_deployment
+from app.core import user_library
+from app.core.build.registry_image_suggestions import (
     fetch_docker_hub_suggestions,
     merge_image_suggestions,
 )
-from app.core.default_image_builder import DefaultImageBuilder
+from app.core.build.default_image_builder import DefaultImageBuilder
 from app.core.models import (
     ContainerInfo,
     ContainerStats,
@@ -61,9 +78,18 @@ from app.core.models import (
     ProjectSource,
 )
 from app.core.oauth import decrypt_identity_token, get_github_identity
-from app.core.orchestrator import ContainerOrchestrator
-from app.core.traffic_router import TrafficRouter
+from app.core.projects.access import (
+    list_accessible_project_ids,
+    membership_role_for_container,
+    require_container_access,
+)
+from app.core.projects.enums import can_write
+from app.core.projects.repository import get_personal_project_id, require_membership
+from app.core.containers.orchestrator import ContainerOrchestrator
+from app.core.traffic.traffic_router import TrafficRouter
 from app.db.models import User
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -77,16 +103,51 @@ def _with_owner_label(config: DeployConfig, owner_id: str) -> DeployConfig:
     return config.model_copy(update={"labels": labels})
 
 
-async def _require_owned(
-    orchestrator: ContainerOrchestrator,
-    container_id: str,
-    current_user: User,
-) -> ContainerInfo:
-    """Load a container and confirm it belongs to ``current_user`` (404 otherwise)."""
-    info = await orchestrator.get(container_id)
-    if info.labels.get(VELA_OWNER_LABEL) != str(current_user.id):
-        raise ContainerNotFoundError(container_id)
-    return info
+def _with_project_label(config: DeployConfig, project_id: uuid.UUID) -> DeployConfig:
+    labels = dict(config.labels)
+    labels[VELA_PROJECT_LABEL] = str(project_id)
+    return config.model_copy(update={"labels": labels})
+
+
+def _apply_deploy_labels(
+    config: DeployConfig,
+    *,
+    owner_id: str,
+    project_id: uuid.UUID,
+) -> DeployConfig:
+    return _with_project_label(_with_owner_label(config, owner_id), project_id)
+
+
+async def _resolve_deploy_project_id(
+    session: AsyncSession,
+    user: User,
+    body: RunFromSourceRequest,
+) -> uuid.UUID:
+    project_id = body.project_id or await get_personal_project_id(session, user)
+    membership = await require_membership(
+        session, project_id=project_id, user_id=user.id
+    )
+    if not can_write(membership.role):
+        raise ProjectAccessDeniedError(
+            "You do not have permission to deploy to this project."
+        )
+    return project_id
+
+
+async def _resolve_deploy_project_id_for_config(
+    session: AsyncSession,
+    user: User,
+    project_id: uuid.UUID | None,
+) -> uuid.UUID:
+    resolved = project_id or await get_personal_project_id(session, user)
+    membership = await require_membership(
+        session, project_id=resolved, user_id=user.id
+    )
+    if not can_write(membership.role):
+        raise ProjectAccessDeniedError(
+            "You do not have permission to deploy to this project."
+        )
+    return resolved
 
 
 async def _deploy_and_maybe_wire_route(
@@ -176,6 +237,8 @@ def _deploy_config_for_image(
     container_name: str | None,
     host_port: int | None,
     container_port: int,
+    env_vars: dict[str, str] | None = None,
+    command: list[str] | None = None,
 ) -> DeployConfig:
     ports: list[PortMapping] = []
     if host_port is not None:
@@ -185,6 +248,121 @@ def _deploy_config_for_image(
         name=container_name,
         ports=ports,
         container_listen_port=container_port,
+        env_vars=env_vars or {},
+        command=command,
+    )
+
+
+def _route_updates_from_run_body(body: RunFromSourceRequest) -> dict[str, object]:
+    return {
+        "route_host": None if body.public_route else body.route_host,
+        "route_path_prefix": body.route_path_prefix,
+        "route_tls": body.route_tls if not body.public_route else False,
+        "public_route": body.public_route,
+    }
+
+
+_DEPLOYMENT_ENV_VALUE_REDACTED = "<REDACTED>"
+
+
+def _redacted_env_vars_for_history(env_vars: dict[str, str]) -> dict[str, str]:
+    return {key: _DEPLOYMENT_ENV_VALUE_REDACTED for key in env_vars}
+
+
+async def _persist_run_deployment(
+    session: AsyncSession,
+    user: User,
+    body: RunFromSourceRequest,
+    info: ContainerInfo,
+    *,
+    project_id: uuid.UUID,
+    source_kind: str,
+    source_ref: str,
+    image_tag: str,
+    dockerfile_snapshot: str | None,
+    public_url: str | None,
+) -> None:
+    sanitized_env_vars = _redacted_env_vars_for_history(body.env_vars)
+    try:
+        await record_deployment(
+            session,
+            user_id=user.id,
+            project_id=project_id,
+            snapshot=DeploymentSnapshot(
+                container_id=info.id,
+                container_name=info.name or body.container_name,
+                source_kind=source_kind,
+                source_ref=source_ref,
+                git_branch=body.git_branch if source_kind == "git" else None,
+                image_tag=image_tag,
+                container_port=body.container_port,
+                env_vars=sanitized_env_vars,
+                command=list(body.command) if body.command else None,
+                dockerfile_snapshot=dockerfile_snapshot,
+                public_url=public_url,
+            ),
+        )
+    except Exception:
+        logger.exception(
+            "Failed to persist deployment history for container %s",
+            info.id,
+        )
+
+
+async def _enrich_container_source_labels(
+    session: AsyncSession,
+    user: User,
+    containers: list[ContainerInfo],
+) -> list[ContainerInfo]:
+    """Fill ``source_label`` and ``access_role`` for listed containers."""
+    history_by_container = await latest_source_by_container_ids(
+        session,
+        user.id,
+        [row.id for row in containers],
+    )
+    enriched: list[ContainerInfo] = []
+    for info in containers:
+        role = await membership_role_for_container(session, user.id, info)
+        access_role = role.value if role is not None else None
+        source_kind = info.source_kind or info.labels.get(VELA_SOURCE_KIND_LABEL)
+        source_ref = info.source_label or info.labels.get(VELA_SOURCE_REF_LABEL) or ""
+        if not source_ref and info.id in history_by_container:
+            history_kind, history_ref = history_by_container[info.id]
+            source_kind = source_kind or history_kind
+            source_ref = history_ref
+        if not source_kind or not source_ref:
+            enriched.append(info.model_copy(update={"access_role": access_role}))
+            continue
+        display_ref = await resolve_deploy_source_label(
+            session,
+            user.id,
+            source_kind=source_kind,
+            source_ref=source_ref,
+        )
+        enriched.append(
+            info.model_copy(
+                update={
+                    "source_kind": source_kind,
+                    "source_label": display_ref,
+                    "access_role": access_role,
+                }
+            )
+        )
+    return enriched
+
+
+async def _list_user_containers(
+    orchestrator: ContainerOrchestrator,
+    session: AsyncSession,
+    user: User,
+    *,
+    container_status: ContainerStatus | None,
+) -> list[ContainerInfo]:
+    project_ids = await list_accessible_project_ids(session, user.id)
+    return await orchestrator.list(
+        status=container_status,
+        project_ids=project_ids,
+        user_id=user.id,
     )
 
 
@@ -192,15 +370,20 @@ def _deploy_config_for_image(
 async def list_containers(
     orchestrator: Annotated[ContainerOrchestrator, Depends(get_orchestrator)],
     current_user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[AsyncSession, Depends(get_db)],
     container_status: Annotated[
         ContainerStatus | None,
         Query(alias="status", description="Filter by container status"),
     ] = None,
 ) -> list[ContainerInfo]:
-    """List the caller's Vela-managed containers, optionally filtered by status."""
-    return await orchestrator.list(
-        status=container_status, owner_id=str(current_user.id)
+    """List containers in projects the caller belongs to, optionally filtered by status."""
+    containers = await _list_user_containers(
+        orchestrator,
+        session,
+        current_user,
+        container_status=container_status,
     )
+    return await _enrich_container_source_labels(session, current_user, containers)
 
 
 @router.get("/image/availability", response_model=ImageAvailabilityResponse)
@@ -211,9 +394,14 @@ async def image_availability(
     orchestrator: Annotated[ContainerOrchestrator, Depends(get_orchestrator)],
     _current_user: Annotated[User, Depends(get_current_user)],
 ) -> ImageAvailabilityResponse:
-    """Check whether a registry image reference exists (local engine or remote manifest).
-
-    Git clone URLs are returned with ``checked=false`` so the UI can skip gating.
+    """
+    Determine whether the given Docker image reference or Git source is available.
+    
+    Parameters:
+        ref (str): A Docker image reference or a Git clone URL.
+    
+    Returns:
+        ImageAvailabilityResponse: For Git clone URLs, `available` is `true` and `checked` is `false`. For image references, `checked` is `true` and `available` is `true` when the image manifest or local image is found. If the image does not exist, `available` is `false`, `can_attempt_deploy` is `false`, and `detail`/`error_code` contain registry error information. If access to the registry is denied, `available` is `false`, `can_attempt_deploy` is `true`, and `detail`/`error_code` contain registry error information.
     """
     stripped = ref.strip()
     kind, source = _infer_source_kind(stripped)
@@ -255,6 +443,33 @@ async def image_availability(
     )
 
 
+@router.get("/deploy-sources", response_model=DeploySourcesResponse)
+async def deploy_source_suggestions(
+    orchestrator: Annotated[ContainerOrchestrator, Depends(get_orchestrator)],
+    current_user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[AsyncSession, Depends(get_db)],
+    q: Annotated[str, Query(max_length=128)] = "",
+    limit: Annotated[int, Query(ge=1, le=40)] = 22,
+) -> DeploySourcesResponse:
+    """
+    Provide unified autocomplete suggestions for registry images, GitHub repositories, and user Dockerfile templates.
+    
+    Parameters:
+        q (str): Search query to match suggestions; empty string returns broad suggestions.
+        limit (int): Maximum number of suggestions to return (1–40).
+    
+    Returns:
+        DeploySourcesResponse: Aggregated suggestion list combining registry images, GitHub repositories, and the current user's Dockerfile templates.
+    """
+    return await collect_deploy_source_suggestions(
+        session=session,
+        user=current_user,
+        orchestrator=orchestrator,
+        query=q,
+        limit=limit,
+    )
+
+
 @router.get("/image/suggestions", response_model=ImageSuggestionsResponse)
 async def image_suggestions(
     orchestrator: Annotated[ContainerOrchestrator, Depends(get_orchestrator)],
@@ -262,7 +477,16 @@ async def image_suggestions(
     q: Annotated[str, Query(max_length=128)] = "",
     limit: Annotated[int, Query(ge=1, le=40)] = 20,
 ) -> ImageSuggestionsResponse:
-    """Autocomplete registry images: local engine tags plus Docker Hub (sorted by pull count)."""
+    """
+    Return image autocomplete suggestions combining local engine tags and Docker Hub results.
+    
+    Parameters:
+    	q (str): Query string to match image refs; leading/trailing whitespace is ignored.
+    	limit (int): Maximum number of suggestions to return.
+    
+    Returns:
+    	ImageSuggestionsResponse: Suggestions limited to `limit`, merged from local engine tags and Docker Hub (sorted/merged by relevance and pull count). If the orchestrator is unreachable, local tags are treated as empty and only Docker Hub results (when `q` is non-empty) are used.
+    """
     stripped = q.strip()
     try:
         local_tags = await orchestrator.list_images()
@@ -298,9 +522,17 @@ async def deploy(
     orchestrator: Annotated[ContainerOrchestrator, Depends(get_orchestrator)],
     traffic_router: Annotated[TrafficRouter, Depends(get_traffic_router)],
     current_user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[AsyncSession, Depends(get_db)],
 ) -> ContainerDeployResponse:
     """Create and start a container from configuration."""
-    config = _with_owner_label(config, str(current_user.id))
+    project_id = await _resolve_deploy_project_id_for_config(
+        session, current_user, config.project_id
+    )
+    config = _apply_deploy_labels(
+        config,
+        owner_id=str(current_user.id),
+        project_id=project_id,
+    )
     config = await apply_public_route_to_deploy_config(config, traffic_router)
     info, route_wired, public_url = await _deploy_and_maybe_wire_route(
         orchestrator, traffic_router, config
@@ -321,62 +553,136 @@ async def run_from_user_source(
     current_user: Annotated[User, Depends(get_current_user)],
     session: Annotated[AsyncSession, Depends(get_db)],
 ) -> RunFromSourceResponse:
-    """Pull or build an image from ``source``, then deploy a container.
-
-    * **Image** — registry reference (e.g. ``nginx:alpine``). The image is
-      pulled if missing, then a container is started.
-    * **Git URL** — shallow clone, ensure a ``Dockerfile`` (existing or
-      generated from ``package.json`` / Python / Go markers), ``docker build``,
-      then start a container from the new image tag.
-
-    For GitHub HTTPS URLs we transparently use the caller's stored OAuth token
-    (when they have connected GitHub in Settings) so private repos clone too.
     """
-    kind, source = _infer_source_kind(body.source)
+    Deploy a container by pulling or building an image from the user's specified source and return the deployment result.
+    
+    Depending on body.source_kind this will:
+    - "image": use the provided image reference (pull if needed) and deploy it.
+    - "dockerfile_template": build an ephemeral image from the user's saved Dockerfile template, then deploy it.
+    - "git": clone the Git source (using the caller's GitHub token for GitHub HTTPS URLs when available), build an image from the source, then deploy it.
+    When a public route is requested, route-related fields are adjusted and a Traefik route may be registered; private-repo clone failures on GitHub produce a CloneError with guidance to connect GitHub when applicable.
+    
+    Returns:
+        RunFromSourceResponse: deployment result containing the created container info, the source kind, built/pulled image tag, whether a route was wired, and an optional public URL.
+    """
+    source_kind = body.source_kind
+    if source_kind is None:
+        raise ValueError("source_kind must be set after request validation.")
 
-    if kind == "image":
+    project_id = await _resolve_deploy_project_id(session, current_user, body)
+
+    if source_kind == "image":
+        image_ref = (body.image_ref or "").strip()
         cfg = _deploy_config_for_image(
-            image=source,
+            image=image_ref,
             container_name=body.container_name,
             host_port=body.host_port,
             container_port=body.container_port,
-        ).model_copy(
-            update={
-                "route_host": None if body.public_route else body.route_host,
-                "route_path_prefix": body.route_path_prefix,
-                "route_tls": body.route_tls if not body.public_route else False,
-                "public_route": body.public_route,
-            }
+            env_vars=body.env_vars,
+            command=body.command,
+        ).model_copy(update=_route_updates_from_run_body(body))
+        cfg = with_deploy_source_labels(cfg, source_kind="image", source_ref=image_ref)
+        cfg = _apply_deploy_labels(
+            cfg, owner_id=str(current_user.id), project_id=project_id
         )
-        cfg = _with_owner_label(cfg, str(current_user.id))
         cfg = await apply_public_route_to_deploy_config(cfg, traffic_router)
         info, route_wired, public_url = await _deploy_and_maybe_wire_route(
             orchestrator, traffic_router, cfg
         )
+        await _persist_run_deployment(
+            session,
+            current_user,
+            body,
+            info,
+            project_id=project_id,
+            source_kind="image",
+            source_ref=image_ref,
+            image_tag=image_ref,
+            dockerfile_snapshot=None,
+            public_url=public_url,
+        )
         return RunFromSourceResponse(
             container=info,
             kind="image",
-            image=source,
+            image=image_ref,
             route_wired=route_wired,
             public_url=public_url,
         )
 
-    access_token = await _github_token_for_url(session, current_user, source)
+    if source_kind == "dockerfile_template":
+        template_id = body.dockerfile_template_id
+        if template_id is None:
+            raise ValueError("dockerfile_template_id is required.")
+        template = await user_library.get_dockerfile_template(
+            session, current_user.id, template_id
+        )
+        tag = f"vela/templatebuild:{uuid.uuid4().hex[:12]}"
+        build_result = await image_builder.build_from_dockerfile_template(
+            template.contents,
+            tag=tag,
+        )
+        cfg = _deploy_config_for_image(
+            image=build_result.image_tag,
+            container_name=body.container_name,
+            host_port=body.host_port,
+            container_port=body.container_port,
+            env_vars=body.env_vars,
+            command=body.command,
+        ).model_copy(
+            update={
+                "restart_policy": RestartPolicy.UNLESS_STOPPED,
+                **_route_updates_from_run_body(body),
+            }
+        )
+        cfg = with_deploy_source_labels(
+            cfg,
+            source_kind="dockerfile_template",
+            source_ref=template.name,
+        )
+        cfg = _apply_deploy_labels(
+            cfg, owner_id=str(current_user.id), project_id=project_id
+        )
+        cfg = await apply_public_route_to_deploy_config(cfg, traffic_router)
+        info, route_wired, public_url = await _deploy_and_maybe_wire_route(
+            orchestrator, traffic_router, cfg
+        )
+        await _persist_run_deployment(
+            session,
+            current_user,
+            body,
+            info,
+            project_id=project_id,
+            source_kind="dockerfile_template",
+            source_ref=template.name,
+            image_tag=build_result.image_tag,
+            dockerfile_snapshot=build_result.dockerfile_snapshot or template.contents,
+            public_url=public_url,
+        )
+        return RunFromSourceResponse(
+            container=info,
+            kind="dockerfile_template",
+            image=build_result.image_tag,
+            route_wired=route_wired,
+            public_url=public_url,
+        )
+
+    git_url = (body.git_url or "").strip()
+    access_token = await _github_token_for_url(session, current_user, git_url)
     tag = f"vela/gitbuild:{uuid.uuid4().hex[:12]}"
     try:
         build_result = await image_builder.build_from_source(
-            ProjectSource(git_url=source, branch=body.git_branch),
+            ProjectSource(git_url=git_url, branch=body.git_branch),
             tag=tag,
             access_token=access_token,
         )
     except CloneError as exc:
         if (
             access_token is None
-            and _is_github_https_url(source)
+            and _is_github_https_url(git_url)
             and _looks_like_auth_failure(str(exc))
         ):
             raise CloneError(
-                source,
+                git_url,
                 "Repository looks private. Connect GitHub in Settings to deploy private repos.",
             ) from exc
         raise
@@ -386,19 +692,33 @@ async def run_from_user_source(
         container_name=body.container_name,
         host_port=body.host_port,
         container_port=body.container_port,
+        env_vars=body.env_vars,
+        command=body.command,
     ).model_copy(
         update={
             "restart_policy": RestartPolicy.UNLESS_STOPPED,
-            "route_host": None if body.public_route else body.route_host,
-            "route_path_prefix": body.route_path_prefix,
-            "route_tls": body.route_tls if not body.public_route else False,
-            "public_route": body.public_route,
+            **_route_updates_from_run_body(body),
         }
     )
-    cfg = _with_owner_label(cfg, str(current_user.id))
+    cfg = with_deploy_source_labels(cfg, source_kind="git", source_ref=git_url)
+    cfg = _apply_deploy_labels(
+        cfg, owner_id=str(current_user.id), project_id=project_id
+    )
     cfg = await apply_public_route_to_deploy_config(cfg, traffic_router)
     info, route_wired, public_url = await _deploy_and_maybe_wire_route(
         orchestrator, traffic_router, cfg
+    )
+    await _persist_run_deployment(
+        session,
+        current_user,
+        body,
+        info,
+        project_id=project_id,
+        source_kind="git",
+        source_ref=git_url,
+        image_tag=build_result.image_tag,
+        dockerfile_snapshot=build_result.dockerfile_snapshot,
+        public_url=public_url,
     )
     return RunFromSourceResponse(
         container=info,
@@ -414,9 +734,12 @@ async def get_container(
     container_id: str,
     orchestrator: Annotated[ContainerOrchestrator, Depends(get_orchestrator)],
     current_user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[AsyncSession, Depends(get_db)],
 ) -> ContainerInfo:
     """Return detailed information about a single managed container."""
-    return await _require_owned(orchestrator, container_id, current_user)
+    return await require_container_access(
+        session, orchestrator, current_user, container_id, action="read"
+    )
 
 
 @router.post("/{container_id}/start", response_model=ContainerInfo)
@@ -424,10 +747,14 @@ async def start_container(
     container_id: str,
     orchestrator: Annotated[ContainerOrchestrator, Depends(get_orchestrator)],
     current_user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[AsyncSession, Depends(get_db)],
 ) -> ContainerInfo:
     """Start a stopped container."""
-    await _require_owned(orchestrator, container_id, current_user)
-    return await orchestrator.start(container_id)
+    access_info = await require_container_access(
+        session, orchestrator, current_user, container_id, action="write"
+    )
+    updated = await orchestrator.start(container_id)
+    return updated.model_copy(update={"access_role": access_info.access_role})
 
 
 @router.post("/{container_id}/stop", response_model=ContainerInfo)
@@ -435,11 +762,15 @@ async def stop_container(
     container_id: str,
     orchestrator: Annotated[ContainerOrchestrator, Depends(get_orchestrator)],
     current_user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[AsyncSession, Depends(get_db)],
     timeout: int = 10,
 ) -> ContainerInfo:
     """Gracefully stop a running container."""
-    await _require_owned(orchestrator, container_id, current_user)
-    return await orchestrator.stop(container_id, timeout=timeout)
+    access_info = await require_container_access(
+        session, orchestrator, current_user, container_id, action="write"
+    )
+    updated = await orchestrator.stop(container_id, timeout=timeout)
+    return updated.model_copy(update={"access_role": access_info.access_role})
 
 
 @router.post("/{container_id}/restart", response_model=ContainerInfo)
@@ -447,11 +778,15 @@ async def restart_container(
     container_id: str,
     orchestrator: Annotated[ContainerOrchestrator, Depends(get_orchestrator)],
     current_user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[AsyncSession, Depends(get_db)],
     timeout: int = 10,
 ) -> ContainerInfo:
     """Restart a container."""
-    await _require_owned(orchestrator, container_id, current_user)
-    return await orchestrator.restart(container_id, timeout=timeout)
+    access_info = await require_container_access(
+        session, orchestrator, current_user, container_id, action="write"
+    )
+    updated = await orchestrator.restart(container_id, timeout=timeout)
+    return updated.model_copy(update={"access_role": access_info.access_role})
 
 
 @router.delete("/{container_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -460,10 +795,13 @@ async def remove_container(
     orchestrator: Annotated[ContainerOrchestrator, Depends(get_orchestrator)],
     traffic_router: Annotated[TrafficRouter, Depends(get_traffic_router)],
     current_user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[AsyncSession, Depends(get_db)],
     force: bool = False,
 ) -> Response:
     """Remove a container and drop any Traefik route keyed by its name."""
-    info = await _require_owned(orchestrator, container_id, current_user)
+    info = await require_container_access(
+        session, orchestrator, current_user, container_id, action="write"
+    )
     await remove_route_for_container_name(
         traffic_router=traffic_router,
         container_name=info.name,
@@ -477,10 +815,13 @@ async def container_logs(
     container_id: str,
     orchestrator: Annotated[ContainerOrchestrator, Depends(get_orchestrator)],
     current_user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[AsyncSession, Depends(get_db)],
     tail: Annotated[int, Query(ge=1, le=_MAX_LOG_TAIL_LINES)] = 100,
 ) -> dict[str, str]:
     """Return recent log lines for a container."""
-    await _require_owned(orchestrator, container_id, current_user)
+    await require_container_access(
+        session, orchestrator, current_user, container_id, action="read"
+    )
     text = await orchestrator.logs(container_id, tail=tail)
     return {"logs": text}
 
@@ -514,8 +855,10 @@ async def container_logs_stream(
         await websocket.close(code=1008)
         return
     try:
-        await _require_owned(orchestrator, container_id, user)
-    except ContainerNotFoundError:
+        await require_container_access(
+            session, orchestrator, user, container_id, action="read"
+        )
+    except (ContainerNotFoundError, ProjectAccessDeniedError):
         await websocket.close(code=1008)
         return
 
@@ -540,9 +883,12 @@ async def container_stats(
     container_id: str,
     orchestrator: Annotated[ContainerOrchestrator, Depends(get_orchestrator)],
     current_user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[AsyncSession, Depends(get_db)],
 ) -> ContainerStats:
     """Return resource usage snapshot for a container."""
-    await _require_owned(orchestrator, container_id, current_user)
+    await require_container_access(
+        session, orchestrator, current_user, container_id, action="read"
+    )
     return await orchestrator.get_stats(container_id)
 
 
@@ -551,7 +897,10 @@ async def container_health(
     container_id: str,
     orchestrator: Annotated[ContainerOrchestrator, Depends(get_orchestrator)],
     current_user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[AsyncSession, Depends(get_db)],
 ) -> HealthResult:
     """Return latest health check result for a container."""
-    await _require_owned(orchestrator, container_id, current_user)
+    await require_container_access(
+        session, orchestrator, current_user, container_id, action="read"
+    )
     return await orchestrator.get_health(container_id)

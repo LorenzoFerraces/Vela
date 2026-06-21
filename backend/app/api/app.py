@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import app.bootstrap_env  # noqa: F401 — loads backend/.env before other app imports.
 
+import asyncio
+from contextlib import asynccontextmanager, suppress
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -12,10 +15,12 @@ from app.api.routes import (
     auth,
     builder,
     containers,
+    deployments,
     dockerfile_templates,
     github,
     images,
-    saved_images,
+    projects,
+    settings,
     traffic,
     users,
 )
@@ -23,11 +28,42 @@ from app.api.routes import (
 API_PREFIX = "/api"
 
 
+@asynccontextmanager
+async def _lifespan(_application: FastAPI):
+    """
+    Lifespan context manager that ensures the end-to-end test database is prepared before the application starts.
+
+    This async context manager runs once at startup to await e2e database setup, starts the container monitoring loop, then yields control for the application runtime. On shutdown, the monitoring task is cancelled.
+    """
+    from app.e2e_support import ensure_e2e_database
+    from app.core.notifications.container_monitor import run_monitoring_loop
+
+    await ensure_e2e_database()
+
+    monitor_task = asyncio.create_task(run_monitoring_loop())
+
+    try:
+        yield
+    finally:
+        monitor_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await monitor_task
+
+
 def create_app() -> FastAPI:
+    """
+    Create and configure the FastAPI application used by the service.
+
+    The returned application is configured with a custom startup/shutdown lifespan, CORS middleware, global exception handlers, mounted API routers under the `/api` prefix (containers, builder, images, dockerfiles, traffic, auth, github, settings, deployments), and a health endpoint at `/api/health`.
+
+    Returns:
+        FastAPI: A configured FastAPI application instance.
+    """
     application = FastAPI(
         title="Vela API",
         description="Container deployment platform — orchestrate, build, and manage containers.",
         version="0.1.0",
+        lifespan=_lifespan,
     )
 
     application.add_middleware(
@@ -35,10 +71,12 @@ def create_app() -> FastAPI:
         allow_origins=[
             "http://localhost:5173",
             "http://127.0.0.1:5173",
+            "http://localhost:5174",
+            "http://127.0.0.1:5174",
             "http://velaunq.ddns.net:5173",
             "https://velaunq.ddns.net:5173",
         ],
-        allow_origin_regex=r"^https?://[^/]+:5173$",
+        allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$",
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
@@ -60,11 +98,6 @@ def create_app() -> FastAPI:
         images.router,
         prefix=f"{API_PREFIX}/images",
         tags=["images"],
-    )
-    application.include_router(
-        saved_images.router,
-        prefix=f"{API_PREFIX}/saved-images",
-        tags=["saved-images"],
     )
     application.include_router(
         dockerfile_templates.router,
@@ -95,6 +128,21 @@ def create_app() -> FastAPI:
         github.router_resource,
         prefix=f"{API_PREFIX}/github",
         tags=["github"],
+    )
+    application.include_router(
+        settings.router,
+        prefix=f"{API_PREFIX}/settings",
+        tags=["settings"],
+    )
+    application.include_router(
+        deployments.router,
+        prefix=f"{API_PREFIX}/deployments",
+        tags=["deployments"],
+    )
+    application.include_router(
+        projects.router,
+        prefix=f"{API_PREFIX}/projects",
+        tags=["projects"],
     )
 
     @application.get(f"{API_PREFIX}/health", tags=["health"])

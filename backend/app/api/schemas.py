@@ -6,19 +6,46 @@ import uuid
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    EmailStr,
+    Field,
+    field_validator,
+    model_validator,
+)
 
 from app.core.models import ContainerInfo, ProjectSource
 
 
 class RunFromSourceRequest(BaseModel):
-    """Run a container from a registry image or from a Git URL (Docker build)."""
+    """Run a container from a registry image, Git URL, or saved Dockerfile template."""
 
-    source: str = Field(
-        ...,
+    source_kind: Literal["image", "git", "dockerfile_template"] | None = Field(
+        default=None,
+        description="Explicit deploy source; when omitted, ``source`` is inferred.",
+    )
+    source: str | None = Field(
+        default=None,
         min_length=1,
         max_length=2048,
-        description="Docker image reference (e.g. nginx:alpine) or Git clone URL.",
+        description="Legacy: image ref or Git URL (used when ``source_kind`` is omitted).",
+    )
+    image_ref: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=2048,
+        description="Registry image when ``source_kind`` is ``image``.",
+    )
+    git_url: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=2048,
+        description="Git clone URL when ``source_kind`` is ``git``.",
+    )
+    dockerfile_template_id: uuid.UUID | None = Field(
+        default=None,
+        description="Saved Dockerfile template when ``source_kind`` is ``dockerfile_template``.",
     )
     container_name: str | None = Field(
         default=None,
@@ -67,20 +94,122 @@ class RunFromSourceRequest(BaseModel):
             "route_host from this request is ignored."
         ),
     )
+    env_vars: dict[str, str] = Field(
+        default_factory=dict,
+        description="Environment variables injected into the container at start.",
+    )
+    command: list[str] | None = Field(
+        default=None,
+        description="Optional command override (Docker CMD) when starting the container.",
+    )
+    project_id: uuid.UUID | None = Field(
+        default=None,
+        description="Target project for deploy; defaults to the caller's personal project.",
+    )
+
+    @field_validator("env_vars")
+    @classmethod
+    def validate_env_vars(cls, value: dict[str, str]) -> dict[str, str]:
+        validated: dict[str, str] = {}
+        original_keys_by_trimmed: dict[str, str] = {}
+        for key, env_value in value.items():
+            trimmed_key = key.strip()
+            if not trimmed_key:
+                msg = "Environment variable keys cannot be empty."
+                raise ValueError(msg)
+            if len(trimmed_key) > 256:
+                msg = "Environment variable keys cannot exceed 256 characters."
+                raise ValueError(msg)
+            if trimmed_key in original_keys_by_trimmed:
+                prior_key = original_keys_by_trimmed[trimmed_key]
+                msg = (
+                    f"Duplicate environment variable keys after trimming: "
+                    f"{prior_key!r} and {key!r} both map to {trimmed_key!r}."
+                )
+                raise ValueError(msg)
+            original_keys_by_trimmed[trimmed_key] = key
+            validated[trimmed_key] = env_value
+        return validated
+
+    @field_validator("command")
+    @classmethod
+    def validate_command(cls, value: list[str] | None) -> list[str] | None:
+        if value is None:
+            return None
+        tokens = [token.strip() for token in value if token.strip()]
+        if not tokens:
+            msg = "command must contain at least one non-empty token when provided."
+            raise ValueError(msg)
+        return tokens
 
     @field_validator("route_path_prefix")
     @classmethod
     def route_path_prefix_must_start_with_slash(cls, value: str) -> str:
+        """
+        Validate that a Traefik route path prefix begins with a leading '/'.
+
+        Parameters:
+            value (str): The route path prefix to validate.
+
+        Returns:
+            str: The validated route path prefix (returned unchanged) if it starts with '/'.
+
+        Raises:
+            ValueError: If `value` does not start with '/'.
+        """
         if not value.startswith("/"):
             msg = "route_path_prefix must start with '/'"
             raise ValueError(msg)
         return value
 
+    @model_validator(mode="after")
+    def validate_source_fields(self) -> RunFromSourceRequest:
+        """
+        Validate and normalize the request's source fields and enforce mode-specific requirements.
+
+        If `source_kind` is omitted, infer the kind from the legacy `source` value and return a copy with `source_kind` set and the appropriate field (`git_url` or `image_ref`) populated with the trimmed legacy value. If `source_kind` is `"image"` or `"git"`, ensure the respective field (`image_ref` or `git_url`) is present (or fall back to `source`), trim it, and return a copy with that field set. If `source_kind` is `"dockerfile_template"`, ensure `dockerfile_template_id` is provided.
+
+        Returns:
+            RunFromSourceRequest: A validated and possibly normalized copy of the request model.
+
+        Raises:
+            ValueError: When a required source field is missing or empty for the selected deployment kind.
+        """
+        kind = self.source_kind
+        if kind is None:
+            legacy = (self.source or "").strip()
+            if not legacy:
+                raise ValueError("source is required when source_kind is omitted.")
+            if legacy.startswith(("git@", "http://", "https://", "ssh://")):
+                return self.model_copy(
+                    update={"source_kind": "git", "git_url": legacy},
+                )
+            return self.model_copy(
+                update={"source_kind": "image", "image_ref": legacy},
+            )
+        if kind == "image":
+            ref = (self.image_ref or self.source or "").strip()
+            if not ref:
+                raise ValueError("image_ref or source is required for image deploy.")
+            return self.model_copy(update={"image_ref": ref})
+        if kind == "git":
+            url = (self.git_url or self.source or "").strip()
+            if not url:
+                raise ValueError("git_url or source is required for git deploy.")
+            return self.model_copy(update={"git_url": url})
+        if self.dockerfile_template_id is None:
+            raise ValueError(
+                "dockerfile_template_id is required for dockerfile_template deploy."
+            )
+        return self
+
 
 class ImageSuggestion(BaseModel):
     """One autocomplete candidate for a registry image reference."""
 
-    ref: str = Field(..., description="Suggested image reference (may omit implicit :latest).")
+    ref: str = Field(
+        ..., description="Suggested image reference (may omit implicit :latest)."
+    )
     pull_count: int | None = Field(
         default=None,
         description="Docker Hub pull count when ``source`` is ``registry`` and Hub returned it.",
@@ -136,7 +265,7 @@ class ImageAvailabilityResponse(BaseModel):
 
 class RunFromSourceResponse(BaseModel):
     container: ContainerInfo
-    kind: Literal["image", "git"]
+    kind: Literal["image", "git", "dockerfile_template"]
     image: str
     route_wired: bool = Field(
         default=False,
@@ -178,6 +307,152 @@ class ContainerDeployResponse(BaseModel):
         default=None,
         description="Canonical URL when public_route was used and the route was wired.",
     )
+
+
+# ---------------------------------------------------------------------------
+# Git source analysis (Gemini pre-fill)
+# ---------------------------------------------------------------------------
+
+
+class AnalyzeGitSourceRequest(BaseModel):
+    git_url: str = Field(..., min_length=1, max_length=2048)
+    git_branch: str = Field(default="main", max_length=256)
+
+
+class GitSourceAnalysis(BaseModel):
+    git_branch: str | None = None
+    container_port: int = Field(default=80, ge=1, le=65535)
+    container_name: str | None = None
+    env_vars: dict[str, str] = Field(default_factory=dict)
+    start_command: list[str] | None = None
+    language: str | None = None
+    framework: str | None = None
+    has_dockerfile: bool = False
+    build_strategy: Literal["dockerfile_exists", "generated_dockerfile"] = (
+        "generated_dockerfile"
+    )
+    summary_hint: str = ""
+
+
+class AiPrefillPreferences(BaseModel):
+    git_branch: bool = True
+    container_port: bool = True
+    container_name: bool = True
+    env_vars: bool = True
+    start_command: bool = True
+
+
+class AiPrefillPreferencesUpdate(BaseModel):
+    git_branch: bool | None = None
+    container_port: bool | None = None
+    container_name: bool | None = None
+    env_vars: bool | None = None
+    start_command: bool | None = None
+
+
+class GeminiConfigStatus(BaseModel):
+    configured: bool
+
+
+# ---------------------------------------------------------------------------
+# Team / projects
+# ---------------------------------------------------------------------------
+
+
+ProjectRoleLiteral = Literal["owner", "operator", "viewer"]
+InvitableRoleLiteral = Literal["operator", "viewer"]
+
+
+class ProjectPublic(BaseModel):
+    id: uuid.UUID
+    name: str
+    is_personal: bool
+    role: ProjectRoleLiteral
+    owner_email: str
+
+
+class ProjectCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=255)
+
+
+class ProjectMemberPublic(BaseModel):
+    user_id: uuid.UUID
+    email: str
+    role: ProjectRoleLiteral
+    created_at: datetime
+
+
+class ProjectMemberUpdate(BaseModel):
+    role: InvitableRoleLiteral
+
+
+class ProjectInvitationCreate(BaseModel):
+    email: EmailStr
+    role: InvitableRoleLiteral
+
+
+class ProjectInvitationPublic(BaseModel):
+    id: uuid.UUID
+    invitee_user_id: uuid.UUID
+    email: str
+    role: InvitableRoleLiteral
+    created_at: datetime
+
+
+class IncomingProjectInvitationPublic(BaseModel):
+    id: uuid.UUID
+    project_id: uuid.UUID
+    project_name: str
+    inviter_email: str
+    role: InvitableRoleLiteral
+    created_at: datetime
+
+
+class MyProjectRolePublic(BaseModel):
+    project_id: uuid.UUID
+    role: ProjectRoleLiteral
+
+
+# ---------------------------------------------------------------------------
+# Deployment history
+# ---------------------------------------------------------------------------
+
+
+class DeploymentRecordPublic(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    user_id: uuid.UUID
+    project_id: uuid.UUID | None = None
+    author_email: str
+    container_id: str
+    container_name: str | None
+    source_kind: Literal["image", "git", "dockerfile_template"]
+    source_ref: str
+    git_branch: str | None
+    image_tag: str
+    container_port: int
+    env_vars: dict[str, str]
+    command: list[str] | None
+    dockerfile_snapshot: str | None
+    public_url: str | None
+    created_at: datetime
+
+
+class DeploymentEnvDiff(BaseModel):
+    added: dict[str, str] = Field(default_factory=dict)
+    removed: dict[str, str] = Field(default_factory=dict)
+    changed: dict[str, dict[str, str]] = Field(
+        default_factory=dict,
+        description="Keys map to {before, after} env values.",
+    )
+
+
+class DeploymentDiffResponse(BaseModel):
+    left_id: uuid.UUID
+    right_id: uuid.UUID
+    env: DeploymentEnvDiff
+    dockerfile_diff: list[str]
 
 
 # ---------------------------------------------------------------------------
@@ -251,24 +526,8 @@ class GitHubBranchSummary(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# User library (saved image refs, Dockerfile templates)
+# User library (Dockerfile templates)
 # ---------------------------------------------------------------------------
-
-
-class SavedImageCreate(BaseModel):
-    ref: str = Field(..., min_length=1, max_length=512)
-
-
-class SavedImageUpdate(BaseModel):
-    ref: str = Field(..., min_length=1, max_length=512)
-
-
-class SavedImagePublic(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
-    id: uuid.UUID
-    ref: str
-    created_at: datetime
 
 
 class DockerfileTemplateCreate(BaseModel):
@@ -289,3 +548,64 @@ class DockerfileTemplatePublic(BaseModel):
     contents: str
     created_at: datetime
     updated_at: datetime
+
+
+# ---------------------------------------------------------------------------
+# Email notifications
+# ---------------------------------------------------------------------------
+
+
+class EmailNotificationPreferences(BaseModel):
+    """Get/set user email notification preferences."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID | None = None
+    user_id: uuid.UUID
+    email: EmailStr
+    alerts_enabled: bool
+    alert_types: list[Literal["stop", "failure", "unhealthy"]] = Field(
+        default=["stop", "failure", "unhealthy"]
+    )
+    alert_frequency: Literal["immediate", "daily_digest", "weekly_summary"] = Field(
+        default="immediate"
+    )
+    created_at: datetime
+    updated_at: datetime
+
+
+class EmailNotificationPreferencesUpdate(BaseModel):
+    """Update email notification preferences."""
+
+    email: EmailStr | None = None
+    alerts_enabled: bool | None = None
+    alert_types: list[Literal["stop", "failure", "unhealthy"]] | None = None
+    alert_frequency: Literal["immediate", "daily_digest", "weekly_summary"] | None = (
+        None
+    )
+
+
+class AlertHistoryEntry(BaseModel):
+    """Alert sent to user."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    container_id: str
+    event_type: str
+    sent_at: datetime
+    email_sent_to: str | None
+    status: Literal["sent", "failed"]
+
+
+# ---------------------------------------------------------------------------
+# Container Monitoring
+# ---------------------------------------------------------------------------
+
+
+class ContainerMonitoringStatus(BaseModel):
+    """Status of container monitoring system."""
+
+    enabled: bool
+    interval_seconds: int
+    total_containers_tracked: int

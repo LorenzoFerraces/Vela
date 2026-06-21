@@ -1,5 +1,5 @@
-from app.core.image_not_found_payload import image_not_found_api_content
-from app.core.registry_access_payload import registry_access_denied_api_content
+from app.core.build.image_not_found_payload import image_not_found_api_content
+from app.core.build.registry_access_payload import registry_access_denied_api_content
 
 
 class VelaError(Exception):
@@ -113,6 +113,10 @@ class AnalysisError(BuilderError):
         super().__init__(f"Project analysis failed for {path}: {message}")
 
 
+class GitSourceAnalysisError(BuilderError):
+    """Gemini or repository analysis for deploy pre-fill failed."""
+
+
 class DockerfileGenerationError(BuilderError):
     def __init__(self, language: str, message: str) -> None:
         self.language = language
@@ -163,6 +167,12 @@ class InvalidCredentialsError(AuthError):
 
 class NotAuthenticatedError(AuthError):
     def __init__(self, message: str = "Not authenticated.") -> None:
+        """
+        Initialize the NotAuthenticatedError with an optional custom message.
+
+        Parameters:
+            message (str): Error message to use for this exception. Defaults to "Not authenticated."
+        """
         super().__init__(message)
 
 
@@ -175,26 +185,26 @@ class UserLibraryError(VelaError):
     """Base exception for per-user saved image / Dockerfile template operations."""
 
 
-class SavedImageNotFoundError(UserLibraryError):
-    def __init__(self, image_id: str) -> None:
-        self.image_id = image_id
-        super().__init__(f"Saved image not found: {image_id}")
-
-
 class DockerfileTemplateNotFoundError(UserLibraryError):
     def __init__(self, template_id: str) -> None:
+        """
+        Initialize an exception for a missing Dockerfile template.
+
+        Parameters:
+            template_id (str): Identifier of the Dockerfile template that was not found. The exception message will be "Dockerfile template not found: {template_id}".
+        """
         self.template_id = template_id
         super().__init__(f"Dockerfile template not found: {template_id}")
 
 
-class DuplicateSavedImageError(UserLibraryError):
-    def __init__(self, ref: str) -> None:
-        self.ref = ref
-        super().__init__(f"You already saved this image reference: {ref}")
-
-
 class DuplicateDockerfileNameError(UserLibraryError):
     def __init__(self, name: str) -> None:
+        """
+        Initialize the error for attempting to create a Dockerfile template with a name that already exists.
+
+        Parameters:
+            name (str): The duplicate Dockerfile template name.
+        """
         self.name = name
         super().__init__(f"You already have a Dockerfile template named {name!r}.")
 
@@ -258,3 +268,62 @@ class GitHubAccountAlreadyLinkedError(IntegrationError):
         ),
     ) -> None:
         super().__init__(message)
+
+
+# ---------------------------------------------------------------------------
+# Team / project errors
+# ---------------------------------------------------------------------------
+
+
+class ProjectError(VelaError):
+    """Base exception for project and team operations."""
+
+
+class ProjectNotFoundError(ProjectError):
+    def __init__(self, project_id: str) -> None:
+        self.project_id = project_id
+        super().__init__("Requested project not found.")
+
+
+class ProjectMemberNotFoundError(ProjectError):
+    def __init__(self, project_id: str, user_id: str) -> None:
+        self.project_id = project_id
+        self.user_id = user_id
+        super().__init__("Not a member of the project.")
+
+
+class ProjectAccessDeniedError(ProjectError):
+    def __init__(
+        self, message: str = "You do not have permission for this project action."
+    ) -> None:
+        super().__init__(message)
+
+
+class UserNotRegisteredError(ProjectError):
+    def __init__(self, email: str) -> None:
+        self.email = email
+        super().__init__("No registered user found for the provided email.")
+
+
+class InvitationNotFoundError(ProjectError):
+    def __init__(self, invitation_id: str) -> None:
+        self.invitation_id = invitation_id
+        super().__init__("Invitation not found.")
+
+
+class InvitationAlreadyRespondedError(ProjectError):
+    def __init__(self, invitation_id: str) -> None:
+        self.invitation_id = invitation_id
+        super().__init__("Invitation is no longer pending.")
+
+
+class DuplicateInvitationError(ProjectError):
+    def __init__(self, email: str) -> None:
+        self.email = email
+        super().__init__("A pending invitation already exists.")
+
+
+class AlreadyProjectMemberError(ProjectError):
+    def __init__(self, email: str) -> None:
+        self.email = email
+        super().__init__("User is already a member of this project.")

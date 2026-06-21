@@ -1,90 +1,6 @@
 import { expect, test } from './fixtures'
 
-const mockContainer = {
-  id: 'e2e-mock-id',
-  name: 'e2e-mock',
-  image: 'nginx:alpine',
-  status: 'running',
-  created_at: '2026-04-01T12:00:00.000Z',
-  ports: [],
-  labels: {},
-  health: 'none',
-  access_url: 'https://vela-e2e.example.com/',
-}
-
-const mockRunResponse = {
-  container: mockContainer,
-  kind: 'image',
-  image: 'nginx:alpine',
-  route_wired: true,
-  public_url: 'https://vela-e2e.example.com/',
-}
-
-test.describe('Containers page (UI + mocked API)', () => {
-  test.beforeEach(async ({ authenticatedPage }) => {
-    // The Containers page touches several endpoints:
-    //   - GET /api/containers/                    → list workloads
-    //   - GET /api/containers/image/suggestions   → debounced image autocomplete
-    //   - GET /api/containers/image/availability  → pre-flight before Build
-    //   - POST /api/containers/run                → actual deploy
-    // Mock them all from a single handler so the order in which routes were
-    // registered does not matter.
-    await authenticatedPage.route('**/api/containers/**', async (route) => {
-      const url = route.request().url()
-      const method = route.request().method()
-
-      if (method === 'GET' && /\/api\/containers\/?(\?.*)?$/.test(url)) {
-        await route.fulfill({
-          status: 200,
-          contentType: 'application/json',
-          body: JSON.stringify([]),
-        })
-        return
-      }
-
-      if (
-        method === 'GET' &&
-        url.includes('/api/containers/image/availability')
-      ) {
-        await route.fulfill({
-          status: 200,
-          contentType: 'application/json',
-          body: JSON.stringify({
-            ref: 'nginx:alpine',
-            available: true,
-            checked: true,
-            detail: null,
-            can_attempt_deploy: true,
-          }),
-        })
-        return
-      }
-
-      if (
-        method === 'GET' &&
-        url.includes('/api/containers/image/suggestions')
-      ) {
-        await route.fulfill({
-          status: 200,
-          contentType: 'application/json',
-          body: JSON.stringify({ suggestions: [] }),
-        })
-        return
-      }
-
-      if (method === 'POST' && url.includes('/api/containers/run')) {
-        await route.fulfill({
-          status: 200,
-          contentType: 'application/json',
-          body: JSON.stringify(mockRunResponse),
-        })
-        return
-      }
-
-      await route.continue()
-    })
-  })
-
+test.describe('Containers page', () => {
   test('shows create form, Build, and Running workloads', async ({
     authenticatedPage,
   }) => {
@@ -96,7 +12,10 @@ test.describe('Containers page (UI + mocked API)', () => {
       }),
     ).toBeVisible()
     await expect(
-      authenticatedPage.getByLabel(/Docker image reference or Git clone URL/i),
+      authenticatedPage.getByLabel('Deploy source'),
+    ).toBeVisible()
+    await expect(
+      authenticatedPage.getByLabel('Team / workspace'),
     ).toBeVisible()
     await expect(
       authenticatedPage.getByRole('button', { name: 'Build' }),
@@ -113,10 +32,12 @@ test.describe('Containers page (UI + mocked API)', () => {
     authenticatedPage,
   }) => {
     await authenticatedPage.goto('/containers')
-    const sourceInput = authenticatedPage.getByLabel(
-      /Docker image reference or Git clone URL/i,
-    )
-    await sourceInput.fill('nginx:alpine')
+    const sourceInput = authenticatedPage.getByLabel('Deploy source')
+    await sourceInput.click()
+    await sourceInput.fill('nginx')
+    await authenticatedPage
+      .getByRole('option', { name: 'nginx:alpine', exact: true })
+      .click()
     await expect(
       authenticatedPage.getByText('Image reference found.'),
     ).toBeVisible()
@@ -125,20 +46,47 @@ test.describe('Containers page (UI + mocked API)', () => {
       authenticatedPage.getByRole('alert').filter({ hasText: 'Started' }),
     ).toBeVisible()
     await expect(
-      authenticatedPage.getByRole('link', { name: mockRunResponse.public_url }),
+      authenticatedPage.getByRole('link', { name: /https:\/\/.*apps\.e2e\.test\// }),
     ).toBeVisible()
   })
 
-  test('Git branch field appears for https source', async ({
+  test('Git branch field appears for GitHub repo source', async ({
     authenticatedPage,
   }) => {
     await authenticatedPage.goto('/containers')
-    const sourceInput = authenticatedPage.getByLabel(
-      /Docker image reference or Git clone URL/i,
-    )
-    await sourceInput.fill('https://github.com/org/repo.git')
+    const sourceInput = authenticatedPage.getByLabel('Deploy source')
+    await sourceInput.click()
+    await sourceInput.fill('github.com/org/repo')
+    await authenticatedPage.getByRole('option', { name: 'org/repo' }).click()
     await expect(
       authenticatedPage.getByLabel('Git branch'),
     ).toBeVisible()
+    await authenticatedPage.getByRole('button', { name: 'Analyze repository' }).click()
+    await expect(
+      authenticatedPage.getByText('Analyzing repository…'),
+    ).toBeHidden({ timeout: 15_000 })
+    await expect(authenticatedPage.getByLabel('Container port')).toHaveValue('5173')
   })
+
+  test('advanced env and start command can be set before build', async ({
+    authenticatedPage,
+  }) => {
+    await authenticatedPage.goto('/containers')
+    const sourceInput = authenticatedPage.getByLabel('Deploy source')
+    await sourceInput.click()
+    await sourceInput.fill('nginx')
+    await authenticatedPage.getByRole('option', { name: 'nginx:alpine', exact: true }).click()
+    await expect(
+      authenticatedPage.getByText('Image reference found.'),
+    ).toBeVisible()
+    await authenticatedPage.getByRole('button', { name: 'Advanced options' }).click()
+    await authenticatedPage.getByLabel('Environment variable name 1').fill('FOO')
+    await authenticatedPage.getByLabel('Environment variable value 1').fill('bar')
+    await authenticatedPage.getByLabel('Start command').fill('nginx -g daemon off;')
+    await authenticatedPage.getByRole('button', { name: 'Build' }).click()
+    await expect(
+      authenticatedPage.getByRole('alert').filter({ hasText: 'Started' }),
+    ).toBeVisible()
+  })
+
 })

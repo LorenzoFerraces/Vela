@@ -2,12 +2,13 @@ import { NavLink, useNavigate } from 'react-router-dom'
 import { useAuth } from '../auth/AuthContext'
 import UserAvatar from './UserAvatar'
 import { getUserDisplayLabel } from '../utils/userDisplay'
+import { VelaMarkIcon } from './VelaMarkIcon'
 
 const navItems = [
   { to: '/dashboard', label: 'Dashboard' },
   { to: '/containers', label: 'Containers' },
   { to: '/builder', label: 'Builder' },
-  { to: '/images', label: 'Images' },
+  { to: '/teams', label: 'Teams' },
   { to: '/settings', label: 'Settings' },
 ] as const
 
@@ -25,8 +26,8 @@ export default function Navbar() {
   return (
     <header className="navbar">
       <NavLink to="/" className="navbar__brand" end>
-        <span className="navbar__logo" aria-hidden>
-          ▲
+        <span className="vela-icon-box navbar__logo" aria-hidden>
+          <VelaMarkIcon size={12} />
         </span>
         <span className="navbar__title">Vela</span>
       </NavLink>

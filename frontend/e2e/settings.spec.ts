@@ -62,43 +62,33 @@ test.describe('Settings page', () => {
   })
 
   test('renders the disconnected GitHub card with a Connect button', async ({
-    authenticatedPage,
+    authenticatedPageNoGithub,
   }) => {
-    await authenticatedPage.goto('/settings')
+    await authenticatedPageNoGithub.goto('/settings')
     await expect(
-      authenticatedPage.getByRole('heading', { name: 'GitHub', level: 3 }),
+      authenticatedPageNoGithub.getByRole('heading', { name: 'GitHub', level: 3 }),
     ).toBeVisible()
     await expect(
-      authenticatedPage.getByRole('button', { name: 'Connect GitHub' }),
+      authenticatedPageNoGithub.getByRole('button', { name: 'Connect GitHub' }),
     ).toBeVisible()
   })
 
   test('renders the connected GitHub card with login, scopes, and Disconnect', async ({
     authenticatedPage,
   }) => {
-    await authenticatedPage.route(
-      '**/api/auth/github/status',
-      async (route) => {
-        await route.fulfill({
-          status: 200,
-          contentType: 'application/json',
-          body: JSON.stringify(connectedGithubStatus),
-        })
-      },
-    )
-
     await authenticatedPage.goto('/settings')
     await expect(
-      authenticatedPage.getByText(`@${connectedGithubStatus.login}`),
+      authenticatedPage.getByText('@vela-user'),
     ).toBeVisible()
     await expect(
       authenticatedPage.getByRole('list', {
         name: 'Granted GitHub scopes',
       }),
     ).toBeVisible()
-    for (const scope of connectedGithubStatus.scopes) {
-      await expect(authenticatedPage.getByText(scope, { exact: true })).toBeVisible()
-    }
+    await expect(authenticatedPage.getByText('repo', { exact: true })).toBeVisible()
+    await expect(
+      authenticatedPage.getByText('read:user', { exact: true }),
+    ).toBeVisible()
     await expect(
       authenticatedPage.getByRole('button', { name: 'Disconnect' }),
     ).toBeVisible()
@@ -112,5 +102,17 @@ test.describe('Settings page', () => {
       authenticatedPage.getByText('GitHub account connected.'),
     ).toBeVisible()
     await expect(authenticatedPage).toHaveURL(/\/settings$/)
+  })
+
+  test('renders AI deploy analysis preferences', async ({
+    authenticatedPage,
+  }) => {
+    await authenticatedPage.goto('/settings')
+    await expect(
+      authenticatedPage.getByRole('heading', { name: 'AI deploy analysis', level: 3 }),
+    ).toBeVisible()
+    await expect(
+      authenticatedPage.getByRole('checkbox', { name: 'Container port' }),
+    ).toBeChecked()
   })
 })

@@ -1,4 +1,13 @@
+<p align="center">
+  <img src="docs/assets/vela-logo.png" alt="Vela" width="320" />
+  <br />
+  <sub>Logo by Fedra Bacigalupo</sub>
+</p>
+
 # Vela
+
+[![CI](https://github.com/LorenzoFerraces/Vela/actions/workflows/ci.yml/badge.svg)](https://github.com/LorenzoFerraces/Vela/actions/workflows/ci.yml)
+[![License: GPL-3.0](https://img.shields.io/github/license/LorenzoFerraces/Vela)](LICENSE)
 
 FastAPI backend, Vite/React frontend, optional Traefik as an edge proxy, and PostgreSQL for users and related data.
 
@@ -74,6 +83,13 @@ Create `backend/.env` as needed. Common variables:
 | `VELA_GITHUB_OAUTH_REDIRECT_URI` | Public URL of `GET /api/auth/github/callback`, e.g. `http://localhost:8000/api/auth/github/callback` |
 | `VELA_GITHUB_OAUTH_SCOPES` | Comma-separated scopes requested from GitHub (default `repo,read:user`) |
 | `VELA_TOKEN_ENCRYPTION_KEY` | Fernet key used to encrypt third-party access tokens at rest. Generate with `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"` |
+| `VELA_GEMINI_API_KEY` | Google Gemini API key for GitHub repo analysis (pre-fill on Containers). Optional; without it, analysis uses deterministic project detection |
+| `VELA_GEMINI_MODEL` | Optional Gemini model id (default `gemini-2.0-flash`) |
+| `BREVO_API_KEY` | Brevo transactional API key for container alert emails ([Python SDK](https://developers.brevo.com/guides/python); free tier ~300/day) |
+| `BREVO_SENDER_EMAIL` | Verified sender address in Brevo (required with `BREVO_API_KEY`) |
+| `BREVO_SENDER_NAME` | Optional From name (default `Vela`) |
+| `VELA_LOG_LEVEL` | App + uvicorn log level: `DEBUG`, `INFO`, `WARNING`, `ERROR` (default `INFO`) |
+| `VELA_CONTAINER_MONITOR_INTERVAL_SECONDS` | Container alert poll interval in seconds (default `15`) |
 
 ```powershell
 python run.py
@@ -101,16 +117,15 @@ Profile photos are stored in object storage (Cloudflare R2 in production). Set i
 
 Most **`/api/containers/**`** routes require that bearer token. Containers are scoped per user (Docker label `vela.owner_id`).
 
-### User library (saved image refs and Dockerfile templates)
+### User library (Dockerfile templates)
 
-Per-user records stored in PostgreSQL (not the Docker engine):
+Per-user Dockerfile templates are stored in PostgreSQL (not the Docker engine):
 
-- **`GET/POST /api/saved-images/`**, **`GET/PATCH/DELETE /api/saved-images/{id}`** — bookmarked registry references (e.g. `nginx:alpine`).
-- **`GET/POST /api/dockerfiles/`**, **`GET/PATCH/DELETE /api/dockerfiles/{id}`** — named Dockerfile snippets.
+- **`GET/POST /api/dockerfiles/`**, **`GET/PATCH/DELETE /api/dockerfiles/{id}`** — named Dockerfile snippets. Manage them on the **Builder** page; pick them when deploying from **Containers** (`GET /api/containers/deploy-sources`).
 
-These routes require the same bearer token as containers. Names and refs are unique per user.
+Template names are unique per user.
 
-**`/api/images`** is separate: it lists tags on the **local Docker host**, pulls images, and builds from a server path — it does not read the saved library tables.
+**`/api/images`** is separate: it lists tags on the **local Docker host**, pulls images, and builds from a server path — it does not read the `dockerfiles` table.
 
 ### GitHub integration (private repos)
 
@@ -182,7 +197,7 @@ Useful variants:
 | `npm run test:e2e:headed` | Watch the browser |
 | `npm run test:e2e:ui` | Open the Playwright UI runner |
 
-The CI workflow (`.github/workflows/e2e.yml`) installs Python + Node + Chromium and runs the full suite on every push and pull request that touches `frontend/` or `backend/`.
+The CI workflow (`.github/workflows/ci.yml`) installs Python + Node + Chromium and runs backend pytest and the Playwright suite on every push and pull request that touches `frontend/` or `backend/`.
 
 ## Troubleshooting
 

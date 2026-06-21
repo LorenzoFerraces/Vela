@@ -208,6 +208,14 @@ export async function apiGet<T>(path: string): Promise<T> {
   return apiRequest<T>(path, { method: 'GET' })
 }
 
+/**
+ * Send a JSON POST request to the API and return the parsed JSON response.
+ *
+ * @param path - Path relative to the API base (leading slash optional)
+ * @param body - Value to JSON-serialize and send as the request body
+ * @param options - Optional request options; when `options.skipAuth` is true the Authorization header is not attached and 401 handling that clears stored tokens is skipped
+ * @returns The response body parsed as JSON mapped to `TResponse`
+ */
 export async function apiPost<TResponse, TBody = unknown>(
   path: string,
   body: TBody,
@@ -220,6 +228,13 @@ export async function apiPost<TResponse, TBody = unknown>(
   )
 }
 
+/**
+ * Send a PATCH request with a JSON body to the given API path and return the parsed response.
+ *
+ * @param path - API path (will be resolved against the configured API base URL)
+ * @param body - Payload to serialize as JSON and include in the request body
+ * @returns The parsed JSON response as `TResponse`
+ */
 export async function apiPatch<TResponse, TBody = unknown>(
   path: string,
   body: TBody
@@ -230,6 +245,14 @@ export async function apiPatch<TResponse, TBody = unknown>(
   })
 }
 
+/**
+ * Send a DELETE request to the API for the given path.
+ *
+ * Attaches an `Authorization: Bearer <token>` header when an access token is available.
+ * On a 401 response the stored access token is cleared and registered unauthorized listeners are notified.
+ *
+ * @param path - API path relative to the configured API base URL (leading `/` is optional)
+ */
 export async function apiDelete(path: string): Promise<void> {
   const url = `${getApiBaseUrl()}${path.startsWith('/') ? path : `/${path}`}`
   const headers = new Headers({ Accept: 'application/json' })
@@ -308,10 +331,24 @@ export interface ContainerInfo {
   health: string
   /** Public edge URL when Traefik route labels are present on the container. */
   access_url?: string | null
+  /** From vela.source_kind label when the workload was deployed via the run API. */
+  source_kind?: RunSourceKind | null
+  /** User-facing source (template name, image ref, Git URL) from vela.source_ref. */
+  source_label?: string | null
+  /** Caller's role for this container's project. */
+  access_role?: ProjectRole | null
 }
 
+export type ProjectRole = 'owner' | 'operator' | 'viewer'
+
+export type RunSourceKind = 'image' | 'git' | 'dockerfile_template'
+
 export interface RunFromSourceRequest {
-  source: string
+  source_kind?: RunSourceKind
+  source?: string
+  image_ref?: string
+  git_url?: string
+  dockerfile_template_id?: string
   container_name?: string | null
   host_port?: number | null
   container_port?: number
@@ -320,11 +357,14 @@ export interface RunFromSourceRequest {
   route_path_prefix?: string
   route_tls?: boolean
   public_route?: boolean
+  env_vars?: Record<string, string>
+  command?: string[] | null
+  project_id?: string | null
 }
 
 export interface RunFromSourceResponse {
   container: ContainerInfo
-  kind: 'image' | 'git'
+  kind: RunSourceKind
   image: string
   route_wired: boolean
   public_url?: string | null
@@ -358,6 +398,46 @@ export interface ImageSuggestion {
   source: ImageSuggestionSource
 }
 
+export type DeploySourceSuggestion =
+  | { kind: 'image'; ref: string; label: string }
+  | {
+      kind: 'git'
+      url: string
+      name: string
+      default_branch: string
+    }
+  | { kind: 'dockerfile_template'; id: string; name: string }
+
+/**
+ * Fetches deploy source suggestions that match the provided query.
+ *
+ * @param query - Search string used to find matching deploy sources
+ * @param options - Optional parameters for the request
+ * @param options.limit - Maximum number of suggestions to return
+ * @returns An array of DeploySourceSuggestion objects matching the query
+ */
+export async function getDeploySourceSuggestions(
+  query: string,
+  options: { limit?: number } = {}
+): Promise<DeploySourceSuggestion[]> {
+  const params = new URLSearchParams({ q: query })
+  if (options.limit != null) {
+    params.set('limit', String(options.limit))
+  }
+  const data = await apiGet<{ suggestions: DeploySourceSuggestion[] }>(
+    `/api/containers/deploy-sources?${params.toString()}`
+  )
+  return data.suggestions
+}
+
+/**
+ * Fetches image suggestions that match the given query.
+ *
+ * @param query - The search text used to find image suggestions
+ * @param options - Optional settings for the request
+ * @param options.limit - Maximum number of suggestions to return
+ * @returns The list of matching image suggestion objects
+ */
 export async function getImageSuggestions(
   query: string,
   options: { limit?: number } = {}
@@ -483,6 +563,296 @@ export async function runContainerFromSource(
   return apiPost<RunFromSourceResponse, RunFromSourceRequest>(
     '/api/containers/run',
     body
+  )
+}
+
+export type AiPrefillPreferences = {
+  git_branch: boolean
+  container_port: boolean
+  container_name: boolean
+  env_vars: boolean
+  start_command: boolean
+}
+
+export type AiPrefillPreferencesUpdate = Partial<AiPrefillPreferences>
+
+export type GitSourceAnalysis = {
+  git_branch: string | null
+  container_port: number
+  container_name: string | null
+  env_vars: Record<string, string>
+  start_command: string[] | null
+  language: string | null
+  framework: string | null
+  has_dockerfile: boolean
+  build_strategy: 'dockerfile_exists' | 'generated_dockerfile'
+  summary_hint: string
+}
+
+export type DeploymentRecord = {
+  id: string
+  user_id: string
+  author_email: string
+  container_id: string
+  container_name: string | null
+  source_kind: RunSourceKind
+  source_ref: string
+  git_branch: string | null
+  image_tag: string
+  container_port: number
+  env_vars: Record<string, string>
+  command: string[] | null
+  dockerfile_snapshot: string | null
+  public_url: string | null
+  created_at: string
+}
+
+export type DeploymentEnvDiff = {
+  added: Record<string, string>
+  removed: Record<string, string>
+  changed: Record<string, { before: string; after: string }>
+}
+
+export type DeploymentDiffResponse = {
+  left_id: string
+  right_id: string
+  env: DeploymentEnvDiff
+  dockerfile_diff: string[]
+}
+
+export async function getAiPrefillPreferences(): Promise<AiPrefillPreferences> {
+  return apiGet<AiPrefillPreferences>('/api/settings/ai-prefill')
+}
+
+export async function patchAiPrefillPreferences(
+  patch: AiPrefillPreferencesUpdate
+): Promise<AiPrefillPreferences> {
+  return apiPatch<AiPrefillPreferences, AiPrefillPreferencesUpdate>(
+    '/api/settings/ai-prefill',
+    patch
+  )
+}
+
+export async function getGeminiConfigStatus(): Promise<{ configured: boolean }> {
+  return apiGet<{ configured: boolean }>('/api/settings/gemini-status')
+}
+
+// --- Email Notifications ---
+
+export type EmailNotificationPreferences = {
+  id: string | null
+  user_id: string
+  email: string
+  alerts_enabled: boolean
+  alert_types: Array<'stop' | 'failure' | 'unhealthy'>
+  alert_frequency: 'immediate' | 'daily_digest' | 'weekly_summary'
+  created_at: string
+  updated_at: string
+}
+
+export type EmailNotificationPreferencesUpdate = Partial<Omit<EmailNotificationPreferences, 'id' | 'user_id' | 'created_at' | 'updated_at'>>
+
+export type AlertHistoryEntry = {
+  id: string
+  container_id: string
+  event_type: string
+  sent_at: string
+  email_sent_to: string | null
+  status: 'sent' | 'failed'
+}
+
+export async function getEmailNotificationPreferences(): Promise<EmailNotificationPreferences> {
+  return apiGet<EmailNotificationPreferences>('/api/settings/email-notifications')
+}
+
+export async function updateEmailNotificationPreferences(
+  patch: EmailNotificationPreferencesUpdate
+): Promise<EmailNotificationPreferences> {
+  return apiPatch<EmailNotificationPreferences, EmailNotificationPreferencesUpdate>(
+    '/api/settings/email-notifications',
+    patch
+  )
+}
+
+export async function getAlertHistory(options: {
+  limit?: number
+  container_id?: string
+} = {}): Promise<AlertHistoryEntry[]> {
+  const params = new URLSearchParams()
+  if (options.limit != null) {
+    params.set('limit', String(options.limit))
+  }
+  if (options.container_id) {
+    params.set('container_id', options.container_id)
+  }
+  const query = params.toString()
+  return apiGet<AlertHistoryEntry[]>(
+    query ? `/api/settings/email-notifications/history?${query}` : '/api/settings/email-notifications/history'
+  )
+}
+
+// --- Team / projects ---
+
+export type Project = {
+  id: string
+  name: string
+  is_personal: boolean
+  role: ProjectRole
+  owner_email: string
+}
+
+export type ProjectMember = {
+  user_id: string
+  email: string
+  role: ProjectRole
+  created_at: string
+}
+
+export type ProjectInvitation = {
+  id: string
+  invitee_user_id: string
+  email: string
+  role: 'operator' | 'viewer'
+  created_at: string
+}
+
+export type IncomingProjectInvitation = {
+  id: string
+  project_id: string
+  project_name: string
+  inviter_email: string
+  role: 'operator' | 'viewer'
+  created_at: string
+}
+
+export async function listProjects(): Promise<Project[]> {
+  return apiGet<Project[]>('/api/projects/')
+}
+
+export async function createProject(name: string): Promise<Project> {
+  return apiPost<Project, { name: string }>('/api/projects/', { name })
+}
+
+export async function apiPostEmpty(path: string): Promise<void> {
+  const url = `${getApiBaseUrl()}${path.startsWith('/') ? path : `/${path}`}`
+  const headers = new Headers({ Accept: 'application/json', 'Content-Type': 'application/json' })
+  const token = getAccessToken()
+  if (token) {
+    headers.set('Authorization', `Bearer ${token}`)
+  }
+  const response = await fetch(url, { method: 'POST', headers, body: '{}' })
+  await readEmptyOk(response)
+}
+
+export async function leaveProject(projectId: string): Promise<void> {
+  await apiPostEmpty(
+    `/api/projects/${encodeURIComponent(projectId)}/leave`,
+  )
+}
+
+export async function listProjectMembers(projectId: string): Promise<ProjectMember[]> {
+  return apiGet<ProjectMember[]>(`/api/projects/${encodeURIComponent(projectId)}/members`)
+}
+
+export async function listProjectInvitations(projectId: string): Promise<ProjectInvitation[]> {
+  return apiGet<ProjectInvitation[]>(
+    `/api/projects/${encodeURIComponent(projectId)}/invitations`
+  )
+}
+
+export async function createProjectInvitation(
+  projectId: string,
+  body: { email: string; role: 'operator' | 'viewer' }
+): Promise<ProjectInvitation> {
+  return apiPost<ProjectInvitation, { email: string; role: 'operator' | 'viewer' }>(
+    `/api/projects/${encodeURIComponent(projectId)}/invitations`,
+    body
+  )
+}
+
+export async function cancelProjectInvitation(
+  projectId: string,
+  invitationId: string
+): Promise<void> {
+  await apiDelete(
+    `/api/projects/${encodeURIComponent(projectId)}/invitations/${encodeURIComponent(invitationId)}`
+  )
+}
+
+export async function listIncomingInvitations(): Promise<IncomingProjectInvitation[]> {
+  return apiGet<IncomingProjectInvitation[]>('/api/projects/invitations/incoming')
+}
+
+export async function acceptProjectInvitation(invitationId: string): Promise<Project> {
+  return apiPost<Project>(
+    `/api/projects/invitations/${encodeURIComponent(invitationId)}/accept`,
+    {}
+  )
+}
+
+export async function rejectProjectInvitation(invitationId: string): Promise<void> {
+  await apiPostEmpty(
+    `/api/projects/invitations/${encodeURIComponent(invitationId)}/reject`,
+  )
+}
+
+export async function updateProjectMemberRole(
+  projectId: string,
+  userId: string,
+  role: 'operator' | 'viewer'
+): Promise<ProjectMember> {
+  return apiPatch<ProjectMember, { role: 'operator' | 'viewer' }>(
+    `/api/projects/${encodeURIComponent(projectId)}/members/${encodeURIComponent(userId)}`,
+    { role }
+  )
+}
+
+export async function removeProjectMember(
+  projectId: string,
+  userId: string
+): Promise<void> {
+  await apiDelete(
+    `/api/projects/${encodeURIComponent(projectId)}/members/${encodeURIComponent(userId)}`
+  )
+}
+
+export function containerWriteAllowed(container: ContainerInfo): boolean {
+  return container.access_role === 'owner' || container.access_role === 'operator'
+}
+
+export async function analyzeGitSource(body: {
+  git_url: string
+  git_branch: string
+}): Promise<GitSourceAnalysis> {
+  return apiPost<GitSourceAnalysis, typeof body>(
+    '/api/builder/analyze-source',
+    body
+  )
+}
+
+export async function listDeployments(options: {
+  container_name?: string
+  limit?: number
+} = {}): Promise<DeploymentRecord[]> {
+  const params = new URLSearchParams()
+  if (options.container_name) {
+    params.set('container_name', options.container_name)
+  }
+  if (options.limit != null) {
+    params.set('limit', String(options.limit))
+  }
+  const query = params.toString()
+  return apiGet<DeploymentRecord[]>(
+    query ? `/api/deployments/?${query}` : '/api/deployments/'
+  )
+}
+
+export async function getDeploymentDiff(
+  leftId: string,
+  rightId: string
+): Promise<DeploymentDiffResponse> {
+  return apiGet<DeploymentDiffResponse>(
+    `/api/deployments/${encodeURIComponent(leftId)}/diff/${encodeURIComponent(rightId)}`
   )
 }
 
@@ -688,7 +1058,16 @@ export async function fetchAllGithubRepos(): Promise<GithubRepo[]> {
 }
 
 /**
- * Filter repos by ``query``: tries case-insensitive ``RegExp``; if the pattern is invalid, falls back to substring match on ``full_name`` and ``description``.
+ * Filter a list of GitHub repositories by a search query.
+ *
+ * The function trims `query` and, if non-empty, attempts a case-insensitive
+ * `RegExp` match against each repo's `full_name` and `description`. If the
+ * regex is invalid, it falls back to a case-insensitive substring search.
+ * An empty or whitespace-only `query` returns the original `repos` array.
+ *
+ * @param repos - Array of repositories to filter
+ * @param query - Search string or regular-expression pattern
+ * @returns The repositories whose `full_name` or `description` match `query`
  */
 export function filterGithubReposByQuery(
   repos: GithubRepo[],
@@ -717,6 +1096,7 @@ export function filterGithubReposByQuery(
   }
 }
 
+<<<<<<< HEAD
 // --- User library (saved image refs, Dockerfile templates) ---
 
 export interface SavedImage {
@@ -724,6 +1104,9 @@ export interface SavedImage {
   ref: string
   created_at: string
 }
+=======
+// --- User library (Dockerfile templates) ---
+>>>>>>> d4db03c7e445b5635085f0f79f2f27dc26290f28
 
 export interface DockerfileTemplate {
   id: string
@@ -733,6 +1116,7 @@ export interface DockerfileTemplate {
   updated_at: string
 }
 
+<<<<<<< HEAD
 export async function listSavedImages(): Promise<SavedImage[]> {
   return apiGet<SavedImage[]>('/api/saved-images/')
 }
@@ -755,10 +1139,26 @@ export async function deleteSavedImage(imageId: string): Promise<void> {
   await apiDelete(`/api/saved-images/${encodeURIComponent(imageId)}`)
 }
 
+=======
+/**
+ * Retrieves all Dockerfile templates in the user's library.
+ *
+ * @returns An array of `DockerfileTemplate` objects
+ */
+>>>>>>> d4db03c7e445b5635085f0f79f2f27dc26290f28
 export async function listDockerfileTemplates(): Promise<DockerfileTemplate[]> {
   return apiGet<DockerfileTemplate[]>('/api/dockerfiles/')
 }
 
+<<<<<<< HEAD
+=======
+/**
+ * Create a new Dockerfile template.
+ *
+ * @param body - The template payload containing `name` and `contents`
+ * @returns The created `DockerfileTemplate`
+ */
+>>>>>>> d4db03c7e445b5635085f0f79f2f27dc26290f28
 export async function createDockerfileTemplate(body: {
   name: string
   contents: string
@@ -769,6 +1169,16 @@ export async function createDockerfileTemplate(body: {
   )
 }
 
+<<<<<<< HEAD
+=======
+/**
+ * Update an existing Dockerfile template.
+ *
+ * @param templateId - The identifier of the Dockerfile template to update
+ * @param body - Partial template fields to change; may include `name` and/or `contents`
+ * @returns The updated DockerfileTemplate
+ */
+>>>>>>> d4db03c7e445b5635085f0f79f2f27dc26290f28
 export async function updateDockerfileTemplate(
   templateId: string,
   body: { name?: string; contents?: string }
@@ -779,10 +1189,28 @@ export async function updateDockerfileTemplate(
   )
 }
 
+<<<<<<< HEAD
+=======
+/**
+ * Delete a Dockerfile template by its identifier.
+ *
+ * @param templateId - The ID of the Dockerfile template to remove
+ */
+>>>>>>> d4db03c7e445b5635085f0f79f2f27dc26290f28
 export async function deleteDockerfileTemplate(templateId: string): Promise<void> {
   await apiDelete(`/api/dockerfiles/${encodeURIComponent(templateId)}`)
 }
 
+<<<<<<< HEAD
+=======
+/**
+ * Fetches the branches for a GitHub repository identified by its full name.
+ *
+ * @param fullName - The repository full name in the form `owner/repo`
+ * @returns The list of repository branches
+ * @throws Error when `fullName` is not in the `owner/repo` format
+ */
+>>>>>>> d4db03c7e445b5635085f0f79f2f27dc26290f28
 export async function listGithubRepoBranches(
   fullName: string
 ): Promise<GithubBranch[]> {

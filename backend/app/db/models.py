@@ -1,13 +1,21 @@
-"""ORM models (users, OAuth identities, per-user images and Dockerfiles)."""
+"""ORM models (users, OAuth identities, per-user Dockerfiles)."""
 
 from __future__ import annotations
 
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import DateTime, ForeignKey, LargeBinary, String, Text, UniqueConstraint
+from sqlalchemy import (
+    DateTime,
+    ForeignKey,
+    Integer,
+    LargeBinary,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
-from sqlalchemy.types import Uuid
+from sqlalchemy.types import JSON, Uuid
 
 from app.db.base import Base
 
@@ -37,12 +45,16 @@ class User(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=_utcnow
     )
+    ai_prefill_preferences: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    personal_project_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("projects.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
 
     oauth_identities: Mapped[list["UserOAuthIdentity"]] = relationship(
         back_populates="user", cascade="all, delete-orphan"
-    )
-    images: Mapped[list["Image"]] = relationship(
-        back_populates="owner", cascade="all, delete-orphan"
     )
     dockerfiles: Mapped[list["Dockerfile"]] = relationship(
         back_populates="owner", cascade="all, delete-orphan"
@@ -97,31 +109,6 @@ class UserOAuthIdentity(Base):
     user: Mapped[User] = relationship(back_populates="oauth_identities")
 
 
-class Image(Base):
-    __tablename__ = "images"
-    __table_args__ = (
-        UniqueConstraint("owner_id", "ref", name="uq_images_owner_ref"),
-    )
-
-    id: Mapped[uuid.UUID] = mapped_column(
-        Uuid(as_uuid=True),
-        primary_key=True,
-        default=uuid.uuid4,
-    )
-    owner_id: Mapped[uuid.UUID] = mapped_column(
-        Uuid(as_uuid=True),
-        ForeignKey("users.id", ondelete="CASCADE"),
-        nullable=False,
-        index=True,
-    )
-    ref: Mapped[str] = mapped_column(String(512), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, default=_utcnow
-    )
-
-    owner: Mapped[User] = relationship(back_populates="images")
-
-
 class Dockerfile(Base):
     __tablename__ = "dockerfiles"
     __table_args__ = (
@@ -149,3 +136,221 @@ class Dockerfile(Base):
     )
 
     owner: Mapped[User] = relationship(back_populates="dockerfiles")
+
+
+class Organization(Base):
+    __tablename__ = "organizations"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    name: Mapped[str] = mapped_column(String(320), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utcnow
+    )
+
+    projects: Mapped[list["Project"]] = relationship(back_populates="organization")
+
+
+class Project(Base):
+    __tablename__ = "projects"
+    __table_args__ = (
+        UniqueConstraint("organization_id", "name", name="uq_projects_org_name"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("organizations.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    is_personal: Mapped[bool] = mapped_column(nullable=False, default=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utcnow
+    )
+
+    organization: Mapped[Organization] = relationship(back_populates="projects")
+    memberships: Mapped[list["ProjectMembership"]] = relationship(
+        back_populates="project", cascade="all, delete-orphan"
+    )
+    invitations: Mapped[list["ProjectInvitation"]] = relationship(
+        back_populates="project", cascade="all, delete-orphan"
+    )
+
+
+class ProjectMembership(Base):
+    __tablename__ = "project_memberships"
+    __table_args__ = (
+        UniqueConstraint(
+            "project_id", "user_id", name="uq_project_memberships_project_user"
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    project_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("projects.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    role: Mapped[str] = mapped_column(String(32), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utcnow
+    )
+
+    project: Mapped[Project] = relationship(back_populates="memberships")
+    user: Mapped[User] = relationship()
+
+
+class ProjectInvitation(Base):
+    __tablename__ = "project_invitations"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    project_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("projects.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    invitee_user_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    invited_by_user_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    role: Mapped[str] = mapped_column(String(32), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utcnow
+    )
+    responded_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    project: Mapped[Project] = relationship(back_populates="invitations")
+    invitee: Mapped[User] = relationship(foreign_keys=[invitee_user_id])
+    invited_by: Mapped[User] = relationship(foreign_keys=[invited_by_user_id])
+
+
+class DeploymentRecord(Base):
+    __tablename__ = "deployment_records"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    project_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("projects.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    container_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    container_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    source_kind: Mapped[str] = mapped_column(String(32), nullable=False)
+    source_ref: Mapped[str] = mapped_column(String(2048), nullable=False)
+    git_branch: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    image_tag: Mapped[str] = mapped_column(String(512), nullable=False)
+    container_port: Mapped[int] = mapped_column(Integer, nullable=False)
+    env_vars: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    command: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    dockerfile_snapshot: Mapped[str | None] = mapped_column(Text, nullable=True)
+    public_url: Mapped[str | None] = mapped_column(String(2048), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utcnow, index=True
+    )
+
+    user: Mapped[User] = relationship()
+
+
+class EmailPreference(Base):
+    __tablename__ = "email_preferences"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True,
+        index=True,
+    )
+    email: Mapped[str] = mapped_column(String(320), nullable=False)
+    alerts_enabled: Mapped[bool] = mapped_column(nullable=False, default=True)
+    alert_types: Mapped[list] = mapped_column(
+        JSON, nullable=False, default=lambda: ["stop", "failure", "unhealthy"]
+    )
+    alert_frequency: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="immediate"
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utcnow
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow
+    )
+
+    user: Mapped[User] = relationship()
+
+
+class AlertHistory(Base):
+    __tablename__ = "alert_history"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    container_id: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    event_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    alert_hash: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    sent_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utcnow, index=True
+    )
+    email_sent_to: Mapped[str | None] = mapped_column(String(320), nullable=True)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="sent")
+
+    user: Mapped[User] = relationship()

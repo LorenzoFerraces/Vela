@@ -9,6 +9,7 @@ from app.core.exceptions import (
     AvatarValidationError,
     BuilderError,
     CloneError,
+    GitSourceAnalysisError,
     UnsupportedProjectError,
     ContainerAlreadyRunningError,
     ContainerNotFoundError,
@@ -16,7 +17,6 @@ from app.core.exceptions import (
     DockerfileGenerationError,
     DockerfileTemplateNotFoundError,
     DuplicateDockerfileNameError,
-    DuplicateSavedImageError,
     EmailAlreadyRegisteredError,
     GitHubAccountAlreadyLinkedError,
     GitHubAPIError,
@@ -29,6 +29,15 @@ from app.core.exceptions import (
     InvalidCredentialsError,
     NotAuthenticatedError,
     ObjectStorageError,
+    AlreadyProjectMemberError,
+    DuplicateInvitationError,
+    InvitationAlreadyRespondedError,
+    InvitationNotFoundError,
+    ProjectAccessDeniedError,
+    ProjectError,
+    ProjectMemberNotFoundError,
+    ProjectNotFoundError,
+    UserNotRegisteredError,
     OrchestratorError,
     RegistryAccessDeniedError,
     ProviderConnectionError,
@@ -42,8 +51,19 @@ from app.core.exceptions import (
 )
 
 
+def _project_error_payload(exc: ProjectError, error_code: str) -> dict[str, str]:
+    return {"error": error_code, "detail": str(exc)}
+
+
 def register_exception_handlers(app) -> None:
-    """Register handlers for Vela domain errors."""
+    """
+    Register exception handlers on a FastAPI application that translate Vela domain errors into JSON HTTP responses.
+
+    Each installed handler maps a VelaError subclass (and related exceptions) to an appropriate HTTP status code and JSON response body (for some exceptions the handler uses the exception's api_response_content()). The registered handlers also add authentication headers where applicable.
+
+    Parameters:
+        app (FastAPI): The FastAPI application on which to register the exception handlers.
+    """
 
     @app.exception_handler(ImageNotFoundError)
     async def image_not_found_handler(
@@ -63,11 +83,70 @@ def register_exception_handlers(app) -> None:
             content=exc.api_response_content(),
         )
 
+    @app.exception_handler(ProjectNotFoundError)
+    @app.exception_handler(ProjectMemberNotFoundError)
+    @app.exception_handler(InvitationNotFoundError)
+    async def project_not_found_handler(
+        _request: Request, exc: ProjectError
+    ) -> JSONResponse:
+        codes = {
+            ProjectNotFoundError: "project_not_found",
+            ProjectMemberNotFoundError: "project_member_not_found",
+            InvitationNotFoundError: "invitation_not_found",
+        }
+        return JSONResponse(
+            status_code=status.HTTP_404_NOT_FOUND,
+            content=_project_error_payload(exc, codes[type(exc)]),
+        )
+
+    @app.exception_handler(ProjectAccessDeniedError)
+    async def project_access_denied_handler(
+        _request: Request, exc: ProjectAccessDeniedError
+    ) -> JSONResponse:
+        return JSONResponse(
+            status_code=status.HTTP_403_FORBIDDEN,
+            content=_project_error_payload(exc, "project_access_denied"),
+        )
+
+    @app.exception_handler(UserNotRegisteredError)
+    async def user_not_registered_handler(
+        _request: Request, exc: UserNotRegisteredError
+    ) -> JSONResponse:
+        return JSONResponse(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            content=_project_error_payload(exc, "user_not_registered"),
+        )
+
+    @app.exception_handler(AlreadyProjectMemberError)
+    @app.exception_handler(DuplicateInvitationError)
+    @app.exception_handler(InvitationAlreadyRespondedError)
+    async def project_conflict_handler(
+        _request: Request, exc: ProjectError
+    ) -> JSONResponse:
+        codes = {
+            AlreadyProjectMemberError: "already_project_member",
+            DuplicateInvitationError: "duplicate_invitation",
+            InvitationAlreadyRespondedError: "invitation_already_responded",
+        }
+        return JSONResponse(
+            status_code=status.HTTP_409_CONFLICT,
+            content=_project_error_payload(exc, codes[type(exc)]),
+        )
+
     @app.exception_handler(RouteNotFoundError)
     @app.exception_handler(ContainerNotFoundError)
-    @app.exception_handler(SavedImageNotFoundError)
     @app.exception_handler(DockerfileTemplateNotFoundError)
     async def not_found_handler(_request: Request, exc: VelaError) -> JSONResponse:
+        """
+        Produce a 404 Not Found JSON response for the given domain error.
+
+        Parameters:
+            _request (Request): The incoming HTTP request (unused).
+            exc (VelaError): The domain error to convert into the response.
+
+        Returns:
+            JSONResponse: Response with HTTP 404 and body `{"detail": str(exc)}`.
+        """
         return JSONResponse(
             status_code=status.HTTP_404_NOT_FOUND,
             content={"detail": str(exc)},
@@ -75,9 +154,18 @@ def register_exception_handlers(app) -> None:
 
     @app.exception_handler(ContainerAlreadyRunningError)
     @app.exception_handler(ContainerNotRunningError)
-    @app.exception_handler(DuplicateSavedImageError)
     @app.exception_handler(DuplicateDockerfileNameError)
     async def conflict_handler(_request: Request, exc: VelaError) -> JSONResponse:
+        """
+        Map a domain conflict error to an HTTP 409 Conflict JSON response.
+
+        Parameters:
+            _request (Request): Incoming request (unused).
+            exc (VelaError): Domain-layer error whose message will be placed in the response `detail`.
+
+        Returns:
+            JSONResponse: Response with status code 409 and body `{"detail": str(exc)}`.
+        """
         return JSONResponse(
             status_code=status.HTTP_409_CONFLICT,
             content={"detail": str(exc)},
@@ -227,6 +315,15 @@ def register_exception_handlers(app) -> None:
     ) -> JSONResponse:
         return JSONResponse(
             status_code=status.HTTP_502_BAD_GATEWAY,
+            content={"detail": str(exc)},
+        )
+
+    @app.exception_handler(GitSourceAnalysisError)
+    async def git_source_analysis_handler(
+        _request: Request, exc: GitSourceAnalysisError
+    ) -> JSONResponse:
+        return JSONResponse(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             content={"detail": str(exc)},
         )
 

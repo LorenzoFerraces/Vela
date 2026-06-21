@@ -33,7 +33,7 @@ flowchart TB
       RF["ContainersRunFormFields.tsx\nuseRunFormSource.ts"]
       GHUI["useGithubForContainersForm.ts\nContainersGithubRepoPickerPanel.tsx"]
       Client["api/client.ts"]
-      Auth["AuthProvider.tsx\nlocalStorage vela.access_token"]
+      Auth["localStorage vela.access_token"]
     end
   end
 

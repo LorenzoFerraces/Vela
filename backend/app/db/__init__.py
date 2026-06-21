@@ -7,12 +7,11 @@ from app.db.engine import (
     get_engine,
     get_session_factory,
 )
-from app.db.models import Dockerfile, Image, User, UserOAuthIdentity
+from app.db.models import Dockerfile, DeploymentRecord, User, UserOAuthIdentity
 
 __all__ = [
     "Base",
     "Dockerfile",
-    "Image",
     "User",
     "UserOAuthIdentity",
     "create_async_engine_from_env",

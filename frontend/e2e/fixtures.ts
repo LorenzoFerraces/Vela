@@ -1,95 +1,47 @@
 import { test as baseTest, expect, type Page } from '@playwright/test'
 
+import { loginAndSeedToken } from './auth-helpers'
+import {
+  E2E_USER_EMAIL,
+  E2E_USER_ID,
+  E2E_USER_NO_GITHUB_EMAIL,
+  E2E_USER_NO_GITHUB_PASSWORD,
+} from './constants'
+
 /**
  * Shared Playwright fixtures for Vela's UI tests.
  *
- * Most of the app is behind email+password auth. Spinning up a real Postgres
- * user per test would be slow and would couple every UI assertion to the auth
- * stack, so these fixtures fake the signed-in state at the browser boundary:
- *
- *   - Pre-seed `localStorage` with a fake access token under the same key the
- *     real app uses (`vela.access_token`).
- *   - Mock `GET /api/auth/me` so the `AuthProvider` resolves to authenticated
- *     on first render.
- *
- * Tests that need to exercise the real login form skip the fixture and drive
- * the form directly (see `auth.spec.ts`).
+ * Authenticated tests log in against the real API started by Playwright's
+ * webServer (see playwright.config.ts). No `/api/**` stubs for app flows.
  */
 
-export const fakeAccessToken = 'fake.e2e.token'
-
 export const fakeUser = {
-  id: '11111111-1111-1111-1111-111111111111',
-  email: 'e2e@vela.test',
+  id: E2E_USER_ID,
+  email: E2E_USER_EMAIL,
   created_at: '2026-01-15T12:00:00.000Z',
   display_name: null,
   pronouns: null,
   avatar_url: null,
 }
 
-export const disconnectedGithubStatus = {
-  connected: false,
-  login: null,
-  avatar_url: null,
-  scopes: [],
-  connected_at: null,
-}
-
-/**
- * Install the standard backend mocks every authenticated UI test relies on:
- *
- *   - `/api/auth/me` returns the fake user
- *   - `/api/auth/github/status` returns "disconnected" so the Settings/Containers
- *     pages do not hang waiting for a real GitHub OAuth response
- *
- * Individual tests override more endpoints as needed (e.g. container list).
- */
-async function installDefaultMocks(page: Page) {
-  await page.route('**/api/auth/me', async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify(fakeUser),
-    })
-  })
-
-  await page.route('**/api/auth/github/status', async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify(disconnectedGithubStatus),
-    })
-  })
-}
-
-/**
- * Seed the access token on the SPA origin before the app boots so
- * `AuthProvider` starts in the `loading` → `authenticated` path instead of
- * `anonymous`.
- */
-async function seedAccessToken(page: Page) {
-  await page.addInitScript((token) => {
-    try {
-      window.localStorage.setItem('vela.access_token', token)
-    } catch {
-      // localStorage can be unavailable in some sandboxed contexts.
-    }
-  }, fakeAccessToken)
-}
+export { loginAndSeedToken }
 
 type AuthenticatedFixtures = {
   authenticatedPage: Page
+  authenticatedPageNoGithub: Page
 }
 
-/**
- * `authenticatedPage` is a `Page` that the app will treat as a logged-in user
- * once it navigates anywhere. Default mocks for `/api/auth/me` and the GitHub
- * status endpoint are installed automatically.
- */
 export const test = baseTest.extend<AuthenticatedFixtures>({
   authenticatedPage: async ({ page }, use) => {
-    await seedAccessToken(page)
-    await installDefaultMocks(page)
+    await loginAndSeedToken(page)
+    await use(page)
+  },
+  authenticatedPageNoGithub: async ({ page }, use) => {
+    await loginAndSeedToken(
+      page,
+      E2E_USER_NO_GITHUB_EMAIL,
+      E2E_USER_NO_GITHUB_PASSWORD,
+    )
     await use(page)
   },
 })

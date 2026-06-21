@@ -16,10 +16,20 @@ from sqlalchemy.ext.asyncio import (
 
 from dotenv import load_dotenv
 
-load_dotenv(override=True)
+# Preserve Playwright / pytest env (e.g. ``VELA_E2E`` SQLite) — do not let ``.env`` clobber it.
+load_dotenv(override=os.environ.get("VELA_E2E", "").strip() != "1")
 
 
 def _database_url() -> str:
+    """
+    Load the VELA_DATABASE_URL environment variable and return it.
+    
+    Returns:
+        str: The database URL from VELA_DATABASE_URL with surrounding whitespace removed.
+    
+    Raises:
+        RuntimeError: If VELA_DATABASE_URL is not set or is empty; the error message instructs how to configure a SQLAlchemy async URL.
+    """
     url = os.environ.get("VELA_DATABASE_URL", "").strip()
     if not url:
         msg = (

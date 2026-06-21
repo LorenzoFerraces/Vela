@@ -9,9 +9,9 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
 from app.api.deps import get_orchestrator
-from app.core.default_image_builder import validate_local_build_context
-from app.core.orchestrator import ContainerOrchestrator
-from app.core.project_analysis import ensure_dockerfile_for_build
+from app.core.build.default_image_builder import validate_local_build_context
+from app.core.containers.orchestrator import ContainerOrchestrator
+from app.core.git.project_analysis import ensure_dockerfile_for_build
 
 
 class ImageBuildRequest(BaseModel):

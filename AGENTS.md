@@ -2,6 +2,9 @@
 
 Conventions for tooling, dependencies, naming, and Python style. Follow this file when changing the repo.
 
+## Repo management
+- **Keep the readme concise** when adding or updating the readme file, prevent it from being too verbose, prefer short explanations
+
 ## Package management (pnpm / npm)
 
 - **Do not introduce caret (`^`) or tilde (`~`) ranges** when adding or updating dependencies in `package.json`. Prefer **exact versions** (e.g. `"18.2.0"`, not `"^18.2.0"`).
@@ -33,10 +36,26 @@ Keep new and refactored code aligned with this separation of concerns under `bac
 
 When adding a feature, place logic in the right layer instead of growing “god” route modules.
 
+### `app/core/` domain packages
+
+Group related modules under `app/core/<domain>/` when that domain has **three or more** Python modules (count submodules in the package, not `__init__.py`). Smaller areas stay as single modules at `app/core/` root (e.g. `enums.py`, `models.py`, `exceptions.py`, `user_library.py`).
+
+Existing domains: `auth/`, `oauth/`, `security/`, `traffic/`, `containers/`, `build/`, `git/`, `deploy/`, `notifications/`. Prefer imports from the concrete module (e.g. `from app.core.traffic.traffic_router import TrafficRouter`) or the package’s public surface in `__init__.py` when re-exporting a small API.
+
+When a new feature grows past two modules in the same area, create or extend a domain package instead of adding more flat files at `app/core/`.
+
 ## Backend testing
 
-- **Core functionality** (auth, container ownership, orchestration boundaries, and other user-visible or safety-critical behavior) should be covered by **integration tests** in `backend/tests/` — typically exercising HTTP routes and real-ish wiring (e.g. `TestClient`, DB overrides where the suite uses SQLite, Docker mocks as the project already does).
-- **Model / unit tests** for pure domain helpers (e.g. `app/core/` without HTTP) are **optional** but encouraged when logic is non-trivial, easy to isolate, and cheaper to test than a full API path.
+- Prefer **real wiring** over mocks. Do not add tests that mock away the behavior you are trying to verify.
+- **Unit tests** are for **isolated** logic only: small models, validators, parsing helpers, and other pure functions in `app/core/` that do not need HTTP, DB, or Docker.
+- **Integration tests** are the default for API and user-visible behavior: exercise routes with `TestClient`, the real app factory, and in-memory SQLite (the existing `conftest` DB override). Call through to **core and route layers**; avoid replacing orchestrators, builders, or auth with `MagicMock` except where Docker, GitHub, or other external services are genuinely unavailable in CI — and keep any such mock narrowly scoped to that boundary.
+- When testing safety-critical paths (auth, ownership, deploy contracts), assert on **HTTP responses and persisted state**, not on whether a mock method was called.
+
+## Frontend testing
+
+- **E2E tests** (`frontend/e2e/`) should run the **real frontend against the real local API** (Playwright `webServer` config). Do **not** stub `/api/**` with `page.route` to fake responses for flows you are verifying; those tests should reflect end-to-end behavior.
+- Reserve browser network interception for **external systems** the app cannot control in dev (e.g. third-party OAuth redirects). Document why when interception is unavoidable.
+- **Unit or component tests** (if added) belong on small utilities and presentational pieces; page-level behavior belongs in unmocked E2E, not in tests that replace the API client with fixtures.
 
 ## Cleaning AI-generated changes (deslop)
 
@@ -54,11 +73,12 @@ After substantive agent-generated edits on a branch, run the **deslop** Cursor s
 
 - **Prioritize user experience** when designing and building interfaces: flows should feel clear, fast, and respectful of attention.
 - **Follow common UX patterns** where they apply: clear navigation and hierarchy, visible loading and success/error feedback, sensible empty states, destructive actions behind confirmation, keyboard-friendly controls where the rest of the app does the same. Stay consistent with existing pages in this repo before introducing a new interaction model.
+- **Loading states**: Prefer **skeleton placeholders** that mirror the final layout over blank screens or generic “Loading…” text. Keep structure stable so the page feels responsive. Use **optimistic UI** when it is safe (update local state immediately, reconcile on success or roll back with a clear error on failure) so actions feel instant.
 - **When usability or user flow is unclear** (e.g. multi-step flows, dense data, unfamiliar domain), ask for product or design guidance or propose **short** options in chat instead of guessing a one-off pattern.
 - **Keep form fields short and concise** (labels, placeholders, helper text). Prefer tight copy over verbose prose.
 - **Avoid long explanations** inline on the form; if something needs detail, link to docs or a collapsible help pattern rather than wall-of-text above fields.
 - **Long forms are fine to split**: use **multi-step flows** or **modals** (and related patterns) so users are not overwhelmed by a single scrolling page of inputs.
-- **Containers** (`frontend/src/pages/ContainersPage.tsx`): the run form always uses **public routes** (`public_route: true`), fixed **container port 80**, no host port mapping, and shows **Git branch** only when the source looks like a Git URL (same `git@` / `http(s)://` / `ssh://` prefix rules as `POST /api/containers/run` on the server).
+- **Containers** (`frontend/src/pages/ContainersPage.tsx`): the run form always uses **public routes** (`public_route: true`), a user-selected **container port** (defaults to 80; Git analysis may pre-fill when enabled in settings), no host port mapping, and shows **Git branch** only when the source looks like a Git URL (same `git@` / `http(s)://` / `ssh://` prefix rules as `POST /api/containers/run` on the server).
 
 ## Errors shown to users (frontend and API)
 
