@@ -41,7 +41,7 @@ export default function ProfileSection({
   useEffect(() => {
     setDisplayName(user.display_name ?? '')
     setPronouns(user.pronouns ?? '')
-  }, [user.display_name, user.pronouns, user.avatar_url])
+  }, [user.display_name, user.pronouns])
 
   async function handleSaveProfile(event: FormEvent) {
     event.preventDefault()
@@ -81,6 +81,7 @@ export default function ProfileSection({
 
   async function handleRemoveAvatar() {
     if (!user.avatar_url) return
+    if (!window.confirm('Remove your profile photo?')) return
     setAvatarBusy(true)
     setBanner(null)
     try {

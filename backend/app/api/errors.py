@@ -1,7 +1,11 @@
 """Map domain exceptions to HTTP responses."""
 
+import logging
+
 from fastapi import Request, status
 from fastapi.responses import JSONResponse
+
+logger = logging.getLogger(__name__)
 
 from app.core.exceptions import (
     AnalysisError,
@@ -312,9 +316,10 @@ def register_exception_handlers(app) -> None:
     async def object_storage_handler(
         _request: Request, exc: ObjectStorageError
     ) -> JSONResponse:
+        logger.error("Object storage error: %s", exc, exc_info=exc)
         return JSONResponse(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            content={"detail": str(exc)},
+            content={"detail": "Storage service unavailable."},
         )
 
     @app.exception_handler(GitSourceAnalysisError)

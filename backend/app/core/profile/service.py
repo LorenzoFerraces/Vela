@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import logging
 import uuid
 from datetime import datetime, timezone
+
+logger = logging.getLogger(__name__)
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -122,15 +125,23 @@ async def upload_avatar(
         await session.rollback()
         try:
             await object_storage.delete_object(key=new_key)
-        except Exception:
-            pass
+        except Exception as cleanup_error:
+            logger.warning(
+                "Failed to clean up orphaned avatar object %r after DB rollback: %s",
+                new_key,
+                cleanup_error,
+            )
         raise
 
     if previous_key and previous_key != new_key:
         try:
             await object_storage.delete_object(key=previous_key)
-        except Exception:
-            pass
+        except Exception as delete_error:
+            logger.warning(
+                "Failed to delete previous avatar object %r: %s",
+                previous_key,
+                delete_error,
+            )
 
     return user_to_snapshot(user, object_storage)
 
@@ -150,7 +161,11 @@ async def delete_avatar(
     if previous_key:
         try:
             await object_storage.delete_object(key=previous_key)
-        except Exception:
-            pass
+        except Exception as delete_error:
+            logger.warning(
+                "Failed to delete avatar object %r during removal: %s",
+                previous_key,
+                delete_error,
+            )
 
     return user_to_snapshot(user, object_storage)
