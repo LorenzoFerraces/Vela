@@ -169,7 +169,7 @@ class NotAuthenticatedError(AuthError):
     def __init__(self, message: str = "Not authenticated.") -> None:
         """
         Initialize the NotAuthenticatedError with an optional custom message.
-        
+
         Parameters:
             message (str): Error message to use for this exception. Defaults to "Not authenticated."
         """
@@ -189,7 +189,7 @@ class DockerfileTemplateNotFoundError(UserLibraryError):
     def __init__(self, template_id: str) -> None:
         """
         Initialize an exception for a missing Dockerfile template.
-        
+
         Parameters:
             template_id (str): Identifier of the Dockerfile template that was not found. The exception message will be "Dockerfile template not found: {template_id}".
         """
@@ -201,12 +201,25 @@ class DuplicateDockerfileNameError(UserLibraryError):
     def __init__(self, name: str) -> None:
         """
         Initialize the error for attempting to create a Dockerfile template with a name that already exists.
-        
+
         Parameters:
             name (str): The duplicate Dockerfile template name.
         """
         self.name = name
         super().__init__(f"You already have a Dockerfile template named {name!r}.")
+
+
+# ---------------------------------------------------------------------------
+# Object storage / profile avatars
+# ---------------------------------------------------------------------------
+
+
+class ObjectStorageError(VelaError):
+    """Base exception for blob storage failures."""
+
+
+class AvatarValidationError(VelaError):
+    """Raised when an uploaded avatar fails validation."""
 
 
 # ---------------------------------------------------------------------------
@@ -280,7 +293,9 @@ class ProjectMemberNotFoundError(ProjectError):
 
 
 class ProjectAccessDeniedError(ProjectError):
-    def __init__(self, message: str = "You do not have permission for this project action.") -> None:
+    def __init__(
+        self, message: str = "You do not have permission for this project action."
+    ) -> None:
         super().__init__(message)
 
 

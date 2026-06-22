@@ -75,9 +75,7 @@ def test_dockerfile_templates_other_user_isolated(
     template_id = create.json()["id"]
 
     assert other_user_client.get("/api/dockerfiles/").json() == []
-    assert (
-        other_user_client.get(f"/api/dockerfiles/{template_id}").status_code == 404
-    )
+    assert other_user_client.get(f"/api/dockerfiles/{template_id}").status_code == 404
 
 
 def test_dockerfile_not_found(api_client: TestClient) -> None:
@@ -90,7 +88,7 @@ def test_deploy_sources_includes_dockerfile_template(
 ) -> None:
     """
     Verify that Dockerfile templates created by the user appear in the deploy-sources suggestions for a matching query.
-    
+
     Creates a Dockerfile template named "nginx-static", queries the deploy-sources endpoint with q="nginx", and asserts at least one suggestion with kind "dockerfile_template" has name "nginx-static".
     """
     create = api_client.post(
@@ -102,7 +100,5 @@ def test_deploy_sources_includes_dockerfile_template(
     listed = api_client.get("/api/containers/deploy-sources", params={"q": "nginx"})
     assert listed.status_code == 200
     suggestions = listed.json()["suggestions"]
-    template_rows = [
-        row for row in suggestions if row["kind"] == "dockerfile_template"
-    ]
+    template_rows = [row for row in suggestions if row["kind"] == "dockerfile_template"]
     assert any(row["name"] == "nginx-static" for row in template_rows)

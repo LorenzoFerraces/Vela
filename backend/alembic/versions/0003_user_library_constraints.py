@@ -5,6 +5,7 @@ Revises: 0002_github_oauth_identity
 Create Date: 2026-05-19
 
 """
+
 from __future__ import annotations
 
 from typing import Sequence
@@ -21,7 +22,7 @@ depends_on: str | Sequence[str] | None = None
 def upgrade() -> None:
     """
     Apply schema changes: add an updated_at timestamp to dockerfiles and enforce owner-scoped uniqueness for dockerfiles and images.
-    
+
     Adds a timezone-aware `updated_at` column to `dockerfiles`, backfills it from `created_at`, and then makes it non-nullable. Creates a unique constraint `uq_dockerfiles_owner_name` on `dockerfiles(owner_id, name)` and `uq_images_owner_ref` on `images(owner_id, ref)`.
     """
     op.add_column(

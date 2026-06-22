@@ -27,7 +27,7 @@ async def list_dockerfile_templates(
 ) -> list[DockerfileTemplatePublic]:
     """
     Retrieve Dockerfile templates owned by the authenticated caller.
-    
+
     Returns:
         list[DockerfileTemplatePublic]: A list of DockerfileTemplatePublic instances representing templates owned by the caller.
     """
@@ -47,13 +47,13 @@ async def create_dockerfile_template(
 ) -> DockerfileTemplatePublic:
     """
     Create a Dockerfile template owned by the current user.
-    
+
     Parameters:
         body (DockerfileTemplateCreate): Template data (name and contents) to create.
-    
+
     Returns:
         DockerfileTemplatePublic: The created template converted to the public schema.
-    
+
     Raises:
         HTTPException: HTTP 400 Bad Request if creation fails due to invalid input or a naming conflict.
     """
@@ -79,10 +79,10 @@ async def get_dockerfile_template(
 ) -> DockerfileTemplatePublic:
     """
     Retrieve a Dockerfile template owned by the authenticated user.
-    
+
     Parameters:
         template_id (uuid.UUID): UUID of the template to retrieve.
-    
+
     Returns:
         DockerfileTemplatePublic: Public representation of the requested template.
     """
@@ -101,14 +101,14 @@ async def update_dockerfile_template(
 ) -> DockerfileTemplatePublic:
     """
     Update an existing Dockerfile template's name and/or contents.
-    
+
     Parameters:
         template_id (uuid.UUID): Identifier of the template to update.
         body (DockerfileTemplateUpdate): Update payload; must include at least one of `name` or `contents`.
-        
+
     Returns:
         DockerfileTemplatePublic: The updated Dockerfile template.
-    
+
     Raises:
         HTTPException: 400 if neither `name` nor `contents` is provided, or if the update is invalid (validation error mapped from `ValueError`).
     """
@@ -140,10 +140,8 @@ async def delete_dockerfile_template(
 ):
     """
     Delete the Dockerfile template identified by `template_id` that belongs to the authenticated user.
-    
+
     Parameters:
         template_id (uuid.UUID): ID of the Dockerfile template to delete.
     """
-    await user_library.delete_dockerfile_template(
-        session, current_user.id, template_id
-    )
+    await user_library.delete_dockerfile_template(session, current_user.id, template_id)

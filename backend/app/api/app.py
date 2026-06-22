@@ -22,6 +22,7 @@ from app.api.routes import (
     projects,
     settings,
     traffic,
+    users,
 )
 
 API_PREFIX = "/api"
@@ -31,7 +32,7 @@ API_PREFIX = "/api"
 async def _lifespan(_application: FastAPI):
     """
     Lifespan context manager that ensures the end-to-end test database is prepared before the application starts.
-    
+
     This async context manager runs once at startup to await e2e database setup, starts the container monitoring loop, then yields control for the application runtime. On shutdown, the monitoring task is cancelled.
     """
     from app.e2e_support import ensure_e2e_database
@@ -52,9 +53,9 @@ async def _lifespan(_application: FastAPI):
 def create_app() -> FastAPI:
     """
     Create and configure the FastAPI application used by the service.
-    
+
     The returned application is configured with a custom startup/shutdown lifespan, CORS middleware, global exception handlers, mounted API routers under the `/api` prefix (containers, builder, images, dockerfiles, traffic, auth, github, settings, deployments), and a health endpoint at `/api/health`.
-    
+
     Returns:
         FastAPI: A configured FastAPI application instance.
     """
@@ -112,6 +113,11 @@ def create_app() -> FastAPI:
         auth.router,
         prefix=f"{API_PREFIX}/auth",
         tags=["auth"],
+    )
+    application.include_router(
+        users.router,
+        prefix=f"{API_PREFIX}/users",
+        tags=["users"],
     )
     application.include_router(
         github.router_auth,

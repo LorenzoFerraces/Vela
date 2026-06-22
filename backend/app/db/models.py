@@ -5,7 +5,15 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import DateTime, ForeignKey, Integer, LargeBinary, String, Text, UniqueConstraint
+from sqlalchemy import (
+    DateTime,
+    ForeignKey,
+    Integer,
+    LargeBinary,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.types import JSON, Uuid
 
@@ -28,6 +36,12 @@ class User(Base):
         String(320), unique=True, nullable=False, index=True
     )
     password_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    display_name: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    pronouns: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    avatar_object_key: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    avatar_updated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=_utcnow
     )
@@ -175,7 +189,9 @@ class Project(Base):
 class ProjectMembership(Base):
     __tablename__ = "project_memberships"
     __table_args__ = (
-        UniqueConstraint("project_id", "user_id", name="uq_project_memberships_project_user"),
+        UniqueConstraint(
+            "project_id", "user_id", name="uq_project_memberships_project_user"
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(

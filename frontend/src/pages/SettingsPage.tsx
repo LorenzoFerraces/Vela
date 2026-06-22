@@ -13,6 +13,7 @@ import {
   patchAiPrefillPreferences,
   type AiPrefillPreferences,
 } from '../api/client'
+import ProfileSection from './settings/ProfileSection'
 import { EmailNotificationSettingsCard } from '../components/EmailNotificationSettings'
 
 type StatusState =
@@ -53,7 +54,7 @@ function formatJoinedDate(iso: string | null): string {
 }
 
 export default function SettingsPage() {
-  const { user, status: authStatus } = useAuth()
+  const { user, status: authStatus, refreshUser } = useAuth()
   const [searchParams, setSearchParams] = useSearchParams()
   const [state, setState] = useState<StatusState>({ kind: 'loading' })
   const [banner, setBanner] = useState<Banner>(null)
@@ -152,19 +153,12 @@ export default function SettingsPage() {
         Account info, notifications, and third-party integrations.
       </p>
 
-      <h2 className="settings-page__section-title">Account</h2>
-      <div className="settings-card">
-        <dl className="settings-card__list">
-          <div className="settings-card__row">
-            <dt>Email</dt>
-            <dd>{user?.email ?? '—'}</dd>
-          </div>
-          <div className="settings-card__row">
-            <dt>Member since</dt>
-            <dd>{formatJoinedDate(user?.created_at ?? null)}</dd>
-          </div>
-        </dl>
-      </div>
+      {user ? (
+        <ProfileSection
+          user={user}
+          onProfileUpdated={refreshUser}
+        />
+      ) : null}
 
       <h2 className="settings-page__section-title">Integrations</h2>
       {banner ? (
