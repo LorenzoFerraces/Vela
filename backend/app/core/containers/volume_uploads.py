@@ -21,14 +21,22 @@ VOLUME_UPLOAD_USER_QUOTA_BYTES = 150 * 1024 * 1024
 def volume_upload_max_bytes() -> int:
     raw = os.environ.get("VELA_VOLUME_UPLOAD_MAX_BYTES", "").strip()
     if raw:
-        return int(raw)
+        try:
+            return int(raw)
+        except ValueError:
+            # Fall back to default if conversion fails
+            return VOLUME_UPLOAD_MAX_BYTES
     return VOLUME_UPLOAD_MAX_BYTES
 
 
 def volume_upload_user_quota_bytes() -> int:
     raw = os.environ.get("VELA_VOLUME_UPLOAD_USER_QUOTA_BYTES", "").strip()
     if raw:
-        return int(raw)
+        try:
+            return int(raw)
+        except ValueError:
+            # Fall back to default if conversion fails
+            return VOLUME_UPLOAD_USER_QUOTA_BYTES
     return VOLUME_UPLOAD_USER_QUOTA_BYTES
 
 
@@ -125,7 +133,9 @@ def save_volume_upload(
     destination_root.mkdir(parents=True, exist_ok=False)
 
     try:
-        for relative_path, content in zip(relative_paths, (content for _, content in files), strict=True):
+        for relative_path, content in zip(
+            relative_paths, (content for _, content in files), strict=True
+        ):
             target_path = destination_root / relative_path
             target_path.parent.mkdir(parents=True, exist_ok=True)
             target_path.write_bytes(content)

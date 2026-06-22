@@ -254,7 +254,7 @@ class RunFromSourceRequest(BaseModel):
 
     @model_validator(mode="after")
     def validate_volume_targets_unique(self) -> RunFromSourceRequest:
-        targets = [mount.target for mount in self.volumes]
+        targets = [mount.target.rstrip("/") for mount in self.volumes]
         if len(targets) != len(set(targets)):
             raise ValueError("Duplicate volume target paths are not allowed.")
         return self

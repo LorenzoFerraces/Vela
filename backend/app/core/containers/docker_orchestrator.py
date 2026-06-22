@@ -15,6 +15,7 @@ import docker.errors
 import requests.exceptions
 from docker.types import Healthcheck
 
+from app.core.containers.orchestrator import ContainerOrchestrator
 from app.core.enums import ContainerStatus, HealthStatus, RestartPolicy
 from app.core.exceptions import (
     ContainerNotFoundError,
@@ -33,7 +34,6 @@ from app.core.models import (
     HealthResult,
     PortMapping,
 )
-from app.core.containers.orchestrator import ContainerOrchestrator
 from app.core.traffic.public_route_host import build_public_url
 
 VELA_MANAGED_LABEL = "vela.managed"
@@ -94,7 +94,11 @@ def _is_vela_local_build_tag(image_ref: str) -> bool:
 def _docker_daemon_unreachable_message(exc: BaseException) -> str:
     """Turn docker-py's generic connection errors into actionable text."""
     msg = str(exc).strip()
-    if sys.platform == "win32" and "CreateFile" in msg and "cannot find the file" in msg.lower():
+    if (
+        sys.platform == "win32"
+        and "CreateFile" in msg
+        and "cannot find the file" in msg.lower()
+    ):
         return (
             f"{msg}\n\n"
             "Docker Engine is not reachable. On Windows, start Docker Desktop and wait until "
@@ -107,6 +111,7 @@ def _docker_daemon_unreachable_message(exc: BaseException) -> str:
             "Docker Desktop on Windows or macOS), then retry."
         )
     return msg
+
 
 T = TypeVar("T")
 
@@ -293,9 +298,13 @@ class DockerOrchestrator(ContainerOrchestrator):
             try:
                 self._client = docker.from_env(**kwargs)
             except docker.errors.DockerException as e:
-                raise ProviderConnectionError(_docker_daemon_unreachable_message(e)) from e
+                raise ProviderConnectionError(
+                    _docker_daemon_unreachable_message(e)
+                ) from e
         if default_network is None:
-            self._default_network = os.environ.get("VELA_DOCKER_NETWORK", "").strip() or None
+            self._default_network = (
+                os.environ.get("VELA_DOCKER_NETWORK", "").strip() or None
+            )
         else:
             self._default_network = default_network.strip() or None
         self._log_stream_semaphore = asyncio.Semaphore(_max_concurrent_log_streams())
@@ -403,7 +412,9 @@ class DockerOrchestrator(ContainerOrchestrator):
         ports = self._port_bindings_from_config(config)
         restart = _docker_restart_policy(config.restart_policy)
         nano_cpus = (
-            int(config.cpu_limit * _NS_PER_SEC) if config.cpu_limit is not None else None
+            int(config.cpu_limit * _NS_PER_SEC)
+            if config.cpu_limit is not None
+            else None
         )
         hc = (
             _healthcheck_for_config(config.health_check)
@@ -442,10 +453,13 @@ class DockerOrchestrator(ContainerOrchestrator):
             if self._default_network:
                 kwargs["network"] = self._default_network
             if config.volumes:
-                kwargs["volumes"] = {
-                    mount.source: {"bind": mount.target, "mode": "ro"}
-                    for mount in config.volumes
-                }
+                # Build a mapping of source to list of target mounts (ro)
+                vol_map: dict[str, list[dict]] = {}
+                for mount in config.volumes:
+                    vol_map.setdefault(mount.source, []).append(
+                        {"bind": mount.target, "mode": "ro"}
+                    )
+                kwargs["volumes"] = vol_map
 
             try:
                 container = self._client.containers.create(config.image, **kwargs)
