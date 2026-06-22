@@ -44,7 +44,6 @@ from app.core.exceptions import (
     ResourceLimitError,
     RouteConfigurationError,
     RouteNotFoundError,
-    SavedImageNotFoundError,
     TrafficRouterError,
     UnsupportedLanguageError,
     VelaError,

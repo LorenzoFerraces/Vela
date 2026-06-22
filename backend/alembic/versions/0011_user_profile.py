@@ -1,10 +1,11 @@
 """Add user profile fields (display name, pronouns, avatar).
 
-Revision ID: 0003_user_profile
-Revises: 0002_github_oauth_identity
+Revision ID: 0011_user_profile
+Revises: 0010_organization_name_320
 Create Date: 2026-06-17
 
 """
+
 from __future__ import annotations
 
 from typing import Sequence
@@ -12,8 +13,8 @@ from typing import Sequence
 import sqlalchemy as sa
 from alembic import op
 
-revision: str = "0003_user_profile"
-down_revision: str | Sequence[str] | None = "0002_github_oauth_identity"
+revision: str = "0011_user_profile"
+down_revision: str | Sequence[str] | None = "0010_organization_name_320"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

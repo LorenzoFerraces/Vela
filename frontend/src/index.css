@@ -2200,3 +2200,8 @@ body {
     width: 8rem;
   }
 }
+
+.settings-profile__remove-photo {
+  padding: 0.35rem 0.5rem;
+  line-height: 0;
+}

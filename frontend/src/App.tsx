@@ -6,11 +6,9 @@ import ContainersPage from './pages/ContainersPage'
 import LoginPage from './pages/LoginPage'
 import RegisterPage from './pages/RegisterPage'
 import DashboardPage from './pages/DashboardPage'
-import ImagesPage from './pages/ImagesPage'
-import PlaceholderPage from './pages/PlaceholderPage'
 import SettingsPage from './pages/SettingsPage'
 import TeamsPage from './pages/TeamsPage'
-
+import BuilderPage from './pages/BuilderPage'
 /**
  * Defines the application's client-side routes and layout.
  *

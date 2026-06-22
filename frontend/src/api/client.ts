@@ -1096,17 +1096,7 @@ export function filterGithubReposByQuery(
   }
 }
 
-<<<<<<< HEAD
-// --- User library (saved image refs, Dockerfile templates) ---
-
-export interface SavedImage {
-  id: string
-  ref: string
-  created_at: string
-}
-=======
 // --- User library (Dockerfile templates) ---
->>>>>>> d4db03c7e445b5635085f0f79f2f27dc26290f28
 
 export interface DockerfileTemplate {
   id: string
@@ -1116,49 +1106,21 @@ export interface DockerfileTemplate {
   updated_at: string
 }
 
-<<<<<<< HEAD
-export async function listSavedImages(): Promise<SavedImage[]> {
-  return apiGet<SavedImage[]>('/api/saved-images/')
-}
-
-export async function createSavedImage(ref: string): Promise<SavedImage> {
-  return apiPost<SavedImage, { ref: string }>('/api/saved-images/', { ref })
-}
-
-export async function updateSavedImage(
-  imageId: string,
-  ref: string
-): Promise<SavedImage> {
-  return apiPatch<SavedImage, { ref: string }>(
-    `/api/saved-images/${encodeURIComponent(imageId)}`,
-    { ref }
-  )
-}
-
-export async function deleteSavedImage(imageId: string): Promise<void> {
-  await apiDelete(`/api/saved-images/${encodeURIComponent(imageId)}`)
-}
-
-=======
 /**
  * Retrieves all Dockerfile templates in the user's library.
  *
  * @returns An array of `DockerfileTemplate` objects
  */
->>>>>>> d4db03c7e445b5635085f0f79f2f27dc26290f28
 export async function listDockerfileTemplates(): Promise<DockerfileTemplate[]> {
   return apiGet<DockerfileTemplate[]>('/api/dockerfiles/')
 }
 
-<<<<<<< HEAD
-=======
 /**
  * Create a new Dockerfile template.
  *
  * @param body - The template payload containing `name` and `contents`
  * @returns The created `DockerfileTemplate`
  */
->>>>>>> d4db03c7e445b5635085f0f79f2f27dc26290f28
 export async function createDockerfileTemplate(body: {
   name: string
   contents: string
@@ -1169,8 +1131,6 @@ export async function createDockerfileTemplate(body: {
   )
 }
 
-<<<<<<< HEAD
-=======
 /**
  * Update an existing Dockerfile template.
  *
@@ -1178,7 +1138,6 @@ export async function createDockerfileTemplate(body: {
  * @param body - Partial template fields to change; may include `name` and/or `contents`
  * @returns The updated DockerfileTemplate
  */
->>>>>>> d4db03c7e445b5635085f0f79f2f27dc26290f28
 export async function updateDockerfileTemplate(
   templateId: string,
   body: { name?: string; contents?: string }
@@ -1189,20 +1148,15 @@ export async function updateDockerfileTemplate(
   )
 }
 
-<<<<<<< HEAD
-=======
 /**
  * Delete a Dockerfile template by its identifier.
  *
  * @param templateId - The ID of the Dockerfile template to remove
  */
->>>>>>> d4db03c7e445b5635085f0f79f2f27dc26290f28
 export async function deleteDockerfileTemplate(templateId: string): Promise<void> {
   await apiDelete(`/api/dockerfiles/${encodeURIComponent(templateId)}`)
 }
 
-<<<<<<< HEAD
-=======
 /**
  * Fetches the branches for a GitHub repository identified by its full name.
  *
@@ -1210,7 +1164,6 @@ export async function deleteDockerfileTemplate(templateId: string): Promise<void
  * @returns The list of repository branches
  * @throws Error when `fullName` is not in the `owner/repo` format
  */
->>>>>>> d4db03c7e445b5635085f0f79f2f27dc26290f28
 export async function listGithubRepoBranches(
   fullName: string
 ): Promise<GithubBranch[]> {

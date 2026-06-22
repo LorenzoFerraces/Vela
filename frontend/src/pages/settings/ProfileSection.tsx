@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ChangeEvent, type FormEvent } from 'react'
 import type { UserPublic } from '../../api/client'
+import { TrashIcon} from '@phosphor-icons/react/Trash'
 import {
   deleteAvatar,
   formatApiError,
@@ -135,15 +136,17 @@ export default function ProfileSection({
               </button>
               {user.avatar_url ? (
                 <button
-                  type="button"
-                  className="btn btn--ghost btn--sm"
-                  disabled={avatarDisabled}
-                  onClick={() => {
-                    void handleRemoveAvatar()
-                  }}
-                >
-                  Remove photo
-                </button>
+                type="button"
+                className="btn btn--sm btn--danger settings-profile__remove-photo"
+                disabled={avatarDisabled}
+                aria-label="Remove photo"
+                title="Remove photo"
+                onClick={() => {
+                  void handleRemoveAvatar()
+                }}
+              >
+                <TrashIcon size={18} weight="regular" aria-hidden />
+              </button>
               ) : null}
             </div>
           </div>
@@ -171,17 +174,6 @@ export default function ProfileSection({
               placeholder="e.g. they/them"
               onChange={(event) => setPronouns(event.target.value)}
             />
-
-            <dl className="settings-card__list settings-profile__meta">
-              <div className="settings-card__row">
-                <dt>Email</dt>
-                <dd>{user.email}</dd>
-              </div>
-              <div className="settings-card__row">
-                <dt>Member since</dt>
-                <dd>{formatJoinedDate(user.created_at)}</dd>
-              </div>
-            </dl>
 
             <div className="settings-card__actions">
               <button
