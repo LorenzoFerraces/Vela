@@ -1096,6 +1096,36 @@ export function filterGithubReposByQuery(
   }
 }
 
+// --- User library (saved image references) ---
+
+export interface SavedImage {
+  id: string
+  ref: string
+  created_at: string
+}
+
+export async function listSavedImages(): Promise<SavedImage[]> {
+  return apiGet<SavedImage[]>('/api/saved-images/')
+}
+
+export async function createSavedImage(ref: string): Promise<SavedImage> {
+  return apiPost<SavedImage, { ref: string }>('/api/saved-images/', { ref })
+}
+
+export async function updateSavedImage(
+  imageId: string,
+  ref: string
+): Promise<SavedImage> {
+  return apiPatch<SavedImage, { ref: string }>(
+    `/api/saved-images/${encodeURIComponent(imageId)}`,
+    { ref }
+  )
+}
+
+export async function deleteSavedImage(imageId: string): Promise<void> {
+  await apiDelete(`/api/saved-images/${encodeURIComponent(imageId)}`)
+}
+
 // --- User library (Dockerfile templates) ---
 
 export interface DockerfileTemplate {

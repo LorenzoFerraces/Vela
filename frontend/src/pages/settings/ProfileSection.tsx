@@ -175,6 +175,17 @@ export default function ProfileSection({
               onChange={(event) => setPronouns(event.target.value)}
             />
 
+            <dl className="settings-card__list settings-profile__meta">
+              <div className="settings-card__row">
+                <dt>Email</dt>
+                <dd>{user.email}</dd>
+              </div>
+              <div className="settings-card__row">
+                <dt>Member since</dt>
+                <dd>{formatJoinedDate(user.created_at)}</dd>
+              </div>
+            </dl>
+
             <div className="settings-card__actions">
               <button
                 type="submit"

@@ -1,18 +1,25 @@
 import { useCallback, useEffect, useState } from 'react'
 import {
+  createSavedImage,
+  deleteSavedImage,
   formatApiError,
+  listSavedImages,
+  type SavedImage,
 } from '../../api/client'
 import type { ImagesBanner } from './types'
 
 export function useSavedImages(
   reportBanner: (banner: ImagesBanner) => void
 ) {
+  const [rows, setRows] = useState<SavedImage[]>([])
   const [listLoading, setListLoading] = useState(true)
   const [busy, setBusy] = useState(false)
 
   const refresh = useCallback(async () => {
     setListLoading(true)
     try {
+      const data = await listSavedImages()
+      setRows(data)
     } catch (error) {
       reportBanner({ tone: 'err', text: formatApiError(error) })
     } finally {
@@ -33,6 +40,7 @@ export function useSavedImages(
     setBusy(true)
     reportBanner(null)
     try {
+      await createSavedImage(trimmed)
       await refresh()
       reportBanner({ tone: 'ok', text: `Saved ${trimmed}.` })
       return true
@@ -48,6 +56,7 @@ export function useSavedImages(
     setBusy(true)
     reportBanner(null)
     try {
+      await deleteSavedImage(imageId)
       await refresh()
       reportBanner({ tone: 'ok', text: 'Image reference removed.' })
     } catch (error) {
@@ -58,10 +67,11 @@ export function useSavedImages(
   }
 
   return {
+    rows,
     listLoading,
     busy,
     refresh,
     addImage,
-    removeImage
+    removeImage,
   }
 }
