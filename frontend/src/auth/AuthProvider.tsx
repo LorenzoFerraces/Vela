@@ -95,9 +95,20 @@ export function AuthProvider({ children }: AuthProviderProps) {
     setStatus('anonymous')
   }, [])
 
+  const refreshUser = useCallback(async () => {
+    if (!getAccessToken()) {
+      setUser(null)
+      setStatus('anonymous')
+      return
+    }
+    const me = await getMe()
+    setUser(me)
+    setStatus('authenticated')
+  }, [])
+
   const value = useMemo<AuthContextValue>(
-    () => ({ status, user, login, register, logout }),
-    [status, user, login, register, logout]
+    () => ({ status, user, login, register, logout, refreshUser }),
+    [status, user, login, register, logout, refreshUser]
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

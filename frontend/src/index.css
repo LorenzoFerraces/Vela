@@ -617,6 +617,53 @@ body {
   color: var(--text-muted);
 }
 
+.navbar__avatar {
+  flex-shrink: 0;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: var(--bg-deep);
+  object-fit: cover;
+}
+
+.user-avatar--initials {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: var(--accent-soft);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  color: var(--text-heading);
+}
+
+.settings-profile__header {
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+  margin-bottom: 1rem;
+}
+
+.settings-profile__photo-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.settings-profile__file-input {
+  display: none;
+}
+
+.settings-profile__form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+
+.settings-profile__meta {
+  margin-top: 0.5rem;
+}
+
 /* --- Auth pages (login / register) --- */
 
 .auth-page {
@@ -2179,4 +2226,9 @@ body {
   .skeleton--invite-role {
     width: 8rem;
   }
+}
+
+.settings-profile__remove-photo {
+  padding: 0.35rem 0.5rem;
+  line-height: 0;
 }

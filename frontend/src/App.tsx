@@ -6,10 +6,10 @@ import ContainersPage from './pages/ContainersPage'
 import LoginPage from './pages/LoginPage'
 import RegisterPage from './pages/RegisterPage'
 import DashboardPage from './pages/DashboardPage'
-import BuilderPage from './pages/BuilderPage'
 import SettingsPage from './pages/SettingsPage'
 import TeamsPage from './pages/TeamsPage'
-
+import BuilderPage from './pages/BuilderPage'
+import ImagesPage from './pages/ImagesPage'
 /**
  * Defines the application's client-side routes and layout.
  *
@@ -45,6 +45,14 @@ export default function App() {
           element={
             <RequireAuth>
               <BuilderPage />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/images"
+          element={
+            <RequireAuth>
+              <ImagesPage />
             </RequireAuth>
           }
         />

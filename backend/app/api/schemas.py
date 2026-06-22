@@ -6,7 +6,14 @@ import uuid
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    EmailStr,
+    Field,
+    field_validator,
+    model_validator,
+)
 
 from app.core.containers.volume_uploads import (
     VOLUME_UPLOAD_MAX_BYTES,
@@ -189,13 +196,13 @@ class RunFromSourceRequest(BaseModel):
     def route_path_prefix_must_start_with_slash(cls, value: str) -> str:
         """
         Validate that a Traefik route path prefix begins with a leading '/'.
-        
+
         Parameters:
             value (str): The route path prefix to validate.
-        
+
         Returns:
             str: The validated route path prefix (returned unchanged) if it starts with '/'.
-        
+
         Raises:
             ValueError: If `value` does not start with '/'.
         """
@@ -208,12 +215,12 @@ class RunFromSourceRequest(BaseModel):
     def validate_source_fields(self) -> RunFromSourceRequest:
         """
         Validate and normalize the request's source fields and enforce mode-specific requirements.
-        
+
         If `source_kind` is omitted, infer the kind from the legacy `source` value and return a copy with `source_kind` set and the appropriate field (`git_url` or `image_ref`) populated with the trimmed legacy value. If `source_kind` is `"image"` or `"git"`, ensure the respective field (`image_ref` or `git_url`) is present (or fall back to `source`), trim it, and return a copy with that field set. If `source_kind` is `"dockerfile_template"`, ensure `dockerfile_template_id` is provided.
-        
+
         Returns:
             RunFromSourceRequest: A validated and possibly normalized copy of the request model.
-        
+
         Raises:
             ValueError: When a required source field is missing or empty for the selected deployment kind.
         """
@@ -256,7 +263,9 @@ class RunFromSourceRequest(BaseModel):
 class ImageSuggestion(BaseModel):
     """One autocomplete candidate for a registry image reference."""
 
-    ref: str = Field(..., description="Suggested image reference (may omit implicit :latest).")
+    ref: str = Field(
+        ..., description="Suggested image reference (may omit implicit :latest)."
+    )
     pull_count: int | None = Field(
         default=None,
         description="Docker Hub pull count when ``source`` is ``registry`` and Hub returned it.",
@@ -525,6 +534,14 @@ class UserPublic(BaseModel):
     id: uuid.UUID
     email: EmailStr
     created_at: datetime
+    display_name: str | None = None
+    pronouns: str | None = None
+    avatar_url: str | None = None
+
+
+class UserProfileUpdate(BaseModel):
+    display_name: str | None = Field(default=None, max_length=120)
+    pronouns: str | None = Field(default=None, max_length=40)
 
 
 class TokenResponse(BaseModel):
@@ -619,7 +636,9 @@ class EmailNotificationPreferencesUpdate(BaseModel):
     email: EmailStr | None = None
     alerts_enabled: bool | None = None
     alert_types: list[Literal["stop", "failure", "unhealthy"]] | None = None
-    alert_frequency: Literal["immediate", "daily_digest", "weekly_summary"] | None = None
+    alert_frequency: Literal["immediate", "daily_digest", "weekly_summary"] | None = (
+        None
+    )
 
 
 class AlertHistoryEntry(BaseModel):

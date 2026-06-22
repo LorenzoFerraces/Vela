@@ -19,6 +19,9 @@ export const fakeUser = {
   id: E2E_USER_ID,
   email: E2E_USER_EMAIL,
   created_at: '2026-01-15T12:00:00.000Z',
+  display_name: null,
+  pronouns: null,
+  avatar_url: null,
 }
 
 export { loginAndSeedToken }

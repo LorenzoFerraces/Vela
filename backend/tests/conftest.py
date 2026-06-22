@@ -36,6 +36,7 @@ from app.api.app import create_app
 from app.api.deps import (
     get_db,
     get_image_builder,
+    get_object_storage,
     get_orchestrator,
     get_traffic_router,
 )
@@ -49,13 +50,20 @@ from app.core.containers.docker_orchestrator import (
 )
 from app.core.enums import ContainerStatus, HealthStatus
 from app.core.containers.fake_orchestrator import FakeContainerOrchestrator
+from app.core.storage.memory import InMemoryObjectStorage
 from app.core.models import ContainerInfo
 from app.core.traffic.traffic_router import NoopTrafficRouter
 from app.db.base import Base
 from app.db.models import User
 
+os.environ.setdefault("VELA_AUTH_SECRET", "test-secret-please-do-not-use-in-prod")
+os.environ.setdefault("VELA_AUTH_ACCESS_TOKEN_TTL_MINUTES", "60")
+os.environ.setdefault("VELA_OBJECT_STORAGE", "memory")
 
-def make_container_info(*, owner_id: uuid.UUID | str, **overrides: object) -> ContainerInfo:
+
+def make_container_info(
+    *, owner_id: uuid.UUID | str, **overrides: object
+) -> ContainerInfo:
     labels: dict[str, str] = {
         VELA_MANAGED_LABEL: VELA_MANAGED_VALUE,
         VELA_OWNER_LABEL: str(owner_id),
@@ -96,10 +104,10 @@ def sample_container(test_user_id: uuid.UUID) -> ContainerInfo:
 def fake_orchestrator(sample_container: ContainerInfo) -> FakeContainerOrchestrator:
     """
     Create a FakeContainerOrchestrator pre-seeded for tests.
-    
+
     Parameters:
         sample_container (ContainerInfo): Container model to seed into the orchestrator.
-    
+
     Returns:
         FakeContainerOrchestrator: Orchestrator instance seeded with `sample_container` and with the image `"nginx:alpine"` registered.
     """
@@ -113,10 +121,10 @@ def fake_orchestrator(sample_container: ContainerInfo) -> FakeContainerOrchestra
 def image_builder(fake_orchestrator: FakeContainerOrchestrator) -> DefaultImageBuilder:
     """
     Constructs a DefaultImageBuilder configured to use the provided orchestrator.
-    
+
     Parameters:
         fake_orchestrator (FakeContainerOrchestrator): Orchestrator instance to be used by the image builder.
-    
+
     Returns:
         DefaultImageBuilder: Image builder wired to the given orchestrator.
     """
@@ -124,10 +132,15 @@ def image_builder(fake_orchestrator: FakeContainerOrchestrator) -> DefaultImageB
 
 
 @pytest.fixture
+def memory_object_storage() -> InMemoryObjectStorage:
+    return InMemoryObjectStorage()
+
+
+@pytest.fixture
 def noop_router() -> NoopTrafficRouter:
     """
     Provide a NoopTrafficRouter instance for tests.
-    
+
     Returns:
         NoopTrafficRouter: a router implementation that performs no routing actions (a no-op router).
     """
@@ -138,7 +151,7 @@ def noop_router() -> NoopTrafficRouter:
 def db_session_factory() -> Iterator[async_sessionmaker[AsyncSession]]:
     """
     Provide an async SQLAlchemy session factory connected to an in-memory SQLite database with the ORM schema created before yielding.
-    
+
     Returns:
         async_sessionmaker[AsyncSession]: A session factory producing AsyncSession instances backed by an in-memory SQLite engine. The fixture ensures Base.metadata.create_all() runs before yielding and disposes the underlying engine when the fixture is torn down.
     """
@@ -214,6 +227,7 @@ def _build_app_with_overrides(
     orchestrator: Any | None = None,
     image_builder: Any | None = None,
     traffic_router: Any | None = None,
+    object_storage: Any | None = None,
 ) -> Any:
     app = create_app()
 
@@ -228,6 +242,8 @@ def _build_app_with_overrides(
         app.dependency_overrides[get_image_builder] = lambda: image_builder
     if traffic_router is not None:
         app.dependency_overrides[get_traffic_router] = lambda: traffic_router
+    if object_storage is not None:
+        app.dependency_overrides[get_object_storage] = lambda: object_storage
     return app
 
 
@@ -237,7 +253,7 @@ def db_app(
 ) -> Iterator[Any]:
     """
     Create a FastAPI app configured to use the provided DB session factory while leaving orchestrator/builder/router dependencies to their environment defaults.
-    
+
     Yields:
         app (Any): A FastAPI application with the database dependency overridden to use `db_session_factory`. The app's `dependency_overrides` are cleared after the fixture completes.
     """
@@ -252,10 +268,11 @@ def integration_app(
     fake_orchestrator: FakeContainerOrchestrator,
     image_builder: DefaultImageBuilder,
     noop_router: NoopTrafficRouter,
+    memory_object_storage: InMemoryObjectStorage,
 ) -> Iterator[Any]:
     """
     Create a FastAPI application configured to use the provided in-memory database, orchestrator, image builder, and traffic router.
-    
+
     Returns:
         The configured FastAPI application instance with dependency overrides applied. The fixture clears those dependency overrides after yielding.
     """
@@ -264,6 +281,7 @@ def integration_app(
         orchestrator=fake_orchestrator,
         image_builder=image_builder,
         traffic_router=noop_router,
+        object_storage=memory_object_storage,
     )
     yield app
     app.dependency_overrides.clear()
@@ -276,7 +294,7 @@ def api_client(
 ) -> Iterator[TestClient]:
     """
     Provide an authenticated TestClient configured for the seeded user.
-    
+
     Returns:
         TestClient: A TestClient instance whose `Authorization` header is set to `Bearer <token>` for the provided seeded user.
     """
@@ -293,7 +311,7 @@ def other_user_client(
 ) -> Iterator[TestClient]:
     """
     TestClient authenticated as a different user for ownership-filtering tests.
-    
+
     Returns:
         client (TestClient): A TestClient whose Authorization header is set to a bearer token for the provided other user.
     """
@@ -307,7 +325,7 @@ def other_user_client(
 def anonymous_client(integration_app: Any) -> Iterator[TestClient]:
     """
     Provide a TestClient configured without authentication.
-    
+
     Returns:
         client (TestClient): A TestClient instance that sends requests without an Authorization header.
     """
@@ -319,10 +337,10 @@ def anonymous_client(integration_app: Any) -> Iterator[TestClient]:
 def auth_token(seeded_user: User) -> str:
     """
     Create an access token for the given user.
-    
+
     Parameters:
         seeded_user (User): The user whose id will be embedded in the token.
-    
+
     Returns:
         str: A JWT access token string for the provided user's id.
     """
@@ -339,16 +357,16 @@ def make_authed_client(
 ):
     """
     Create a contextmanager builder that yields a pre-authenticated TestClient configured for tests.
-    
+
     The returned `builder` is a contextmanager that opens a TestClient for an app whose dependencies are overridden to use the provided test fixtures by default. The TestClient will have an Authorization header set to a bearer token for `seeded_user`.
-    
+
     Parameters:
         db_session_factory (async_sessionmaker[AsyncSession]): Factory used to provide the app's database session override.
         seeded_user (User): User whose ID is used to create the authentication token attached to the TestClient.
         fake_orchestrator (FakeContainerOrchestrator): Default orchestrator override used when the builder is not given an `orchestrator`.
         image_builder (DefaultImageBuilder): Default image builder used when the builder is not given an `image_builder`.
         noop_router (NoopTrafficRouter): Default traffic router used when the builder is not given a `traffic_router`.
-    
+
     Returns:
         builder (callable): A contextmanager function usable as:
             with builder(orchestrator=<...>, image_builder=<...>, traffic_router=<...>) as client:
@@ -370,22 +388,30 @@ def make_authed_client(
     ) -> Iterator[TestClient]:
         """
         Create a context-managed TestClient pre-authenticated as the seeded user, with optional dependency overrides.
-        
+
         Parameters:
             orchestrator (Any | None): If provided, override the app's orchestrator dependency with this value; otherwise the fixture's fake_orchestrator is used.
             image_builder (Any | None): If provided, override the app's image builder dependency with this value; otherwise a DefaultImageBuilder tied to the chosen orchestrator is used.
             traffic_router (Any | None): If provided, override the app's traffic router dependency with this value; otherwise the fixture's noop_router is used.
-        
+
         Returns:
             client (TestClient): A TestClient instance with an Authorization header set to a bearer token for the seeded user. The app's dependency overrides are cleared after the client context exits.
         """
         app = _build_app_with_overrides(
             db_session_factory=db_session_factory,
-            orchestrator=orchestrator if orchestrator is not None else fake_orchestrator,
-            image_builder=image_builder if image_builder is not None else DefaultImageBuilder(
-                orchestrator=orchestrator if orchestrator is not None else fake_orchestrator
+            orchestrator=orchestrator
+            if orchestrator is not None
+            else fake_orchestrator,
+            image_builder=image_builder
+            if image_builder is not None
+            else DefaultImageBuilder(
+                orchestrator=orchestrator
+                if orchestrator is not None
+                else fake_orchestrator
             ),
-            traffic_router=traffic_router if traffic_router is not None else noop_router,
+            traffic_router=traffic_router
+            if traffic_router is not None
+            else noop_router,
         )
         try:
             with TestClient(app) as client:

@@ -1,11 +1,16 @@
 """Map domain exceptions to HTTP responses."""
 
+import logging
+
 from fastapi import Request, status
 from fastapi.responses import JSONResponse
+
+logger = logging.getLogger(__name__)
 
 from app.core.exceptions import (
     AnalysisError,
     AuthError,
+    AvatarValidationError,
     BuilderError,
     CloneError,
     GitSourceAnalysisError,
@@ -27,6 +32,7 @@ from app.core.exceptions import (
     IntegrationError,
     InvalidCredentialsError,
     NotAuthenticatedError,
+    ObjectStorageError,
     AlreadyProjectMemberError,
     DuplicateInvitationError,
     InvitationAlreadyRespondedError,
@@ -57,9 +63,9 @@ def _project_error_payload(exc: ProjectError, error_code: str) -> dict[str, str]
 def register_exception_handlers(app) -> None:
     """
     Register exception handlers on a FastAPI application that translate Vela domain errors into JSON HTTP responses.
-    
+
     Each installed handler maps a VelaError subclass (and related exceptions) to an appropriate HTTP status code and JSON response body (for some exceptions the handler uses the exception's api_response_content()). The registered handlers also add authentication headers where applicable.
-    
+
     Parameters:
         app (FastAPI): The FastAPI application on which to register the exception handlers.
     """
@@ -139,11 +145,11 @@ def register_exception_handlers(app) -> None:
     async def not_found_handler(_request: Request, exc: VelaError) -> JSONResponse:
         """
         Produce a 404 Not Found JSON response for the given domain error.
-        
+
         Parameters:
             _request (Request): The incoming HTTP request (unused).
             exc (VelaError): The domain error to convert into the response.
-        
+
         Returns:
             JSONResponse: Response with HTTP 404 and body `{"detail": str(exc)}`.
         """
@@ -158,11 +164,11 @@ def register_exception_handlers(app) -> None:
     async def conflict_handler(_request: Request, exc: VelaError) -> JSONResponse:
         """
         Map a domain conflict error to an HTTP 409 Conflict JSON response.
-        
+
         Parameters:
             _request (Request): Incoming request (unused).
             exc (VelaError): Domain-layer error whose message will be placed in the response `detail`.
-        
+
         Returns:
             JSONResponse: Response with status code 409 and body `{"detail": str(exc)}`.
         """
@@ -173,6 +179,7 @@ def register_exception_handlers(app) -> None:
 
     @app.exception_handler(ResourceLimitError)
     @app.exception_handler(InvalidVolumeUploadPathError)
+    @app.exception_handler(AvatarValidationError)
     async def bad_request_handler(_request: Request, exc: VelaError) -> JSONResponse:
         return JSONResponse(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -307,6 +314,16 @@ def register_exception_handlers(app) -> None:
         return JSONResponse(
             status_code=status.HTTP_502_BAD_GATEWAY,
             content={"detail": str(exc)},
+        )
+
+    @app.exception_handler(ObjectStorageError)
+    async def object_storage_handler(
+        _request: Request, exc: ObjectStorageError
+    ) -> JSONResponse:
+        logger.error("Object storage error: %s", exc, exc_info=exc)
+        return JSONResponse(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            content={"detail": "Storage service unavailable."},
         )
 
     @app.exception_handler(GitSourceAnalysisError)

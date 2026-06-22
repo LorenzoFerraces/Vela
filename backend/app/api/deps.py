@@ -17,8 +17,15 @@ from app.core.auth.tokens import decode_access_token
 from app.core.build.default_image_builder import DefaultImageBuilder
 from app.core.containers.docker_orchestrator import DockerOrchestrator
 from app.core.containers.orchestrator import ContainerOrchestrator
-from app.core.exceptions import NotAuthenticatedError, TrafficRouterError
+from app.core.exceptions import (
+    NotAuthenticatedError,
+    ObjectStorageError,
+    TrafficRouterError,
+)
 from app.core.traffic.kubernetes_traffic_router import KubernetesTrafficRouter
+from app.core.storage.memory import InMemoryObjectStorage
+from app.core.storage.object_storage import ObjectStorage
+from app.core.storage.r2 import CloudflareR2ObjectStorage
 from app.core.traffic.traffic_router import NoopTrafficRouter, TrafficRouter
 from app.core.traffic.traefik_file_traffic_router import TraefikFileTrafficRouter
 from app.db.engine import get_session_factory
@@ -29,7 +36,7 @@ from app.db.models import User
 def get_orchestrator() -> ContainerOrchestrator:
     """
     Provide the shared container orchestrator instance for the application.
-    
+
     Returns:
         ContainerOrchestrator: Shared orchestrator instance. If the environment variable
         VELA_FAKE_ORCHESTRATOR is set to "1" (after trimming), returns the shared in-memory
@@ -60,7 +67,9 @@ def _traffic_router_from_env() -> TrafficRouter:
                     "VELA_TRAFFIC_ROUTER=traefik_file requires VELA_TRAEFIK_DYNAMIC_FILE "
                     "(absolute path to the dynamic JSON file Traefik loads)."
                 )
-            reload_container = os.environ.get("VELA_TRAEFIK_RELOAD_CONTAINER", "").strip()
+            reload_container = os.environ.get(
+                "VELA_TRAEFIK_RELOAD_CONTAINER", ""
+            ).strip()
             return TraefikFileTrafficRouter(
                 traefik_dynamic_file=Path(path_str),
                 reload_container=reload_container or None,
@@ -78,6 +87,54 @@ def _traffic_router_from_env() -> TrafficRouter:
 def get_traffic_router() -> TrafficRouter:
     """Shared edge routing adapter (noop, Traefik file, or Kubernetes scaffold)."""
     return _traffic_router_from_env()
+
+
+def _object_storage_from_env() -> ObjectStorage:
+    mode = os.environ.get("VELA_OBJECT_STORAGE", "memory").strip().lower()
+    match mode:
+        case "memory":
+            public_base_url = os.environ.get(
+                "VELA_OBJECT_STORAGE_PUBLIC_BASE_URL", "https://storage.test"
+            ).strip()
+            return InMemoryObjectStorage(public_base_url=public_base_url)
+        case "r2":
+            account_id = os.environ.get("VELA_R2_ACCOUNT_ID", "").strip()
+            access_key_id = os.environ.get("VELA_R2_ACCESS_KEY_ID", "").strip()
+            secret_access_key = os.environ.get("VELA_R2_SECRET_ACCESS_KEY", "").strip()
+            bucket = os.environ.get("VELA_R2_BUCKET", "").strip()
+            public_base_url = os.environ.get("VELA_R2_PUBLIC_BASE_URL", "").strip()
+            missing = [
+                name
+                for name, value in (
+                    ("VELA_R2_ACCOUNT_ID", account_id),
+                    ("VELA_R2_ACCESS_KEY_ID", access_key_id),
+                    ("VELA_R2_SECRET_ACCESS_KEY", secret_access_key),
+                    ("VELA_R2_BUCKET", bucket),
+                    ("VELA_R2_PUBLIC_BASE_URL", public_base_url),
+                )
+                if not value
+            ]
+            if missing:
+                raise ObjectStorageError(
+                    f"VELA_OBJECT_STORAGE=r2 requires: {', '.join(missing)}."
+                )
+            return CloudflareR2ObjectStorage(
+                account_id=account_id,
+                access_key_id=access_key_id,
+                secret_access_key=secret_access_key,
+                bucket=bucket,
+                public_base_url=public_base_url,
+            )
+        case _:
+            raise ObjectStorageError(
+                f"Unknown VELA_OBJECT_STORAGE={mode!r}; use memory or r2."
+            )
+
+
+@lru_cache(maxsize=1)
+def get_object_storage() -> ObjectStorage:
+    """Shared blob storage adapter (in-memory or Cloudflare R2)."""
+    return _object_storage_from_env()
 
 
 # ---------------------------------------------------------------------------
