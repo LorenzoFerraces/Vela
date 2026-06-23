@@ -1548,6 +1548,33 @@ body {
   padding-right: 0.5rem;
 }
 
+.containers-form__folder-input {
+  display: none;
+}
+
+.containers-volume-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+}
+
+.containers-volume-row__meta {
+  flex: 1 1 8rem;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.containers-env-list__row--volume {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  width: 100%;
+}
+
 .btn--compact {
   padding: 0.35rem 0.65rem;
   font-size: 0.875rem;

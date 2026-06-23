@@ -343,6 +343,21 @@ export type ProjectRole = 'owner' | 'operator' | 'viewer'
 
 export type RunSourceKind = 'image' | 'git' | 'dockerfile_template'
 
+export interface VolumeUploadResponse {
+  upload_id: string
+  folder_name: string
+  total_bytes: number
+  file_count: number
+  max_bytes: number
+  user_quota_bytes: number
+  user_used_bytes: number
+}
+
+export interface VolumeMountRequest {
+  upload_id: string
+  target: string
+}
+
 export interface RunFromSourceRequest {
   source_kind?: RunSourceKind
   source?: string
@@ -360,6 +375,7 @@ export interface RunFromSourceRequest {
   env_vars?: Record<string, string>
   command?: string[] | null
   project_id?: string | null
+  volumes?: VolumeMountRequest[]
 }
 
 export interface RunFromSourceResponse {
@@ -564,6 +580,49 @@ export async function runContainerFromSource(
     '/api/containers/run',
     body
   )
+}
+
+export async function uploadVolumeFolder(
+  files: File[]
+): Promise<VolumeUploadResponse> {
+  const formData = new FormData()
+  for (const file of files) {
+    const relativePath = file.webkitRelativePath || file.name
+    formData.append('files', file, relativePath)
+  }
+
+  const url = `${getApiBaseUrl()}/api/containers/volume-uploads`
+  const headers = new Headers()
+  headers.set('Accept', 'application/json')
+  const token = getAccessToken()
+  if (token) {
+    headers.set('Authorization', `Bearer ${token}`)
+  }
+
+  const response = await fetch(url, {
+    method: 'POST',
+    body: formData,
+    headers,
+  })
+
+  if (!response.ok) {
+    const body = await response.text()
+    if (response.status === 401) {
+      clearAccessToken()
+      notifyUnauthorized()
+    }
+    throw new ApiError(
+      `Request failed: ${response.status} ${response.statusText}`,
+      response.status,
+      body
+    )
+  }
+
+  const text = await response.text()
+  if (!text) {
+    throw new ApiError('Empty upload response', response.status, '')
+  }
+  return JSON.parse(text) as VolumeUploadResponse
 }
 
 export type AiPrefillPreferences = {

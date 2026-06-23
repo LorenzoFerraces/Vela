@@ -25,6 +25,29 @@ class PortMapping(BaseModel):
     protocol: str = "tcp"
 
 
+class VolumeMount(BaseModel):
+    source: str
+    target: str
+
+    @field_validator("source")
+    @classmethod
+    def source_must_be_non_empty(cls, value: str) -> str:
+        trimmed = value.strip()
+        if not trimmed:
+            msg = "Volume source cannot be empty."
+            raise ValueError(msg)
+        return trimmed
+
+    @field_validator("target")
+    @classmethod
+    def target_must_be_absolute_path(cls, value: str) -> str:
+        trimmed = value.strip()
+        if not trimmed.startswith("/"):
+            msg = "Volume target must be an absolute path starting with '/'."
+            raise ValueError(msg)
+        return trimmed
+
+
 class HealthCheckConfig(BaseModel):
     command: list[str]
     interval_s: int = 30
@@ -38,6 +61,7 @@ class DeployConfig(BaseModel):
     name: str | None = None
     env_vars: dict[str, str] = Field(default_factory=dict)
     ports: list[PortMapping] = Field(default_factory=list)
+    volumes: list[VolumeMount] = Field(default_factory=list)
     container_listen_port: int = Field(
         default=80,
         ge=1,

@@ -75,6 +75,22 @@ class ResourceLimitError(OrchestratorError):
     pass
 
 
+class VolumeUploadTooLargeError(ResourceLimitError):
+    """Uploaded folder exceeds the platform size limit."""
+
+
+class VolumeUploadQuotaExceededError(ResourceLimitError):
+    """User has reached the total volume upload storage quota."""
+
+
+class VolumeUploadNotFoundError(VelaError):
+    """Referenced volume upload does not exist for this user."""
+
+
+class InvalidVolumeUploadPathError(VelaError):
+    """Uploaded file path is unsafe or invalid."""
+
+
 class ProviderConnectionError(OrchestratorError):
     """Cannot reach the container runtime (Docker daemon, k8s API, etc.)."""
 

@@ -7,7 +7,16 @@ import uuid
 from typing import Annotated
 from urllib.parse import urlparse
 
-from fastapi import APIRouter, Depends, Query, Response, WebSocket, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    Query,
+    Response,
+    UploadFile,
+    WebSocket,
+    status,
+)
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.websockets import WebSocketDisconnect
 
@@ -30,11 +39,17 @@ from app.api.schemas import (
     ImageSuggestionsResponse,
     RunFromSourceRequest,
     RunFromSourceResponse,
+    VolumeMountRequest,
+    VolumeUploadResponse,
 )
+from app.core import user_library
 from app.core.auth.service import get_user_by_id
 from app.core.auth.tokens import decode_access_token
-from app.core.deploy.deploy_source_display import resolve_deploy_source_label
-from app.core.deploy.deployment_history import latest_source_by_container_ids
+from app.core.build.default_image_builder import DefaultImageBuilder
+from app.core.build.registry_image_suggestions import (
+    fetch_docker_hub_suggestions,
+    merge_image_suggestions,
+)
 from app.core.containers.docker_orchestrator import (
     VELA_OWNER_LABEL,
     VELA_PROJECT_LABEL,
@@ -42,33 +57,37 @@ from app.core.containers.docker_orchestrator import (
     VELA_SOURCE_REF_LABEL,
     with_deploy_source_labels,
 )
-from app.core.traffic.public_route_host import (
-    apply_public_route_to_deploy_config,
-    build_public_url,
-    read_public_route_settings,
+from app.core.containers.orchestrator import ContainerOrchestrator
+from app.core.containers.volume_uploads import (
+    resolve_volume_upload_path,
+    save_volume_upload,
+    user_uploads_total_bytes,
+    volume_upload_max_bytes,
+    volume_upload_user_quota_bytes,
+)
+from app.core.deploy.deploy_source_display import resolve_deploy_source_label
+from app.core.deploy.deploy_source_suggestions import (
+    DeploySourcesResponse,
+    collect_deploy_source_suggestions,
+)
+from app.core.deploy.deployment_history import (
+    DeploymentSnapshot,
+    latest_source_by_container_ids,
+    record_deployment,
 )
 from app.core.enums import ContainerStatus, RestartPolicy
 from app.core.exceptions import (
     CloneError,
     ContainerNotFoundError,
     ImageNotFoundError,
+    InvalidVolumeUploadPathError,
     NotAuthenticatedError,
     ProjectAccessDeniedError,
     ProviderConnectionError,
     RegistryAccessDeniedError,
+    VolumeUploadQuotaExceededError,
+    VolumeUploadTooLargeError,
 )
-
-from app.core.deploy.deploy_source_suggestions import (
-    DeploySourcesResponse,
-    collect_deploy_source_suggestions,
-)
-from app.core.deploy.deployment_history import DeploymentSnapshot, record_deployment
-from app.core import user_library
-from app.core.build.registry_image_suggestions import (
-    fetch_docker_hub_suggestions,
-    merge_image_suggestions,
-)
-from app.core.build.default_image_builder import DefaultImageBuilder
 from app.core.models import (
     ContainerInfo,
     ContainerStats,
@@ -76,6 +95,7 @@ from app.core.models import (
     HealthResult,
     PortMapping,
     ProjectSource,
+    VolumeMount,
 )
 from app.core.oauth import decrypt_identity_token, get_github_identity
 from app.core.projects.access import (
@@ -85,7 +105,11 @@ from app.core.projects.access import (
 )
 from app.core.projects.enums import can_write
 from app.core.projects.repository import get_personal_project_id, require_membership
-from app.core.containers.orchestrator import ContainerOrchestrator
+from app.core.traffic.public_route_host import (
+    apply_public_route_to_deploy_config,
+    build_public_url,
+    read_public_route_settings,
+)
 from app.core.traffic.traffic_router import TrafficRouter
 from app.db.models import User
 
@@ -140,9 +164,7 @@ async def _resolve_deploy_project_id_for_config(
     project_id: uuid.UUID | None,
 ) -> uuid.UUID:
     resolved = project_id or await get_personal_project_id(session, user)
-    membership = await require_membership(
-        session, project_id=resolved, user_id=user.id
-    )
+    membership = await require_membership(session, project_id=resolved, user_id=user.id)
     if not can_write(membership.role):
         raise ProjectAccessDeniedError(
             "You do not have permission to deploy to this project."
@@ -239,6 +261,7 @@ def _deploy_config_for_image(
     container_port: int,
     env_vars: dict[str, str] | None = None,
     command: list[str] | None = None,
+    volumes: list[VolumeMount] | None = None,
 ) -> DeployConfig:
     ports: list[PortMapping] = []
     if host_port is not None:
@@ -250,7 +273,21 @@ def _deploy_config_for_image(
         container_listen_port=container_port,
         env_vars=env_vars or {},
         command=command,
+        volumes=volumes or [],
     )
+
+
+def _resolve_deploy_volumes(
+    user_id: uuid.UUID,
+    volume_requests: list[VolumeMountRequest],
+) -> list[VolumeMount]:
+    return [
+        VolumeMount(
+            source=str(resolve_volume_upload_path(user_id, mount.upload_id)),
+            target=mount.target,
+        )
+        for mount in volume_requests
+    ]
 
 
 def _route_updates_from_run_body(body: RunFromSourceRequest) -> dict[str, object]:
@@ -396,10 +433,10 @@ async def image_availability(
 ) -> ImageAvailabilityResponse:
     """
     Determine whether the given Docker image reference or Git source is available.
-    
+
     Parameters:
         ref (str): A Docker image reference or a Git clone URL.
-    
+
     Returns:
         ImageAvailabilityResponse: For Git clone URLs, `available` is `true` and `checked` is `false`. For image references, `checked` is `true` and `available` is `true` when the image manifest or local image is found. If the image does not exist, `available` is `false`, `can_attempt_deploy` is `false`, and `detail`/`error_code` contain registry error information. If access to the registry is denied, `available` is `false`, `can_attempt_deploy` is `true`, and `detail`/`error_code` contain registry error information.
     """
@@ -453,11 +490,11 @@ async def deploy_source_suggestions(
 ) -> DeploySourcesResponse:
     """
     Provide unified autocomplete suggestions for registry images, GitHub repositories, and user Dockerfile templates.
-    
+
     Parameters:
         q (str): Search query to match suggestions; empty string returns broad suggestions.
         limit (int): Maximum number of suggestions to return (1–40).
-    
+
     Returns:
         DeploySourcesResponse: Aggregated suggestion list combining registry images, GitHub repositories, and the current user's Dockerfile templates.
     """
@@ -479,13 +516,13 @@ async def image_suggestions(
 ) -> ImageSuggestionsResponse:
     """
     Return image autocomplete suggestions combining local engine tags and Docker Hub results.
-    
+
     Parameters:
-    	q (str): Query string to match image refs; leading/trailing whitespace is ignored.
-    	limit (int): Maximum number of suggestions to return.
-    
+        q (str): Query string to match image refs; leading/trailing whitespace is ignored.
+        limit (int): Maximum number of suggestions to return.
+
     Returns:
-    	ImageSuggestionsResponse: Suggestions limited to `limit`, merged from local engine tags and Docker Hub (sorted/merged by relevance and pull count). If the orchestrator is unreachable, local tags are treated as empty and only Docker Hub results (when `q` is non-empty) are used.
+        ImageSuggestionsResponse: Suggestions limited to `limit`, merged from local engine tags and Docker Hub (sorted/merged by relevance and pull count). If the orchestrator is unreachable, local tags are treated as empty and only Docker Hub results (when `q` is non-empty) are used.
     """
     stripped = q.strip()
     try:
@@ -544,6 +581,61 @@ async def deploy(
     )
 
 
+@router.post("/volume-uploads", response_model=VolumeUploadResponse)
+async def upload_volume_folder(
+    files: Annotated[list[UploadFile], File(...)],
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> VolumeUploadResponse:
+    """Upload a local folder for read-only volume mounts (max 100 MB per folder)."""
+    if not files:
+        raise InvalidVolumeUploadPathError(
+            "Select a folder that contains at least one file."
+        )
+
+    per_folder_limit = volume_upload_max_bytes()
+    user_quota = volume_upload_user_quota_bytes()
+    current_usage = user_uploads_total_bytes(current_user.id)
+
+    payloads: list[tuple[str, bytes]] = []
+    total_bytes = 0
+    for upload in files:
+        relative_path = upload.filename or ""
+        # Only read content if early size check passes\
+        if upload.size is not None and total_bytes + upload.size > per_folder_limit:
+            limit_megabytes = per_folder_limit // (1024 * 1024)
+            raise VolumeUploadTooLargeError(
+                f"Folder exceeds the {limit_megabytes} MB upload limit."
+            )
+        content = await upload.read()
+        total_bytes += len(content)
+        if total_bytes > per_folder_limit:
+            limit_megabytes = per_folder_limit // (1024 * 1024)
+            raise VolumeUploadTooLargeError(
+                f"Folder exceeds the {limit_megabytes} MB upload limit."
+            )
+        if current_usage + total_bytes > user_quota:
+            limit_megabytes = user_quota // (1024 * 1024)
+            raise VolumeUploadQuotaExceededError(
+                f"Upload would exceed your {limit_megabytes} MB volume storage quota. "
+                "Use a smaller folder or remove unused uploads."
+            )
+        payloads.append((relative_path, content))
+
+    upload_id, folder_name, saved_bytes, file_count = save_volume_upload(
+        current_user.id,
+        payloads,
+    )
+    return VolumeUploadResponse(
+        upload_id=upload_id,
+        folder_name=folder_name,
+        total_bytes=saved_bytes,
+        file_count=file_count,
+        max_bytes=per_folder_limit,
+        user_quota_bytes=user_quota,
+        user_used_bytes=user_uploads_total_bytes(current_user.id),
+    )
+
+
 @router.post("/run", response_model=RunFromSourceResponse)
 async def run_from_user_source(
     body: RunFromSourceRequest,
@@ -555,13 +647,13 @@ async def run_from_user_source(
 ) -> RunFromSourceResponse:
     """
     Deploy a container by pulling or building an image from the user's specified source and return the deployment result.
-    
+
     Depending on body.source_kind this will:
     - "image": use the provided image reference (pull if needed) and deploy it.
     - "dockerfile_template": build an ephemeral image from the user's saved Dockerfile template, then deploy it.
     - "git": clone the Git source (using the caller's GitHub token for GitHub HTTPS URLs when available), build an image from the source, then deploy it.
     When a public route is requested, route-related fields are adjusted and a Traefik route may be registered; private-repo clone failures on GitHub produce a CloneError with guidance to connect GitHub when applicable.
-    
+
     Returns:
         RunFromSourceResponse: deployment result containing the created container info, the source kind, built/pulled image tag, whether a route was wired, and an optional public URL.
     """
@@ -570,6 +662,7 @@ async def run_from_user_source(
         raise ValueError("source_kind must be set after request validation.")
 
     project_id = await _resolve_deploy_project_id(session, current_user, body)
+    resolved_volumes = _resolve_deploy_volumes(current_user.id, body.volumes)
 
     if source_kind == "image":
         image_ref = (body.image_ref or "").strip()
@@ -580,6 +673,7 @@ async def run_from_user_source(
             container_port=body.container_port,
             env_vars=body.env_vars,
             command=body.command,
+            volumes=resolved_volumes,
         ).model_copy(update=_route_updates_from_run_body(body))
         cfg = with_deploy_source_labels(cfg, source_kind="image", source_ref=image_ref)
         cfg = _apply_deploy_labels(
@@ -628,6 +722,7 @@ async def run_from_user_source(
             container_port=body.container_port,
             env_vars=body.env_vars,
             command=body.command,
+            volumes=resolved_volumes,
         ).model_copy(
             update={
                 "restart_policy": RestartPolicy.UNLESS_STOPPED,
@@ -694,6 +789,7 @@ async def run_from_user_source(
         container_port=body.container_port,
         env_vars=body.env_vars,
         command=body.command,
+        volumes=resolved_volumes,
     ).model_copy(
         update={
             "restart_policy": RestartPolicy.UNLESS_STOPPED,
@@ -842,7 +938,9 @@ async def container_logs_stream(
     except ValueError:
         tail_parsed = 200
     tail_parsed = max(1, min(tail_parsed, _MAX_LOG_TAIL_LINES))
-    follow_logs = websocket.query_params.get("follow", "true").strip().lower() != "false"
+    follow_logs = (
+        websocket.query_params.get("follow", "true").strip().lower() != "false"
+    )
 
     try:
         if not token:

@@ -51,6 +51,8 @@ from app.core.exceptions import (
     TrafficRouterError,
     UnsupportedLanguageError,
     VelaError,
+    VolumeUploadNotFoundError,
+    InvalidVolumeUploadPathError,
 )
 
 
@@ -139,6 +141,7 @@ def register_exception_handlers(app) -> None:
     @app.exception_handler(RouteNotFoundError)
     @app.exception_handler(ContainerNotFoundError)
     @app.exception_handler(DockerfileTemplateNotFoundError)
+    @app.exception_handler(VolumeUploadNotFoundError)
     async def not_found_handler(_request: Request, exc: VelaError) -> JSONResponse:
         """
         Produce a 404 Not Found JSON response for the given domain error.
@@ -175,6 +178,7 @@ def register_exception_handlers(app) -> None:
         )
 
     @app.exception_handler(ResourceLimitError)
+    @app.exception_handler(InvalidVolumeUploadPathError)
     @app.exception_handler(AvatarValidationError)
     async def bad_request_handler(_request: Request, exc: VelaError) -> JSONResponse:
         return JSONResponse(
