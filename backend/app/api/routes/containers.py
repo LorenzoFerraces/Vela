@@ -601,7 +601,7 @@ async def upload_volume_folder(
     for upload in files:
         relative_path = upload.filename or ""
         # Only read content if early size check passes\
-        if total_bytes + upload.size > per_folder_limit:
+        if upload.size is not None and total_bytes + upload.size > per_folder_limit:
             limit_megabytes = per_folder_limit // (1024 * 1024)
             raise VolumeUploadTooLargeError(
                 f"Folder exceeds the {limit_megabytes} MB upload limit."

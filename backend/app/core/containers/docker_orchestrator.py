@@ -13,7 +13,7 @@ from typing import Any, TypeVar
 import docker
 import docker.errors
 import requests.exceptions
-from docker.types import Healthcheck
+from docker.types import Healthcheck, Mount
 
 from app.core.containers.orchestrator import ContainerOrchestrator
 from app.core.enums import ContainerStatus, HealthStatus, RestartPolicy
@@ -453,13 +453,15 @@ class DockerOrchestrator(ContainerOrchestrator):
             if self._default_network:
                 kwargs["network"] = self._default_network
             if config.volumes:
-                # Build a mapping of source to list of target mounts (ro)
-                vol_map: dict[str, list[dict]] = {}
-                for mount in config.volumes:
-                    vol_map.setdefault(mount.source, []).append(
-                        {"bind": mount.target, "mode": "ro"}
+                kwargs["mounts"] = [
+                    Mount(
+                        target=volume_mount.target,
+                        source=volume_mount.source,
+                        type="bind",
+                        read_only=True,
                     )
-                kwargs["volumes"] = vol_map
+                    for volume_mount in config.volumes
+                ]
 
             try:
                 container = self._client.containers.create(config.image, **kwargs)
