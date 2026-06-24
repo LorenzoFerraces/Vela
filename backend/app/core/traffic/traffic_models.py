@@ -5,8 +5,20 @@ from __future__ import annotations
 from pydantic import BaseModel, Field, field_validator
 
 
+class BackendServer(BaseModel):
+    """A single upstream server for a load-balanced route."""
+
+    host: str = Field(
+        ...,
+        min_length=1,
+        max_length=253,
+        description="Hostname or container name the proxy resolves (Docker network DNS, etc.).",
+    )
+    port: int = Field(..., ge=1, le=65535)
+
+
 class RouteSpec(BaseModel):
-    """Desired HTTP route from hostname/path to a backend reachable by the edge proxy."""
+    """Desired HTTP route from hostname/path to one or more backends reachable by the edge proxy."""
 
     route_id: str = Field(
         ...,
@@ -25,13 +37,11 @@ class RouteSpec(BaseModel):
         max_length=512,
         description="URL path prefix; use '/' for all paths on this host.",
     )
-    backend_host: str = Field(
+    backend_servers: list[BackendServer] = Field(
         ...,
         min_length=1,
-        max_length=253,
-        description="Hostname or container name the proxy resolves (Docker network DNS, etc.).",
+        description="Upstream servers; Traefik load-balances across all entries.",
     )
-    backend_port: int = Field(..., ge=1, le=65535)
     tls_enabled: bool = Field(
         default=False,
         description="If true, the generated Traefik router references TLS (entrypoints must match static config).",
@@ -64,8 +74,7 @@ class RouteInfo(BaseModel):
     route_id: str
     host: str
     path_prefix: str
-    backend_host: str
-    backend_port: int
+    backend_servers: list[BackendServer]
     tls_enabled: bool
     entrypoints: list[str]
 
@@ -75,8 +84,7 @@ class RouteInfo(BaseModel):
             route_id=spec.route_id,
             host=spec.host,
             path_prefix=spec.path_prefix,
-            backend_host=spec.backend_host,
-            backend_port=spec.backend_port,
+            backend_servers=list(spec.backend_servers),
             tls_enabled=spec.tls_enabled,
             entrypoints=list(spec.entrypoints),
         )

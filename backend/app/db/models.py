@@ -6,7 +6,9 @@ import uuid
 from datetime import datetime, timezone
 
 from sqlalchemy import (
+    Boolean,
     DateTime,
+    Float,
     ForeignKey,
     Integer,
     LargeBinary,
@@ -328,6 +330,55 @@ class EmailPreference(Base):
     )
 
     user: Mapped[User] = relationship()
+
+
+class ScalingPolicy(Base):
+    """Horizontal auto-scaling policy for a named container service."""
+
+    __tablename__ = "scaling_policies"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    container_name: Mapped[str] = mapped_column(
+        String(128), nullable=False, unique=True, index=True
+    )
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    min_replicas: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    max_replicas: Mapped[int] = mapped_column(Integer, nullable=False, default=3)
+    metric: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="cpu_percent"
+    )
+    scale_up_threshold: Mapped[float] = mapped_column(
+        Float, nullable=False, default=70.0
+    )
+    scale_down_threshold: Mapped[float] = mapped_column(
+        Float, nullable=False, default=30.0
+    )
+    cooldown_seconds: Mapped[int] = mapped_column(Integer, nullable=False, default=60)
+    scale_up_stabilization_seconds: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=120
+    )
+    scale_down_stabilization_seconds: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=120
+    )
+    scale_up_condition_since: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    scale_down_condition_since: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    last_scaled_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utcnow
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow
+    )
 
 
 class AlertHistory(Base):

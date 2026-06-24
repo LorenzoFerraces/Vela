@@ -51,10 +51,10 @@ def _build_rule(spec: RouteSpec) -> str:
     return f"{host_part} && {_path_rule(spec.path_prefix)}"
 
 
-def _backend_url(spec: RouteSpec) -> str:
-    if "`" in spec.backend_host or " " in spec.backend_host:
-        raise RouteConfigurationError("backend_host contains invalid characters")
-    return f"http://{spec.backend_host}:{spec.backend_port}"
+def _server_url(host: str, port: int) -> str:
+    if "`" in host or " " in host:
+        raise RouteConfigurationError("backend host contains invalid characters")
+    return f"http://{host}:{port}"
 
 
 def _tls_split_router_keys(route_id: str) -> tuple[str, str]:
@@ -79,9 +79,11 @@ def _build_traefik_document(route_specs: list[RouteSpec]) -> dict[str, object]:
         key = _traefik_safe_key(spec.route_id)
         service_name = f"{key}_svc"
         rule = _build_rule(spec)
-        services[service_name] = {
-            "loadBalancer": {"servers": [{"url": _backend_url(spec)}]}
-        }
+        servers = [
+            {"url": _server_url(backend.host, backend.port)}
+            for backend in spec.backend_servers
+        ]
+        services[service_name] = {"loadBalancer": {"servers": servers}}
         if spec.tls_enabled:
             # Two routers so both http://host:80 and https://host:443 match the same backend.
             key_web, key_websecure = _tls_split_router_keys(spec.route_id)

@@ -19,7 +19,7 @@ from app.core.containers.volume_uploads import (
     VOLUME_UPLOAD_MAX_BYTES,
     VOLUME_UPLOAD_USER_QUOTA_BYTES,
 )
-from app.core.models import ContainerInfo, ProjectSource
+from app.core.models import ContainerInfo, ProjectSource, ScalingPolicyConfig, ScalingPolicyInfo
 
 
 class VolumeMountRequest(BaseModel):
@@ -154,6 +154,10 @@ class RunFromSourceRequest(BaseModel):
     volumes: list[VolumeMountRequest] = Field(
         default_factory=list,
         description="Read-only mounts from user-uploaded folders.",
+    )
+    scaling_policy: ScalingPolicyConfig | None = Field(
+        default=None,
+        description="When set, persist an auto-scaling policy for this container after deploy.",
     )
 
     @field_validator("env_vars")
@@ -330,6 +334,10 @@ class RunFromSourceResponse(BaseModel):
     public_url: str | None = Field(
         default=None,
         description="Canonical URL when public_route was used and the route was wired.",
+    )
+    scaling_policy: ScalingPolicyInfo | None = Field(
+        default=None,
+        description="Persisted scaling policy when one was requested at deploy time.",
     )
 
 

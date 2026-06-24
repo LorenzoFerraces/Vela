@@ -11,6 +11,10 @@ import {
 import { ContainersFormMessageBanner } from './containers/ContainersFormMessageBanner'
 import { ContainersRunAdvancedFields } from './containers/ContainersRunAdvancedFields'
 import { ContainersRunFormFields } from './containers/ContainersRunFormFields'
+import {
+  ContainersRunScalingFields,
+  type ScalingPolicyRequest,
+} from './containers/ContainersRunScalingFields'
 import { DeployProjectSelect } from './containers/DeployProjectSelect'
 import { DeploySourceCombobox } from './containers/DeploySourceCombobox'
 import { Toast } from '../components/Toast'
@@ -43,6 +47,7 @@ export default function ContainersPage() {
     createEmptyVolumeMountRow(),
   ])
   const [startCommand, setStartCommand] = useState('')
+  const [scalingPolicy, setScalingPolicy] = useState<ScalingPolicyRequest | null>(null)
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState<FormMessage | null>(null)
   const [rowBusy, setRowBusy] = useState<string | null>(null)
@@ -81,6 +86,7 @@ export default function ContainersPage() {
     setEnvRows([{ key: '', value: '' }])
     setVolumeRows([createEmptyVolumeMountRow()])
     setStartCommand('')
+    setScalingPolicy(null)
   }
 
   function validateVolumeRows(): string | null {
@@ -150,6 +156,7 @@ export default function ContainersPage() {
       command,
       volumes: volumesFromRows(volumeRows),
       project_id: deployProjects.selectedProjectId,
+      scaling_policy: scalingPolicy,
     }
     switch (selection.kind) {
       case 'image':
@@ -366,6 +373,10 @@ export default function ContainersPage() {
           onVolumeRowsChange={setVolumeRows}
           startCommand={startCommand}
           onStartCommandChange={setStartCommand}
+        />
+        <ContainersRunScalingFields
+          scalingPolicy={scalingPolicy}
+          onScalingPolicyChange={setScalingPolicy}
         />
 
         <div className="containers-form__actions">

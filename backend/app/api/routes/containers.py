@@ -42,6 +42,7 @@ from app.api.schemas import (
     VolumeMountRequest,
     VolumeUploadResponse,
 )
+from app.core.models import ScalingPolicyInfo
 from app.core import user_library
 from app.core.auth.service import get_user_by_id
 from app.core.auth.tokens import decode_access_token
@@ -75,6 +76,7 @@ from app.core.deploy.deployment_history import (
     latest_source_by_container_ids,
     record_deployment,
 )
+from app.core.scaling.policy_repository import upsert_policy
 from app.core.enums import ContainerStatus, RestartPolicy
 from app.core.exceptions import (
     CloneError,
@@ -344,6 +346,22 @@ async def _persist_run_deployment(
             "Failed to persist deployment history for container %s",
             info.id,
         )
+
+
+async def _persist_scaling_policy(
+    session: AsyncSession,
+    container_name: str,
+    body: RunFromSourceRequest,
+) -> ScalingPolicyInfo | None:
+    if body.scaling_policy is None:
+        return None
+    try:
+        return await upsert_policy(session, container_name, body.scaling_policy)
+    except Exception:
+        logger.exception(
+            "Failed to persist scaling policy for container %s", container_name
+        )
+        return None
 
 
 async def _enrich_container_source_labels(
@@ -695,12 +713,14 @@ async def run_from_user_source(
             dockerfile_snapshot=None,
             public_url=public_url,
         )
+        saved_policy = await _persist_scaling_policy(session, info.name, body)
         return RunFromSourceResponse(
             container=info,
             kind="image",
             image=image_ref,
             route_wired=route_wired,
             public_url=public_url,
+            scaling_policy=saved_policy,
         )
 
     if source_kind == "dockerfile_template":
@@ -753,12 +773,14 @@ async def run_from_user_source(
             dockerfile_snapshot=build_result.dockerfile_snapshot or template.contents,
             public_url=public_url,
         )
+        saved_policy = await _persist_scaling_policy(session, info.name, body)
         return RunFromSourceResponse(
             container=info,
             kind="dockerfile_template",
             image=build_result.image_tag,
             route_wired=route_wired,
             public_url=public_url,
+            scaling_policy=saved_policy,
         )
 
     git_url = (body.git_url or "").strip()
@@ -816,12 +838,14 @@ async def run_from_user_source(
         dockerfile_snapshot=build_result.dockerfile_snapshot,
         public_url=public_url,
     )
+    saved_policy = await _persist_scaling_policy(session, info.name, body)
     return RunFromSourceResponse(
         container=info,
         kind="git",
         image=build_result.image_tag,
         route_wired=route_wired,
         public_url=public_url,
+        scaling_policy=saved_policy,
     )
 
 

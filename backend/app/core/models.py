@@ -10,6 +10,7 @@ from app.core.enums import (
     ContainerStatus,
     HealthStatus,
     RestartPolicy,
+    ScalingMetric,
     SupportedLanguage,
 )
 
@@ -194,3 +195,82 @@ class BuildResult(BaseModel):
     build_log: str
     project_info: ProjectInfo
     dockerfile_snapshot: str | None = None
+
+
+# ---------------------------------------------------------------------------
+# Scaling policy models
+# ---------------------------------------------------------------------------
+
+
+class ScalingPolicyConfig(BaseModel):
+    """Desired auto-scaling configuration attached to a container service."""
+
+    enabled: bool = True
+    min_replicas: int = Field(default=1, ge=1, le=20)
+    max_replicas: int = Field(default=3, ge=1, le=20)
+    metric: ScalingMetric = ScalingMetric.CPU_PERCENT
+    scale_up_threshold: float = Field(
+        default=70.0,
+        ge=0.0,
+        le=100.0,
+        description="Metric value above which the engine scales up.",
+    )
+    scale_down_threshold: float = Field(
+        default=30.0,
+        ge=0.0,
+        le=100.0,
+        description="Metric value below which the engine scales down.",
+    )
+    cooldown_seconds: int = Field(
+        default=60,
+        ge=10,
+        le=3600,
+        description="Minimum seconds between consecutive scaling actions.",
+    )
+    scale_up_stabilization_seconds: int = Field(
+        default=120,
+        ge=30,
+        le=3600,
+        description=(
+            "Metric must stay at or above scale_up_threshold for this many seconds "
+            "before a scale-up is applied."
+        ),
+    )
+    scale_down_stabilization_seconds: int = Field(
+        default=120,
+        ge=30,
+        le=3600,
+        description=(
+            "Metric must stay at or below scale_down_threshold for this many seconds "
+            "before a scale-down is applied."
+        ),
+    )
+
+    @field_validator("max_replicas")
+    @classmethod
+    def max_must_be_gte_min(cls, value: int, info: object) -> int:
+        data = getattr(info, "data", {})
+        min_replicas = data.get("min_replicas", 1)
+        if value < min_replicas:
+            msg = "max_replicas must be >= min_replicas"
+            raise ValueError(msg)
+        return value
+
+
+class ScalingPolicyInfo(BaseModel):
+    """Scaling policy as returned by the API (includes server-assigned fields)."""
+
+    id: uuid.UUID
+    container_name: str
+    enabled: bool
+    min_replicas: int
+    max_replicas: int
+    metric: ScalingMetric
+    scale_up_threshold: float
+    scale_down_threshold: float
+    cooldown_seconds: int
+    scale_up_stabilization_seconds: int
+    scale_down_stabilization_seconds: int
+    last_scaled_at: datetime | None
+    created_at: datetime
+    updated_at: datetime

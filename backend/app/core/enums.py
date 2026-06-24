@@ -40,3 +40,8 @@ class SupportedLanguage(StrEnum):
     RUST = "rust"
     RUBY = "ruby"
     UNKNOWN = "unknown"
+
+
+class ScalingMetric(StrEnum):
+    CPU_PERCENT = "cpu_percent"
+    REQUESTS_PER_SECOND = "requests_per_second"

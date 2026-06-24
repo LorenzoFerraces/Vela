@@ -45,6 +45,7 @@ VELA_SOURCE_REF_LABEL = "vela.source_ref"
 VELA_ROUTE_HOST_LABEL = "vela.route_host"
 VELA_ROUTE_PATH_PREFIX_LABEL = "vela.route_path_prefix"
 VELA_ROUTE_TLS_LABEL = "vela.route_tls"
+VELA_REPLICA_OF_LABEL = "vela.replica_of"
 _NS_PER_SEC = 1_000_000_000
 
 
@@ -940,3 +941,47 @@ class DockerOrchestrator(ContainerOrchestrator):
             raise ProviderConnectionError(str(e)) from e
         except docker.errors.DockerException as e:
             raise ProviderConnectionError(str(e)) from e
+
+    async def list_replicas(self, base_name: str) -> list[ContainerInfo]:
+        label_filter = [
+            f"{VELA_MANAGED_LABEL}={VELA_MANAGED_VALUE}",
+            f"{VELA_REPLICA_OF_LABEL}={base_name}",
+        ]
+
+        def sync() -> list[ContainerInfo]:
+            containers = self._client.containers.list(
+                all=True,
+                filters={"label": label_filter},
+            )
+            out: list[ContainerInfo] = []
+            for container in containers:
+                container.reload()
+                out.append(_inspect_to_container_info(container.attrs))
+            return out
+
+        try:
+            return await self._to_thread(sync)
+        except requests.exceptions.RequestException as e:
+            raise ProviderConnectionError(str(e)) from e
+        except docker.errors.DockerException as e:
+            raise ProviderConnectionError(str(e)) from e
+
+    async def deploy_replica(
+        self, base_config: DeployConfig, replica_index: int
+    ) -> ContainerInfo:
+        base_name = base_config.name or ""
+        replica_name = f"{base_name}-r{replica_index}"
+        replica_labels = dict(base_config.labels)
+        replica_labels[VELA_REPLICA_OF_LABEL] = base_name
+        # Replicas do not publish host ports or register routes themselves;
+        # only the base container's route entry lists all backend servers.
+        replica_config = base_config.model_copy(
+            update={
+                "name": replica_name,
+                "labels": replica_labels,
+                "ports": [],
+                "route_host": None,
+                "public_route": False,
+            }
+        )
+        return await self.deploy(replica_config)

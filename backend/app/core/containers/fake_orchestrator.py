@@ -11,6 +11,7 @@ from app.core.containers.docker_orchestrator import (
     VELA_MANAGED_LABEL,
     VELA_MANAGED_VALUE,
     VELA_OWNER_LABEL,
+    VELA_REPLICA_OF_LABEL,
     VELA_ROUTE_HOST_LABEL,
     VELA_ROUTE_PATH_PREFIX_LABEL,
     VELA_ROUTE_TLS_LABEL,
@@ -355,6 +356,31 @@ class FakeContainerOrchestrator(ContainerOrchestrator):
             list[str]: Image reference strings sorted in ascending order.
         """
         return sorted(self._images)
+
+    async def list_replicas(self, base_name: str) -> list[ContainerInfo]:
+        return [
+            info
+            for info in self._containers.values()
+            if info.labels.get(VELA_REPLICA_OF_LABEL) == base_name
+        ]
+
+    async def deploy_replica(
+        self, base_config: DeployConfig, replica_index: int
+    ) -> ContainerInfo:
+        base_name = base_config.name or ""
+        replica_name = f"{base_name}-r{replica_index}"
+        replica_labels = dict(base_config.labels)
+        replica_labels[VELA_REPLICA_OF_LABEL] = base_name
+        replica_config = base_config.model_copy(
+            update={
+                "name": replica_name,
+                "labels": replica_labels,
+                "ports": [],
+                "route_host": None,
+                "public_route": False,
+            }
+        )
+        return await self.deploy(replica_config)
 
     async def verify_image_reference_available(self, image_ref: str) -> None:
         """
