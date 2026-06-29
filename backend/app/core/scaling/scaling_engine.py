@@ -8,10 +8,13 @@ from datetime import datetime, timezone
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.containers.docker_orchestrator import VELA_REPLICA_OF_LABEL
 from app.core.containers.orchestrator import ContainerOrchestrator
 from app.core.enums import ContainerStatus, ScalingMetric
-from app.core.exceptions import ContainerNotFoundError, OrchestratorError, ProviderConnectionError
+from app.core.exceptions import (
+    ContainerNotFoundError,
+    OrchestratorError,
+    ProviderConnectionError,
+)
 from app.core.models import DeployConfig
 from app.core.scaling.policy_repository import (
     ScalingPolicyRuntime,
@@ -38,10 +41,12 @@ async def _measure_metric(
             try:
                 stats = await orchestrator.get_stats(container_name)
                 return stats.cpu_percent
-            except (ContainerNotFoundError, ProviderConnectionError, OrchestratorError) as exc:
-                logger.debug(
-                    "Could not read stats for %s: %s", container_name, exc
-                )
+            except (
+                ContainerNotFoundError,
+                ProviderConnectionError,
+                OrchestratorError,
+            ) as exc:
+                logger.debug("Could not read stats for %s: %s", container_name, exc)
                 return None
         case ScalingMetric.REQUESTS_PER_SECOND:
             # Traefik metrics integration is out of scope for the initial implementation;
@@ -49,10 +54,12 @@ async def _measure_metric(
             try:
                 stats = await orchestrator.get_stats(container_name)
                 return stats.cpu_percent
-            except (ContainerNotFoundError, ProviderConnectionError, OrchestratorError) as exc:
-                logger.debug(
-                    "Could not read stats for %s: %s", container_name, exc
-                )
+            except (
+                ContainerNotFoundError,
+                ProviderConnectionError,
+                OrchestratorError,
+            ) as exc:
+                logger.debug("Could not read stats for %s: %s", container_name, exc)
                 return None
 
 
@@ -140,23 +147,28 @@ async def _scale_up(
     try:
         base_info = await orchestrator.get(base_name)
     except (ContainerNotFoundError, ProviderConnectionError):
-        logger.warning("Scale-up skipped: could not inspect base container %s", base_name)
+        logger.warning(
+            "Scale-up skipped: could not inspect base container %s", base_name
+        )
         return
-    replica_labels = dict(base_info.labels)
-    replica_labels[VELA_REPLICA_OF_LABEL] = base_name
-    replica_config = DeployConfig(
+    base_config = DeployConfig(
         image=base_info.image,
-        name=f"{base_name}-r{next_index}",
+        name=base_name,
         container_listen_port=base_port,
-        labels=replica_labels,
+        labels=dict(base_info.labels),
+        volumes=list(base_info.volumes),
     )
     try:
-        replica_info = await orchestrator.deploy(replica_config)
+        replica_info = await orchestrator.deploy_replica(base_config, next_index)
     except (OrchestratorError, ProviderConnectionError) as exc:
-        logger.warning("Scale-up deploy failed for %s replica %d: %s", base_name, next_index, exc)
+        logger.warning(
+            "Scale-up deploy failed for %s replica %d: %s", base_name, next_index, exc
+        )
         return
     live_replicas = await orchestrator.list_replicas(base_name)
-    live_replica_names = [r.name for r in live_replicas if r.status == ContainerStatus.RUNNING]
+    live_replica_names = [
+        r.name for r in live_replicas if r.status == ContainerStatus.RUNNING
+    ]
     await _upsert_route_with_replicas(
         traffic_router, base_spec, base_name, base_port, live_replica_names
     )
@@ -187,7 +199,9 @@ async def _scale_down(
         logger.warning("Scale-down removal failed for %s: %s", victim_name, exc)
         return
     live_replicas = await orchestrator.list_replicas(base_name)
-    live_replica_names = [r.name for r in live_replicas if r.status == ContainerStatus.RUNNING]
+    live_replica_names = [
+        r.name for r in live_replicas if r.status == ContainerStatus.RUNNING
+    ]
     await _upsert_route_with_replicas(
         traffic_router, base_spec, base_name, base_port, live_replica_names
     )
@@ -292,10 +306,14 @@ async def _evaluate_policy(
             now,
         )
     )
-
     if ready_to_scale_up:
         await _scale_up(
-            orchestrator, traffic_router, base_name, base_port, base_spec, current_replica_count
+            orchestrator,
+            traffic_router,
+            base_name,
+            base_port,
+            base_spec,
+            current_replica_count,
         )
         await record_scale_event(session, base_name)
         return

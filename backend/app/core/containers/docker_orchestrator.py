@@ -33,6 +33,7 @@ from app.core.models import (
     HealthCheckConfig,
     HealthResult,
     PortMapping,
+    VolumeMount,
 )
 from app.core.traffic.public_route_host import build_public_url
 
@@ -210,6 +211,26 @@ def _health_status_from_docker(raw: str | None) -> HealthStatus:
             return HealthStatus.NONE
 
 
+def _volumes_from_inspect(data: dict[str, Any]) -> list[VolumeMount]:
+    mounts = data.get("Mounts") or []
+    volumes: list[VolumeMount] = []
+    for mount in mounts:
+        if not isinstance(mount, dict):
+            continue
+        if mount.get("Type") != "bind":
+            continue
+        source = mount.get("Source")
+        destination = mount.get("Destination")
+        if (
+            isinstance(source, str)
+            and source.strip()
+            and isinstance(destination, str)
+            and destination.strip()
+        ):
+            volumes.append(VolumeMount(source=source, target=destination))
+    return volumes
+
+
 def _inspect_to_container_info(data: dict[str, Any]) -> ContainerInfo:
     cid = data.get("Id", "")
     name_raw = data.get("Name")
@@ -235,6 +256,7 @@ def _inspect_to_container_info(data: dict[str, Any]) -> ContainerInfo:
         status=status,
         created_at=_parse_created(data.get("Created", "")),
         ports=_ports_from_inspect(data),
+        volumes=_volumes_from_inspect(data),
         labels=labels,
         health=health,
         access_url=_access_url_from_route_labels(labels),

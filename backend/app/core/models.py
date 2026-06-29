@@ -119,6 +119,7 @@ class ContainerInfo(BaseModel):
     status: ContainerStatus
     created_at: datetime
     ports: list[PortMapping] = Field(default_factory=list)
+    volumes: list[VolumeMount] = Field(default_factory=list)
     labels: dict[str, str] = Field(default_factory=dict)
     health: HealthStatus = HealthStatus.NONE
     access_url: str | None = Field(
