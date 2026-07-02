@@ -7,12 +7,34 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_current_user, get_db
+from app.api.deps import get_current_user, get_db, get_orchestrator
+from app.core.containers.orchestrator import ContainerOrchestrator
 from app.core.models import ScalingPolicyConfig, ScalingPolicyInfo
-from app.core.scaling.policy_repository import get_policy, upsert_policy
+from app.core.projects.access import list_accessible_project_ids
+from app.core.scaling.policy_repository import (
+    get_policy,
+    list_policies_for_container_names,
+    upsert_policy,
+)
 from app.db.models import User
 
 router = APIRouter()
+
+
+@router.get("/policies", response_model=list[ScalingPolicyInfo])
+async def list_scaling_policies(
+    session: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+    orchestrator: Annotated[ContainerOrchestrator, Depends(get_orchestrator)],
+) -> list[ScalingPolicyInfo]:
+    """Return scaling policies for containers the caller can access."""
+    project_ids = await list_accessible_project_ids(session, current_user.id)
+    containers = await orchestrator.list(
+        project_ids=project_ids,
+        user_id=current_user.id,
+    )
+    container_names = {container.name for container in containers}
+    return await list_policies_for_container_names(session, container_names)
 
 
 @router.get(

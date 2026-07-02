@@ -339,6 +339,19 @@ export interface ContainerInfo {
   access_role?: ProjectRole | null
 }
 
+export const VELA_REPLICA_OF_LABEL = 'vela.replica_of'
+
+export interface ContainerStats {
+  container_id: string
+  timestamp: string
+  cpu_percent: number
+  memory_usage_bytes: number
+  memory_limit_bytes: number
+  memory_percent: number
+  network_rx_bytes: number
+  network_tx_bytes: number
+}
+
 export type ProjectRole = 'owner' | 'operator' | 'viewer'
 
 export type RunSourceKind = 'image' | 'git' | 'dockerfile_template'
@@ -503,6 +516,16 @@ export async function getImageSuggestions(
 
 export async function listContainers(): Promise<ContainerInfo[]> {
   return apiGet<ContainerInfo[]>('/api/containers/')
+}
+
+export async function listScalingPolicies(): Promise<ScalingPolicyInfo[]> {
+  return apiGet<ScalingPolicyInfo[]>('/api/scaling/policies')
+}
+
+export async function getContainerStats(containerId: string): Promise<ContainerStats> {
+  return apiGet<ContainerStats>(
+    `/api/containers/${encodeURIComponent(containerId)}/stats`,
+  )
 }
 
 const MAX_CONTAINER_LOG_TAIL = 2000

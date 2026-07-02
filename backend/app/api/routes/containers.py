@@ -94,6 +94,7 @@ from app.core.models import (
     ContainerInfo,
     ContainerStats,
     DeployConfig,
+    default_listen_port_health_check,
     HealthResult,
     PortMapping,
     ProjectSource,
@@ -276,6 +277,7 @@ def _deploy_config_for_image(
         env_vars=env_vars or {},
         command=command,
         volumes=volumes or [],
+        health_check=default_listen_port_health_check(container_port),
     )
 
 

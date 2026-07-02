@@ -11,10 +11,7 @@ import {
 import { ContainersFormMessageBanner } from './containers/ContainersFormMessageBanner'
 import { ContainersRunAdvancedFields } from './containers/ContainersRunAdvancedFields'
 import { ContainersRunFormFields } from './containers/ContainersRunFormFields'
-import {
-  ContainersRunScalingFields,
-  type ScalingPolicyRequest,
-} from './containers/ContainersRunScalingFields'
+import type { ScalingPolicyRequest } from './containers/ContainersRunScalingFields'
 import { DeployProjectSelect } from './containers/DeployProjectSelect'
 import { DeploySourceCombobox } from './containers/DeploySourceCombobox'
 import { Toast } from '../components/Toast'
@@ -24,7 +21,7 @@ import {
   selectionNeedsRegistryCheck,
   selectionShowsGitBranch,
 } from './containers/deploySourceTypes'
-import { useContainerList } from './containers/useContainerList'
+import { useWorkloadGroups } from './containers/useWorkloadGroups'
 import { useDeploySourceSelection } from './containers/useDeploySourceSelection'
 import { useDeployProjects } from './containers/useDeployProjects'
 import { useGitSourceAnalysis } from './containers/useGitSourceAnalysis'
@@ -71,7 +68,7 @@ export default function ContainersPage() {
     setMessage({ type: 'err', text: detail })
   }, [])
 
-  const { rows, listLoading, refresh } = useContainerList(reportListLoadError)
+  const { groups, listLoading, refresh } = useWorkloadGroups(reportListLoadError)
   const deployProjects = useDeployProjects()
 
   const imageRefForCheck =
@@ -373,8 +370,6 @@ export default function ContainersPage() {
           onVolumeRowsChange={setVolumeRows}
           startCommand={startCommand}
           onStartCommandChange={setStartCommand}
-        />
-        <ContainersRunScalingFields
           scalingPolicy={scalingPolicy}
           onScalingPolicyChange={setScalingPolicy}
         />
@@ -420,7 +415,7 @@ export default function ContainersPage() {
       <h2 className="containers-page__subtitle">Running workloads</h2>
       <WorkloadsTable
         listLoading={listLoading}
-        rows={rows}
+        groups={groups}
         rowBusyId={rowBusy}
         onStart={onStart}
         onStop={onStop}

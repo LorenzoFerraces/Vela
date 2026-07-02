@@ -15,7 +15,7 @@ from app.core.exceptions import (
     OrchestratorError,
     ProviderConnectionError,
 )
-from app.core.models import DeployConfig
+from app.core.models import DeployConfig, default_listen_port_health_check
 from app.core.scaling.policy_repository import (
     ScalingPolicyRuntime,
     list_enabled_policies,
@@ -157,6 +157,7 @@ async def _scale_up(
         container_listen_port=base_port,
         labels=dict(base_info.labels),
         volumes=list(base_info.volumes),
+        health_check=default_listen_port_health_check(base_port),
     )
     try:
         replica_info = await orchestrator.deploy_replica(base_config, next_index)

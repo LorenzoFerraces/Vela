@@ -49,6 +49,18 @@ def _orm_to_runtime(row: ScalingPolicy) -> ScalingPolicyRuntime:
     )
 
 
+async def list_policies_for_container_names(
+    session: AsyncSession,
+    container_names: set[str],
+) -> list[ScalingPolicyInfo]:
+    if not container_names:
+        return []
+    result = await session.execute(
+        select(ScalingPolicy).where(ScalingPolicy.container_name.in_(container_names))
+    )
+    return [_orm_to_info(row) for row in result.scalars().all()]
+
+
 async def get_policy(
     session: AsyncSession, container_name: str
 ) -> ScalingPolicyInfo | None:
@@ -115,9 +127,7 @@ async def update_stabilization_state(
     await session.commit()
 
 
-async def record_scale_event(
-    session: AsyncSession, container_name: str
-) -> None:
+async def record_scale_event(session: AsyncSession, container_name: str) -> None:
     """Record a scale action and reset stabilization timers."""
     result = await session.execute(
         select(ScalingPolicy).where(ScalingPolicy.container_name == container_name)

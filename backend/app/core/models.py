@@ -57,6 +57,25 @@ class HealthCheckConfig(BaseModel):
     start_period_s: int = 0
 
 
+def default_listen_port_health_check(listen_port: int) -> HealthCheckConfig:
+    """Verify the configured port accepts TCP connections inside the container."""
+    return HealthCheckConfig(
+        command=[
+            "CMD-SHELL",
+            (
+                f"nc -z 127.0.0.1 {listen_port} 2>/dev/null || "
+                f"nc -z localhost {listen_port} 2>/dev/null || "
+                f"bash -c 'exec 3<>/dev/tcp/127.0.0.1/{listen_port}' 2>/dev/null || "
+                "exit 1"
+            ),
+        ],
+        interval_s=15,
+        timeout_s=5,
+        retries=3,
+        start_period_s=30,
+    )
+
+
 class DeployConfig(BaseModel):
     image: str
     name: str | None = None

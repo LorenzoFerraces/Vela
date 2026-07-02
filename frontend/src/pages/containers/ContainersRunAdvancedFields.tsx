@@ -11,6 +11,10 @@ import {
 } from '../../constants/volumeUploadLimits'
 import type { EnvVarRow, VolumeMountRow } from './runFormAdvanced'
 import { createEmptyVolumeMountRow, folderTotalBytes } from './runFormAdvanced'
+import {
+  ContainersRunScalingFields,
+  type ScalingPolicyRequest,
+} from './ContainersRunScalingFields'
 
 type ContainersRunAdvancedFieldsProps = {
   envRows: EnvVarRow[]
@@ -19,6 +23,8 @@ type ContainersRunAdvancedFieldsProps = {
   onVolumeRowsChange: (rows: VolumeMountRow[]) => void
   startCommand: string
   onStartCommandChange: (value: string) => void
+  scalingPolicy: ScalingPolicyRequest | null
+  onScalingPolicyChange: (policy: ScalingPolicyRequest | null) => void
 }
 
 function formatBytes(totalBytes: number): string {
@@ -38,6 +44,8 @@ export function ContainersRunAdvancedFields({
   onVolumeRowsChange,
   startCommand,
   onStartCommandChange,
+  scalingPolicy,
+  onScalingPolicyChange,
 }: ContainersRunAdvancedFieldsProps) {
   const [expanded, setExpanded] = useState(false)
   const folderInputRef = useRef<HTMLInputElement>(null)
@@ -287,6 +295,11 @@ export function ContainersRunAdvancedFields({
           <p className="containers-muted containers-form__hint">
             Overrides the container CMD when set.
           </p>
+
+          <ContainersRunScalingFields
+            scalingPolicy={scalingPolicy}
+            onScalingPolicyChange={onScalingPolicyChange}
+          />
         </div>
       ) : null}
     </div>
