@@ -19,7 +19,12 @@ from app.core.containers.volume_uploads import (
     VOLUME_UPLOAD_MAX_BYTES,
     VOLUME_UPLOAD_USER_QUOTA_BYTES,
 )
-from app.core.models import ContainerInfo, ProjectSource, ScalingPolicyConfig, ScalingPolicyInfo
+from app.core.models import (
+    ContainerInfo,
+    ProjectSource,
+    ScalingPolicyConfig,
+    ScalingPolicyInfo,
+)
 
 
 class VolumeMountRequest(BaseModel):
@@ -338,6 +343,12 @@ class RunFromSourceResponse(BaseModel):
     scaling_policy: ScalingPolicyInfo | None = Field(
         default=None,
         description="Persisted scaling policy when one was requested at deploy time.",
+    )
+    scaling_policy_warning: str | None = Field(
+        default=None,
+        description=(
+            "Set when deploy succeeded but the requested auto-scaling policy could not be saved."
+        ),
     )
 
 

@@ -355,22 +355,20 @@ async def _persist_scaling_policy(
     session: AsyncSession,
     container_name: str,
     body: RunFromSourceRequest,
-) -> ScalingPolicyInfo | None:
+) -> tuple[ScalingPolicyInfo | None, str | None]:
     if body.scaling_policy is None:
-        return None
+        return None, None
     try:
-        return await upsert_policy(session, container_name, body.scaling_policy)
-    except Exception as exc:
+        policy = await upsert_policy(session, container_name, body.scaling_policy)
+        return policy, None
+    except Exception:
         logger.exception(
             "Failed to persist scaling policy for container %s", container_name
         )
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=(
-                "The container was created but the auto-scaling policy could not be "
-                "saved. Configure scaling from the container settings or try again."
-            ),
-        ) from exc
+        return None, (
+            "Auto-scaling policy could not be saved. "
+            "Configure scaling from the container settings or try again."
+        )
 
 
 async def _enrich_container_source_labels(
@@ -722,7 +720,9 @@ async def run_from_user_source(
             dockerfile_snapshot=None,
             public_url=public_url,
         )
-        saved_policy = await _persist_scaling_policy(session, info.name, body)
+        saved_policy, scaling_policy_warning = await _persist_scaling_policy(
+            session, info.name, body
+        )
         return RunFromSourceResponse(
             container=info,
             kind="image",
@@ -730,6 +730,7 @@ async def run_from_user_source(
             route_wired=route_wired,
             public_url=public_url,
             scaling_policy=saved_policy,
+            scaling_policy_warning=scaling_policy_warning,
         )
 
     if source_kind == "dockerfile_template":
@@ -782,7 +783,9 @@ async def run_from_user_source(
             dockerfile_snapshot=build_result.dockerfile_snapshot or template.contents,
             public_url=public_url,
         )
-        saved_policy = await _persist_scaling_policy(session, info.name, body)
+        saved_policy, scaling_policy_warning = await _persist_scaling_policy(
+            session, info.name, body
+        )
         return RunFromSourceResponse(
             container=info,
             kind="dockerfile_template",
@@ -790,6 +793,7 @@ async def run_from_user_source(
             route_wired=route_wired,
             public_url=public_url,
             scaling_policy=saved_policy,
+            scaling_policy_warning=scaling_policy_warning,
         )
 
     git_url = (body.git_url or "").strip()
@@ -847,7 +851,9 @@ async def run_from_user_source(
         dockerfile_snapshot=build_result.dockerfile_snapshot,
         public_url=public_url,
     )
-    saved_policy = await _persist_scaling_policy(session, info.name, body)
+    saved_policy, scaling_policy_warning = await _persist_scaling_policy(
+        session, info.name, body
+    )
     return RunFromSourceResponse(
         container=info,
         kind="git",
@@ -855,6 +861,7 @@ async def run_from_user_source(
         route_wired=route_wired,
         public_url=public_url,
         scaling_policy=saved_policy,
+        scaling_policy_warning=scaling_policy_warning,
     )
 
 

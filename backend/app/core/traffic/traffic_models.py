@@ -4,6 +4,18 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field, field_validator
 
+_INVALID_BACKEND_HOST_CHARS = frozenset("` /@?#\\:[]")
+
+
+def validate_backend_host(host: str) -> str:
+    if any(ord(character) < 32 for character in host):
+        msg = "backend host contains invalid characters"
+        raise ValueError(msg)
+    if any(character in _INVALID_BACKEND_HOST_CHARS for character in host):
+        msg = "backend host contains invalid characters"
+        raise ValueError(msg)
+    return host
+
 
 class BackendServer(BaseModel):
     """A single upstream server for a load-balanced route."""
@@ -15,6 +27,11 @@ class BackendServer(BaseModel):
         description="Hostname or container name the proxy resolves (Docker network DNS, etc.).",
     )
     port: int = Field(..., ge=1, le=65535)
+
+    @field_validator("host")
+    @classmethod
+    def host_must_be_safe(cls, value: str) -> str:
+        return validate_backend_host(value)
 
 
 class RouteSpec(BaseModel):

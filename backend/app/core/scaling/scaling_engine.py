@@ -14,6 +14,7 @@ from app.core.exceptions import (
     ContainerNotFoundError,
     OrchestratorError,
     ProviderConnectionError,
+    RouteNotFoundError,
 )
 from app.core.models import DeployConfig, default_listen_port_health_check
 from app.core.scaling.policy_repository import (
@@ -36,31 +37,23 @@ async def _measure_metric(
     metric: ScalingMetric,
 ) -> float | None:
     """Return the current metric value for ``container_name``, or None on failure."""
+    try:
+        stats = await orchestrator.get_stats(container_name)
+    except (
+        ContainerNotFoundError,
+        ProviderConnectionError,
+        OrchestratorError,
+    ) as exc:
+        logger.debug("Could not read stats for %s: %s", container_name, exc)
+        return None
+
     match metric:
         case ScalingMetric.CPU_PERCENT:
-            try:
-                stats = await orchestrator.get_stats(container_name)
-                return stats.cpu_percent
-            except (
-                ContainerNotFoundError,
-                ProviderConnectionError,
-                OrchestratorError,
-            ) as exc:
-                logger.debug("Could not read stats for %s: %s", container_name, exc)
-                return None
+            return stats.cpu_percent
         case ScalingMetric.REQUESTS_PER_SECOND:
             # Traefik metrics integration is out of scope for the initial implementation;
             # fall back to CPU until a Prometheus/Traefik scrape is wired.
-            try:
-                stats = await orchestrator.get_stats(container_name)
-                return stats.cpu_percent
-            except (
-                ContainerNotFoundError,
-                ProviderConnectionError,
-                OrchestratorError,
-            ) as exc:
-                logger.debug("Could not read stats for %s: %s", container_name, exc)
-                return None
+            return stats.cpu_percent
 
 
 def _is_in_cooldown(runtime: ScalingPolicyRuntime) -> bool:
@@ -83,15 +76,13 @@ def _stabilization_elapsed(
 
 
 async def _build_route_spec_for_service(
-    orchestrator: ContainerOrchestrator,
     traffic_router: TrafficRouter,
     base_name: str,
-    base_port: int,
 ) -> RouteSpec | None:
     """Return the current RouteSpec for the base container, or None if no route exists."""
     try:
         existing = await traffic_router.get_route(base_name)
-    except Exception:
+    except RouteNotFoundError:
         return None
     return RouteSpec(
         route_id=existing.route_id,
@@ -251,9 +242,7 @@ async def _evaluate_policy(
     current_replica_count = len(replica_pairs)
     total_instances = 1 + current_replica_count
 
-    base_spec = await _build_route_spec_for_service(
-        orchestrator, traffic_router, base_name, base_port=80
-    )
+    base_spec = await _build_route_spec_for_service(traffic_router, base_name)
     if base_spec is None:
         return
 
@@ -341,6 +330,9 @@ async def run_scaling_loop(
     """Background coroutine that runs the scaling engine on a fixed interval.
 
     Designed to be cancelled cleanly via :func:`asyncio.Task.cancel`.
+
+    Only one control-plane process should run this loop; multiple workers would
+    each call :func:`tick` and could issue duplicate scale actions.
     """
     from app.db.engine import get_session_factory
 

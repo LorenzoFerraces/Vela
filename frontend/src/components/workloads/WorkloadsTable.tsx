@@ -113,8 +113,15 @@ export function WorkloadsTable({
     )
   }
 
-  function statsContainerForGroup(group: WorkloadGroup): string {
-    return statsContainerByGroup[group.base.id] ?? group.base.id
+  function resolvedStatsContainerId(
+    group: WorkloadGroup,
+    instances: ContainerInfo[],
+  ): string {
+    const storedId = statsContainerByGroup[group.base.id]
+    if (storedId && instances.some((instance) => instance.id === storedId)) {
+      return storedId
+    }
+    return group.base.id
   }
 
   function setStatsContainerForGroup(group: WorkloadGroup, containerId: string) {
@@ -176,7 +183,7 @@ export function WorkloadsTable({
                   ? undefined
                   : VIEWER_ACTION_DISABLED_TITLE
                 const instances = workloadInstances(group)
-                const statsContainerId = statsContainerForGroup(group)
+                const statsContainerId = resolvedStatsContainerId(group, instances)
                 const statsTarget =
                   instances.find((instance) => instance.id === statsContainerId) ??
                   containerRow

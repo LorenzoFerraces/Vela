@@ -17,7 +17,7 @@ from app.core.exceptions import (
     RouteNotFoundError,
     TrafficRouterError,
 )
-from app.core.traffic.traffic_models import RouteInfo, RouteSpec
+from app.core.traffic.traffic_models import RouteInfo, RouteSpec, validate_backend_host
 from app.core.traffic.traffic_router import TrafficRouter
 
 logger = logging.getLogger(__name__)
@@ -58,9 +58,10 @@ def _build_rule(spec: RouteSpec) -> str:
 
 
 def _server_url(host: str, port: int) -> str:
-    invalid_host_chars = "` /@?#\\"
-    if any(character in host for character in invalid_host_chars):
-        raise RouteConfigurationError("backend host contains invalid characters")
+    try:
+        validate_backend_host(host)
+    except ValueError as exc:
+        raise RouteConfigurationError(str(exc)) from exc
     return f"http://{host}:{port}"
 
 

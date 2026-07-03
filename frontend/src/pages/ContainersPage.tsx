@@ -262,6 +262,11 @@ export default function ContainersPage() {
       const routeNote = response.route_wired
         ? ' Traefik route registered.'
         : ''
+      const scalingWarning =
+        typeof response.scaling_policy_warning === 'string' &&
+        response.scaling_policy_warning.length > 0
+          ? ` ${response.scaling_policy_warning}`
+          : ''
       const publicUrl =
         typeof response.public_url === 'string' &&
         response.public_url.length > 0
@@ -269,7 +274,7 @@ export default function ContainersPage() {
           : undefined
       setMessage({
         type: 'ok',
-        text: `Started (${response.kind}) as ${response.container.name} — image ${response.image}.${routeNote}`,
+        text: `Started (${response.kind}) as ${response.container.name} — image ${response.image}.${routeNote}${scalingWarning}`,
         publicUrl,
       })
       deploySource.clearSelection()

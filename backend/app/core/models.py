@@ -290,15 +290,12 @@ class ScalingPolicyConfig(BaseModel):
             raise ValueError(msg)
         return value
 
-    @field_validator("scale_down_threshold")
-    @classmethod
-    def scale_down_must_be_below_scale_up(cls, value: float, info: object) -> float:
-        data = getattr(info, "data", {})
-        scale_up_threshold = data.get("scale_up_threshold")
-        if scale_up_threshold is not None and value >= scale_up_threshold:
+    @model_validator(mode="after")
+    def thresholds_must_be_ordered(self) -> ScalingPolicyConfig:
+        if self.scale_down_threshold >= self.scale_up_threshold:
             msg = "scale_down_threshold must be < scale_up_threshold"
             raise ValueError(msg)
-        return value
+        return self
 
 
 class ScalingPolicyInfo(BaseModel):

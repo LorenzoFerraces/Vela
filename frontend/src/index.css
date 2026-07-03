@@ -11,7 +11,9 @@
   --accent-glow: rgba(61, 156, 240, 0.35);
   --warn: #e8b84a;
   --error: #e0706e;
+  --danger: var(--error);
   --ok: #5cb88a;
+  --border-subtle: color-mix(in srgb, var(--border) 65%, transparent);
   --font: 'Segoe UI', system-ui, -apple-system, sans-serif;
   --radius: 10px;
   --nav-height: 56px;
@@ -1519,7 +1521,7 @@ body {
 .containers-form__section-label {
   margin-top: 0.75rem;
   padding-top: 0.75rem;
-  border-top: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.08));
+  border-top: 1px solid var(--border-subtle);
 }
 
 .containers-scaling-toggle {
@@ -1635,7 +1637,7 @@ body {
 .workloads-replicas-panel__table td {
   padding: 0.35rem 0.5rem;
   text-align: left;
-  border-bottom: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.08));
+  border-bottom: 1px solid var(--border-subtle);
 }
 
 .workloads-stats-panel__toolbar {
@@ -1653,7 +1655,7 @@ body {
 
 .workloads-stats-panel__error {
   margin: 0 0 0.75rem;
-  color: var(--danger, #f87171);
+  color: var(--danger);
 }
 
 .workloads-stats-panel__grid {

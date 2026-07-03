@@ -20,7 +20,9 @@ export function useWorkloadGroups(reportLoadError: (detail: string) => void) {
       try {
         containers = await listContainers()
       } catch (error) {
-        reportLoadError(formatApiError(error))
+        if (generation === refreshGenerationRef.current) {
+          reportLoadError(formatApiError(error))
+        }
         return
       }
 

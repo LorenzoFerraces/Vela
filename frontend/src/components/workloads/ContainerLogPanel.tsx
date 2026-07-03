@@ -7,6 +7,15 @@ import {
 } from '../../api/client'
 
 const ERROR_LINE_PATTERN = /\b(error|exception|fatal|traceback)\b/i
+const MAX_LOG_BUFFER_CHARS = 256_000
+
+function appendWithLimit(previous: string, piece: string): string {
+  const next = previous + piece
+  if (next.length <= MAX_LOG_BUFFER_CHARS) {
+    return next
+  }
+  return next.slice(next.length - MAX_LOG_BUFFER_CHARS)
+}
 
 type ContainerLogPanelProps = {
   containerId: string
@@ -31,7 +40,7 @@ export function ContainerLogPanel({
   const refreshSnapshot = useCallback(async () => {
     try {
       const snapshot = await fetchContainerLogs(containerId, { tail: 500 })
-      setLogText(snapshot)
+      setLogText(snapshot.slice(-MAX_LOG_BUFFER_CHARS))
       setErrorText(null)
     } catch (error) {
       setErrorText(formatApiError(error))
@@ -86,7 +95,7 @@ export function ContainerLogPanel({
         return
       }
       const piece = decoderRef.current.decode(chunk, { stream: true })
-      setLogText((previous) => previous + piece)
+      setLogText((previous) => appendWithLimit(previous, piece))
     }
     websocket.onerror = () => {
       queueMicrotask(() => {

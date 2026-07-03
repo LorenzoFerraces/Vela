@@ -430,6 +430,7 @@ export interface RunFromSourceResponse {
   route_wired: boolean
   public_url?: string | null
   scaling_policy?: ScalingPolicyInfo | null
+  scaling_policy_warning?: string | null
 }
 
 export interface ImageAvailabilityResponse {

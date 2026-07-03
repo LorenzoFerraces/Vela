@@ -35,7 +35,7 @@ logger = logging.getLogger(__name__)
 async def _lifespan(_application: FastAPI):
     """Startup/shutdown lifecycle: initialise DB, start background monitoring and scaling loops."""
     from app.api.deps import get_orchestrator, get_traffic_router
-    from app.core.exceptions import ProviderConnectionError
+    from app.core.exceptions import ProviderConnectionError, TrafficRouterError
     from app.core.notifications.container_monitor import run_monitoring_loop
     from app.core.scaling.scaling_engine import run_scaling_loop
     from app.e2e_support import ensure_e2e_database
@@ -47,8 +47,11 @@ async def _lifespan(_application: FastAPI):
     try:
         orchestrator = get_orchestrator()
         traffic_router = get_traffic_router()
-    except ProviderConnectionError:
-        logger.warning("Docker unavailable at startup; auto-scaling loop will not run.")
+    except (ProviderConnectionError, TrafficRouterError) as exc:
+        logger.warning(
+            "Scaling dependencies unavailable at startup (%s); auto-scaling loop will not run.",
+            exc,
+        )
     else:
         scaling_task = asyncio.create_task(
             run_scaling_loop(orchestrator, traffic_router)
