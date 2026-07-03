@@ -33,6 +33,7 @@ from app.core.models import (
     HealthCheckConfig,
     HealthResult,
     PortMapping,
+    VolumeMount,
 )
 from app.core.traffic.public_route_host import build_public_url
 
@@ -45,6 +46,7 @@ VELA_SOURCE_REF_LABEL = "vela.source_ref"
 VELA_ROUTE_HOST_LABEL = "vela.route_host"
 VELA_ROUTE_PATH_PREFIX_LABEL = "vela.route_path_prefix"
 VELA_ROUTE_TLS_LABEL = "vela.route_tls"
+VELA_REPLICA_OF_LABEL = "vela.replica_of"
 _NS_PER_SEC = 1_000_000_000
 
 
@@ -209,6 +211,26 @@ def _health_status_from_docker(raw: str | None) -> HealthStatus:
             return HealthStatus.NONE
 
 
+def _volumes_from_inspect(data: dict[str, Any]) -> list[VolumeMount]:
+    mounts = data.get("Mounts") or []
+    volumes: list[VolumeMount] = []
+    for mount in mounts:
+        if not isinstance(mount, dict):
+            continue
+        if mount.get("Type") != "bind":
+            continue
+        source = mount.get("Source")
+        destination = mount.get("Destination")
+        if (
+            isinstance(source, str)
+            and source.strip()
+            and isinstance(destination, str)
+            and destination.strip()
+        ):
+            volumes.append(VolumeMount(source=source, target=destination))
+    return volumes
+
+
 def _inspect_to_container_info(data: dict[str, Any]) -> ContainerInfo:
     cid = data.get("Id", "")
     name_raw = data.get("Name")
@@ -234,6 +256,7 @@ def _inspect_to_container_info(data: dict[str, Any]) -> ContainerInfo:
         status=status,
         created_at=_parse_created(data.get("Created", "")),
         ports=_ports_from_inspect(data),
+        volumes=_volumes_from_inspect(data),
         labels=labels,
         health=health,
         access_url=_access_url_from_route_labels(labels),
@@ -940,3 +963,56 @@ class DockerOrchestrator(ContainerOrchestrator):
             raise ProviderConnectionError(str(e)) from e
         except docker.errors.DockerException as e:
             raise ProviderConnectionError(str(e)) from e
+
+    async def list_replicas(self, base_name: str) -> list[ContainerInfo]:
+        label_filter = [
+            f"{VELA_MANAGED_LABEL}={VELA_MANAGED_VALUE}",
+            f"{VELA_REPLICA_OF_LABEL}={base_name}",
+        ]
+
+        def sync() -> list[ContainerInfo]:
+            containers = self._client.containers.list(
+                all=True,
+                filters={"label": label_filter},
+            )
+            out: list[ContainerInfo] = []
+            for container in containers:
+                container.reload()
+                out.append(_inspect_to_container_info(container.attrs))
+            return out
+
+        try:
+            return await self._to_thread(sync)
+        except requests.exceptions.RequestException as e:
+            raise ProviderConnectionError(str(e)) from e
+        except docker.errors.DockerException as e:
+            raise ProviderConnectionError(str(e)) from e
+
+    async def deploy_replica(
+        self, base_config: DeployConfig, replica_index: int
+    ) -> ContainerInfo:
+        base_name = base_config.name or ""
+        replica_name = f"{base_name}-r{replica_index}"
+        replica_labels = {
+            key: value
+            for key, value in base_config.labels.items()
+            if key
+            not in {
+                VELA_ROUTE_HOST_LABEL,
+                VELA_ROUTE_PATH_PREFIX_LABEL,
+                VELA_ROUTE_TLS_LABEL,
+            }
+        }
+        replica_labels[VELA_REPLICA_OF_LABEL] = base_name
+        # Replicas do not publish host ports or register routes themselves;
+        # only the base container's route entry lists all backend servers.
+        replica_config = base_config.model_copy(
+            update={
+                "name": replica_name,
+                "labels": replica_labels,
+                "ports": [],
+                "route_host": None,
+                "public_route": False,
+            }
+        )
+        return await self.deploy(replica_config)

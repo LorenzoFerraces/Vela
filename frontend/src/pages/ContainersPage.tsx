@@ -7,10 +7,12 @@ import {
   startContainer,
   stopContainer,
   type RunFromSourceRequest,
+  type ScalingPolicyRequest,
 } from '../api/client'
 import { ContainersFormMessageBanner } from './containers/ContainersFormMessageBanner'
 import { ContainersRunAdvancedFields } from './containers/ContainersRunAdvancedFields'
 import { ContainersRunFormFields } from './containers/ContainersRunFormFields'
+import { validateScalingPolicy } from './containers/ContainersRunScalingFields'
 import { DeployProjectSelect } from './containers/DeployProjectSelect'
 import { DeploySourceCombobox } from './containers/DeploySourceCombobox'
 import { Toast } from '../components/Toast'
@@ -20,7 +22,7 @@ import {
   selectionNeedsRegistryCheck,
   selectionShowsGitBranch,
 } from './containers/deploySourceTypes'
-import { useContainerList } from './containers/useContainerList'
+import { useWorkloadGroups } from './containers/useWorkloadGroups'
 import { useDeploySourceSelection } from './containers/useDeploySourceSelection'
 import { useDeployProjects } from './containers/useDeployProjects'
 import { useGitSourceAnalysis } from './containers/useGitSourceAnalysis'
@@ -43,6 +45,7 @@ export default function ContainersPage() {
     createEmptyVolumeMountRow(),
   ])
   const [startCommand, setStartCommand] = useState('')
+  const [scalingPolicy, setScalingPolicy] = useState<ScalingPolicyRequest | null>(null)
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState<FormMessage | null>(null)
   const [rowBusy, setRowBusy] = useState<string | null>(null)
@@ -66,7 +69,7 @@ export default function ContainersPage() {
     setMessage({ type: 'err', text: detail })
   }, [])
 
-  const { rows, listLoading, refresh } = useContainerList(reportListLoadError)
+  const { groups, listLoading, refresh } = useWorkloadGroups(reportListLoadError)
   const deployProjects = useDeployProjects()
 
   const imageRefForCheck =
@@ -77,10 +80,16 @@ export default function ContainersPage() {
   const { imageRefCheck, setImageRefCheck, runImageRefAvailabilityCheck } =
     useImageRefAvailability(imageRefForCheck)
 
+  const scalingValidationError = useMemo(
+    () => (scalingPolicy ? validateScalingPolicy(scalingPolicy) : null),
+    [scalingPolicy],
+  )
+
   function resetAdvancedFields() {
     setEnvRows([{ key: '', value: '' }])
     setVolumeRows([createEmptyVolumeMountRow()])
     setStartCommand('')
+    setScalingPolicy(null)
   }
 
   function validateVolumeRows(): string | null {
@@ -150,6 +159,7 @@ export default function ContainersPage() {
       command,
       volumes: volumesFromRows(volumeRows),
       project_id: deployProjects.selectedProjectId,
+      scaling_policy: scalingPolicy,
     }
     switch (selection.kind) {
       case 'image':
@@ -232,6 +242,11 @@ export default function ContainersPage() {
       return
     }
 
+    if (scalingValidationError) {
+      setMessage({ type: 'err', text: scalingValidationError })
+      return
+    }
+
     setBusy(true)
     setMessage(null)
     try {
@@ -247,6 +262,11 @@ export default function ContainersPage() {
       const routeNote = response.route_wired
         ? ' Traefik route registered.'
         : ''
+      const scalingWarning =
+        typeof response.scaling_policy_warning === 'string' &&
+        response.scaling_policy_warning.length > 0
+          ? ` ${response.scaling_policy_warning}`
+          : ''
       const publicUrl =
         typeof response.public_url === 'string' &&
         response.public_url.length > 0
@@ -254,7 +274,7 @@ export default function ContainersPage() {
           : undefined
       setMessage({
         type: 'ok',
-        text: `Started (${response.kind}) as ${response.container.name} — image ${response.image}.${routeNote}`,
+        text: `Started (${response.kind}) as ${response.container.name} — image ${response.image}.${routeNote}${scalingWarning}`,
         publicUrl,
       })
       deploySource.clearSelection()
@@ -366,6 +386,9 @@ export default function ContainersPage() {
           onVolumeRowsChange={setVolumeRows}
           startCommand={startCommand}
           onStartCommandChange={setStartCommand}
+          scalingPolicy={scalingPolicy}
+          onScalingPolicyChange={setScalingPolicy}
+          scalingValidationError={scalingValidationError}
         />
 
         <div className="containers-form__actions">
@@ -409,7 +432,7 @@ export default function ContainersPage() {
       <h2 className="containers-page__subtitle">Running workloads</h2>
       <WorkloadsTable
         listLoading={listLoading}
-        rows={rows}
+        groups={groups}
         rowBusyId={rowBusy}
         onStart={onStart}
         onStop={onStop}

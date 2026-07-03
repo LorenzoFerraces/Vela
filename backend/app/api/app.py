@@ -5,6 +5,7 @@ from __future__ import annotations
 import app.bootstrap_env  # noqa: F401 — loads backend/.env before other app imports.
 
 import asyncio
+import logging
 from contextlib import asynccontextmanager, suppress
 
 from fastapi import FastAPI
@@ -20,34 +21,53 @@ from app.api.routes import (
     github,
     images,
     projects,
+    scaling,
     settings,
     traffic,
     users,
 )
 
 API_PREFIX = "/api"
+logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
 async def _lifespan(_application: FastAPI):
-    """
-    Lifespan context manager that ensures the end-to-end test database is prepared before the application starts.
-
-    This async context manager runs once at startup to await e2e database setup, starts the container monitoring loop, then yields control for the application runtime. On shutdown, the monitoring task is cancelled.
-    """
-    from app.e2e_support import ensure_e2e_database
+    """Startup/shutdown lifecycle: initialise DB, start background monitoring and scaling loops."""
+    from app.api.deps import get_orchestrator, get_traffic_router
+    from app.core.exceptions import ProviderConnectionError, TrafficRouterError
     from app.core.notifications.container_monitor import run_monitoring_loop
+    from app.core.scaling.scaling_engine import run_scaling_loop
+    from app.e2e_support import ensure_e2e_database
 
     await ensure_e2e_database()
 
     monitor_task = asyncio.create_task(run_monitoring_loop())
+    scaling_task: asyncio.Task[None] | None = None
+    try:
+        orchestrator = get_orchestrator()
+        traffic_router = get_traffic_router()
+    except (ProviderConnectionError, TrafficRouterError) as exc:
+        logger.warning(
+            "Scaling dependencies unavailable at startup (%s); auto-scaling loop will not run.",
+            exc,
+        )
+    else:
+        scaling_task = asyncio.create_task(
+            run_scaling_loop(orchestrator, traffic_router)
+        )
 
     try:
         yield
     finally:
         monitor_task.cancel()
+        if scaling_task is not None:
+            scaling_task.cancel()
         with suppress(asyncio.CancelledError):
             await monitor_task
+        if scaling_task is not None:
+            with suppress(asyncio.CancelledError):
+                await scaling_task
 
 
 def create_app() -> FastAPI:
@@ -143,6 +163,11 @@ def create_app() -> FastAPI:
         projects.router,
         prefix=f"{API_PREFIX}/projects",
         tags=["projects"],
+    )
+    application.include_router(
+        scaling.router,
+        prefix=f"{API_PREFIX}/scaling",
+        tags=["scaling"],
     )
 
     @application.get(f"{API_PREFIX}/health", tags=["health"])

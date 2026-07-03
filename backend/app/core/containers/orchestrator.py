@@ -124,3 +124,25 @@ class ContainerOrchestrator(ABC):
             RegistryAccessDeniedError: The registry returned 401/403 for the manifest lookup.
             ProviderConnectionError: The runtime or registry could not be reached.
         """
+
+    # ------------------------------------------------------------------
+    # Replica management (auto-scaling)
+    # ------------------------------------------------------------------
+
+    @abstractmethod
+    async def list_replicas(self, base_name: str) -> list[ContainerInfo]:
+        """Return all running replica containers for a base service name.
+
+        Replicas are identified by the ``vela.replica_of`` label matching ``base_name``.
+        """
+
+    @abstractmethod
+    async def deploy_replica(
+        self, base_config: DeployConfig, replica_index: int
+    ) -> ContainerInfo:
+        """Deploy a numbered replica of an existing service.
+
+        The replica name is ``{base_config.name}-r{replica_index}`` and the
+        ``vela.replica_of`` label is set to ``base_config.name`` so that
+        :meth:`list_replicas` can discover it.
+        """

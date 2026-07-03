@@ -3,6 +3,7 @@ import { useRef, useState } from 'react'
 import {
   formatApiError,
   uploadVolumeFolder,
+  type ScalingPolicyRequest,
 } from '../../api/client'
 import {
   VOLUME_UPLOAD_MAX_BYTES,
@@ -11,6 +12,8 @@ import {
 } from '../../constants/volumeUploadLimits'
 import type { EnvVarRow, VolumeMountRow } from './runFormAdvanced'
 import { createEmptyVolumeMountRow, folderTotalBytes } from './runFormAdvanced'
+import { ContainersRunScalingFields } from './ContainersRunScalingFields'
+import { formatBytes } from '../../utils/formatBytes'
 
 type ContainersRunAdvancedFieldsProps = {
   envRows: EnvVarRow[]
@@ -19,16 +22,9 @@ type ContainersRunAdvancedFieldsProps = {
   onVolumeRowsChange: (rows: VolumeMountRow[]) => void
   startCommand: string
   onStartCommandChange: (value: string) => void
-}
-
-function formatBytes(totalBytes: number): string {
-  if (totalBytes < 1024) {
-    return `${totalBytes} B`
-  }
-  if (totalBytes < 1024 * 1024) {
-    return `${(totalBytes / 1024).toFixed(1)} KB`
-  }
-  return `${(totalBytes / (1024 * 1024)).toFixed(1)} MB`
+  scalingPolicy: ScalingPolicyRequest | null
+  onScalingPolicyChange: (policy: ScalingPolicyRequest | null) => void
+  scalingValidationError?: string | null
 }
 
 export function ContainersRunAdvancedFields({
@@ -38,6 +34,9 @@ export function ContainersRunAdvancedFields({
   onVolumeRowsChange,
   startCommand,
   onStartCommandChange,
+  scalingPolicy,
+  onScalingPolicyChange,
+  scalingValidationError = null,
 }: ContainersRunAdvancedFieldsProps) {
   const [expanded, setExpanded] = useState(false)
   const folderInputRef = useRef<HTMLInputElement>(null)
@@ -287,6 +286,12 @@ export function ContainersRunAdvancedFields({
           <p className="containers-muted containers-form__hint">
             Overrides the container CMD when set.
           </p>
+
+          <ContainersRunScalingFields
+            scalingPolicy={scalingPolicy}
+            onScalingPolicyChange={onScalingPolicyChange}
+            validationError={scalingValidationError}
+          />
         </div>
       ) : null}
     </div>

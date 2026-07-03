@@ -10,6 +10,7 @@ from app.core.enums import (
     ContainerStatus,
     HealthStatus,
     RestartPolicy,
+    ScalingMetric,
     SupportedLanguage,
 )
 
@@ -54,6 +55,31 @@ class HealthCheckConfig(BaseModel):
     timeout_s: int = 5
     retries: int = 3
     start_period_s: int = 0
+
+
+def default_listen_port_health_check(listen_port: int) -> HealthCheckConfig:
+    """Verify the configured port accepts TCP connections inside the container."""
+    python_probe = (
+        "import socket; "
+        f"socket.create_connection(('127.0.0.1', {listen_port}), timeout=1).close()"
+    )
+    return HealthCheckConfig(
+        command=[
+            "CMD-SHELL",
+            (
+                f'python3 -c "{python_probe}" 2>/dev/null || '
+                f'python -c "{python_probe}" 2>/dev/null || '
+                f"nc -z 127.0.0.1 {listen_port} 2>/dev/null || "
+                f"nc -z localhost {listen_port} 2>/dev/null || "
+                f"bash -c 'exec 3<>/dev/tcp/127.0.0.1/{listen_port}' 2>/dev/null || "
+                "exit 1"
+            ),
+        ],
+        interval_s=15,
+        timeout_s=5,
+        retries=3,
+        start_period_s=30,
+    )
 
 
 class DeployConfig(BaseModel):
@@ -118,6 +144,7 @@ class ContainerInfo(BaseModel):
     status: ContainerStatus
     created_at: datetime
     ports: list[PortMapping] = Field(default_factory=list)
+    volumes: list[VolumeMount] = Field(default_factory=list)
     labels: dict[str, str] = Field(default_factory=dict)
     health: HealthStatus = HealthStatus.NONE
     access_url: str | None = Field(
@@ -194,3 +221,97 @@ class BuildResult(BaseModel):
     build_log: str
     project_info: ProjectInfo
     dockerfile_snapshot: str | None = None
+
+
+# ---------------------------------------------------------------------------
+# Scaling policy models
+# ---------------------------------------------------------------------------
+
+
+class ScalingPolicyConfig(BaseModel):
+    """Desired auto-scaling configuration attached to a container service."""
+
+    enabled: bool = True
+    min_replicas: int = Field(default=1, ge=1, le=20)
+    max_replicas: int = Field(default=3, ge=1, le=20)
+    metric: ScalingMetric = ScalingMetric.CPU_PERCENT
+    scale_up_threshold: float = Field(
+        default=70.0,
+        ge=0.0,
+        description="Metric value above which the engine scales up.",
+    )
+    scale_down_threshold: float = Field(
+        default=30.0,
+        ge=0.0,
+        description="Metric value below which the engine scales down.",
+    )
+    cooldown_seconds: int = Field(
+        default=60,
+        ge=10,
+        le=3600,
+        description="Minimum seconds between consecutive scaling actions.",
+    )
+    scale_up_stabilization_seconds: int = Field(
+        default=120,
+        ge=30,
+        le=3600,
+        description=(
+            "Metric must stay at or above scale_up_threshold for this many seconds "
+            "before a scale-up is applied."
+        ),
+    )
+    scale_down_stabilization_seconds: int = Field(
+        default=120,
+        ge=30,
+        le=3600,
+        description=(
+            "Metric must stay at or below scale_down_threshold for this many seconds "
+            "before a scale-down is applied."
+        ),
+    )
+
+    @field_validator("max_replicas")
+    @classmethod
+    def max_must_be_gte_min(cls, value: int, info: object) -> int:
+        data = getattr(info, "data", {})
+        min_replicas = data.get("min_replicas", 1)
+        if value < min_replicas:
+            msg = "max_replicas must be >= min_replicas"
+            raise ValueError(msg)
+        return value
+
+    @field_validator("scale_up_threshold", "scale_down_threshold")
+    @classmethod
+    def threshold_within_metric_range(cls, value: float, info: object) -> float:
+        data = getattr(info, "data", {})
+        metric = data.get("metric", ScalingMetric.CPU_PERCENT)
+        if metric == ScalingMetric.CPU_PERCENT and value > 100.0:
+            msg = "CPU percent thresholds must be <= 100"
+            raise ValueError(msg)
+        return value
+
+    @model_validator(mode="after")
+    def thresholds_must_be_ordered(self) -> ScalingPolicyConfig:
+        if self.scale_down_threshold >= self.scale_up_threshold:
+            msg = "scale_down_threshold must be < scale_up_threshold"
+            raise ValueError(msg)
+        return self
+
+
+class ScalingPolicyInfo(BaseModel):
+    """Scaling policy as returned by the API (includes server-assigned fields)."""
+
+    id: uuid.UUID
+    container_name: str
+    enabled: bool
+    min_replicas: int
+    max_replicas: int
+    metric: ScalingMetric
+    scale_up_threshold: float
+    scale_down_threshold: float
+    cooldown_seconds: int
+    scale_up_stabilization_seconds: int
+    scale_down_stabilization_seconds: int
+    last_scaled_at: datetime | None
+    created_at: datetime
+    updated_at: datetime

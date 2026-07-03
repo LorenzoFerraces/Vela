@@ -6,7 +6,7 @@ import {
   stopContainer,
 } from '../api/client'
 import { WorkloadsTable } from '../components/workloads/WorkloadsTable'
-import { useContainerList } from './containers/useContainerList'
+import { useWorkloadGroups } from './containers/useWorkloadGroups'
 import { DeploymentHistorySection } from './containers/DeploymentHistorySection'
 
 export default function DashboardPage() {
@@ -20,7 +20,7 @@ export default function DashboardPage() {
     setBanner({ tone: 'err', text: detail })
   }, [])
 
-  const { rows, listLoading, refresh } = useContainerList(reportListLoadError)
+  const { groups, listLoading, refresh } = useWorkloadGroups(reportListLoadError)
 
   async function onStart(containerId: string) {
     setRowBusy(containerId)
@@ -66,8 +66,9 @@ export default function DashboardPage() {
     <section className="dashboard-page">
       <h1 className="dashboard-page__title">Dashboard</h1>
       <p className="dashboard-page__lead">
-        Monitor workloads: logs stream live over WebSocket. Containers that are
-        stopped, restarting, or failing health checks are listed first.
+        Monitor workloads: live logs, resource stats per instance, and grouped
+        replicas for auto-scaled deployments. Containers that are stopped,
+        restarting, or failing health checks are listed first.
       </p>
 
       {banner ? (
@@ -82,12 +83,13 @@ export default function DashboardPage() {
       <h2 className="dashboard-page__subtitle">Running workloads</h2>
       <WorkloadsTable
         listLoading={listLoading}
-        rows={rows}
+        groups={groups}
         rowBusyId={rowBusy}
         onStart={onStart}
         onStop={onStop}
         onRemove={onRemove}
         prioritizeProblemWorkloads
+        showStatsColumn
       />
 
       <DeploymentHistorySection refreshSignal={historyRefreshSignal} />
