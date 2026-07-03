@@ -21,6 +21,25 @@ from app.db.models import User
 router = APIRouter()
 
 
+async def _require_accessible_container_name(
+    session: AsyncSession,
+    orchestrator: ContainerOrchestrator,
+    current_user: User,
+    container_name: str,
+) -> None:
+    project_ids = await list_accessible_project_ids(session, current_user.id)
+    containers = await orchestrator.list(
+        project_ids=project_ids,
+        user_id=current_user.id,
+    )
+    accessible_names = {container.name for container in containers}
+    if container_name not in accessible_names:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No container found with name '{container_name}'.",
+        )
+
+
 @router.get("/policies", response_model=list[ScalingPolicyInfo])
 async def list_scaling_policies(
     session: Annotated[AsyncSession, Depends(get_db)],
@@ -44,9 +63,13 @@ async def list_scaling_policies(
 async def get_scaling_policy(
     container_name: str,
     session: Annotated[AsyncSession, Depends(get_db)],
-    _current_user: Annotated[User, Depends(get_current_user)],
+    current_user: Annotated[User, Depends(get_current_user)],
+    orchestrator: Annotated[ContainerOrchestrator, Depends(get_orchestrator)],
 ) -> ScalingPolicyInfo:
     """Return the auto-scaling policy for a container."""
+    await _require_accessible_container_name(
+        session, orchestrator, current_user, container_name
+    )
     policy = await get_policy(session, container_name)
     if policy is None:
         raise HTTPException(
@@ -64,7 +87,11 @@ async def update_scaling_policy(
     container_name: str,
     body: ScalingPolicyConfig,
     session: Annotated[AsyncSession, Depends(get_db)],
-    _current_user: Annotated[User, Depends(get_current_user)],
+    current_user: Annotated[User, Depends(get_current_user)],
+    orchestrator: Annotated[ContainerOrchestrator, Depends(get_orchestrator)],
 ) -> ScalingPolicyInfo:
     """Create or update the auto-scaling policy for a container."""
+    await _require_accessible_container_name(
+        session, orchestrator, current_user, container_name
+    )
     return await upsert_policy(session, container_name, body)

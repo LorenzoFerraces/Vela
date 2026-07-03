@@ -11,6 +11,7 @@ from fastapi import (
     APIRouter,
     Depends,
     File,
+    HTTPException,
     Query,
     Response,
     UploadFile,
@@ -359,11 +360,17 @@ async def _persist_scaling_policy(
         return None
     try:
         return await upsert_policy(session, container_name, body.scaling_policy)
-    except Exception:
+    except Exception as exc:
         logger.exception(
             "Failed to persist scaling policy for container %s", container_name
         )
-        return None
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=(
+                "The container was created but the auto-scaling policy could not be "
+                "saved. Configure scaling from the container settings or try again."
+            ),
+        ) from exc
 
 
 async def _enrich_container_source_labels(

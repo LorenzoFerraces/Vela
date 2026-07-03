@@ -7,11 +7,12 @@ import {
   startContainer,
   stopContainer,
   type RunFromSourceRequest,
+  type ScalingPolicyRequest,
 } from '../api/client'
 import { ContainersFormMessageBanner } from './containers/ContainersFormMessageBanner'
 import { ContainersRunAdvancedFields } from './containers/ContainersRunAdvancedFields'
 import { ContainersRunFormFields } from './containers/ContainersRunFormFields'
-import type { ScalingPolicyRequest } from './containers/ContainersRunScalingFields'
+import { validateScalingPolicy } from './containers/ContainersRunScalingFields'
 import { DeployProjectSelect } from './containers/DeployProjectSelect'
 import { DeploySourceCombobox } from './containers/DeploySourceCombobox'
 import { Toast } from '../components/Toast'
@@ -78,6 +79,11 @@ export default function ContainersPage() {
 
   const { imageRefCheck, setImageRefCheck, runImageRefAvailabilityCheck } =
     useImageRefAvailability(imageRefForCheck)
+
+  const scalingValidationError = useMemo(
+    () => (scalingPolicy ? validateScalingPolicy(scalingPolicy) : null),
+    [scalingPolicy],
+  )
 
   function resetAdvancedFields() {
     setEnvRows([{ key: '', value: '' }])
@@ -236,6 +242,11 @@ export default function ContainersPage() {
       return
     }
 
+    if (scalingValidationError) {
+      setMessage({ type: 'err', text: scalingValidationError })
+      return
+    }
+
     setBusy(true)
     setMessage(null)
     try {
@@ -372,6 +383,7 @@ export default function ContainersPage() {
           onStartCommandChange={setStartCommand}
           scalingPolicy={scalingPolicy}
           onScalingPolicyChange={setScalingPolicy}
+          scalingValidationError={scalingValidationError}
         />
 
         <div className="containers-form__actions">

@@ -9,6 +9,20 @@ export type WorkloadGroup = {
   scalingEnabled: boolean
 }
 
+function buildWorkloadGroup(
+  base: ContainerInfo,
+  replicas: ContainerInfo[],
+  policyByName: Map<string, ScalingPolicyInfo>,
+): WorkloadGroup {
+  const scalingPolicy = policyByName.get(base.name) ?? null
+  return {
+    base,
+    replicas,
+    scalingPolicy,
+    scalingEnabled: scalingPolicy?.enabled === true,
+  }
+}
+
 export function groupContainers(
   containers: ContainerInfo[],
   policies: ScalingPolicyInfo[],
@@ -30,18 +44,26 @@ export function groupContainers(
     bases.push(container)
   }
 
-  return bases.map((base) => {
+  const baseNames = new Set(bases.map((base) => base.name))
+  const groups = bases.map((base) => {
     const replicas = (replicasByBase.get(base.name) ?? []).sort((left, right) =>
       left.name.localeCompare(right.name),
     )
-    const scalingPolicy = policyByName.get(base.name) ?? null
-    return {
-      base,
-      replicas,
-      scalingPolicy,
-      scalingEnabled: scalingPolicy?.enabled === true,
-    }
+    return buildWorkloadGroup(base, replicas, policyByName)
   })
+
+  const orphanReplicas = containers.filter((container) => {
+    const replicaOf = container.labels[VELA_REPLICA_OF_LABEL]?.trim()
+    return Boolean(replicaOf) && !baseNames.has(replicaOf)
+  })
+
+  for (const orphan of orphanReplicas.sort((left, right) =>
+    left.name.localeCompare(right.name),
+  )) {
+    groups.push(buildWorkloadGroup(orphan, [], policyByName))
+  }
+
+  return groups
 }
 
 export function workloadInstances(group: WorkloadGroup): ContainerInfo[] {

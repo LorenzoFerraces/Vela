@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 
 from pydantic import BaseModel
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.enums import ScalingMetric
@@ -80,24 +81,39 @@ async def upsert_policy(
         select(ScalingPolicy).where(ScalingPolicy.container_name == container_name)
     )
     row = result.scalar_one_or_none()
+
+    def apply_config(target: ScalingPolicy) -> None:
+        target.enabled = config.enabled
+        target.min_replicas = config.min_replicas
+        target.max_replicas = config.max_replicas
+        target.metric = config.metric.value
+        target.scale_up_threshold = config.scale_up_threshold
+        target.scale_down_threshold = config.scale_down_threshold
+        target.cooldown_seconds = config.cooldown_seconds
+        target.scale_up_stabilization_seconds = config.scale_up_stabilization_seconds
+        target.scale_down_stabilization_seconds = (
+            config.scale_down_stabilization_seconds
+        )
+        target.scale_up_condition_since = None
+        target.scale_down_condition_since = None
+
     if row is None:
         row = ScalingPolicy(
             id=uuid.uuid4(),
             container_name=container_name,
         )
         session.add(row)
-    row.enabled = config.enabled
-    row.min_replicas = config.min_replicas
-    row.max_replicas = config.max_replicas
-    row.metric = config.metric.value
-    row.scale_up_threshold = config.scale_up_threshold
-    row.scale_down_threshold = config.scale_down_threshold
-    row.cooldown_seconds = config.cooldown_seconds
-    row.scale_up_stabilization_seconds = config.scale_up_stabilization_seconds
-    row.scale_down_stabilization_seconds = config.scale_down_stabilization_seconds
-    row.scale_up_condition_since = None
-    row.scale_down_condition_since = None
-    await session.commit()
+    apply_config(row)
+    try:
+        await session.commit()
+    except IntegrityError:
+        await session.rollback()
+        result = await session.execute(
+            select(ScalingPolicy).where(ScalingPolicy.container_name == container_name)
+        )
+        row = result.scalar_one()
+        apply_config(row)
+        await session.commit()
     await session.refresh(row)
     return _orm_to_info(row)
 

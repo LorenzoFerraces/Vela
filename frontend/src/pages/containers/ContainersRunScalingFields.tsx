@@ -1,10 +1,49 @@
 import type { ScalingMetric, ScalingPolicyRequest } from '../../api/client'
 
-export type { ScalingPolicyRequest }
+type ThresholdBounds = {
+  min: number
+  max: number | undefined
+  step: number
+}
+
+export function scalingThresholdBounds(metric: ScalingMetric): ThresholdBounds {
+  if (metric === 'cpu_percent') {
+    return { min: 0, max: 100, step: 1 }
+  }
+  return { min: 0, max: undefined, step: 1 }
+}
+
+export function validateScalingPolicy(
+  policy: ScalingPolicyRequest,
+): string | null {
+  if (policy.min_replicas > policy.max_replicas) {
+    return 'Max replicas must be greater than or equal to min replicas.'
+  }
+  if (policy.scale_down_threshold >= policy.scale_up_threshold) {
+    return 'Scale-down threshold must be lower than scale-up threshold.'
+  }
+  const bounds = scalingThresholdBounds(policy.metric)
+  if (bounds.max !== undefined) {
+    if (
+      policy.scale_up_threshold > bounds.max ||
+      policy.scale_down_threshold > bounds.max
+    ) {
+      return 'CPU percent thresholds must be 100 or less.'
+    }
+  }
+  if (
+    policy.scale_up_threshold < bounds.min ||
+    policy.scale_down_threshold < bounds.min
+  ) {
+    return 'Scaling thresholds cannot be negative.'
+  }
+  return null
+}
 
 type ContainersRunScalingFieldsProps = {
   scalingPolicy: ScalingPolicyRequest | null
   onScalingPolicyChange: (policy: ScalingPolicyRequest | null) => void
+  validationError?: string | null
 }
 
 const DEFAULT_POLICY: ScalingPolicyRequest = {
@@ -27,8 +66,12 @@ const METRIC_LABELS: Record<ScalingMetric, string> = {
 export function ContainersRunScalingFields({
   scalingPolicy,
   onScalingPolicyChange,
+  validationError = null,
 }: ContainersRunScalingFieldsProps) {
   const enabled = scalingPolicy !== null
+  const thresholdBounds = scalingPolicy
+    ? scalingThresholdBounds(scalingPolicy.metric)
+    : scalingThresholdBounds('cpu_percent')
 
   function handleToggleEnabled() {
     onScalingPolicyChange(enabled ? null : { ...DEFAULT_POLICY })
@@ -131,9 +174,9 @@ export function ContainersRunScalingFields({
                   id="scaling-up-threshold"
                   className="containers-form__input containers-form__input--short"
                   type="number"
-                  min={0}
-                  max={100}
-                  step={1}
+                  min={thresholdBounds.min}
+                  max={thresholdBounds.max}
+                  step={thresholdBounds.step}
                   value={scalingPolicy.scale_up_threshold}
                   onChange={(event) =>
                     patch({
@@ -159,9 +202,9 @@ export function ContainersRunScalingFields({
                   id="scaling-down-threshold"
                   className="containers-form__input containers-form__input--short"
                   type="number"
-                  min={0}
-                  max={100}
-                  step={1}
+                  min={thresholdBounds.min}
+                  max={thresholdBounds.max}
+                  step={thresholdBounds.step}
                   value={scalingPolicy.scale_down_threshold}
                   onChange={(event) =>
                     patch({
@@ -256,6 +299,11 @@ export function ContainersRunScalingFields({
           <p className="containers-muted containers-form__hint">
             Minimum seconds between scale-up or scale-down actions.
           </p>
+          {validationError ? (
+            <p className="containers-form__error" role="alert">
+              {validationError}
+            </p>
+          ) : null}
         </div>
       ) : null}
     </>

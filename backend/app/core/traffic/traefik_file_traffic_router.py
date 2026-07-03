@@ -12,7 +12,11 @@ import docker
 import docker.errors
 from pydantic import ValidationError
 
-from app.core.exceptions import RouteConfigurationError, RouteNotFoundError, TrafficRouterError
+from app.core.exceptions import (
+    RouteConfigurationError,
+    RouteNotFoundError,
+    TrafficRouterError,
+)
 from app.core.traffic.traffic_models import RouteInfo, RouteSpec
 from app.core.traffic.traffic_router import TrafficRouter
 
@@ -28,7 +32,9 @@ _SUFFIX_ROUTER_TLS = "_ws"  # TLS edge (entrypoint ``websecure``)
 def _traefik_safe_key(route_id: str) -> str:
     safe = re.sub(r"[^a-zA-Z0-9_-]", "_", route_id).strip("_")
     if not safe:
-        raise RouteConfigurationError("route_id must contain at least one alphanumeric character")
+        raise RouteConfigurationError(
+            "route_id must contain at least one alphanumeric character"
+        )
     key = f"vela_{safe}"
     return key[:200]
 
@@ -52,7 +58,8 @@ def _build_rule(spec: RouteSpec) -> str:
 
 
 def _server_url(host: str, port: int) -> str:
-    if "`" in host or " " in host:
+    invalid_host_chars = "` /@?#\\"
+    if any(character in host for character in invalid_host_chars):
         raise RouteConfigurationError("backend host contains invalid characters")
     return f"http://{host}:{port}"
 
@@ -160,7 +167,9 @@ class TraefikFileTrafficRouter(TrafficRouter):
         self._traefik_file = traefik_dynamic_file.resolve()
         self._state_file = self._traefik_file.parent / _STATE_SUFFIX
         self._reload_container = (
-            reload_container.strip() if reload_container and reload_container.strip() else None
+            reload_container.strip()
+            if reload_container and reload_container.strip()
+            else None
         )
         self._lock = asyncio.Lock()
 
@@ -203,7 +212,9 @@ class TraefikFileTrafficRouter(TrafficRouter):
             _atomic_write_bytes(self._state_file, state_bytes)
             _atomic_write_bytes(self._traefik_file, traefik_bytes)
         except OSError as exc:
-            raise TrafficRouterError(f"Failed to write Traefik dynamic file: {exc}") from exc
+            raise TrafficRouterError(
+                f"Failed to write Traefik dynamic file: {exc}"
+            ) from exc
         if self._reload_container:
             _reload_traefik_container_sighup(self._reload_container)
 

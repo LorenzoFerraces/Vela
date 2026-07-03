@@ -3,6 +3,7 @@ import { useRef, useState } from 'react'
 import {
   formatApiError,
   uploadVolumeFolder,
+  type ScalingPolicyRequest,
 } from '../../api/client'
 import {
   VOLUME_UPLOAD_MAX_BYTES,
@@ -11,10 +12,8 @@ import {
 } from '../../constants/volumeUploadLimits'
 import type { EnvVarRow, VolumeMountRow } from './runFormAdvanced'
 import { createEmptyVolumeMountRow, folderTotalBytes } from './runFormAdvanced'
-import {
-  ContainersRunScalingFields,
-  type ScalingPolicyRequest,
-} from './ContainersRunScalingFields'
+import { ContainersRunScalingFields } from './ContainersRunScalingFields'
+import { formatBytes } from '../../utils/formatBytes'
 
 type ContainersRunAdvancedFieldsProps = {
   envRows: EnvVarRow[]
@@ -25,16 +24,7 @@ type ContainersRunAdvancedFieldsProps = {
   onStartCommandChange: (value: string) => void
   scalingPolicy: ScalingPolicyRequest | null
   onScalingPolicyChange: (policy: ScalingPolicyRequest | null) => void
-}
-
-function formatBytes(totalBytes: number): string {
-  if (totalBytes < 1024) {
-    return `${totalBytes} B`
-  }
-  if (totalBytes < 1024 * 1024) {
-    return `${(totalBytes / 1024).toFixed(1)} KB`
-  }
-  return `${(totalBytes / (1024 * 1024)).toFixed(1)} MB`
+  scalingValidationError?: string | null
 }
 
 export function ContainersRunAdvancedFields({
@@ -46,6 +36,7 @@ export function ContainersRunAdvancedFields({
   onStartCommandChange,
   scalingPolicy,
   onScalingPolicyChange,
+  scalingValidationError = null,
 }: ContainersRunAdvancedFieldsProps) {
   const [expanded, setExpanded] = useState(false)
   const folderInputRef = useRef<HTMLInputElement>(null)
@@ -299,6 +290,7 @@ export function ContainersRunAdvancedFields({
           <ContainersRunScalingFields
             scalingPolicy={scalingPolicy}
             onScalingPolicyChange={onScalingPolicyChange}
+            validationError={scalingValidationError}
           />
         </div>
       ) : null}

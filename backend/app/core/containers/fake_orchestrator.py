@@ -373,7 +373,16 @@ class FakeContainerOrchestrator(ContainerOrchestrator):
     ) -> ContainerInfo:
         base_name = base_config.name or ""
         replica_name = f"{base_name}-r{replica_index}"
-        replica_labels = dict(base_config.labels)
+        replica_labels = {
+            key: value
+            for key, value in base_config.labels.items()
+            if key
+            not in {
+                VELA_ROUTE_HOST_LABEL,
+                VELA_ROUTE_PATH_PREFIX_LABEL,
+                VELA_ROUTE_TLS_LABEL,
+            }
+        }
         replica_labels[VELA_REPLICA_OF_LABEL] = base_name
         replica_config = base_config.model_copy(
             update={

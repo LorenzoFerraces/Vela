@@ -1,24 +1,13 @@
-import {
-  Fragment,
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from 'react'
-import type { ContainerInfo, ContainerStats, ContainerStatus } from '../../api/client'
-import {
-  containerWriteAllowed,
-  fetchContainerLogs,
-  formatApiError,
-  getContainerStats,
-  openContainerLogWebSocket,
-} from '../../api/client'
+import { Fragment, useMemo, useState } from 'react'
+import type { ContainerInfo } from '../../api/client'
+import { containerWriteAllowed } from '../../api/client'
 import { deploySourceImageLabel } from '../../pages/containers/deploySourceDisplay'
 import type { WorkloadGroup } from '../../pages/containers/workloadGrouping'
 import { workloadInstances } from '../../pages/containers/workloadGrouping'
+import { ContainerLogPanel } from './ContainerLogPanel'
+import { ContainerStatsPanel } from './ContainerStatsPanel'
+import { ReplicaInstancesPanel } from './ReplicaInstancesPanel'
 
-const ERROR_LINE_PATTERN = /\b(error|exception|fatal|traceback)\b/i
 const VIEWER_ACTION_DISABLED_TITLE =
   'Insufficient permissions to modify this workload (viewer role).'
 
@@ -60,31 +49,8 @@ function sortGroupsForDashboard(groups: WorkloadGroup[]): WorkloadGroup[] {
   })
 }
 
-function formatBytes(totalBytes: number): string {
-  if (totalBytes < 1024) {
-    return `${totalBytes} B`
-  }
-  if (totalBytes < 1024 * 1024) {
-    return `${(totalBytes / 1024).toFixed(1)} KB`
-  }
-  return `${(totalBytes / (1024 * 1024)).toFixed(1)} MB`
-}
-
-function formatWorkloadHealth(health: string): string {
-  const normalized = health.trim().toLowerCase()
-  switch (normalized) {
-    case 'healthy':
-      return 'Healthy'
-    case 'unhealthy':
-      return 'Unhealthy'
-    case 'starting':
-      return 'Starting'
-    case 'none':
-    case '':
-      return 'Not configured'
-    default:
-      return health.trim() || 'Not configured'
-  }
+function showsInstanceSummary(group: WorkloadGroup): boolean {
+  return group.replicas.length > 0 || group.scalingEnabled
 }
 
 function aggregateStatus(group: WorkloadGroup): string {
@@ -92,293 +58,10 @@ function aggregateStatus(group: WorkloadGroup): string {
   const runningCount = instances.filter(
     (instance) => instance.status === 'running',
   ).length
-  if (group.scalingEnabled) {
-    const total = instances.length
-    return `${runningCount}/${total} running`
+  if (showsInstanceSummary(group)) {
+    return `${runningCount}/${instances.length} running`
   }
   return group.base.status
-}
-
-function ContainerLogPanel({
-  containerId,
-  isActive,
-  workloadStatus,
-}: {
-  containerId: string
-  isActive: boolean
-  workloadStatus: ContainerStatus
-}) {
-  const isRunning = workloadStatus === 'running'
-  const [logText, setLogText] = useState('')
-  const [streamStatus, setStreamStatus] = useState<
-    'connecting' | 'live' | 'ended' | 'err'
-  >('connecting')
-  const [errorText, setErrorText] = useState<string | null>(null)
-  const [highlightErrors, setHighlightErrors] = useState(false)
-  const decoderRef = useRef(new TextDecoder())
-
-  const refreshSnapshot = useCallback(async () => {
-    try {
-      const snapshot = await fetchContainerLogs(containerId, { tail: 500 })
-      setLogText(snapshot)
-      setErrorText(null)
-    } catch (error) {
-      setErrorText(formatApiError(error))
-    }
-  }, [containerId])
-
-  useEffect(() => {
-    if (!isActive || isRunning) {
-      return
-    }
-    void refreshSnapshot()
-  }, [isActive, isRunning, containerId, refreshSnapshot])
-
-  useEffect(() => {
-    if (!isActive || !isRunning) {
-      return
-    }
-
-    decoderRef.current = new TextDecoder()
-    setLogText('')
-    setStreamStatus('connecting')
-    setErrorText(null)
-
-    let websocket: WebSocket
-    try {
-      websocket = openContainerLogWebSocket(containerId, {
-        tail: 400,
-        follow: true,
-      })
-    } catch (error) {
-      queueMicrotask(() => {
-        setStreamStatus('err')
-        setErrorText(formatApiError(error))
-      })
-      return
-    }
-    websocket.binaryType = 'arraybuffer'
-    websocket.onopen = () => {
-      queueMicrotask(() => {
-        setStreamStatus('live')
-      })
-    }
-    websocket.onmessage = (event) => {
-      const payload = event.data
-      const chunk =
-        payload instanceof ArrayBuffer
-          ? new Uint8Array(payload)
-          : typeof payload === 'string'
-            ? new TextEncoder().encode(payload)
-            : new Uint8Array()
-      if (chunk.length === 0) {
-        return
-      }
-      const piece = decoderRef.current.decode(chunk, { stream: true })
-      setLogText((previous) => previous + piece)
-    }
-    websocket.onerror = () => {
-      queueMicrotask(() => {
-        setErrorText('Log stream connection failed.')
-        setStreamStatus('err')
-      })
-    }
-    websocket.onclose = () => {
-      queueMicrotask(() => {
-        setStreamStatus((previous) => (previous === 'err' ? previous : 'ended'))
-      })
-    }
-    return () => {
-      websocket.onopen = null
-      websocket.onmessage = null
-      websocket.onerror = null
-      websocket.onclose = null
-      websocket.close()
-    }
-  }, [containerId, isActive, isRunning])
-
-  const lines = useMemo(() => logText.split('\n'), [logText])
-
-  return (
-    <div className="workloads-log-panel">
-      <div className="workloads-log-panel__toolbar">
-        <span className="workloads-log-panel__status" role="status">
-          {!isRunning
-            ? 'Stream paused'
-            : streamStatus === 'connecting'
-              ? 'Connecting…'
-              : streamStatus === 'live'
-                ? 'Live'
-                : streamStatus === 'ended'
-                  ? 'Stream ended'
-                  : 'Error'}
-        </span>
-        <label className="workloads-log-panel__toggle">
-          <input
-            type="checkbox"
-            checked={highlightErrors}
-            onChange={(event) => setHighlightErrors(event.target.checked)}
-          />
-          Highlight error lines
-        </label>
-        <button
-          type="button"
-          className="btn btn--ghost btn--sm"
-          onClick={() => void refreshSnapshot()}
-        >
-          Refresh snapshot
-        </button>
-      </div>
-      {errorText ? (
-        <p className="workloads-log-panel__error" role="alert">
-          {errorText}
-        </p>
-      ) : null}
-      <pre
-        className="workloads-log-panel__pre"
-        tabIndex={0}
-        aria-label="Container log output"
-      >
-        {lines.map((line, index) => {
-          const key = `${index}-${line.slice(0, 24)}`
-          if (highlightErrors && ERROR_LINE_PATTERN.test(line)) {
-            return (
-              <span
-                key={key}
-                className="workloads-log-panel__line workloads-log-panel__line--warn"
-              >
-                {line}
-                {'\n'}
-              </span>
-            )
-          }
-          return (
-            <span key={key} className="workloads-log-panel__line">
-              {line}
-              {'\n'}
-            </span>
-          )
-        })}
-      </pre>
-    </div>
-  )
-}
-
-function ContainerStatsPanel({
-  containerId,
-  isActive,
-}: {
-  containerId: string
-  isActive: boolean
-}) {
-  const [stats, setStats] = useState<ContainerStats | null>(null)
-  const [loading, setLoading] = useState(false)
-  const [errorText, setErrorText] = useState<string | null>(null)
-
-  const refreshStats = useCallback(async () => {
-    setLoading(true)
-    try {
-      const snapshot = await getContainerStats(containerId)
-      setStats(snapshot)
-      setErrorText(null)
-    } catch (error) {
-      setStats(null)
-      setErrorText(formatApiError(error))
-    } finally {
-      setLoading(false)
-    }
-  }, [containerId])
-
-  useEffect(() => {
-    if (!isActive) {
-      return
-    }
-    void refreshStats()
-  }, [isActive, containerId, refreshStats])
-
-  return (
-    <div className="workloads-stats-panel">
-      <div className="workloads-stats-panel__toolbar">
-        <span className="workloads-stats-panel__status" role="status">
-          {loading ? 'Loading stats…' : 'Current snapshot'}
-        </span>
-        <button
-          type="button"
-          className="btn btn--ghost btn--sm"
-          onClick={() => void refreshStats()}
-          disabled={loading}
-        >
-          Refresh
-        </button>
-      </div>
-      {errorText ? (
-        <p className="workloads-stats-panel__error" role="alert">
-          {errorText}
-        </p>
-      ) : null}
-      {stats ? (
-        <dl className="workloads-stats-panel__grid">
-          <div>
-            <dt>CPU</dt>
-            <dd>{stats.cpu_percent.toFixed(1)}%</dd>
-          </div>
-          <div>
-            <dt>Memory</dt>
-            <dd>
-              {formatBytes(stats.memory_usage_bytes)}
-              {stats.memory_limit_bytes > 0
-                ? ` / ${formatBytes(stats.memory_limit_bytes)} (${stats.memory_percent.toFixed(1)}%)`
-                : ''}
-            </dd>
-          </div>
-          <div>
-            <dt>Network in</dt>
-            <dd>{formatBytes(stats.network_rx_bytes)}</dd>
-          </div>
-          <div>
-            <dt>Network out</dt>
-            <dd>{formatBytes(stats.network_tx_bytes)}</dd>
-          </div>
-        </dl>
-      ) : null}
-    </div>
-  )
-}
-
-function ReplicaInstancesPanel({ group }: { group: WorkloadGroup }) {
-  const instances = workloadInstances(group)
-  return (
-    <div className="workloads-replicas-panel">
-      <p className="workloads-replicas-panel__lead">
-        Auto-scaling is enabled
-        {group.scalingPolicy
-          ? ` (${group.scalingPolicy.min_replicas}–${group.scalingPolicy.max_replicas} replicas).`
-          : '.'}
-      </p>
-      <table className="workloads-replicas-panel__table">
-        <thead>
-          <tr>
-            <th>Instance</th>
-            <th>Status</th>
-            <th>Health</th>
-          </tr>
-        </thead>
-        <tbody>
-          {instances.map((instance, index) => (
-            <tr key={instance.id}>
-              <td>
-                {index === 0 ? `${instance.name} (primary)` : instance.name}
-              </td>
-              <td>
-                <span className="containers-status">{instance.status}</span>
-              </td>
-              <td>{formatWorkloadHealth(instance.health)}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  )
 }
 
 export function WorkloadsTable({
@@ -497,6 +180,7 @@ export function WorkloadsTable({
                 const statsTarget =
                   instances.find((instance) => instance.id === statsContainerId) ??
                   containerRow
+                const showReplicaControls = showsInstanceSummary(group)
 
                 return (
                   <Fragment key={containerRow.id}>
@@ -651,7 +335,7 @@ export function WorkloadsTable({
                         </button>
                       </td>
                       <td className="workloads-table__expand-cell">
-                        {group.scalingEnabled ? (
+                        {showReplicaControls ? (
                           <button
                             type="button"
                             className="workloads-table__expand-toggle"
@@ -674,7 +358,7 @@ export function WorkloadsTable({
                         ) : null}
                       </td>
                     </tr>
-                    {group.scalingEnabled && isReplicaExpanded ? (
+                    {showReplicaControls && isReplicaExpanded ? (
                       <tr className="workloads-table__expand-row">
                         <td colSpan={columnCount}>
                           <div

@@ -59,10 +59,16 @@ class HealthCheckConfig(BaseModel):
 
 def default_listen_port_health_check(listen_port: int) -> HealthCheckConfig:
     """Verify the configured port accepts TCP connections inside the container."""
+    python_probe = (
+        "import socket; "
+        f"socket.create_connection(('127.0.0.1', {listen_port}), timeout=1).close()"
+    )
     return HealthCheckConfig(
         command=[
             "CMD-SHELL",
             (
+                f'python3 -c "{python_probe}" 2>/dev/null || '
+                f'python -c "{python_probe}" 2>/dev/null || '
                 f"nc -z 127.0.0.1 {listen_port} 2>/dev/null || "
                 f"nc -z localhost {listen_port} 2>/dev/null || "
                 f"bash -c 'exec 3<>/dev/tcp/127.0.0.1/{listen_port}' 2>/dev/null || "
@@ -232,13 +238,11 @@ class ScalingPolicyConfig(BaseModel):
     scale_up_threshold: float = Field(
         default=70.0,
         ge=0.0,
-        le=100.0,
         description="Metric value above which the engine scales up.",
     )
     scale_down_threshold: float = Field(
         default=30.0,
         ge=0.0,
-        le=100.0,
         description="Metric value below which the engine scales down.",
     )
     cooldown_seconds: int = Field(
@@ -273,6 +277,26 @@ class ScalingPolicyConfig(BaseModel):
         min_replicas = data.get("min_replicas", 1)
         if value < min_replicas:
             msg = "max_replicas must be >= min_replicas"
+            raise ValueError(msg)
+        return value
+
+    @field_validator("scale_up_threshold", "scale_down_threshold")
+    @classmethod
+    def threshold_within_metric_range(cls, value: float, info: object) -> float:
+        data = getattr(info, "data", {})
+        metric = data.get("metric", ScalingMetric.CPU_PERCENT)
+        if metric == ScalingMetric.CPU_PERCENT and value > 100.0:
+            msg = "CPU percent thresholds must be <= 100"
+            raise ValueError(msg)
+        return value
+
+    @field_validator("scale_down_threshold")
+    @classmethod
+    def scale_down_must_be_below_scale_up(cls, value: float, info: object) -> float:
+        data = getattr(info, "data", {})
+        scale_up_threshold = data.get("scale_up_threshold")
+        if scale_up_threshold is not None and value >= scale_up_threshold:
+            msg = "scale_down_threshold must be < scale_up_threshold"
             raise ValueError(msg)
         return value
 
