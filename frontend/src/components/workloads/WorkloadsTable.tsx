@@ -30,32 +30,177 @@ type WorkloadsTableProps = {
   prioritizeProblemWorkloads?: boolean
 }
 
-function workloadConcernRank(row: ContainerInfo): number {
-  if (row.status === 'stopped' || row.status === 'dead') {
-    return 0
-  }
-  if (row.status === 'restarting') {
-    return 1
-  }
-  const health = (row.health || '').toLowerCase()
-  if (health && health !== 'none' && health !== 'healthy') {
-    return 2
-  }
-  return 3
-}
+// Memoize the container row rendering to avoid unnecessary re-renders
+const ContainerRow = React.memo(function ContainerRow({
+  containerRow,
+  isExpanded,
+  toggleLogRow,
+  rowBusyId,
+  onStart,
+  onStop,
+  onRemove,
+  canModify,
+  modifyDisabledTitle,
+  copiedRowId,
+  copyFailedRowId,
+  copyAccessUrl,
+  setCopiedRowId,
+  setCopyFailedRowId,
+  expandedRowId,
+  accessUrl,
+  handleCopy,
+}: {
+  containerRow: ContainerInfo
+  isExpanded: boolean
+  toggleLogRow: (containerId: string) => void
+  rowBusyId: string | null
+  onStart: (containerId: string) => void
+  onStop: (containerId: string) => void
+  onRemove: (containerId: string) => void
+  canModify: boolean
+  modifyDisabledTitle: string | undefined
+  copiedRowId: string | null
+  copyFailedRowId: string | null
+  copyAccessUrl: (accessUrl: string, rowId: string) => void
+  setCopiedRowId: (rowId: string | null) => void
+  setCopyFailedRowId: (rowId: string | null) => void
+  expandedRowId: string | null
+  accessUrl: string
+  handleCopy: (accessUrl: string, rowId: string) => void
+}) {
+  const handleCopyClick = useCallback(() => {
+    handleCopy(accessUrl, containerRow.id)
+  }, [accessUrl, containerRow.id])
 
-function sortRowsForDashboard(rows: ContainerInfo[]): ContainerInfo[] {
-  return [...rows].sort((rowA, rowB) => {
-    const rankA = workloadConcernRank(rowA)
-    const rankB = workloadConcernRank(rowB)
-    if (rankA !== rankB) {
-      return rankA - rankB
-    }
-    return rowA.name.localeCompare(rowB.name)
-  })
-}
+  return (
+    <Fragment key={containerRow.id}>
+      <tr>
+        <td>{containerRow.name}</td>
+        <td
+          className="containers-table__mono"
+          title={
+            containerRow.source_kind === 'dockerfile_template' ||
+            containerRow.source_kind === 'git'
+              ? containerRow.image
+              : undefined
+          }
+        >
+          {deploySourceImageLabel(containerRow)}
+        </td>
+        <td>
+          <span className="containers-status">{containerRow.status}</span>
+        </td>
+        <td className="containers-table__ports">
+          {containerRow.ports.length === 0
+            ? '—'
+            : containerRow.ports
+                .map(
+                  (portMapping) =>
+                    `${portMapping.host_port}:${portMapping.container_port}/${portMapping.protocol}`,
+                )
+                .join(', ')}
+        </td>
+        <td className="workloads-table__url-cell">
+          {accessUrl ? (
+            <button
+              type="button"
+              className="btn btn--ghost btn--sm"
+              onClick={handleCopyClick}
+            >
+              {copiedRowId === containerRow.id
+                ? 'Copied'
+                : copyFailedRowId === containerRow.id
+                  ? 'Copy failed'
+                  : 'Copy'}
+            </button>
+          ) : (
+            <span className="containers-muted" title="No Traefik route on this container">
+              —
+            </span>
+          )}
+        </td>
+        <td>
+          <button
+            type="button"
+            className="btn btn--ghost btn--sm"
+            aria-expanded={isExpanded}
+            aria-controls={`workloads-log-${containerRow.id}`}
+            onClick={() => toggleLogRow(containerRow.id)}
+          >
+            {isExpanded ? 'Hide' : 'Show'}
+          </button>
+        </td>
+        <td className="containers-table__actions">
+          <button
+            type="button"
+            className="btn btn--sm btn--ghost"
+            title={modifyDisabledTitle}
+            aria-label={
+              canModify ? 'Start container' : `Start container — ${VIEWER_ACTION_DISABLED_TITLE}`
+            }
+            disabled={
+              !canModify ||
+              rowBusyId === containerRow.id ||
+              containerRow.status === 'running'
+            }
+            onClick={() => onStart(containerRow.id)}
+          >
+            Start
+          </button>
+          <button
+            type="button"
+            className="btn btn--sm btn--ghost"
+            title={modifyDisabledTitle}
+            aria-label={
+              canModify ? 'Stop container' : `Stop container — ${VIEWER_ACTION_DISABLED_TITLE}`
+            }
+            disabled={
+              !canModify ||
+              rowBusyId === containerRow.id ||
+              containerRow.status !== 'running'
+            }
+            onClick={() => onStop(containerRow.id)}
+          >
+            Stop
+          </button>
+          <button
+            type="button"
+            className="btn btn--sm btn--danger"
+            title={modifyDisabledTitle}
+            aria-label={
+              canModify
+                ? 'Remove container'
+                : `Remove container — ${VIEWER_ACTION_DISABLED_TITLE}`
+            }
+            disabled={!canModify || rowBusyId === containerRow.id}
+            onClick={() => onRemove(containerRow.id)}
+          >
+            Remove
+          </button>
+        </td>
+      </tr>
+      {isExpanded ? (
+        <tr className="workloads-table__expand-row">
+          <td colSpan={7}>
+            <div
+              id={`workloads-log-${containerRow.id}`}
+              className="workloads-table__expand-inner"
+            >
+              <ContainerLogPanel
+                containerId={containerRow.id}
+                isActive={isExpanded}
+                workloadStatus={containerRow.status}
+              />
+            </div>
+          </td>
+        </tr>
+      ) : null}
+    </Fragment>
+  )
+})
 
-function ContainerLogPanel({
+// Memoize the ContainerLogPanel component to avoid unnecessary re-renders
+const ContainerLogPanel = React.memo(function ContainerLogPanel({
   containerId,
   isActive,
   workloadStatus,
@@ -215,7 +360,7 @@ function ContainerLogPanel({
       </pre>
     </div>
   )
-}
+})
 
 export function WorkloadsTable({
   listLoading,
@@ -236,13 +381,13 @@ export function WorkloadsTable({
     [prioritizeProblemWorkloads, rows],
   )
 
-  function toggleLogRow(containerId: string) {
+  const toggleLogRow = useCallback((containerId: string) => {
     setExpandedRowId((current) =>
       current === containerId ? null : containerId,
     )
-  }
+  }, [])
 
-  function copyAccessUrl(accessUrl: string, rowId: string) {
+  const copyAccessUrl = useCallback((accessUrl: string, rowId: string) => {
     void navigator.clipboard.writeText(accessUrl).then(
       () => {
         setCopiedRowId(rowId)
@@ -258,7 +403,15 @@ export function WorkloadsTable({
         }, 2500)
       },
     )
-  }
+  }, [])
+
+  const handleCopy = useCallback((accessUrl: string, rowId: string) => {
+    copyAccessUrl(accessUrl, rowId)
+  }, [copyAccessUrl])
+
+  const handleRowClick = useCallback((containerId: string) => {
+    // This would be used for virtualized lists
+  }, [])
 
   return (
     <div aria-live="polite" className="workloads-table-wrap-outer">
@@ -287,131 +440,26 @@ export function WorkloadsTable({
                 const canModify = containerWriteAllowed(containerRow)
                 const modifyDisabledTitle = canModify ? undefined : VIEWER_ACTION_DISABLED_TITLE
                 return (
-                  <Fragment key={containerRow.id}>
-                    <tr>
-                      <td>{containerRow.name}</td>
-                      <td
-                        className="containers-table__mono"
-                        title={
-                          containerRow.source_kind === 'dockerfile_template' ||
-                          containerRow.source_kind === 'git'
-                            ? containerRow.image
-                            : undefined
-                        }
-                      >
-                        {deploySourceImageLabel(containerRow)}
-                      </td>
-                      <td>
-                        <span className="containers-status">{containerRow.status}</span>
-                      </td>
-                      <td className="containers-table__ports">
-                        {containerRow.ports.length === 0
-                          ? '—'
-                          : containerRow.ports
-                              .map(
-                                (portMapping) =>
-                                  `${portMapping.host_port}:${portMapping.container_port}/${portMapping.protocol}`,
-                              )
-                              .join(', ')}
-                      </td>
-                      <td className="workloads-table__url-cell">
-                        {accessUrl ? (
-                          <button
-                            type="button"
-                            className="btn btn--ghost btn--sm"
-                            onClick={() =>
-                              copyAccessUrl(accessUrl, containerRow.id)
-                            }
-                          >
-                            {copiedRowId === containerRow.id
-                              ? 'Copied'
-                              : copyFailedRowId === containerRow.id
-                                ? 'Copy failed'
-                                : 'Copy'}
-                          </button>
-                        ) : (
-                          <span className="containers-muted" title="No Traefik route on this container">
-                            —
-                          </span>
-                        )}
-                      </td>
-                      <td>
-                        <button
-                          type="button"
-                          className="btn btn--ghost btn--sm"
-                          aria-expanded={isExpanded}
-                          aria-controls={`workloads-log-${containerRow.id}`}
-                          onClick={() => toggleLogRow(containerRow.id)}
-                        >
-                          {isExpanded ? 'Hide' : 'Show'}
-                        </button>
-                      </td>
-                      <td className="containers-table__actions">
-                        <button
-                          type="button"
-                          className="btn btn--sm btn--ghost"
-                          title={modifyDisabledTitle}
-                          aria-label={
-                            canModify ? 'Start container' : `Start container — ${VIEWER_ACTION_DISABLED_TITLE}`
-                          }
-                          disabled={
-                            !canModify ||
-                            rowBusyId === containerRow.id ||
-                            containerRow.status === 'running'
-                          }
-                          onClick={() => void onStart(containerRow.id)}
-                        >
-                          Start
-                        </button>
-                        <button
-                          type="button"
-                          className="btn btn--sm btn--ghost"
-                          title={modifyDisabledTitle}
-                          aria-label={
-                            canModify ? 'Stop container' : `Stop container — ${VIEWER_ACTION_DISABLED_TITLE}`
-                          }
-                          disabled={
-                            !canModify ||
-                            rowBusyId === containerRow.id ||
-                            containerRow.status !== 'running'
-                          }
-                          onClick={() => void onStop(containerRow.id)}
-                        >
-                          Stop
-                        </button>
-                        <button
-                          type="button"
-                          className="btn btn--sm btn--danger"
-                          title={modifyDisabledTitle}
-                          aria-label={
-                            canModify
-                              ? 'Remove container'
-                              : `Remove container — ${VIEWER_ACTION_DISABLED_TITLE}`
-                          }
-                          disabled={!canModify || rowBusyId === containerRow.id}
-                          onClick={() => void onRemove(containerRow.id)}
-                        >
-                          Remove
-                        </button>
-                      </td>
-                    </tr>
-                    {isExpanded ? (
-                      <tr className="workloads-table__expand-row">
-                        <td colSpan={7}>
-                          <div
-                            id={`workloads-log-${containerRow.id}`}
-                            className="workloads-table__expand-inner"
-                          >
-                            <ContainerLogPanel
-                              containerId={containerRow.id}
-                              isActive={isExpanded}
-                              workloadStatus={containerRow.status}
-                            />
-                          </div>
-                        </td>
-                      </tr>
-                    ) : null}
-                  </Fragment>
+                  <ContainerRow
+                    key={containerRow.id}
+                    containerRow={containerRow}
+                    isExpanded={isExpanded}
+                    toggleLogRow={toggleLogRow}
+                    rowBusyId={rowBusyId}
+                    onStart={onStart}
+                    onStop={onStop}
+                    onRemove={onRemove}
+                    canModify={canModify}
+                    modifyDisabledTitle={modifyDisabledTitle}
+                    copiedRowId={copiedRowId}
+                    copyFailedRowId={copyFailedRowId}
+                    copyAccessUrl={copyAccessUrl}
+                    setCopiedRowId={setCopiedRowId}
+                    setCopyFailedRowId={setCopyFailedRowId}
+                    expandedRowId={expandedRowId}
+                    accessUrl={accessUrl}
+                    handleCopy={handleCopy}
+                  />
                 )
               })}
             </tbody>
@@ -420,4 +468,29 @@ export function WorkloadsTable({
       )}
     </div>
   )
+}
+
+function sortRowsForDashboard(rows: ContainerInfo[]): ContainerInfo[] {
+  return [...rows].sort((rowA, rowB) => {
+    const rankA = workloadConcernRank(rowA)
+    const rankB = workloadConcernRank(rowB)
+    if (rankA !== rankB) {
+      return rankA - rankB
+    }
+    return rowA.name.localeCompare(rowB.name)
+  })
+}
+
+function workloadConcernRank(row: ContainerInfo): number {
+  if (row.status === 'stopped' || row.status === 'dead') {
+    return 0
+  }
+  if (row.status === 'restarting') {
+    return 1
+  }
+  const health = (row.health || '').toLowerCase()
+  if (health && health !== 'none' && health !== 'healthy') {
+    return 2
+  }
+  return 3
 }

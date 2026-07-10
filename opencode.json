@@ -3,22 +3,15 @@
   "provider": {
     "llama.cpp": {
       "npm": "@ai-sdk/openai-compatible",
-      "name": "llama-swap (local)",
+      "name": "llama-server (local)",
       "options": {
         "baseURL": "http://192.168.1.193:8080/v1"
       },
       "models": {
         "qwen3-coder-30b": {
-          "name": "Qwen3-Coder-30B (fast)",
+          "name": "Qwen3-Coder-30B (fast, MoE)",
           "limit": {
-            "context": 131072,
-            "output": 8192
-          }
-        },
-        "qwen3.6-27b": {
-          "name": "Qwen3.6-27B (quality)",
-          "limit": {
-            "context": 32768,
+            "context": 98304,
             "output": 8192
           }
         }
@@ -29,6 +22,50 @@
   "instructions": [
     "AGENTS.md"
   ],
+  "lsp": {
+    "pyright": {
+      "disabled": false,
+      "command": [
+        "pyright-langserver",
+        "--stdio"
+      ]
+    },
+    "typescript": {
+      "disabled": false,
+      "command": [
+        "typescript-language-server",
+        "--stdio"
+      ]
+    }
+  },
+  "mcp": {
+    "codebase-memory": {
+      "type": "local",
+      "command": [
+        "codebase-memory-mcp",
+        "mcp"
+      ],
+      "enabled": true
+    },
+    "playwright": {
+      "type": "local",
+      "command": [
+        "npx",
+        "@playwright/mcp@latest"
+      ],
+      "enabled": true
+    },
+    "postgres": {
+      "type": "local",
+      "command": [
+        "npx",
+        "-y",
+        "@modelcontextprotocol/server-postgres",
+        "${DATABASE_URL}"
+      ],
+      "enabled": true
+    }
+  },
   "permission": {
     "bash": "ask",
     "edit": "allow"

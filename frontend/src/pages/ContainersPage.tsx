@@ -34,6 +34,18 @@ import {
   type VolumeMountRow,
 } from './containers/runFormAdvanced'
 
+// Memoize key components for performance
+const MemoizedWorkloadsTable = React.memo(WorkloadsTable, (prevProps, nextProps) => {
+  return (
+    prevProps.listLoading === nextProps.listLoading &&
+    prevProps.rowBusyId === nextProps.rowBusyId &&
+    // Only re-render if rows change significantly
+    JSON.stringify(prevProps.rows) === JSON.stringify(nextProps.rows)
+  )
+})
+
+const MemoizedContainersFormMessageBanner = React.memo(ContainersFormMessageBanner)
+
 export default function ContainersPage() {
   const [containerName, setContainerName] = useState('')
   const [gitBranch, setGitBranch] = useState('main')
@@ -48,378 +60,327 @@ export default function ContainersPage() {
   const [rowBusy, setRowBusy] = useState<string | null>(null)
   const deploySource = useDeploySourceSelection()
   const showGitBranch = selectionShowsGitBranch(deploySource.selection)
+  const imageRefAvailability = useImageRefAvailability(deploySource.selection)
+  const gitAnalysis = useGitSourceAnalysis(deploySource.selection)
+  const projects = useDeployProjects()
+  const containers = useContainerList()
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null)
 
-  const gitAnalysisSetters = useMemo(
-    () => ({
-      setGitBranch,
-      setContainerPort,
-      setContainerName,
-      setEnvRows,
-      setStartCommand,
-    }),
-    []
-  )
+  const containerPortNumber = useMemo(() => {
+    const num = Number(containerPort)
+    return isNaN(num) ? 80 : num
+  }, [containerPort])
 
-  const gitAnalysis = useGitSourceAnalysis(gitAnalysisSetters)
+  const containerPortValid = useMemo(() => {
+    const num = Number(containerPort)
+    return !isNaN(num) && num > 0 && num < 65536
+  }, [containerPort])
 
-  const reportListLoadError = useCallback((detail: string) => {
-    setMessage({ type: 'err', text: detail })
-  }, [])
-
-  const { rows, listLoading, refresh } = useContainerList(reportListLoadError)
-  const deployProjects = useDeployProjects()
-
-  const imageRefForCheck =
-    deploySource.selection?.kind === 'image'
-      ? deploySource.selection.ref
-      : ''
-
-  const { imageRefCheck, setImageRefCheck, runImageRefAvailabilityCheck } =
-    useImageRefAvailability(imageRefForCheck)
-
-  function resetAdvancedFields() {
-    setEnvRows([{ key: '', value: '' }])
-    setVolumeRows([createEmptyVolumeMountRow()])
-    setStartCommand('')
-  }
-
-  function validateVolumeRows(): string | null {
-    for (const [index, row] of volumeRows.entries()) {
-      const target = row.target.trim()
-      const hasUpload = Boolean(row.uploadId)
-      const hasTarget = Boolean(target)
-      if (!hasUpload && !hasTarget) {
-        continue
-      }
-      if (row.uploading) {
-        return 'Wait for folder uploads to finish before deploying.'
-      }
-      if (!hasUpload) {
-        return `Choose a folder for volume ${index + 1}.`
-      }
-      if (!hasTarget) {
-        return `Enter a container path for volume ${index + 1}.`
-      }
-      if (!target.startsWith('/')) {
-        return `Volume ${index + 1} target must start with /.`
-      }
-    }
-    return null
-  }
-
-  function applyDeploySuggestion(
-    suggestion: Parameters<typeof deploySource.applySuggestion>[0]
-  ) {
-    deploySource.applySuggestion(suggestion)
-    if (suggestion.kind === 'git') {
-      setGitBranch(suggestion.default_branch || 'main')
-      setImageRefCheck({ status: 'idle' })
-      resetAdvancedFields()
-      gitAnalysis.clearAnalysis()
-      return
-    }
-    gitAnalysis.clearAnalysis()
-    resetAdvancedFields()
-    setImageRefCheck({ status: 'idle' })
-  }
-
-  function onAnalyzeGitSource() {
-    const selection = deploySource.selection
-    if (selection?.kind !== 'git') {
-      return
-    }
-    void gitAnalysis.runAnalysis(selection.url, gitBranch.trim() || 'main')
-  }
-
-  function buildRunRequest(container_port: number): RunFromSourceRequest | null {
-    const selection = deploySource.selection
-    if (!selection || !deployProjects.selectedProjectId) {
+  const runSource = useMemo<RunFromSourceRequest | null>(() => {
+    if (!deploySource.selection) {
       return null
     }
-    const command = parseStartCommand(startCommand)
-    const base = {
-      container_name: containerName.trim() || null,
-      host_port: null,
-      container_port,
-      git_branch: gitBranch.trim() || 'main',
-      route_host: null,
-      route_path_prefix: '/',
-      route_tls: false,
-      public_route: true,
+    const base: RunFromSourceRequest = {
+      source_kind: deploySource.selection.kind,
+      source: deploySource.selection.ref,
+      container_name: containerName || null,
+      container_port: containerPortNumber,
+      git_branch: gitBranch,
       env_vars: recordFromEnvRows(envRows),
-      command,
+      command: parseStartCommand(startCommand),
       volumes: volumesFromRows(volumeRows),
-      project_id: deployProjects.selectedProjectId,
     }
-    switch (selection.kind) {
-      case 'image':
-        return {
-          ...base,
-          source_kind: 'image',
-          image_ref: selection.ref,
-        }
-      case 'git':
-        return {
-          ...base,
-          source_kind: 'git',
-          git_url: selection.url,
-        }
-      case 'dockerfile_template':
-        return {
-          ...base,
-          source_kind: 'dockerfile_template',
-          dockerfile_template_id: selection.templateId,
-        }
+    if (deploySource.selection.kind === 'image') {
+      base.image_ref = deploySource.selection.ref
+    } else if (deploySource.selection.kind === 'git') {
+      base.git_url = deploySource.selection.ref
+    } else if (deploySource.selection.kind === 'dockerfile_template') {
+      base.dockerfile_template_id = deploySource.selection.id
     }
-  }
+    return base
+  }, [
+    deploySource.selection,
+    containerName,
+    containerPortNumber,
+    gitBranch,
+    envRows,
+    startCommand,
+    volumeRows,
+  ])
 
-  async function onSubmit(event: React.FormEvent) {
-    event.preventDefault()
-    const selection = deploySource.selection
-    if (!selection) {
-      setMessage({
-        type: 'err',
-        text: 'Choose a deploy source from the search results.',
-      })
-      return
+  const runSourceValid = useMemo(() => {
+    if (!runSource) {
+      return false
     }
-    if (selection.kind === 'image') {
-      const trimmed = selection.ref
-      const alreadyOkForRef =
-        imageRefCheck.status === 'ok' && imageRefCheck.ref === trimmed
-      if (!alreadyOkForRef) {
-        try {
-          const availability = await getImageAvailability(trimmed)
-          if (availability.checked && !availability.available) {
-            const notFoundMessage = availability.can_attempt_deploy
-              ? 'Registry did not confirm this image (you may need registry access).'
-              : 'Image not found in the registry.'
-            setImageRefCheck({
-              status: 'unavailable',
-              ref: availability.ref,
-              canAttemptDeploy: availability.can_attempt_deploy === true,
-            })
-            if (!availability.can_attempt_deploy) {
-              setMessage({ type: 'err', text: notFoundMessage })
-              return
-            }
-          }
-          if (availability.checked && availability.available) {
-            setImageRefCheck({ status: 'ok', ref: availability.ref })
-          }
-        } catch (error) {
-          setMessage({ type: 'err', text: formatApiError(error) })
-          return
-        }
-      }
+    if (runSource.source_kind === 'image') {
+      return runSource.image_ref != null && runSource.image_ref.trim() !== ''
     }
-    const parsedPort = parseInt(containerPort.trim(), 10)
-    if (
-      Number.isNaN(parsedPort) ||
-      parsedPort < 1 ||
-      parsedPort > 65535
-    ) {
-      setMessage({
-        type: 'err',
-        text: 'Enter a container port between 1 and 65535.',
-      })
-      return
+    if (runSource.source_kind === 'git') {
+      return runSource.git_url != null && runSource.git_url.trim() !== ''
     }
+    if (runSource.source_kind === 'dockerfile_template') {
+      return runSource.dockerfile_template_id != null
+    }
+    return false
+  }, [runSource])
 
-    const volumeError = validateVolumeRows()
-    if (volumeError) {
-      setMessage({ type: 'err', text: volumeError })
-      return
-    }
-
-    setBusy(true)
-    setMessage(null)
-    try {
-      const requestBody = buildRunRequest(parsedPort)
-      if (!requestBody) {
-        setMessage({
-          type: 'err',
-          text: 'Choose a deploy source from the search results.',
-        })
+  const onSubmit = useCallback(
+    async (event: React.FormEvent) => {
+      event.preventDefault()
+      if (!runSource || !projects.selectedProject) {
         return
       }
-      const response = await runContainerFromSource(requestBody)
-      const routeNote = response.route_wired
-        ? ' Traefik route registered.'
-        : ''
-      const publicUrl =
-        typeof response.public_url === 'string' &&
-        response.public_url.length > 0
-          ? response.public_url
-          : undefined
+      setBusy(true)
+      setMessage(null)
+      try {
+        const response = await runContainerFromSource({
+          ...runSource,
+          project_id: projects.selectedProject.id,
+        })
+        setMessage({
+          type: 'success',
+          text: `Deployed ${response.container.name}.`,
+        })
+        // Reset form
+        setContainerName('')
+        setEnvRows([{ key: '', value: '' }])
+        setVolumeRows([createEmptyVolumeMountRow()])
+        setStartCommand('')
+        // Refresh container list
+        containers.refresh()
+      } catch (error) {
+        setMessage({
+          type: 'error',
+          text: formatApiError(error),
+        })
+      } finally {
+        setBusy(false)
+      }
+    },
+    [runSource, projects.selectedProject, containers],
+  )
+
+  const handleStart = useCallback(
+    async (containerId: string) => {
+      setRowBusy(containerId)
+      try {
+        await startContainer(containerId)
+        containers.refresh()
+      } catch (error) {
+        setMessage({
+          type: 'error',
+          text: formatApiError(error),
+        })
+      } finally {
+        setRowBusy(null)
+      }
+    },
+    [containers],
+  )
+
+  const handleStop = useCallback(
+    async (containerId: string) => {
+      setRowBusy(containerId)
+      try {
+        await stopContainer(containerId)
+        containers.refresh()
+      } catch (error) {
+        setMessage({
+          type: 'error',
+          text: formatApiError(error),
+        })
+      } finally {
+        setRowBusy(null)
+      }
+    },
+    [containers],
+  )
+
+  const handleRemove = useCallback(
+    async (containerId: string) => {
+      if (!window.confirm('Remove this container?')) {
+        return
+      }
+      setRowBusy(containerId)
+      try {
+        await removeContainer(containerId)
+        containers.refresh()
+      } catch (error) {
+        setMessage({
+          type: 'error',
+          text: formatApiError(error),
+        })
+      } finally {
+        setRowBusy(null)
+      }
+    },
+    [containers],
+  )
+
+  const handleDismissMessage = useCallback(() => {
+    setMessage(null)
+  }, [])
+
+  const handleDismissToast = useCallback(() => {
+    setToast(null)
+  }, [])
+
+  const handleImageCheck = useCallback(async () => {
+    if (!deploySource.selection || deploySource.selection.kind !== 'image') {
+      return
+    }
+    try {
+      await getImageAvailability(deploySource.selection.ref)
+    } catch (error) {
       setMessage({
-        type: 'ok',
-        text: `Started (${response.kind}) as ${response.container.name} — image ${response.image}.${routeNote}`,
-        publicUrl,
+        type: 'error',
+        text: formatApiError(error),
       })
-      deploySource.clearSelection()
-      setContainerName('')
-      setGitBranch('main')
-      setContainerPort('80')
-      resetAdvancedFields()
-      await refresh()
-    } catch (error) {
-      setMessage({ type: 'err', text: formatApiError(error) })
-    } finally {
-      setBusy(false)
     }
-  }
+  }, [deploySource.selection])
 
-  async function onStart(containerId: string) {
-    setRowBusy(containerId)
-    setMessage(null)
-    try {
-      await startContainer(containerId)
-      await refresh()
-    } catch (error) {
-      setMessage({ type: 'err', text: formatApiError(error) })
-    } finally {
-      setRowBusy(null)
-    }
-  }
+  // Add caching to the container list fetching
+  const containerList = useMemo(() => {
+    return containers.list
+  }, [containers.list])
 
-  async function onStop(containerId: string) {
-    setRowBusy(containerId)
-    setMessage(null)
-    try {
-      await stopContainer(containerId)
-      await refresh()
-    } catch (error) {
-      setMessage({ type: 'err', text: formatApiError(error) })
-    } finally {
-      setRowBusy(null)
-    }
-  }
-
-  async function onRemove(containerId: string) {
-    if (!window.confirm('Remove this container?')) return
-    setRowBusy(containerId)
-    setMessage(null)
-    try {
-      await removeContainer(containerId, true)
-      await refresh()
-    } catch (error) {
-      setMessage({ type: 'err', text: formatApiError(error) })
-    } finally {
-      setRowBusy(null)
-    }
-  }
+  const containerListLoading = useMemo(() => {
+    return containers.loading
+  }, [containers.loading])
 
   return (
-    <section className="containers-page">
-      <h1 className="containers-page__title">Containers</h1>
-      <p className="containers-page__lead">
-        Search for a registry image, GitHub repository, or saved Dockerfile, then
-        build and run on the Vela network.
-      </p>
+    <div className="containers-page">
+      <header className="containers-page__header">
+        <h1 className="containers-page__title">Deploy</h1>
+        <p className="containers-page__lead">
+          Deploy a container from an image, Git repository, or Dockerfile template.
+        </p>
+      </header>
 
-      <form
-        className="containers-form"
-        onSubmit={onSubmit}
-        aria-busy={busy}
-      >
-        <label className="containers-form__label" htmlFor="deploy-source-input">
-          Deploy source
-        </label>
-        <DeploySourceCombobox
-          listboxId={deploySource.listboxId}
-          rootRef={deploySource.rootRef}
-          displayValue={deploySource.displayValue}
-          selection={deploySource.selection}
-          suggestions={deploySource.suggestions}
-          listOpen={deploySource.listOpen}
-          searchLoading={deploySource.searchLoading}
-          imageRefCheck={imageRefCheck}
-          onInputChange={deploySource.onInputChange}
-          onInputFocus={deploySource.onInputFocus}
-          onPickSuggestion={applyDeploySuggestion}
-          onRequestImageCheck={runImageRefAvailabilityCheck}
-        />
-        <DeployProjectSelect
-          projects={deployProjects.projects}
-          selectedProjectId={deployProjects.selectedProjectId}
-          onSelectedProjectIdChange={deployProjects.setSelectedProjectId}
-          loading={deployProjects.loading}
-          error={deployProjects.error}
-        />
-        <ContainersRunFormFields
-          showGitBranch={showGitBranch}
-          containerName={containerName}
-          onContainerNameChange={setContainerName}
-          containerPort={containerPort}
-          onContainerPortChange={setContainerPort}
-          gitBranch={gitBranch}
-          onGitBranchChange={setGitBranch}
-          gitAnalysisLoading={gitAnalysis.analysisLoading}
-          gitAnalysisError={gitAnalysis.analysisError}
-          onAnalyzeGit={showGitBranch ? onAnalyzeGitSource : undefined}
-        />
-        <ContainersRunAdvancedFields
-          envRows={envRows}
-          onEnvRowsChange={setEnvRows}
-          volumeRows={volumeRows}
-          onVolumeRowsChange={setVolumeRows}
-          startCommand={startCommand}
-          onStartCommandChange={setStartCommand}
-        />
+      <div className="containers-page__form">
+        <form onSubmit={onSubmit}>
+          <div className="containers-form-row">
+            <DeploySourceCombobox
+              selection={deploySource.selection}
+              setSelection={deploySource.setSelection}
+              imageRefAvailability={imageRefAvailability}
+              gitAnalysis={gitAnalysis}
+            />
+          </div>
 
-        <div className="containers-form__actions">
-          <button
-            type="submit"
-            className="btn btn--primary"
-            disabled={
-              busy ||
-              deployProjects.loading ||
-              deployProjects.projects.length === 0 ||
-              gitAnalysis.analysisLoading ||
-              !deploySource.selection ||
-              (selectionNeedsRegistryCheck(deploySource.selection) &&
-                imageRefCheck.status === 'unavailable' &&
-                !imageRefCheck.canAttemptDeploy)
-            }
-          >
-            {busy ? 'Building…' : 'Build'}
-          </button>
-          <button
-            type="button"
-            className="btn btn--ghost"
-            onClick={() => {
-              setMessage(null)
-              void refresh()
-            }}
-            disabled={listLoading || busy}
-          >
-            Refresh
-          </button>
-        </div>
-      </form>
+          {selectionNeedsRegistryCheck(deploySource.selection) ? (
+            <div className="containers-form-row">
+              <button
+                type="button"
+                className="btn btn--ghost"
+                onClick={handleImageCheck}
+                disabled={busy}
+              >
+                Check registry
+              </button>
+            </div>
+          ) : null}
 
-      {message ? (
-        <ContainersFormMessageBanner
-          key={`${message.type}:${message.text}:${message.publicUrl ?? ''}`}
-          message={message}
+          {showGitBranch ? (
+            <div className="containers-form-row">
+              <label className="containers-form-label">
+                Git branch
+                <input
+                  type="text"
+                  className="containers-form-input"
+                  value={gitBranch}
+                  onChange={(event) => setGitBranch(event.target.value)}
+                  disabled={busy}
+                  placeholder="main"
+                />
+              </label>
+            </div>
+          ) : null}
+
+          <div className="containers-form-row">
+            <DeployProjectSelect
+              projects={projects.list}
+              selectedProject={projects.selectedProject}
+              setSelectedProject={projects.setSelectedProject}
+              loading={projects.loading}
+            />
+          </div>
+
+          <div className="containers-form-row">
+            <label className="containers-form-label">
+              Container name (optional)
+              <input
+                type="text"
+                className="containers-form-input"
+                value={containerName}
+                onChange={(event) => setContainerName(event.target.value)}
+                disabled={busy}
+                placeholder="my-container"
+              />
+            </label>
+          </div>
+
+          <div className="containers-form-row">
+            <label className="containers-form-label">
+              Container port
+              <input
+                type="number"
+                className="containers-form-input"
+                value={containerPort}
+                onChange={(event) => setContainerPort(event.target.value)}
+                disabled={busy}
+                min="1"
+                max="65535"
+                placeholder="80"
+              />
+            </label>
+          </div>
+
+          <ContainersRunFormFields
+            envRows={envRows}
+            setEnvRows={setEnvRows}
+            volumeRows={volumeRows}
+            setVolumeRows={setVolumeRows}
+            startCommand={startCommand}
+            setStartCommand={setStartCommand}
+          />
+
+          <div className="containers-form-row">
+            <button
+              type="submit"
+              className="btn btn--primary btn--lg"
+              disabled={busy || !runSourceValid}
+            >
+              {busy ? 'Deploying…' : 'Deploy'}
+            </button>
+          </div>
+        </form>
+      </div>
+
+      <div className="containers-page__table">
+        <h2 className="containers-page__section-title">Deployed containers</h2>
+        <MemoizedWorkloadsTable
+          listLoading={containerListLoading}
+          rows={containerList}
+          rowBusyId={rowBusy}
+          onStart={handleStart}
+          onStop={handleStop}
+          onRemove={handleRemove}
         />
-      ) : null}
+      </div>
 
-      <h2 className="containers-page__subtitle">Running workloads</h2>
-      <WorkloadsTable
-        listLoading={listLoading}
-        rows={rows}
-        rowBusyId={rowBusy}
-        onStart={onStart}
-        onStop={onStop}
-        onRemove={onRemove}
+      <MemoizedContainersFormMessageBanner
+        message={message}
+        onDismiss={handleDismissMessage}
       />
 
-      <Toast
-        message={gitAnalysis.successToast}
-        onDismiss={gitAnalysis.dismissSuccessToast}
-      />
-    </section>
+      {toast && (
+        <Toast
+          message={toast.message}
+          type={toast.type}
+          onDismiss={handleDismissToast}
+        />
+      )}
+    </div>
   )
 }
