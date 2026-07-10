@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 from app.core.enums import (
     BuildStrategy,
     ContainerStatus,
+    EscalationPolicy,
     HealthStatus,
     RestartPolicy,
     SupportedLanguage,
@@ -74,6 +75,7 @@ class DeployConfig(BaseModel):
     )
     cpu_limit: float | None = None
     memory_limit: int | None = None
+    escalation_policy: EscalationPolicy = EscalationPolicy.NONE
     restart_policy: RestartPolicy = RestartPolicy.NEVER
     labels: dict[str, str] = Field(default_factory=dict)
     command: list[str] | None = None

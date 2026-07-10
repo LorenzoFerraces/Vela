@@ -2,86 +2,90 @@
 
 Conventions for tooling, dependencies, naming, and Python style. Follow this file when changing the repo.
 
-## Repo management
-- **Keep the readme concise** when adding or updating the readme file, prevent it from being too verbose, prefer short explanations
+## Commands
 
-## Package management (pnpm / npm)
+```powershell
+# Backend
+cd backend
+python -m pytest tests -q                                    # all tests
+python -m pytest tests/test_auth.py -q                       # single file
+python -m pytest tests/test_auth.py::test_register -q        # single test
+ruff check .                                                  # lint
+mypy app/ tests/                                              # typecheck
+alembic upgrade head                                          # DB migrations
 
-- **Do not introduce caret (`^`) or tilde (`~`) ranges** when adding or updating dependencies in `package.json`. Prefer **exact versions** (e.g. `"18.2.0"`, not `"^18.2.0"`).
-- **pnpm**: If the project uses pnpm, treat `save-exact` as mandatory behavior: new dependencies must be pinned. Do not rely on loose semver in `package.json`.
-- **Configuration**: The repo keeps a root-level policy in `frontend/.npmrc` so installs default to exact saves. After adding a dependency, verify `package.json` has **no** `^` / `~` on that entry.
+# Frontend
+cd frontend
+npm run dev                                                   # dev server (Vite proxy → :8000)
+npm run build                                                 # tsc -b && vite build
+npm run lint                                                  # eslint .
+npm run typecheck                                             # tsc -b
+npm run test:e2e                                              # Playwright suite
+npm run test:e2e -- e2e/auth.spec.ts                          # single spec
+npm run test:e2e -- -g "Settings page"                        # filter by name
+npm run test:e2e:headed                                       # headed (watch browser)
+PW_API_SERVER_COMMAND="..." npm run test:e2e                   # custom API command
+```
 
-## `.npmrc`
+## CI environment
 
-- `frontend/.npmrc` sets `save-exact=true` so **new dependencies are saved without `^` automatically** (for npm and pnpm in this directory).
-- Do not remove `save-exact=true` without team agreement.
+Not using these env vars locally will cause test failures or wait on Docker:
 
-## Variable and identifier naming
+```powershell
+$env:VELA_FAKE_ORCHESTRATOR = "1"       # replaces DockerOrchestrator with in-memory fake
+$env:VELA_DATABASE_URL = "sqlite+aiosqlite:///:memory:"   # no Postgres needed for pytest
+```
 
-- Use **clear, full words** for variables, functions, and parameters (e.g. `container_id`, `request_body`, `orchestrator`).
-- **Avoid** cryptic abbreviations and **single-letter** names except where idiomatic and extremely local (e.g. short loop index in a comprehension is acceptable; a function parameter named `x` or `c` is not).
+CI runs pytest for `backend/` and Playwright for `frontend/` (with `VELA_E2E=1` SQLite via `playwright.config.ts`). No Docker or Postgres needed for tests.
 
-## Python
+The E2E suite resets the database on API startup (`app/e2e_support.py` `ensure_e2e_database`). Most specs stub `/api/**` with `page.route`; only `api.spec.ts` hits the live backend.
 
-- Prefer the **most idiomatic (“Pythonic”)** style: explicit is better than implicit; use standard library and typing where it helps clarity; follow existing project patterns (imports at top of file, structured errors, `match`/`case` for exhaustiveness on unions when appropriate).
-- Match surrounding modules for layout, naming, and error handling unless you are deliberately standardizing a new pattern (then document it here in a short note).
+## Db / engine quirks
+
+- **Runtime** uses `postgresql+asyncpg`. **Alembic** uses `postgresql+psycopg` (sync) because `asyncpg` + `asyncio` fails on some Windows + Docker Desktop setups.
+- On Windows, `localhost` → `127.0.0.1` is mapped automatically in `app/db/engine.py` (`_database_url_for_engine`).
+- `VELA_DATABASE_URL` for async is `postgresql+asyncpg://user:pass@host:port/db`. For Alembic the driver is swapped to `psycopg`.
+- `sqlalchemy.engine.url.URL` masks passwords in `str()` — use `render_as_string(hide_password=False)` when constructing live connection strings.
+- Test conftest overrides: `integration_app` (DB + orchestrator + builder + router + storage), `db_app` (DB only), `api_client` (authed), `make_authed_client` (per-test override builder).
+
+## Package management (npm)
+
+- `frontend/.npmrc` sets `save-exact=true`. New dependencies must be pinned — no `^` / `~` in `package.json`.
+- Project uses **npm** (not pnpm). Lockfile: `package-lock.json`.
 
 ## Backend structure (MVC)
 
-Keep new and refactored code aligned with this separation of concerns under `backend/app/`:
+- **Model** (`app/core/`): Domain logic, orchestration, integrations. No HTTP wiring.
+- **View** (`app/api/schemas.py`, route-local models): Request/response shapes.
+- **Controller** (`app/api/routes/*`, `app.py`, `deps.py`): Thin HTTP handlers — parse input, call core, map errors to HTTP, return view models.
 
-- **Model** (`app/core/`): Domain logic, orchestration, and integrations (e.g. Docker, routing helpers). Core modules should not own HTTP wiring; they expose functions or types the API layer calls.
-- **View** (API presentation): Request and response shapes and serialization — e.g. `app/api/schemas.py` and any route-local response models. This is the contract the client sees.
-- **Controller** (`app/api/routes/`, `app.py`, `deps.py`): Thin HTTP handlers — parse and validate input, call into `app/core/`, map domain errors to HTTP responses, return view models. Avoid embedding heavy business logic in route functions.
+Group `app/core/` modules into `app/core/<domain>/` when >=3 modules. Existing domains: `auth/`, `oauth/`, `security/`, `traffic/`, `containers/`, `build/`, `git/`, `deploy/`, `notifications/`.
 
-When adding a feature, place logic in the right layer instead of growing “god” route modules.
+Entrypoint: `run.py` (imports `app.bootstrap_env` for `.env`), module target `app.api.app:app` for uvicorn.
 
-### `app/core/` domain packages
-
-Group related modules under `app/core/<domain>/` when that domain has **three or more** Python modules (count submodules in the package, not `__init__.py`). Smaller areas stay as single modules at `app/core/` root (e.g. `enums.py`, `models.py`, `exceptions.py`, `user_library.py`).
-
-Existing domains: `auth/`, `oauth/`, `security/`, `traffic/`, `containers/`, `build/`, `git/`, `deploy/`, `notifications/`. Prefer imports from the concrete module (e.g. `from app.core.traffic.traffic_router import TrafficRouter`) or the package’s public surface in `__init__.py` when re-exporting a small API.
-
-When a new feature grows past two modules in the same area, create or extend a domain package instead of adding more flat files at `app/core/`.
+A background `asyncio.Task` (`container_monitor.py`) runs via FastAPI lifespan. Tests that call `create_app()` may need to account for it.
 
 ## Backend testing
 
-- Prefer **real wiring** over mocks. Do not add tests that mock away the behavior you are trying to verify.
-- **Unit tests** are for **isolated** logic only: small models, validators, parsing helpers, and other pure functions in `app/core/` that do not need HTTP, DB, or Docker.
-- **Integration tests** are the default for API and user-visible behavior: exercise routes with `TestClient`, the real app factory, and in-memory SQLite (the existing `conftest` DB override). Call through to **core and route layers**; avoid replacing orchestrators, builders, or auth with `MagicMock` except where Docker, GitHub, or other external services are genuinely unavailable in CI — and keep any such mock narrowly scoped to that boundary.
-- When testing safety-critical paths (auth, ownership, deploy contracts), assert on **HTTP responses and persisted state**, not on whether a mock method was called.
+- Prefer **real wiring** over mocks. Integration tests with `TestClient`, real app factory, and in-memory SQLite are the default.
+- Avoid replacing orchestrators/builders/auth with `MagicMock` unless external services are genuinely unavailable in CI.
+- Assert on HTTP responses and persisted state, not mock call counts.
 
 ## Frontend testing
 
-- **E2E tests** (`frontend/e2e/`) should run the **real frontend against the real local API** (Playwright `webServer` config). Do **not** stub `/api/**` with `page.route` to fake responses for flows you are verifying; those tests should reflect end-to-end behavior.
-- Reserve browser network interception for **external systems** the app cannot control in dev (e.g. third-party OAuth redirects). Document why when interception is unavoidable.
-- **Unit or component tests** (if added) belong on small utilities and presentational pieces; page-level behavior belongs in unmocked E2E, not in tests that replace the API client with fixtures.
+- E2E tests (`frontend/e2e/`) run the real frontend against the real local API. Do not stub `/api/**` for flows you are verifying.
+- Reserve `page.route` for external systems the app cannot control in dev (third-party OAuth, etc.). Document why.
 
-## Cleaning AI-generated changes (deslop)
+## TypeScript / React
 
-After substantive agent-generated edits on a branch, run the **deslop** Cursor skill on the diff: remove unnecessary comments, abnormal defensive `try`/`except` on trusted paths, `any` casts used only to silence types, and deeply nested structure that does not match surrounding code — **without changing behavior** except for clear bugs. Prefer small, focused cleanups over broad rewrites.
+- Avoid `instanceof` — prefer discriminated unions, `typeof`/`in`, type predicates, or Zod.
+- Keep page files readable; split subviews/hooks/shared UI when a file grows hard to scan.
+- Prefer deriving state during render or event handlers over `useEffect`. Reserve effects for real side effects.
+- API client in `frontend/src/api/client.ts`: token in `localStorage` key `vela.access_token`, helpers `apiGet`/`apiPost`/`apiPatch`/`apiDelete`/`apiUploadFile`.
+- Containers run form (`ContainersPage.tsx`): always sends `public_route: true`, user-selected `container_port` (default 80), no host port mapping, shows Git branch only when source looks like a Git URL.
 
-## TypeScript / React (frontend)
+## Errors shown to users
 
-- **Avoid `instanceof` when practical.** Prefer discriminated unions, narrow with `typeof` / `in`, small type-predicate helpers, or parsing/validation (e.g. Zod) so behavior does not depend on prototype chains or cross-realm objects.
-- Use `instanceof` only where it is clearly the best tool (e.g. a well-owned `Error` subclass in the same bundle) and document why if it is non-obvious.
-- **Keep page and component files from growing too large.** Split out subviews, hooks, and shared UI into focused modules when a file becomes hard to scan or review.
-- **Reuse across pages** when the same UI or logic appears in more than one place — extract shared components or hooks rather than duplicating large blocks.
-- **`useEffect`**: Prefer deriving state during render, event handlers, or library patterns that avoid sync-on-mount when they suffice. Reserve effects for real side effects (subscriptions, imperative DOM, syncing with external systems) and avoid redundant or overly chained effects that are hard to reason about.
-
-## UI and forms (user experience)
-
-- **Prioritize user experience** when designing and building interfaces: flows should feel clear, fast, and respectful of attention.
-- **Follow common UX patterns** where they apply: clear navigation and hierarchy, visible loading and success/error feedback, sensible empty states, destructive actions behind confirmation, keyboard-friendly controls where the rest of the app does the same. Stay consistent with existing pages in this repo before introducing a new interaction model.
-- **Loading states**: Prefer **skeleton placeholders** that mirror the final layout over blank screens or generic “Loading…” text. Keep structure stable so the page feels responsive. Use **optimistic UI** when it is safe (update local state immediately, reconcile on success or roll back with a clear error on failure) so actions feel instant.
-- **When usability or user flow is unclear** (e.g. multi-step flows, dense data, unfamiliar domain), ask for product or design guidance or propose **short** options in chat instead of guessing a one-off pattern.
-- **Keep form fields short and concise** (labels, placeholders, helper text). Prefer tight copy over verbose prose.
-- **Avoid long explanations** inline on the form; if something needs detail, link to docs or a collapsible help pattern rather than wall-of-text above fields.
-- **Long forms are fine to split**: use **multi-step flows** or **modals** (and related patterns) so users are not overwhelmed by a single scrolling page of inputs.
-- **Containers** (`frontend/src/pages/ContainersPage.tsx`): the run form always uses **public routes** (`public_route: true`), a user-selected **container port** (defaults to 80; Git analysis may pre-fill when enabled in settings), no host port mapping, and shows **Git branch** only when the source looks like a Git URL (same `git@` / `http(s)://` / `ssh://` prefix rules as `POST /api/containers/run` on the server).
-
-## Errors shown to users (frontend and API)
-
-- **Surface client-facing messages**, not raw implementation details. Do not let low-level or library errors reach the UI unchanged when a clearer explanation is possible.
-- **Frontend**: On failure, show a short, actionable string (e.g. from API `detail` or a mapped message). Avoid re-throwing or logging-only flows that leave the user with a generic “Something went wrong” or a stack trace in production UI.
-- **Backend**: Prefer structured HTTP errors (`detail`, optional fields) from domain exceptions; avoid leaking stack traces or internal identifiers in normal error responses. Map unexpected failures to a safe generic message when appropriate.
+- Surface client-facing messages, not raw implementation details or stack traces.
+- Backend: structured HTTP errors (`detail`) from domain exceptions. Map unexpected failures to a safe generic message.
+- Frontend: short actionable string from API `detail` or mapped message.
