@@ -141,7 +141,52 @@ When you `POST /api/containers/run` with a private `github.com` URL, the server 
 
 ## Traefik (optional)
 
-Use a **single JSON file** for dynamic config (not a directory). Point `VELA_TRAEFIK_DYNAMIC_FILE` at it and set `VELA_TRAFFIC_ROUTER=traefik_file`. Put Traefik and app containers on the same Docker network (`VELA_DOCKER_NETWORK`). Set **`VELA_TRAEFIK_RELOAD_CONTAINER`** to your Traefik container name so the API can signal Traefik to reload after each change (file watches often fail on Docker Desktop bind mounts; Traefik reloads dynamic file config on SIGHUP). See [Traefik docs](https://doc.traefik.io/traefik/) for TLS and entrypoints.
+By default the API uses `VELA_TRAFFIC_ROUTER=noop` (no public hostnames). To turn Traefik on for public routes:
+
+1. **Shared Docker network** (Traefik + workload containers must share it):
+
+```powershell
+docker network create vela-net
+```
+
+2. **Dynamic config file** — a **single JSON file** (not a directory). Create an empty object once, then let Vela overwrite it:
+
+```powershell
+New-Item -ItemType Directory -Force resources | Out-Null
+Set-Content -Path resources\traefik-http.json -Value '{}' -NoNewline
+```
+
+3. **Run Traefik** (v3). Mount the **parent directory** of the JSON file (more reliable than a single-file bind on Docker Desktop). Entry points must be named `web` / `websecure` (what Vela writes when TLS is on). Use an **absolute** host path — if you run this from `backend/`, `${PWD}\resources` points at the wrong folder and Traefik will keep serving `404`:
+
+```powershell
+# From the repo root (or substitute your absolute path to resources\).
+docker run -d --name traefik --restart unless-stopped `
+  --network vela-net `
+  -p 80:80 -p 443:443 -p 8080:8080 `
+  -v "F:\path\to\Vela\resources:/etc/traefik/dynamic" `
+  traefik:v3.2 `
+  --providers.file.filename=/etc/traefik/dynamic/traefik-http.json `
+  --providers.file.watch=true `
+  --entrypoints.web.address=:80 `
+  --entrypoints.websecure.address=:443 `
+  --api.dashboard=true `
+  --api.insecure=true
+```
+
+Dashboard (dev only): **http://127.0.0.1:8080**. Confirm routes loaded: `http://127.0.0.1:8080/api/http/routers` should list `*@file` entries after a deploy.
+
+4. **Enable in `backend/.env`** — `VELA_TRAEFIK_DYNAMIC_FILE` must be the **same** file Traefik mounts (absolute path), then restart the API:
+
+```env
+VELA_TRAFFIC_ROUTER=traefik_file
+VELA_TRAEFIK_DYNAMIC_FILE=F:\path\to\Vela\resources\traefik-http.json
+VELA_TRAEFIK_RELOAD_CONTAINER=traefik
+VELA_DOCKER_NETWORK=vela-net
+VELA_PUBLIC_ROUTE_DOMAIN=apps.example.com
+VELA_PUBLIC_URL_SCHEME=https
+```
+
+`VELA_TRAEFIK_RELOAD_CONTAINER` should match the Traefik container name (`docker ps`). After each route write, Vela sends **SIGHUP** so Traefik reloads the file when fsnotify misses changes (common on Docker Desktop). Deploys with `public_route` then get a hostname under `VELA_PUBLIC_ROUTE_DOMAIN`. See [Traefik docs](https://doc.traefik.io/traefik/) for production TLS.
 
 ## Frontend
 

@@ -988,8 +988,7 @@ def test_traffic_routes_crud(make_authed_client) -> None:
         "route_id": "r1",
         "host": "app.test",
         "path_prefix": "/",
-        "backend_host": "svc",
-        "backend_port": 8080,
+        "backend_servers": [{"host": "svc", "port": 8080}],
         "tls_enabled": False,
         "entrypoints": ["web"],
     }

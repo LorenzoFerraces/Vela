@@ -15,6 +15,7 @@ backend/.env
 
 # Playwright E2E SQLite (see frontend/playwright.config.ts)
 backend/e2e-playwright.db
+backend/data/
 
 # Frontend
 node_modules/

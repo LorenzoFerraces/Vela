@@ -70,13 +70,19 @@ test.describe('Dashboard page', () => {
     await authenticatedPage.goto('/dashboard')
     const workloadsSection = authenticatedPage.locator('.workloads-table-wrap-outer')
     await expect(
-      workloadsSection.getByRole('cell', { name: deployBody.container.name }),
+      workloadsSection.getByRole('cell', {
+        name: deployBody.container.name,
+        exact: true,
+      }),
     ).toBeVisible()
 
     await authenticatedPage.getByRole('button', { name: 'Refresh' }).scrollIntoViewIfNeeded()
     await authenticatedPage.getByRole('button', { name: 'Refresh' }).click()
     await expect(
-      workloadsSection.getByRole('cell', { name: deployBody.container.name }),
+      workloadsSection.getByRole('cell', {
+        name: deployBody.container.name,
+        exact: true,
+      }),
     ).toBeVisible()
   })
 

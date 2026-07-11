@@ -79,7 +79,9 @@ def test_run_creates_deployment_record(
     assert fake_orchestrator.last_deploy_config.labels.get(VELA_OWNER_LABEL)
 
 
-def test_deployment_diff(api_client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_deployment_diff(
+    api_client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
     monkeypatch.setenv("VELA_PUBLIC_ROUTE_DOMAIN", "apps.example.com")
     monkeypatch.setenv("VELA_PUBLIC_URL_SCHEME", "https")
 

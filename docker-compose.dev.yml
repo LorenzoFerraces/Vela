@@ -11,7 +11,7 @@ services:
     ports:
       - "15432:5432"
     volumes:
-      - vela_postgres_data:/var/lib/postgresql/data
+      - vela_postgres_dev_data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U vela -d Vela"]
       interval: 5s
