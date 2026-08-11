@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
+import threading
 import uuid
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from datetime import datetime, timezone
-from typing import Callable
 
 from app.core.containers.docker_orchestrator import (
     VELA_MANAGED_LABEL,
@@ -279,6 +280,93 @@ class FakeContainerOrchestrator(ContainerOrchestrator):
         _ = tail, follow
         self._require_container(container_id)
         yield b"log line\n"
+
+    def stream_exec(
+        self,
+        container_id: str,
+        cols: int = 80,
+        rows: int = 24,
+    ) -> tuple[AsyncIterator[bytes], Callable[[bytes], None], Callable[[], None], str]:
+        """Echo shell fake exec session."""
+        _ = cols, rows
+        self._require_container(container_id)
+        exec_id = f"fake-{container_id[:12]}"
+        stdin_queue: asyncio.Queue[bytes | None] = asyncio.Queue()
+        stdout_queue: asyncio.Queue[bytes | None] = asyncio.Queue()
+        loop = asyncio.get_running_loop()
+        closed = threading.Event()
+
+        def _shell_worker() -> None:
+            try:
+                asyncio.run_coroutine_threadsafe(
+                    stdout_queue.put(f"root@{container_id[:12]}:~# ".encode()),
+                    loop,
+                ).result(timeout=10)
+                buf = ""
+                while not closed.is_set():
+                    try:
+                        data_event = asyncio.run_coroutine_threadsafe(
+                            asyncio.wait_for(stdin_queue.get(), timeout=0.1),
+                            loop,
+                        ).result(timeout=0.2)
+                        if data_event is None:
+                            break
+                        buf += data_event.decode("utf-8", errors="replace")
+                        while "\n" in buf:
+                            line, buf = buf.split("\n", 1)
+                            cmd = line.strip()
+                            if cmd == "exit":
+                                asyncio.run_coroutine_threadsafe(
+                                    stdout_queue.put(None), loop
+                                ).result(timeout=10)
+                                return
+                            if cmd:
+                                asyncio.run_coroutine_threadsafe(
+                                    stdout_queue.put(
+                                        f"{line}\nroot@{container_id[:12]}:~# ".encode()
+                                    ),
+                                    loop,
+                                ).result(timeout=10)
+                            else:
+                                asyncio.run_coroutine_threadsafe(
+                                    stdout_queue.put(
+                                        f"root@{container_id[:12]}:~# ".encode()
+                                    ),
+                                    loop,
+                                ).result(timeout=10)
+                    except Exception:
+                        break
+            except Exception:
+                pass
+            finally:
+                asyncio.run_coroutine_threadsafe(stdout_queue.put(None), loop).result(timeout=10)
+
+        threading.Thread(target=_shell_worker, daemon=True, name="vela-fake-exec").start()
+
+        def _write(data: bytes) -> None:
+            if not closed.is_set():
+                asyncio.run_coroutine_threadsafe(stdin_queue.put(data), loop)
+
+        def _close() -> None:
+            if not closed.is_set():
+                closed.set()
+                asyncio.run_coroutine_threadsafe(stdin_queue.put(None), loop)
+
+        async def _stdout_iterator() -> AsyncIterator[bytes]:
+            try:
+                while True:
+                    item = await stdout_queue.get()
+                    if item is None:
+                        break
+                    yield item
+            except asyncio.CancelledError:
+                _close()
+                raise
+
+        return _stdout_iterator(), _write, _close, exec_id
+
+    def resize_exec(self, container_id: str, exec_id: str, cols: int, rows: int) -> None:
+        pass
 
     async def get_stats(self, container_id: str) -> ContainerStats:
         """

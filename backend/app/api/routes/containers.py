@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import json
 import logging
 import uuid
 from typing import Annotated
@@ -60,6 +62,7 @@ from app.core.containers.docker_orchestrator import (
     with_deploy_source_labels,
 )
 from app.core.containers.orchestrator import ContainerOrchestrator
+from app.core.audit.service import emit_audit_log
 from app.core.containers.volume_uploads import (
     resolve_volume_upload_path,
     save_volume_upload,
@@ -122,6 +125,8 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 _MAX_LOG_TAIL_LINES = 2000
+_MAX_EXEC_CONCURRENT = 20
+_exec_semaphore = asyncio.Semaphore(_MAX_EXEC_CONCURRENT)
 
 
 def _with_owner_label(config: DeployConfig, owner_id: str) -> DeployConfig:
@@ -599,6 +604,14 @@ async def deploy(
     info, route_wired, public_url = await _deploy_and_maybe_wire_route(
         orchestrator, traffic_router, config
     )
+    await emit_audit_log(
+        session,
+        user_id=current_user.id,
+        action="container.deploy",
+        target_type="container",
+        target_id=info.id,
+        details={"image": config.image, "container_name": info.name},
+    )
     return ContainerDeployResponse(
         container=info,
         route_wired=route_wired,
@@ -723,6 +736,17 @@ async def run_from_user_source(
         saved_policy, scaling_policy_warning = await _persist_scaling_policy(
             session, info.name, body
         )
+        await emit_audit_log(
+            session,
+            user_id=current_user.id,
+            action="container.deploy",
+            target_type="container",
+            target_id=info.id,
+            details={
+                "source_kind": "image",
+                "source_ref": image_ref,
+            },
+        )
         return RunFromSourceResponse(
             container=info,
             kind="image",
@@ -785,6 +809,17 @@ async def run_from_user_source(
         )
         saved_policy, scaling_policy_warning = await _persist_scaling_policy(
             session, info.name, body
+        )
+        await emit_audit_log(
+            session,
+            user_id=current_user.id,
+            action="container.deploy",
+            target_type="container",
+            target_id=info.id,
+            details={
+                "source_kind": "dockerfile_template",
+                "source_ref": template.name,
+            },
         )
         return RunFromSourceResponse(
             container=info,
@@ -854,6 +889,17 @@ async def run_from_user_source(
     saved_policy, scaling_policy_warning = await _persist_scaling_policy(
         session, info.name, body
     )
+    await emit_audit_log(
+        session,
+        user_id=current_user.id,
+        action="container.deploy",
+        target_type="container",
+        target_id=info.id,
+        details={
+            "source_kind": "git",
+            "source_ref": git_url,
+        },
+    )
     return RunFromSourceResponse(
         container=info,
         kind="git",
@@ -890,6 +936,13 @@ async def start_container(
         session, orchestrator, current_user, container_id, action="write"
     )
     updated = await orchestrator.start(container_id)
+    await emit_audit_log(
+        session,
+        user_id=current_user.id,
+        action="container.start",
+        target_type="container",
+        target_id=container_id,
+    )
     return updated.model_copy(update={"access_role": access_info.access_role})
 
 
@@ -906,6 +959,14 @@ async def stop_container(
         session, orchestrator, current_user, container_id, action="write"
     )
     updated = await orchestrator.stop(container_id, timeout=timeout)
+    await emit_audit_log(
+        session,
+        user_id=current_user.id,
+        action="container.stop",
+        target_type="container",
+        target_id=container_id,
+        details={"timeout": timeout},
+    )
     return updated.model_copy(update={"access_role": access_info.access_role})
 
 
@@ -922,6 +983,14 @@ async def restart_container(
         session, orchestrator, current_user, container_id, action="write"
     )
     updated = await orchestrator.restart(container_id, timeout=timeout)
+    await emit_audit_log(
+        session,
+        user_id=current_user.id,
+        action="container.restart",
+        target_type="container",
+        target_id=container_id,
+        details={"timeout": timeout},
+    )
     return updated.model_copy(update={"access_role": access_info.access_role})
 
 
@@ -943,6 +1012,14 @@ async def remove_container(
         container_name=info.name,
     )
     await orchestrator.remove(container_id, force=force)
+    await emit_audit_log(
+        session,
+        user_id=current_user.id,
+        action="container.remove",
+        target_type="container",
+        target_id=container_id,
+        details={"force": force},
+    )
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
@@ -1014,6 +1091,88 @@ async def container_logs_stream(
             await websocket.close(code=1011)
         except Exception:
             pass
+
+
+@router.websocket("/{container_id}/exec/ws")
+async def container_exec_ws(
+    websocket: WebSocket,
+    container_id: str,
+    orchestrator: Annotated[ContainerOrchestrator, Depends(get_orchestrator)],
+    session: Annotated[AsyncSession, Depends(get_db)],
+) -> None:
+    """Bidirectional exec terminal over WebSocket. Authenticate with ``access_token`` query param."""
+    await websocket.accept()
+    token = websocket.query_params.get("access_token")
+
+    try:
+        if not token:
+            raise NotAuthenticatedError()
+        claims = decode_access_token(token)
+        user = await get_user_by_id(session, claims.user_id)
+        if user is None:
+            raise NotAuthenticatedError()
+    except NotAuthenticatedError:
+        await websocket.close(code=1008)
+        return
+
+    try:
+        await require_container_access(
+            session, orchestrator, user, container_id, action="write"
+        )
+    except (ContainerNotFoundError, ProjectAccessDeniedError):
+        await websocket.close(code=1008)
+        return
+
+    async with _exec_semaphore:
+        try:
+            cols, rows = 80, 24
+            try:
+                init_raw = await asyncio.wait_for(websocket.receive_text(), timeout=5.0)
+                init_msg = json.loads(init_raw)
+                cols = int(init_msg.get("cols", 80))
+                rows = int(init_msg.get("rows", 24))
+            except (asyncio.TimeoutError, json.JSONDecodeError, ValueError, KeyError):
+                pass
+
+            stdout_iter, stdin_write, exec_close, exec_id = orchestrator.stream_exec(
+                container_id, cols=cols, rows=rows
+            )
+
+            async def _forward_to_client() -> None:
+                try:
+                    async for chunk in stdout_iter:
+                        await websocket.send_bytes(chunk)
+                except WebSocketDisconnect:
+                    pass
+                except Exception:
+                    logger.warning("exec forward error for %s", container_id)
+
+            async def _forward_to_container() -> None:
+                try:
+                    while True:
+                        msg = await websocket.receive_text()
+                        try:
+                            parsed = json.loads(msg)
+                            if "resize" in parsed:
+                                orchestrator.resize_exec(
+                                    container_id, exec_id,
+                                    parsed["resize"]["cols"], parsed["resize"]["rows"],
+                                )
+                                continue
+                        except (json.JSONDecodeError, KeyError, TypeError):
+                            pass
+                        stdin_write(msg.encode("utf-8"))
+                except WebSocketDisconnect:
+                    pass
+                except Exception:
+                    logger.warning("exec input error for %s", container_id)
+
+            await asyncio.gather(_forward_to_client(), _forward_to_container())
+            exec_close()
+        except WebSocketDisconnect:
+            pass
+        except Exception:
+            logger.error("exec session error for %s", container_id)
 
 
 @router.get("/{container_id}/stats", response_model=ContainerStats)

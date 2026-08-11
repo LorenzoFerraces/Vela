@@ -231,9 +231,12 @@ def _build_app_with_overrides(
 ) -> Any:
     app = create_app()
 
+    # Use a single persistent session so data survives across requests
+    # (needed because :memory: SQLite loses data when connections close)
+    persistent_session = db_session_factory()
+
     async def _get_db_override() -> AsyncIterator[AsyncSession]:
-        async with db_session_factory() as session:
-            yield session
+        yield persistent_session
 
     app.dependency_overrides[get_db] = _get_db_override
     if orchestrator is not None:

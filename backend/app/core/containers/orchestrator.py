@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import uuid
 from abc import ABC, abstractmethod
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
+from dataclasses import dataclass
 
 from app.core.enums import ContainerStatus
 from app.core.models import ContainerInfo, ContainerStats, DeployConfig, HealthResult
@@ -80,6 +81,25 @@ class ContainerOrchestrator(ABC):
         follow: bool = True,
     ) -> AsyncIterator[bytes]:
         """Yield log chunks from the runtime (blocking iterator wrapped for async consumption)."""
+
+    @abstractmethod
+    def stream_exec(
+        self,
+        container_id: str,
+        cols: int = 80,
+        rows: int = 24,
+    ) -> tuple[AsyncIterator[bytes], Callable[[bytes], None], Callable[[], None], str]:
+        """Open a PTY exec session inside a container.
+
+        Returns:
+            A tuple of (stdout_async_iterator, stdin_write_func, close_func, exec_id).
+            Consume the iterator for output, call stdin_write to send input,
+            call close to tear down the session. exec_id is used for resize.
+        """
+
+    @abstractmethod
+    def resize_exec(self, container_id: str, exec_id: str, cols: int, rows: int) -> None:
+        """Resize an active exec session."""
 
     # ------------------------------------------------------------------
     # Telemetry

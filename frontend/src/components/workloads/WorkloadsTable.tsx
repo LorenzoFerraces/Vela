@@ -6,6 +6,7 @@ import type { WorkloadGroup } from '../../pages/containers/workloadGrouping'
 import { workloadInstances } from '../../pages/containers/workloadGrouping'
 import { ContainerLogPanel } from './ContainerLogPanel'
 import { ContainerStatsPanel } from './ContainerStatsPanel'
+import { ContainerTerminal } from './ContainerTerminal'
 import { ReplicaInstancesPanel } from './ReplicaInstancesPanel'
 
 const VIEWER_ACTION_DISABLED_TITLE =
@@ -86,6 +87,7 @@ export function WorkloadsTable({
   >({})
   const [copiedRowId, setCopiedRowId] = useState<string | null>(null)
   const [copyFailedRowId, setCopyFailedRowId] = useState<string | null>(null)
+  const [terminalContainerId, setTerminalContainerId] = useState<string | null>(null)
 
   const displayGroups = useMemo(
     () =>
@@ -288,6 +290,24 @@ export function WorkloadsTable({
                         >
                           {isLogExpanded ? 'Hide' : 'Show'}
                         </button>
+                        {containerRow.status === 'running' ? (
+                          <button
+                            type="button"
+                            className="btn btn--ghost btn--sm"
+                            style={{ marginLeft: '0.35rem' }}
+                            title="Open terminal"
+                            aria-label="Open terminal"
+                            onClick={() =>
+                              setTerminalContainerId(
+                                terminalContainerId === containerRow.id
+                                  ? null
+                                  : containerRow.id,
+                              )
+                            }
+                          >
+                            {'>'}
+                          </button>
+                        ) : null}
                       </td>
                       <td className="containers-table__actions">
                         <button
@@ -403,6 +423,21 @@ export function WorkloadsTable({
                               containerId={containerRow.id}
                               isActive={isLogExpanded}
                               workloadStatus={containerRow.status}
+                            />
+                          </div>
+                        </td>
+                      </tr>
+                    ) : null}
+                    {terminalContainerId === containerRow.id ? (
+                      <tr className="workloads-table__expand-row">
+                        <td colSpan={columnCount}>
+                          <div
+                            id={`workloads-terminal-${containerRow.id}`}
+                            className="workloads-table__expand-inner"
+                          >
+                            <ContainerTerminal
+                              containerId={containerRow.id}
+                              onClose={() => setTerminalContainerId(null)}
                             />
                           </div>
                         </td>

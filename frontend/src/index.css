@@ -2391,3 +2391,35 @@ body {
   padding: 0.35rem 0.5rem;
   line-height: 0;
 }
+
+/* --- Container terminal --- */
+
+.workloads-terminal {
+  background: #1e1e2e;
+  border-radius: 6px;
+  overflow: hidden;
+  margin-top: 8px;
+}
+
+.workloads-terminal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 12px;
+  background: #181825;
+  color: #cdd6f4;
+  font-size: 13px;
+}
+
+.workloads-terminal-body {
+  height: 320px;
+  padding: 4px;
+}
+
+.workloads-terminal .xterm {
+  height: 100%;
+}
+
+.workloads-terminal .xterm-viewport {
+  overflow-y: auto;
+}
