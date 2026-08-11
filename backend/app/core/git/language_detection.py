@@ -93,6 +93,24 @@ _MARKER_RULES: list[tuple[tuple[int, int], SupportedLanguage, _MarkerMatcher]] =
 ]
 
 
+def _read_text(path: Path) -> str | None:
+    try:
+        return path.read_text(encoding="utf-8")
+    except OSError:
+        return None
+
+
+def _detect_kotlin_framework(directory: Path, marker_filename: str) -> str | None:
+    if (directory / "src" / "main" / "kotlin").is_dir():
+        return "kotlin"
+    if not marker_filename.startswith("build.gradle"):
+        return None
+    content = _read_text(directory / marker_filename)
+    if content is not None and "kotlin" in content.lower():
+        return "kotlin"
+    return None
+
+
 def _read_json(path: Path) -> dict | None:
     try:
         raw = path.read_text(encoding="utf-8")
@@ -154,7 +172,10 @@ def _find_marker_dir(
                 rank, language, filename = found
                 candidates.append((rank, directory, language, filename))
         if candidates:
-            candidates.sort(key=lambda candidate: (candidate[0], candidate[1].as_posix()))
+            # Only the primary tier (candidate[0][0]) matters across directories: the
+            # Clojure-over-Gradle sub-rank is a same-directory rule already resolved by
+            # ``_directory_marker``, so cross-directory ties fall back to path only.
+            candidates.sort(key=lambda candidate: (candidate[0][0], candidate[1].as_posix()))
             _, directory, language, filename = candidates[0]
             return directory, language, filename
     return None
@@ -180,11 +201,17 @@ def analyze_project(project_root: Path) -> ProjectInfo:
         language = SupportedLanguage.UNKNOWN
         dependency_file = None
         build_subdir = None
+        framework = None
         effective_root = root
     else:
         marker_dir, language, filename = marker
         if language is SupportedLanguage.JAVASCRIPT:
             language = _resolve_js_language(marker_dir)
+        framework = (
+            _detect_kotlin_framework(marker_dir, filename)
+            if language is SupportedLanguage.JAVA
+            else None
+        )
         relative_dir = marker_dir.relative_to(root)
         build_subdir = None if relative_dir == Path() else relative_dir.as_posix()
         dependency_file = (
@@ -196,6 +223,7 @@ def analyze_project(project_root: Path) -> ProjectInfo:
 
     return ProjectInfo(
         language=language,
+        framework=framework,
         dependency_file=dependency_file,
         has_dockerfile=has_dockerfile,
         dockerfile_path=dockerfile_path,

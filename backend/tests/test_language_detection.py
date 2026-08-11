@@ -93,7 +93,9 @@ def test_shallow_nested_node() -> None:
     assert info.dependency_file == "backend/package.json"
 
 
-def test_ignores_node_modules() -> None:
+def test_ignores_vendor_dir() -> None:
+    """``vendor/package.json`` sits in an ignored dir; unlike ``node_modules/`` it isn't
+    gitignored at the repo root, so this fixture stays trackable on a fresh clone."""
     info = analyze_project(FIXTURES / "nested_ignored")
     assert info.language is SupportedLanguage.UNKNOWN
     assert info.dependency_file is None
@@ -116,6 +118,21 @@ def test_priority_clojure_over_gradle_in_same_dir() -> None:
     info = analyze_project(FIXTURES / "jvm_clojure_priority")
     assert info.language is SupportedLanguage.CLOJURE
     assert info.dependency_file == "deps.edn"
+
+
+def test_cross_directory_java_vs_clojure_tie_breaks_by_path_not_language() -> None:
+    """Clojure only outranks Gradle/Maven *within the same directory*. Across different
+    directories at the same depth, both are the JVM/Clojure tier and ties fall back to
+    path order — so the alphabetically-first ``alpha_java`` wins here, not Clojure."""
+    info = analyze_project(FIXTURES / "cross_dir_tie")
+    assert info.language is SupportedLanguage.JAVA
+    assert info.dependency_file == "alpha_java/build.gradle"
+
+
+def test_gradle_kotlin_plugin_sets_kotlin_framework() -> None:
+    info = analyze_project(FIXTURES / "gradle_kotlin")
+    assert info.language is SupportedLanguage.JAVA
+    assert info.framework == "kotlin"
 
 
 def test_analyze_project_raises_for_missing_path(tmp_path: Path) -> None:
