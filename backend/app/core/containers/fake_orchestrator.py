@@ -53,6 +53,11 @@ class FakeContainerOrchestrator(ContainerOrchestrator):
         self.verify_calls: list[str] = []
         self._verify_handlers: dict[str, Callable[[], None]] = {}
         self._networks: set[str] = set()
+        self._deploy_fail_images: set[str] = set()
+
+    def fail_deploy_for_image(self, image_ref: str) -> None:
+        """Cause future deploy() calls for this image to raise RuntimeError."""
+        self._deploy_fail_images.add(image_ref.strip())
 
     def register_image(self, image_ref: str) -> None:
         """
@@ -99,6 +104,9 @@ class FakeContainerOrchestrator(ContainerOrchestrator):
             ContainerInfo: A newly created container record in `RUNNING` state with a generated `id`, the resolved `name`, merged `labels` (including route-related labels when `config.route_host` is set), computed `access_url`, and the current UTC creation timestamp. The container is stored in the orchestrator's internal container registry.
         """
         self.last_deploy_config = config
+        image_ref = config.image.strip()
+        if image_ref in self._deploy_fail_images:
+            raise RuntimeError(f"Simulated deploy failure for {image_ref}")
         labels = {
             VELA_MANAGED_LABEL: VELA_MANAGED_VALUE,
             **config.labels,

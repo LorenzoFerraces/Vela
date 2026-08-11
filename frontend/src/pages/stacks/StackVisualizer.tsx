@@ -166,9 +166,15 @@ export default function StackVisualizer({
   onDependencyChange?: (serviceIndex: number, dependsOn: string[] | null) => void
 }) {
   const onDependencyChangeRef = useRef(onDependencyChange)
-  onDependencyChangeRef.current = onDependencyChange
   const onNodeClickRef = useRef(onNodeClick)
-  onNodeClickRef.current = onNodeClick
+
+  useEffect(() => {
+    onDependencyChangeRef.current = onDependencyChange
+  }, [onDependencyChange])
+
+  useEffect(() => {
+    onNodeClickRef.current = onNodeClick
+  }, [onNodeClick])
 
   const [nodes, setNodes] = useState<Node[]>(() =>
     buildNodesFromServices(services, highlightedIndex, selectedIndex, !!onNodeClick, []),

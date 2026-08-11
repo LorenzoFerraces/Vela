@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import logging
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy import select as sa_select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.api.deps import (
     get_current_user,
@@ -25,7 +27,8 @@ from app.api.schemas import (
 )
 from app.core.build.default_image_builder import DefaultImageBuilder
 from app.core.containers.orchestrator import ContainerOrchestrator
-from app.core.exceptions import StackNotFoundError
+from app.core.exceptions import ProjectAccessDeniedError, StackNotFoundError
+from app.core.projects.enums import can_write
 from app.core.projects.repository import get_personal_project_id, require_membership
 from app.core.stacks.compose_parser import parse_compose
 from app.core.stacks.deploy import deploy_stack
@@ -39,7 +42,23 @@ from app.core.stacks.repository import (
 from app.core.traffic.traffic_router import TrafficRouter
 from app.db.models import Stack, StackService, User
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter()
+
+
+async def _require_stack_write_access(
+    session: AsyncSession,
+    *,
+    project_id: uuid.UUID,
+    user_id: uuid.UUID,
+    action: str,
+) -> None:
+    membership = await require_membership(session, project_id=project_id, user_id=user_id)
+    if not can_write(membership.role):
+        raise ProjectAccessDeniedError(
+            f"You do not have permission to {action} stacks in this project."
+        )
 
 
 @router.get("/", response_model=list[StackPublic])
@@ -57,14 +76,13 @@ async def create_user_stack(
     current_user: Annotated[User, Depends(get_current_user)],
     session: Annotated[AsyncSession, Depends(get_db)],
 ) -> StackPublic:
-    from app.core.projects.enums import can_write
-
     project_id = body.project_id or await get_personal_project_id(session, current_user)
-    membership = await require_membership(session, project_id=project_id, user_id=current_user.id)
-    if not can_write(membership.role):
-        from app.core.exceptions import ProjectAccessDeniedError
-
-        raise ProjectAccessDeniedError("You do not have permission to create stacks in this project.")
+    await _require_stack_write_access(
+        session,
+        project_id=project_id,
+        user_id=current_user.id,
+        action="create",
+    )
 
     services = [
         StackService(
@@ -94,8 +112,6 @@ async def import_compose(
     current_user: Annotated[User, Depends(get_current_user)],
     session: Annotated[AsyncSession, Depends(get_db)],
 ) -> ComposeImportResponse:
-    from app.core.projects.enums import can_write
-
     services, warnings = parse_compose(body.yaml_content)
     if not services:
         raise HTTPException(
@@ -104,7 +120,12 @@ async def import_compose(
         )
 
     project_id = body.project_id or await get_personal_project_id(session, current_user)
-    membership = await require_membership(session, project_id=project_id, user_id=current_user.id)
+    await _require_stack_write_access(
+        session,
+        project_id=project_id,
+        user_id=current_user.id,
+        action="import",
+    )
 
     stack = await create_stack(session, project_id, body.name, services, [])
     result = ComposeImportResponse(stack=_stack_to_public(stack, []), warnings=warnings)
@@ -159,29 +180,40 @@ async def delete_user_stack(
     current_user: Annotated[User, Depends(get_current_user)],
     session: Annotated[AsyncSession, Depends(get_db)],
     orchestrator: Annotated[ContainerOrchestrator, Depends(get_orchestrator)],
-) -> None:
+) -> Response:
     stack = await get_stack(session, stack_id, current_user.id)
     if stack is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Stack not found.")
 
+    containers = await orchestrator.list()
+    containers_by_name = {container.name: container for container in containers}
     for service in stack.services:
         container_name = f"{stack.name}_{service.service_name}"
+        container = containers_by_name.get(container_name)
+        if container is None:
+            continue
         try:
-            containers = await orchestrator.list()
-            for c in containers:
-                if c.name == container_name:
-                    await orchestrator.stop(c.id, timeout=5)
-                    await orchestrator.remove(c.id, force=True)
+            await orchestrator.stop(container.id, timeout=5)
+            await orchestrator.remove(container.id, force=True)
         except Exception:
-            pass
+            logger.warning(
+                "Failed to stop/remove stack container %s during delete",
+                container_name,
+                exc_info=True,
+            )
 
     try:
         await orchestrator.remove_network(stack.network_name)
     except Exception:
-        pass
+        logger.warning(
+            "Failed to remove stack network %s during delete",
+            stack.network_name,
+            exc_info=True,
+        )
 
     await delete_stack(session, stack_id, current_user.id)
     await session.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.post("/{stack_id}/deploy", response_model=dict[str, object])
@@ -197,14 +229,25 @@ async def deploy_user_stack(
     if stack is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Stack not found.")
 
+    await _require_stack_write_access(
+        session,
+        project_id=stack.project_id,
+        user_id=current_user.id,
+        action="deploy",
+    )
+
     child_stacks = []
     for comp in stack.compositions_parent:
-        result = await session.execute(sa_select(Stack).where(Stack.id == comp.child_stack_id))
+        result = await session.execute(
+            sa_select(Stack)
+            .where(Stack.id == comp.child_stack_id)
+            .options(selectinload(Stack.services))
+        )
         child = result.scalar_one_or_none()
         if child:
             child_stacks.append(child)
 
-    return await deploy_stack(
+    result = await deploy_stack(
         session,
         orchestrator,
         traffic_router,
@@ -213,6 +256,13 @@ async def deploy_user_stack(
         current_user,
         child_stacks,
     )
+    if result.get("error"):
+        detail = str(result["error"])
+        failed_service = result.get("failed_service")
+        if failed_service:
+            detail = f"Deploy failed on service '{failed_service}': {detail}"
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, detail=detail)
+    return result
 
 
 def _stack_to_public(

@@ -31,12 +31,14 @@ function ServiceEditForm({
   service,
   index,
   onUpdate,
+  onPatch,
   onRemove,
   siblingNames,
 }: {
   service: StackServiceCreate
   index: number
   onUpdate: (index: number, field: keyof StackServiceCreate, value: unknown) => void
+  onPatch: (index: number, patch: Partial<StackServiceCreate>) => void
   onRemove: (index: number) => void
   siblingNames: string[]
 }) {
@@ -117,20 +119,24 @@ function ServiceEditForm({
       if (!sel) return
       switch (sel.kind) {
         case 'image':
-          onUpdate(index, 'source_kind', 'image')
-          onUpdate(index, 'source_ref', sel.ref)
+          onPatch(index, { source_kind: 'image', source_ref: sel.ref })
           break
         case 'git':
-          onUpdate(index, 'source_kind', 'git')
-          onUpdate(index, 'source_ref', sel.url)
+          onPatch(index, { source_kind: 'git', source_ref: sel.url })
           break
         case 'dockerfile_template':
-          onUpdate(index, 'source_kind', 'dockerfile_template')
-          onUpdate(index, 'source_ref', sel.templateId)
+          onPatch(index, {
+            source_kind: 'dockerfile_template',
+            source_ref: sel.templateId,
+          })
           break
+        default: {
+          const _exhaustive: never = sel
+          return _exhaustive
+        }
       }
     },
-    [index, onUpdate]
+    [index, onPatch]
   )
 
   const updateEnvRow = (rowIndex: number, patch: Partial<EnvVarRow>) => {
@@ -536,6 +542,15 @@ export default function StackBuilderPage() {
     []
   )
 
+  const patchService = useCallback(
+    (index: number, patch: Partial<StackServiceCreate>) => {
+      setServices((prev) =>
+        prev.map((s, i) => (i === index ? { ...s, ...patch } : s))
+      )
+    },
+    []
+  )
+
   const removeService = useCallback(
     (index: number) => {
       setServices((prev) => prev.filter((_, i) => i !== index))
@@ -569,6 +584,18 @@ export default function StackBuilderPage() {
   async function handleSave() {
     if (services.length === 0) {
       setBanner({ tone: 'err', text: 'Stack must have at least one service.' })
+      return
+    }
+    if (
+      services.some(
+        (service) =>
+          !service.service_name.trim() || !service.source_ref.trim(),
+      )
+    ) {
+      setBanner({
+        tone: 'err',
+        text: 'Each service needs a name and deploy source.',
+      })
       return
     }
     try {
@@ -679,6 +706,7 @@ export default function StackBuilderPage() {
                     service={selectedService}
                     index={selectedIndex!}
                     onUpdate={updateService}
+                    onPatch={patchService}
                     onRemove={removeService}
                     siblingNames={services
                       .filter((_, i) => i !== selectedIndex)

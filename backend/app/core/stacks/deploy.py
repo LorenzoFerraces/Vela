@@ -124,7 +124,15 @@ async def deploy_stack(
         except Exception:
             pass
 
-        raise exc
+        failed_service = None
+        if len(deployed_containers) < len(services):
+            failed_service = services[len(deployed_containers)].service_name
+
+        return {
+            "error": str(exc),
+            "failed_service": failed_service,
+            "containers": [],
+        }
 
 
 async def _resolve_service_image(
