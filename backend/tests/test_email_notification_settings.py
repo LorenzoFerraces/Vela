@@ -41,5 +41,5 @@ def test_monitoring_status(api_client: TestClient) -> None:
     assert response.status_code == 200
     body = response.json()
     assert body["enabled"] is True
-    assert body["interval_seconds"] == 15
+    assert body["interval_seconds"] == 60
     assert body["total_containers_tracked"] >= 0

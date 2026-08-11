@@ -9,7 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.exceptions import GitHubAccountAlreadyLinkedError
+from app.core.exceptions import ClerkAccountAlreadyLinkedError, GitHubAccountAlreadyLinkedError
 from app.core.oauth.github import GitHubProfile
 from app.core.security.secrets import decrypt_secret, encrypt_secret
 from app.db.models import UserOAuthIdentity
@@ -146,6 +146,10 @@ async def upsert_clerk_identity(
     external_id: str,
 ) -> UserOAuthIdentity:
     """Insert or update the user's Clerk identity. Commits before returning."""
+    owner = await get_clerk_identity_by_subject(session, external_id)
+    if owner is not None and owner.user_id != user_id:
+        raise ClerkAccountAlreadyLinkedError()
+
     now = datetime.now(timezone.utc)
     identity = await get_clerk_identity(session, user_id)
 

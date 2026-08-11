@@ -20,9 +20,11 @@ from app.api.schemas import (
 from app.api.user_view import user_public_from_snapshot
 from app.core.auth.service import authenticate, register_user
 from app.core.auth.tokens import create_access_token
+from app.core.exceptions import ClerkAccountAlreadyLinkedError, IntegrationConfigurationError
 from app.core.oauth.clerk import clerk_available, verify_clerk_token
 from app.core.oauth.identity import upsert_clerk_identity
 from app.core.profile.service import user_to_snapshot
+from app.core.projects.bootstrap import ensure_personal_workspace
 from app.core.storage.object_storage import ObjectStorage
 from app.db.models import User
 
@@ -79,7 +81,11 @@ async def clerk_exchange(
     object_storage: Annotated[ObjectStorage, Depends(get_object_storage)],
 ) -> TokenResponse:
     """Exchange a Clerk frontend JWT for a Vela access token."""
-    from app.core.projects.bootstrap import ensure_personal_workspace
+    enabled, _ = clerk_available()
+    if not enabled:
+        raise IntegrationConfigurationError(
+            "Clerk authentication is not configured."
+        )
 
     claims = await verify_clerk_token(body.clerk_token)
 

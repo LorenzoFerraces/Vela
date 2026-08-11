@@ -36,9 +36,9 @@ def _publishable_key() -> str:
     return pk
 
 
-def clerk_available() -> tuple[bool, str]:
+def clerk_available() -> tuple[bool, str | None]:
     pk = os.environ.get("VELA_CLERK_PUBLISHABLE_KEY", "").strip()
-    return (bool(pk), pk)
+    return (bool(pk), pk if pk else None)
 
 
 def _jwks_url() -> str:
@@ -61,35 +61,23 @@ async def _get_jwks() -> dict[str, object]:
     return _jwks_cache
 
 
-def _build_algorithms(jwks: dict[str, object]) -> list[str]:
-    keys = jwks.get("keys", [])
-    algs: set[str] = set()
-    for key in keys:
-        alg = key.get("alg")
-        if isinstance(alg, str):
-            algs.add(alg)
-    return list(algs) or ["RS256"]
-
-
 async def verify_clerk_token(token: str) -> ClerkClaims:
     """Verify a Clerk frontend JWT and return extracted claims.
 
     Raises ``ClerkTokenError`` on invalid signature, expiry, or missing claims.
     """
     jwks = await _get_jwks()
-    algs = _build_algorithms(jwks)
 
     try:
         payload = jwt.decode(
             token,
-            options={"verify_audit": False},
-            algorithms=algs,
+            key=jwks,
+            options={"verify_aud": True},
+            algorithms=["RS256"],
             audience=_publishable_key(),
         )
     except InvalidTokenError as exc:
-        raise ClerkTokenError(
-            f"Clerk token verification failed: {exc}"
-        ) from exc
+        raise ClerkTokenError("Clerk authentication failed.") from exc
 
     email = payload.get("email")
     if not isinstance(email, str) or not email:

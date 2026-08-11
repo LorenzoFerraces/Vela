@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
-import { ApiError, formatApiError, getApiBaseUrl } from '../api/client'
+import { ApiError, apiRequest, formatApiError } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 
 function safeNextPath(rawNext: string | null): string {
@@ -22,14 +22,18 @@ export default function LoginPage() {
   const [submitting, setSubmitting] = useState(false)
   const [errorText, setErrorText] = useState<string | null>(null)
   const [clerkKey, setClerkKey] = useState<string | null>(null)
+  const clerkLoaded = useRef(false)
 
   const params = new URLSearchParams(location.search)
   const nextPath = safeNextPath(params.get('next'))
 
   useEffect(() => {
     let cancelled = false
-    fetch(`${getApiBaseUrl()}/auth/config`)
-      .then(r => r.json())
+    apiRequest<{ clerk_enabled: boolean; clerk_publishable_key: string | null }>(
+      '/api/auth/config',
+      { method: 'GET' },
+      { skipAuth: true }
+    )
       .then(data => { if (!cancelled && data.clerk_enabled) setClerkKey(data.clerk_publishable_key) })
       .catch(() => {})
     return () => { cancelled = true }
@@ -40,6 +44,41 @@ export default function LoginPage() {
       navigate(nextPath, { replace: true })
     }
   }, [status, navigate, nextPath])
+
+  useEffect(() => {
+    if (!clerkKey) return
+
+    const loadClerk = () => {
+      if (clerkLoaded.current) return
+      clerkLoaded.current = true
+      return new Promise<void>((resolve, reject) => {
+        const script = document.createElement('script')
+        script.src = `https://${clerkKey}.clerk.accounts.clerkdev.com/npm/@clerk/clerk-js@latest/dist/clerk.browser.js`
+        script.onload = () => resolve()
+        script.onerror = () => reject(new Error('Failed to load Clerk'))
+        document.head.appendChild(script)
+      })
+    }
+
+    let cancelled = false
+    loadClerk().then(() => {
+      if (cancelled) return
+      const clerk = (window as any).Clerk
+      if (clerk && clerk.session) {
+        setSubmitting(true)
+        clerk.session.getToken('vela').then(async (token: string) => {
+          if (cancelled) return
+          await clerkLogin(token)
+          navigate(nextPath, { replace: true })
+        }).catch((error: Error) => {
+          if (!cancelled) setErrorText(formatApiError(error))
+        }).finally(() => {
+          if (!cancelled) setSubmitting(false)
+        })
+      }
+    }).catch(() => {})
+    return () => { cancelled = true }
+  }, [clerkKey, clerkLogin, navigate, nextPath])
 
   async function onSubmit(event: React.FormEvent) {
     event.preventDefault()
@@ -59,40 +98,10 @@ export default function LoginPage() {
     }
   }
 
-  async function onClerkClick() {
-    setErrorText(null)
-    setSubmitting(true)
-    try {
-      const token = await new Promise<string>((resolve, reject) => {
-        const script = document.createElement('script')
-        script.src = `https://${clerkKey}.clerk.accounts.clerkdev.com/npm/@clerk/clerk-js@latest/dist/clerk.browser.js`
-        script.onload = () => {
-          const clerk = (window as any).Clerk
-          clerk.redirectToSignIn({ afterSignInUrl: window.location.href })
-          const checkToken = setInterval(() => {
-            const session = clerk.session
-            if (session) {
-              clearInterval(checkToken)
-              session.getToken('vela').then(resolve, reject)
-            }
-          }, 500)
-          setTimeout(() => {
-            clearInterval(checkToken)
-            reject(new Error('Clerk sign-in timed out'))
-          }, 120000)
-        }
-        script.onerror = () => reject(new Error('Failed to load Clerk'))
-        document.head.appendChild(script)
-      })
-      await clerkLogin(token)
-      navigate(nextPath, { replace: true })
-    } catch (error) {
-      if (error === null) {
-        return
-      }
-      setErrorText(formatApiError(error))
-    } finally {
-      setSubmitting(false)
+  function onClerkClick() {
+    const clerk = (window as any).Clerk
+    if (clerk) {
+      clerk.redirectToSignIn({ afterSignInUrl: window.location.href })
     }
   }
 
@@ -154,7 +163,7 @@ export default function LoginPage() {
               disabled={submitting}
               onClick={onClerkClick}
             >
-              Sign in with email
+              Sign in with Clerk
             </button>
           </>
         ) : null}

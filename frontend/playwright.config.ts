@@ -9,8 +9,8 @@ const repoRoot = path.join(__dirname, '..')
 /** FastAPI lives under `backend/app`; uvicorn must run with this as cwd so `import app` resolves without an editable install. */
 const backendRoot = path.join(repoRoot, 'backend')
 
-const e2eApiPort = process.env.PW_API_PORT ?? '8001'
-const e2eVitePort = process.env.PW_VITE_PORT ?? '5174'
+const e2eApiPort = process.env.PW_API_PORT ?? '8000'
+const e2eVitePort = process.env.PW_VITE_PORT ?? '5173'
 const baseURL = `http://127.0.0.1:${e2eVitePort}`
 const apiHealthURL = `http://127.0.0.1:${e2eApiPort}/api/health`
 
@@ -82,7 +82,7 @@ export default defineConfig({
       command: apiServerCommand,
       cwd: backendRoot,
       url: apiHealthURL,
-      reuseExistingServer: false,
+      reuseExistingServer: true,
       timeout: 120_000,
       env: {
         ...process.env,
@@ -92,7 +92,7 @@ export default defineConfig({
     {
       command: `npx vite --host 127.0.0.1 --port ${e2eVitePort}`,
       url: baseURL,
-      reuseExistingServer: false,
+      reuseExistingServer: true,
       timeout: 120_000,
       env: {
         ...process.env,

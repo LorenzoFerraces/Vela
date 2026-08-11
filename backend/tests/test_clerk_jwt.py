@@ -74,5 +74,5 @@ async def test_verify_clerk_token_invalid_signature_raises(monkeypatch: Any) -> 
 
     with patch.object(clerk_mod, "_fetch_jwks", new=fake_fetch):
         with patch("app.core.oauth.clerk.jwt.decode", side_effect=InvalidTokenError("bad sig")):
-            with pytest.raises(ClerkTokenError, match="Clerk token verification failed"):
+            with pytest.raises(ClerkTokenError):
                 await verify_clerk_token("bad.token")

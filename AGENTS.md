@@ -85,3 +85,7 @@ After substantive agent-generated edits on a branch, run the **deslop** Cursor s
 - **Surface client-facing messages**, not raw implementation details. Do not let low-level or library errors reach the UI unchanged when a clearer explanation is possible.
 - **Frontend**: On failure, show a short, actionable string (e.g. from API `detail` or a mapped message). Avoid re-throwing or logging-only flows that leave the user with a generic “Something went wrong” or a stack trace in production UI.
 - **Backend**: Prefer structured HTTP errors (`detail`, optional fields) from domain exceptions; avoid leaking stack traces or internal identifiers in normal error responses. Map unexpected failures to a safe generic message when appropriate.
+
+## Verification
+
+- **Always run both backend and E2E tests after substantive changes** before claiming work is complete. Run `python -m pytest` in `backend/` and the Playwright E2E suite in `frontend/e2e/`. Do not skip verification—tests are the only check that persists after the session ends.

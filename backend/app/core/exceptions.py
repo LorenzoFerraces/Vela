@@ -293,6 +293,19 @@ class GitHubAccountAlreadyLinkedError(IntegrationError):
         super().__init__(message)
 
 
+class ClerkAccountAlreadyLinkedError(IntegrationError):
+    """This Clerk account is already stored for a different Vela user."""
+
+    def __init__(
+        self,
+        message: str = (
+            "This Clerk account is already connected to another Vela user. "
+            "Sign in as that user instead."
+        ),
+    ) -> None:
+        super().__init__(message)
+
+
 # ---------------------------------------------------------------------------
 # Team / project errors
 # ---------------------------------------------------------------------------

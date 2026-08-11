@@ -108,3 +108,31 @@ def test_clerk_exchange_empty_body_returns_422(db_app: Any) -> None:
         )
 
     assert response.status_code == 422
+
+
+def test_clerk_exchange_account_already_linked_returns_409(db_app: Any, monkeypatch: Any) -> None:
+    monkeypatch.setenv("VELA_CLERK_PUBLISHABLE_KEY", "pk_test_sample123")
+
+    def mock_verify_different_email(_token: str) -> ClerkClaims:
+        return ClerkClaims(email="other@example.com", external_id="user_2Xtest")
+
+    from fastapi.testclient import TestClient
+
+    with TestClient(db_app) as client:
+        with _patch_clerk_verify():
+            response = client.post(
+                "/api/auth/clerk/exchange",
+                json={"clerk_token": "fake.clerk.jwt"},
+            )
+            assert response.status_code == 200
+
+        with patch(
+            "app.api.routes.auth.verify_clerk_token",
+            new=AsyncMock(return_value=mock_verify_different_email("fake")),
+        ):
+            response = client.post(
+                "/api/auth/clerk/exchange",
+                json={"clerk_token": "fake.clerk.jwt"},
+            )
+
+        assert response.status_code == 409

@@ -13,6 +13,7 @@ from app.core.exceptions import (
     AvatarValidationError,
     BuilderError,
     CloneError,
+    ClerkAccountAlreadyLinkedError,
     ClerkTokenError,
     GitSourceAnalysisError,
     UnsupportedProjectError,
@@ -351,6 +352,15 @@ def register_exception_handlers(app) -> None:
     ) -> JSONResponse:
         return JSONResponse(
             status_code=status.HTTP_400_BAD_REQUEST,
+            content={"detail": str(exc)},
+        )
+
+    @app.exception_handler(ClerkAccountAlreadyLinkedError)
+    async def clerk_linked_handler(
+        _request: Request, exc: ClerkAccountAlreadyLinkedError
+    ) -> JSONResponse:
+        return JSONResponse(
+            status_code=status.HTTP_409_CONFLICT,
             content={"detail": str(exc)},
         )
 
