@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { exportLogs, formatApiError, getLogs } from '../api/client'
 import type { LogEntry } from '../api/client'
 
@@ -20,11 +20,11 @@ export default function LogsPage() {
   const [containerFilter, setContainerFilter] = useState('')
   const [offset, setOffset] = useState(0)
   const [error, setError] = useState<string | null>(null)
-  const [reqSeq, setReqSeq] = useState(0)
+  const fetchRequestRef = useRef(0)
 
   const fetchLogs = useCallback(async () => {
-    const seq = reqSeq + 1
-    setReqSeq(seq)
+    const requestId = fetchRequestRef.current + 1
+    fetchRequestRef.current = requestId
     setLoading(true)
     setError(null)
     try {
@@ -33,16 +33,17 @@ export default function LogsPage() {
       if (levelFilter) params.level = levelFilter
       if (containerFilter) params.container_id = containerFilter
       const res = await getLogs(params as any)
-      if (seq === reqSeq) {
-        setEntries(res.entries)
-        setTotal(res.total)
-      }
+      if (fetchRequestRef.current !== requestId) return
+      setEntries(res.entries)
+      setTotal(res.total)
     } catch (err) {
-      if (seq === reqSeq) setError(formatApiError(err))
+      if (fetchRequestRef.current !== requestId) return
+      setError(formatApiError(err))
     } finally {
-      if (seq === reqSeq) setLoading(false)
+      if (fetchRequestRef.current !== requestId) return
+      setLoading(false)
     }
-  }, [search, levelFilter, containerFilter, offset, reqSeq])
+  }, [search, levelFilter, containerFilter, offset])
 
   useEffect(() => {
     fetchLogs()
