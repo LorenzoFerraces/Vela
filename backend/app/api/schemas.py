@@ -684,3 +684,25 @@ class ContainerMonitoringStatus(BaseModel):
     enabled: bool
     interval_seconds: int
     total_containers_tracked: int
+
+
+# ---------------------------------------------------------------------------
+# Audit log
+# ---------------------------------------------------------------------------
+
+
+class AuditLogEntry(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    user_id: uuid.UUID
+    action: str
+    target_type: str
+    target_id: str
+    details: dict | None = None
+    created_at: datetime
+
+
+class AuditLogListResponse(BaseModel):
+    entries: list[AuditLogEntry]
+    total: int

@@ -50,6 +50,7 @@ async def query_logs(
     if end_time:
         conditions.append(ContainerLog.timestamp <= end_time)
     if q:
+        # ponytail: LIKE search, not pg_trgm — sufficient for log lookup, avoids Postgres-only dependency
         _escaped = q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
         conditions.append(ContainerLog.message.like(f"%{_escaped}%", escape="\\"))
 

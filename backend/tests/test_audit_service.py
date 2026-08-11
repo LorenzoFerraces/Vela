@@ -236,3 +236,25 @@ def test_emit_with_none_details(
         assert entries[0].details is None
 
     asyncio.run(run())
+
+
+def test_emit_persists_without_explicit_commit(
+    db_session_factory: async_sessionmaker[AsyncSession],
+    user_a: uuid.UUID,
+) -> None:
+    """emit_audit_log commits internally; entry must survive a fresh session."""
+    async def run() -> None:
+        async with db_session_factory() as session:
+            await emit_audit_log(
+                session,
+                user_id=user_a,
+                action="container.deploy",
+                target_type="container",
+                target_id="cid-persist",
+            )
+
+        entries = await _query(db_session_factory)
+        assert len(entries) == 1
+        assert entries[0].action == "container.deploy"
+
+    asyncio.run(run())

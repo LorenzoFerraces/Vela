@@ -11,6 +11,7 @@ import TeamsPage from './pages/TeamsPage'
 import BuilderPage from './pages/BuilderPage'
 import ImagesPage from './pages/ImagesPage'
 import LogsPage from './pages/LogsPage'
+import AuditLogPage from './pages/AuditLogPage'
 /**
  * Defines the application's client-side routes and layout.
  *
@@ -78,6 +79,14 @@ export default function App() {
           element={
             <RequireAuth>
               <LogsPage />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/audit"
+          element={
+            <RequireAuth>
+              <AuditLogPage />
             </RequireAuth>
           }
         />

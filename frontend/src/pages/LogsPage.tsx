@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useState } from 'react'
-import { exportLogs, getLogs } from '../api/client'
+import { exportLogs, formatApiError, getLogs } from '../api/client'
 import type { LogEntry } from '../api/client'
 
-const LEVEL_COLORS: Record<string, { bg: string; text: string }> = {
-  info: { bg: '#6b728020', text: '#6b7280' },
-  warn: { bg: '#f59e0b20', text: '#f59e0b' },
-  error: { bg: '#ef444420', text: '#ef4444' },
-  debug: { bg: '#9ca3af20', text: '#9ca3af' },
+const LEVEL_STYLES: Record<string, { bg: string; text: string }> = {
+  info: { bg: 'rgba(107, 114, 128, 0.12)', text: '#9aa5b4' },
+  warn: { bg: 'rgba(232, 184, 74, 0.12)', text: '#e8b84a' },
+  error: { bg: 'rgba(224, 112, 110, 0.12)', text: '#e0706e' },
+  debug: { bg: 'rgba(122, 134, 153, 0.12)', text: '#7a8699' },
 }
 
 const LIMIT = 100
@@ -19,9 +19,11 @@ export default function LogsPage() {
   const [levelFilter, setLevelFilter] = useState('')
   const [containerFilter, setContainerFilter] = useState('')
   const [offset, setOffset] = useState(0)
+  const [error, setError] = useState<string | null>(null)
 
   const fetchLogs = useCallback(async () => {
     setLoading(true)
+    setError(null)
     try {
       const params: Record<string, string | number> = { limit: LIMIT, offset }
       if (search) params.q = search
@@ -30,8 +32,8 @@ export default function LogsPage() {
       const res = await getLogs(params as any)
       setEntries(res.entries)
       setTotal(res.total)
-    } catch (error) {
-      console.error('Failed to fetch logs', error)
+    } catch (err) {
+      setError(formatApiError(err))
     } finally {
       setLoading(false)
     }
@@ -45,22 +47,33 @@ export default function LogsPage() {
     const params: Record<string, string> = {}
     if (levelFilter) params.level = levelFilter
     if (containerFilter) params.container_id = containerFilter
-    await exportLogs(params as any)
+    try {
+      await exportLogs(params as any)
+    } catch (err) {
+      setError(formatApiError(err))
+    }
   }
 
   return (
-    <div className="p-6 max-w-7xl mx-auto">
-      <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl font-semibold">Logs</h1>
+    <section className="logs-page">
+      <div className="logs-page__header">
+        <h1 className="logs-page__title">Logs</h1>
         <button
+          type="button"
           onClick={handleExport}
-          className="px-3 py-1.5 text-sm bg-gray-800 text-white rounded hover:bg-gray-700"
+          className="btn btn--ghost btn--sm"
         >
           Export CSV
         </button>
       </div>
 
-      <div className="flex gap-3 mb-4">
+      {error ? (
+        <div className="containers-banner containers-banner--err" role="alert">
+          <p className="containers-banner__text">{error}</p>
+        </div>
+      ) : null}
+
+      <div className="logs-page__filters">
         <input
           type="text"
           placeholder="Search logs..."
@@ -69,7 +82,6 @@ export default function LogsPage() {
             setSearch(e.target.value)
             setOffset(0)
           }}
-          className="flex-1 px-3 py-2 border rounded bg-white text-sm"
         />
         <select
           value={levelFilter}
@@ -77,7 +89,8 @@ export default function LogsPage() {
             setLevelFilter(e.target.value)
             setOffset(0)
           }}
-          className="px-3 py-2 border rounded bg-white text-sm"
+          className="settings-form__input"
+          aria-label="Filter by level"
         >
           <option value="">All levels</option>
           <option value="info">Info</option>
@@ -93,71 +106,65 @@ export default function LogsPage() {
             setContainerFilter(e.target.value)
             setOffset(0)
           }}
-          className="px-3 py-2 border rounded bg-white text-sm w-48"
+          className="settings-form__input"
+          aria-label="Filter by container"
         />
       </div>
 
       {loading ? (
-        <div className="space-y-2">
-          {Array.from({ length: 5 }).map((_, index) => (
-            <div
-              key={index}
-              className="h-8 bg-gray-200 animate-pulse rounded"
-            />
+        <div className="logs-page__skeleton">
+          {Array.from({ length: 5 }).map((_, i) => (
+            <div key={i} className="logs-page__skeleton-row" />
           ))}
         </div>
       ) : (
         <>
-          <div className="text-sm text-gray-500 mb-2">
+          <div className="logs-page__count">
             Showing {entries.length} of {total} entries
           </div>
-          <div className="border rounded bg-white">
+          <div className="logs-page__table-wrap">
             {entries.map((entry, index) => {
-              const color =
-                LEVEL_COLORS[entry.level] ?? LEVEL_COLORS.info
+              const style = LEVEL_STYLES[entry.level] ?? LEVEL_STYLES.info
               return (
-                <div
-                  key={index}
-                  className="flex items-start gap-3 px-4 py-2 border-b last:border-b-0 font-mono text-sm"
-                >
+                <div key={index} className="logs-page__row">
                   <span
-                    className="w-12 shrink-0 text-xs py-0.5 px-1.5 rounded text-center"
+                    className="logs-page__level"
                     style={{
-                      backgroundColor: color.bg,
-                      color: color.text,
+                      backgroundColor: style.bg,
+                      color: style.text,
                     }}
                   >
                     {entry.level}
                   </span>
-                  <span className="text-gray-400 shrink-0 text-xs w-28">
+                  <span className="logs-page__timestamp">
                     {new Date(entry.timestamp).toLocaleString()}
                   </span>
-                  <span className="text-gray-400 shrink-0 text-xs w-24 truncate">
+                  <span className="logs-page__container">
                     {entry.container_name || entry.container_id}
                   </span>
-                  <span className="flex-1 break-all">{entry.message}</span>
+                  <span className="logs-page__message">{entry.message}</span>
                 </div>
               )
             })}
             {entries.length === 0 && (
-              <div className="px-4 py-8 text-center text-gray-400">
-                No logs found
-              </div>
+              <div className="logs-page__empty">No logs found</div>
             )}
           </div>
-          <div className="flex gap-2 mt-3">
+          <div className="logs-page__pagination">
             {offset > 0 && (
               <button
+                type="button"
                 onClick={() => setOffset(offset - LIMIT)}
-                className="px-3 py-1.5 text-sm border rounded hover:bg-gray-50"
+                className="btn btn--ghost btn--sm"
               >
                 Previous
               </button>
             )}
             {offset + LIMIT < total && (
               <button
+                type="button"
                 onClick={() => setOffset(offset + LIMIT)}
-                className="px-3 py-1.5 text-sm border rounded hover:bg-gray-50"
+                className="btn btn--ghost btn--sm"
               >
                 Next
               </button>
@@ -165,6 +172,6 @@ export default function LogsPage() {
           </div>
         </>
       )}
-    </div>
+    </section>
   )
 }

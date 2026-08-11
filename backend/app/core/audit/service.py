@@ -61,6 +61,7 @@ async def emit_audit_log(
         )
         session.add(entry)
         await session.flush()
+        await session.commit()
     except Exception:
         logger.exception(
             "Failed to emit audit log: action=%s target=%s", action, target_id
