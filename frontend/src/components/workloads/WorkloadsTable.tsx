@@ -297,6 +297,8 @@ export function WorkloadsTable({
                             style={{ marginLeft: '0.35rem' }}
                             title="Open terminal"
                             aria-label="Open terminal"
+                            aria-expanded={terminalContainerId === containerRow.id}
+                            aria-controls={`workloads-terminal-${containerRow.id}`}
                             onClick={() =>
                               setTerminalContainerId(
                                 terminalContainerId === containerRow.id

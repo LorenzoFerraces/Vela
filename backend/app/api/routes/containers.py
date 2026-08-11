@@ -1134,6 +1134,8 @@ async def container_exec_ws(
         await websocket.close(code=1008)
         return
 
+    await session.close()
+
     async with _exec_semaphore:
         exec_close_fn: Callable[[], None] | None = None
         try:
@@ -1143,9 +1145,12 @@ async def container_exec_ws(
                 init_raw = await asyncio.wait_for(websocket.receive_text(), timeout=5.0)
                 try:
                     init_msg = json.loads(init_raw)
-                    cols = int(init_msg.get("cols", 80))
-                    rows = int(init_msg.get("rows", 24))
-                except (json.JSONDecodeError, ValueError, KeyError):
+                    if isinstance(init_msg, dict) and ("cols" in init_msg or "rows" in init_msg):
+                        cols = int(init_msg.get("cols", 80))
+                        rows = int(init_msg.get("rows", 24))
+                    else:
+                        pending_init = init_raw
+                except (json.JSONDecodeError, ValueError, TypeError):
                     pending_init = init_raw
             except asyncio.TimeoutError:
                 pass

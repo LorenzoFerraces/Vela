@@ -20,8 +20,11 @@ export default function LogsPage() {
   const [containerFilter, setContainerFilter] = useState('')
   const [offset, setOffset] = useState(0)
   const [error, setError] = useState<string | null>(null)
+  const [reqSeq, setReqSeq] = useState(0)
 
   const fetchLogs = useCallback(async () => {
+    const seq = reqSeq + 1
+    setReqSeq(seq)
     setLoading(true)
     setError(null)
     try {
@@ -30,14 +33,16 @@ export default function LogsPage() {
       if (levelFilter) params.level = levelFilter
       if (containerFilter) params.container_id = containerFilter
       const res = await getLogs(params as any)
-      setEntries(res.entries)
-      setTotal(res.total)
+      if (seq === reqSeq) {
+        setEntries(res.entries)
+        setTotal(res.total)
+      }
     } catch (err) {
-      setError(formatApiError(err))
+      if (seq === reqSeq) setError(formatApiError(err))
     } finally {
-      setLoading(false)
+      if (seq === reqSeq) setLoading(false)
     }
-  }, [search, levelFilter, containerFilter, offset])
+  }, [search, levelFilter, containerFilter, offset, reqSeq])
 
   useEffect(() => {
     fetchLogs()

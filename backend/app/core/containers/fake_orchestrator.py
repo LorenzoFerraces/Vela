@@ -293,7 +293,7 @@ class FakeContainerOrchestrator(ContainerOrchestrator):
         """Echo shell fake exec session."""
         _ = cols, rows
         self._require_container(container_id)
-        exec_id = f"fake-{container_id[:12]}"
+        exec_id = f"fake-{uuid.uuid4().hex[:12]}"
         stdin_queue: asyncio.Queue[bytes | None] = asyncio.Queue()
         stdout_queue: asyncio.Queue[bytes | None] = asyncio.Queue()
         loop = asyncio.get_running_loop()
@@ -305,7 +305,7 @@ class FakeContainerOrchestrator(ContainerOrchestrator):
                     stdout_queue.put(f"root@{container_id[:12]}:~# ".encode()),
                     loop,
                 ).result(timeout=10)
-                buf = ""
+                command_buffer = ""
                 while not closed.is_set():
                     try:
                         data_event = asyncio.run_coroutine_threadsafe(
@@ -314,16 +314,16 @@ class FakeContainerOrchestrator(ContainerOrchestrator):
                         ).result(timeout=0.2)
                         if data_event is None:
                             break
-                        buf += data_event.decode("utf-8", errors="replace")
-                        while "\n" in buf:
-                            line, buf = buf.split("\n", 1)
-                            cmd = line.strip()
-                            if cmd == "exit":
+                        command_buffer += data_event.decode("utf-8", errors="replace")
+                        while "\n" in command_buffer:
+                            line, command_buffer = command_buffer.split("\n", 1)
+                            command = line.strip()
+                            if command == "exit":
                                 asyncio.run_coroutine_threadsafe(
                                     stdout_queue.put(None), loop
                                 ).result(timeout=10)
                                 return
-                            if cmd:
+                            if command:
                                 asyncio.run_coroutine_threadsafe(
                                     stdout_queue.put(
                                         f"{line}\nroot@{container_id[:12]}:~# ".encode()
@@ -343,7 +343,7 @@ class FakeContainerOrchestrator(ContainerOrchestrator):
                         logger.warning("fake exec stdin error for %s", container_id)
                         break
             except Exception:
-                pass
+                logger.exception("fake exec worker failed for %s", container_id)
             finally:
                 asyncio.run_coroutine_threadsafe(stdout_queue.put(None), loop).result(timeout=10)
 

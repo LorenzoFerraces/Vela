@@ -27,8 +27,11 @@ export default function AuditLogPage() {
   const [targetTypeFilter, setTargetTypeFilter] = useState('')
   const [offset, setOffset] = useState(0)
   const [error, setError] = useState<string | null>(null)
+  const [reqSeq, setReqSeq] = useState(0)
 
   const fetchAuditLog = useCallback(async () => {
+    const seq = reqSeq + 1
+    setReqSeq(seq)
     setLoading(true)
     setError(null)
     try {
@@ -36,14 +39,16 @@ export default function AuditLogPage() {
       if (actionFilter) params.action = actionFilter
       if (targetTypeFilter) params.target_type = targetTypeFilter
       const res = await getAuditLog(params as any)
-      setEntries(res.entries)
-      setTotal(res.total)
+      if (seq === reqSeq) {
+        setEntries(res.entries)
+        setTotal(res.total)
+      }
     } catch (err) {
-      setError(formatApiError(err))
+      if (seq === reqSeq) setError(formatApiError(err))
     } finally {
-      setLoading(false)
+      if (seq === reqSeq) setLoading(false)
     }
-  }, [actionFilter, targetTypeFilter, offset])
+  }, [actionFilter, targetTypeFilter, offset, reqSeq])
 
   useEffect(() => {
     fetchAuditLog()

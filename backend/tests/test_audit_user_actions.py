@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from io import BytesIO
 from fastapi.testclient import TestClient
 
 
@@ -18,12 +19,10 @@ def test_profile_update_creates_audit_entry(api_client: TestClient) -> None:
     )
     assert response.status_code == 200
     logs = _get_audit_logs(api_client)
-    assert any(l["action"] == "user.profile_update" for l in logs)
+    assert any(entry["action"] == "user.profile_update" for entry in logs)
 
 
 def test_avatar_upload_creates_audit_entry(api_client: TestClient) -> None:
-    from io import BytesIO
-
     png = BytesIO(b"\x89PNG\r\n\x1a\n" + b"\x00" * 100)
     response = api_client.post(
         "/api/users/me/avatar",
@@ -31,11 +30,11 @@ def test_avatar_upload_creates_audit_entry(api_client: TestClient) -> None:
     )
     assert response.status_code == 200
     logs = _get_audit_logs(api_client)
-    assert any(l["action"] == "user.avatar_upload" for l in logs)
+    assert any(entry["action"] == "user.avatar_upload" for entry in logs)
 
 
 def test_avatar_removed_creates_audit_entry(api_client: TestClient) -> None:
     response = api_client.delete("/api/users/me/avatar")
     assert response.status_code == 200
     logs = _get_audit_logs(api_client)
-    assert any(l["action"] == "user.avatar_removed" for l in logs)
+    assert any(entry["action"] == "user.avatar_removed" for entry in logs)
