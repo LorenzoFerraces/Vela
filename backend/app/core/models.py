@@ -208,6 +208,14 @@ class ProjectSource(BaseModel):
         return self
 
 
+class BuildOverride(BaseModel):
+    language: SupportedLanguage
+    language_version: str | None = None
+    package_manager: str | None = None
+    build_subdir: str | None = None
+    start_command: list[str] | None = None
+
+
 class ProjectInfo(BaseModel):
     language: SupportedLanguage
     language_version: str | None = None
@@ -216,6 +224,7 @@ class ProjectInfo(BaseModel):
     dependency_file: str | None = None
     has_dockerfile: bool = False
     dockerfile_path: str | None = None
+    build_subdir: str | None = None
 
 
 class BuildResult(BaseModel):

@@ -117,6 +117,18 @@ class UnsupportedProjectError(VelaError):
         super().__init__(message)
 
 
+class NeedsBuildOverrideError(BuilderError):
+    """Detection failed; client should collect a BuildOverride via modal."""
+
+    code = "needs_build_override"
+
+    def __init__(self, message: str) -> None:
+        super().__init__(message)
+
+    def api_response_content(self) -> dict[str, object]:
+        return {"code": self.code, "detail": str(self)}
+
+
 class CloneError(BuilderError):
     def __init__(self, git_url: str, message: str) -> None:
         self.git_url = git_url
