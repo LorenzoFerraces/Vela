@@ -1,81 +1,23 @@
-"""Detect project type from filesystem markers and generate Dockerfiles when missing."""
+"""Generate Dockerfiles for projects analyzed by ``language_detection``.
+
+``analyze_project`` is re-exported here (rather than redefined) so existing callers can keep
+importing it from this module while the marker-scanning logic lives in ``language_detection``.
+"""
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 from app.core.enums import BuildStrategy, SupportedLanguage
-from app.core.exceptions import AnalysisError, DockerfileGenerationError, UnsupportedProjectError
+from app.core.exceptions import DockerfileGenerationError, UnsupportedProjectError
+from app.core.git.language_detection import analyze_project
 from app.core.models import ProjectInfo
 
-
-def _read_json(path: Path) -> dict | None:
-    try:
-        raw = path.read_text(encoding="utf-8")
-    except OSError:
-        return None
-    try:
-        out = json.loads(raw)
-    except json.JSONDecodeError:
-        return None
-    return out if isinstance(out, dict) else None
-
-
-def analyze_project(project_root: Path) -> ProjectInfo:
-    """Inspect a project directory (root ``Dockerfile`` and common markers)."""
-    root = project_root.resolve()
-    if not root.is_dir():
-        raise AnalysisError(str(project_root), "path is not a directory")
-
-    dockerfile_path: str | None = None
-    has_dockerfile = (root / "Dockerfile").is_file()
-    if has_dockerfile:
-        dockerfile_path = "Dockerfile"
-
-    if (root / "go.mod").is_file():
-        return ProjectInfo(
-            language=SupportedLanguage.GO,
-            has_dockerfile=has_dockerfile,
-            dockerfile_path=dockerfile_path,
-            dependency_file="go.mod",
-        )
-
-    if (root / "requirements.txt").is_file():
-        return ProjectInfo(
-            language=SupportedLanguage.PYTHON,
-            has_dockerfile=has_dockerfile,
-            dockerfile_path=dockerfile_path,
-            dependency_file="requirements.txt",
-        )
-
-    if (root / "pyproject.toml").is_file():
-        return ProjectInfo(
-            language=SupportedLanguage.PYTHON,
-            has_dockerfile=has_dockerfile,
-            dockerfile_path=dockerfile_path,
-            dependency_file="pyproject.toml",
-        )
-
-    pkg = root / "package.json"
-    if pkg.is_file():
-        data = _read_json(pkg) or {}
-        deps = {**(data.get("dependencies") or {}), **(data.get("devDependencies") or {})}
-        is_ts = (root / "tsconfig.json").is_file() or "typescript" in deps
-        lang = SupportedLanguage.TYPESCRIPT if is_ts else SupportedLanguage.JAVASCRIPT
-        return ProjectInfo(
-            language=lang,
-            has_dockerfile=has_dockerfile,
-            dockerfile_path=dockerfile_path,
-            dependency_file="package.json",
-        )
-
-    return ProjectInfo(
-        language=SupportedLanguage.UNKNOWN,
-        has_dockerfile=has_dockerfile,
-        dockerfile_path=dockerfile_path,
-        dependency_file=None,
-    )
+__all__ = [
+    "analyze_project",
+    "dockerfile_contents_for",
+    "ensure_dockerfile_for_build",
+]
 
 
 def dockerfile_contents_for(
