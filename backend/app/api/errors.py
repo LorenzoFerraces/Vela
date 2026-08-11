@@ -13,6 +13,7 @@ from app.core.exceptions import (
     AvatarValidationError,
     BuilderError,
     CloneError,
+    ClerkTokenError,
     GitSourceAnalysisError,
     UnsupportedProjectError,
     ContainerAlreadyRunningError,
@@ -341,6 +342,15 @@ def register_exception_handlers(app) -> None:
     ) -> JSONResponse:
         return JSONResponse(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            content={"detail": str(exc)},
+        )
+
+    @app.exception_handler(ClerkTokenError)
+    async def clerk_token_handler(
+        _request: Request, exc: ClerkTokenError
+    ) -> JSONResponse:
+        return JSONResponse(
+            status_code=status.HTTP_400_BAD_REQUEST,
             content={"detail": str(exc)},
         )
 

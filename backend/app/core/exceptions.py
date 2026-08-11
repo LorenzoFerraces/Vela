@@ -273,6 +273,13 @@ class GitHubAPIError(IntegrationError):
         super().__init__(message)
 
 
+class ClerkTokenError(IntegrationError):
+    """Clerk token verification failed (bad signature, expired, missing claims)."""
+
+    def __init__(self, message: str = "Clerk authentication failed.") -> None:
+        super().__init__(message)
+
+
 class GitHubAccountAlreadyLinkedError(IntegrationError):
     """This GitHub account is already stored for a different Vela user."""
 

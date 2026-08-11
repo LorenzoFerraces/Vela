@@ -1038,6 +1038,14 @@ export async function login(body: LoginRequest): Promise<TokenResponse> {
   })
 }
 
+export async function clerkLogin(clerkToken: string): Promise<TokenResponse> {
+  return apiPost<TokenResponse, { clerk_token: string }>(
+    '/api/auth/clerk/exchange',
+    { clerk_token: clerkToken },
+    { skipAuth: true },
+  )
+}
+
 export async function getMe(): Promise<UserPublic> {
   return apiGet<UserPublic>('/api/auth/me')
 }

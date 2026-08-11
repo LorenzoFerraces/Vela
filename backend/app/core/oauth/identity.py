@@ -15,6 +15,7 @@ from app.core.security.secrets import decrypt_secret, encrypt_secret
 from app.db.models import UserOAuthIdentity
 
 GITHUB_PROVIDER = "github"
+CLERK_PROVIDER = "clerk"
 
 
 async def get_github_identity(
@@ -114,3 +115,53 @@ def decrypt_identity_token(identity: UserOAuthIdentity) -> str | None:
     if identity.access_token_encrypted is None:
         return None
     return decrypt_secret(identity.access_token_encrypted)
+
+
+async def get_clerk_identity(
+    session: AsyncSession, user_id: uuid.UUID
+) -> UserOAuthIdentity | None:
+    return await session.scalar(
+        select(UserOAuthIdentity).where(
+            UserOAuthIdentity.user_id == user_id,
+            UserOAuthIdentity.provider == CLERK_PROVIDER,
+        )
+    )
+
+
+async def get_clerk_identity_by_subject(
+    session: AsyncSession, provider_subject: str
+) -> UserOAuthIdentity | None:
+    return await session.scalar(
+        select(UserOAuthIdentity).where(
+            UserOAuthIdentity.provider == CLERK_PROVIDER,
+            UserOAuthIdentity.provider_subject == provider_subject,
+        )
+    )
+
+
+async def upsert_clerk_identity(
+    session: AsyncSession,
+    *,
+    user_id: uuid.UUID,
+    external_id: str,
+) -> UserOAuthIdentity:
+    """Insert or update the user's Clerk identity. Commits before returning."""
+    now = datetime.now(timezone.utc)
+    identity = await get_clerk_identity(session, user_id)
+
+    if identity is None:
+        identity = UserOAuthIdentity(
+            user_id=user_id,
+            provider=CLERK_PROVIDER,
+            provider_subject=external_id,
+            connected_at=now,
+            updated_at=now,
+        )
+        session.add(identity)
+    else:
+        identity.provider_subject = external_id
+        identity.updated_at = now
+
+    await session.commit()
+    await session.refresh(identity)
+    return identity
