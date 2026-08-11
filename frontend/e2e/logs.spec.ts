@@ -29,6 +29,7 @@ test.describe('Logs page', () => {
     authenticatedPage,
   }) => {
     await authenticatedPage.goto('/logs')
+    await authenticatedPage.getByPlaceholder('Container ID...').fill('nonexistent-id')
     await expect(authenticatedPage.getByText('No logs found')).toBeVisible()
   })
 })
