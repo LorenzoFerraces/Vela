@@ -354,11 +354,19 @@ export default function ContainersPage() {
           suggestions={deploySource.suggestions}
           listOpen={deploySource.listOpen}
           searchLoading={deploySource.searchLoading}
+          pastedGithubRepoPending={deploySource.pastedGithubRepoPending}
+          pastedGithubHint={deploySource.pastedGithubHint}
           imageRefCheck={imageRefCheck}
           onInputChange={deploySource.onInputChange}
           onInputFocus={deploySource.onInputFocus}
           onPickSuggestion={applyDeploySuggestion}
           onRequestImageCheck={runImageRefAvailabilityCheck}
+          onCommitPastedGithubRepo={() => {
+            const committed = deploySource.tryCommitPastedGithubRepo()
+            if (committed) {
+              applyDeploySuggestion(committed)
+            }
+          }}
         />
         <DeployProjectSelect
           projects={deployProjects.projects}

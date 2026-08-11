@@ -52,6 +52,7 @@ class FakeContainerOrchestrator(ContainerOrchestrator):
         self.last_deploy_config: DeployConfig | None = None
         self.verify_calls: list[str] = []
         self._verify_handlers: dict[str, Callable[[], None]] = {}
+        self._networks: set[str] = set()
 
     def register_image(self, image_ref: str) -> None:
         """
@@ -424,6 +425,12 @@ class FakeContainerOrchestrator(ContainerOrchestrator):
             self.register_image(stripped)
             return
         raise ImageNotFoundError(stripped)
+
+    async def create_network(self, name: str) -> None:
+        self._networks.add(name)
+
+    async def remove_network(self, name: str) -> None:
+        self._networks.discard(name)
 
     def _require_container(self, container_id: str) -> ContainerInfo:
         """

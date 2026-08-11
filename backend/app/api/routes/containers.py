@@ -510,7 +510,7 @@ async def deploy_source_suggestions(
     orchestrator: Annotated[ContainerOrchestrator, Depends(get_orchestrator)],
     current_user: Annotated[User, Depends(get_current_user)],
     session: Annotated[AsyncSession, Depends(get_db)],
-    q: Annotated[str, Query(max_length=128)] = "",
+    q: Annotated[str, Query(max_length=512)] = "",
     limit: Annotated[int, Query(ge=1, le=40)] = 22,
 ) -> DeploySourcesResponse:
     """

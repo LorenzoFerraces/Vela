@@ -13,6 +13,7 @@ from app.core.exceptions import (
     AvatarValidationError,
     BuilderError,
     CloneError,
+    ComposeImportError,
     GitSourceAnalysisError,
     UnsupportedProjectError,
     ContainerAlreadyRunningError,
@@ -21,6 +22,7 @@ from app.core.exceptions import (
     DockerfileGenerationError,
     DockerfileTemplateNotFoundError,
     DuplicateDockerfileNameError,
+    DuplicateStackNameError,
     EmailAlreadyRegisteredError,
     GitHubAccountAlreadyLinkedError,
     GitHubAPIError,
@@ -48,6 +50,8 @@ from app.core.exceptions import (
     ResourceLimitError,
     RouteConfigurationError,
     RouteNotFoundError,
+    StackCompositionCycleError,
+    StackNotFoundError,
     TrafficRouterError,
     UnsupportedLanguageError,
     VelaError,
@@ -161,6 +165,7 @@ def register_exception_handlers(app) -> None:
     @app.exception_handler(ContainerAlreadyRunningError)
     @app.exception_handler(ContainerNotRunningError)
     @app.exception_handler(DuplicateDockerfileNameError)
+    @app.exception_handler(DuplicateStackNameError)
     async def conflict_handler(_request: Request, exc: VelaError) -> JSONResponse:
         """
         Map a domain conflict error to an HTTP 409 Conflict JSON response.
@@ -351,6 +356,24 @@ def register_exception_handlers(app) -> None:
         return JSONResponse(
             status_code=status.HTTP_502_BAD_GATEWAY,
             content={"detail": str(exc)},
+        )
+
+    @app.exception_handler(StackNotFoundError)
+    async def handle_stack_not_found(_request: Request, exc: StackNotFoundError) -> JSONResponse:
+        return JSONResponse(status_code=status.HTTP_404_NOT_FOUND, content={"detail": str(exc)})
+
+    @app.exception_handler(StackCompositionCycleError)
+    async def handle_stack_cycle(_request: Request, exc: StackCompositionCycleError) -> JSONResponse:
+        return JSONResponse(
+            status_code=status.HTTP_409_CONFLICT,
+            content={"detail": str(exc), "stack_names": exc.stack_names},
+        )
+
+    @app.exception_handler(ComposeImportError)
+    async def handle_compose_import(_request: Request, exc: ComposeImportError) -> JSONResponse:
+        return JSONResponse(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            content={"detail": str(exc), "warnings": exc.warnings},
         )
 
     @app.exception_handler(VelaError)

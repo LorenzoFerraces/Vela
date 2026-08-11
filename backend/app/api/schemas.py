@@ -684,3 +684,68 @@ class ContainerMonitoringStatus(BaseModel):
     enabled: bool
     interval_seconds: int
     total_containers_tracked: int
+
+
+# ---------------------------------------------------------------------------
+# Stacks
+# ---------------------------------------------------------------------------
+
+
+class StackServiceCreate(BaseModel):
+    service_name: str = Field(min_length=1, max_length=128)
+    source_kind: Literal["image", "git", "dockerfile_template"]
+    source_ref: str = Field(min_length=1, max_length=2048)
+    container_port: int = Field(default=80, ge=1, le=65535)
+    env_vars: dict[str, str] = Field(default_factory=dict)
+    command: list[str] | None = None
+    public_route: bool = False
+    depends_on: list[str] | None = None
+    volumes: list[VolumeMountRequest] = Field(default_factory=list)
+    scaling_policy: ScalingPolicyConfig | None = None
+
+
+class StackCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=128)
+    project_id: uuid.UUID | None = None
+    services: list[StackServiceCreate] = Field(min_length=1)
+    child_stack_ids: list[uuid.UUID] = Field(default_factory=list)
+
+
+class StackServicePublic(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    stack_id: uuid.UUID
+    service_name: str
+    source_kind: str
+    source_ref: str
+    container_port: int
+    env_vars: dict[str, str]
+    command: list[str] | None
+    public_route: bool
+    depends_on: list[str] | None
+    volumes: list
+    scaling_policy: dict | None
+
+
+class StackPublic(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    project_id: uuid.UUID
+    name: str
+    network_name: str
+    created_at: datetime
+    services: list[StackServicePublic] = []
+    child_stack_ids: list[uuid.UUID] = []
+
+
+class ComposeImportRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=128)
+    project_id: uuid.UUID | None = None
+    yaml_content: str
+
+
+class ComposeImportResponse(BaseModel):
+    stack: StackPublic
+    warnings: list[str] = []

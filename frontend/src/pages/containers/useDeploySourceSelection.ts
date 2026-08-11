@@ -4,7 +4,11 @@ import {
   type DeploySourceSuggestion,
 } from '../../api/client'
 import type { DeploySourceSelection } from './deploySourceTypes'
-import { deploySourceLabel } from './deploySourceTypes'
+import {
+  deploySourceLabel,
+  findPastedGithubRepoSuggestion,
+  queryLooksLikeGithubRepoUrl,
+} from './deploySourceTypes'
 
 const SEARCH_DEBOUNCE_MS = 320
 const SEARCH_LIMIT = 22
@@ -40,6 +44,7 @@ export function useDeploySourceSelection() {
   const [suggestions, setSuggestions] = useState<DeploySourceSuggestion[]>([])
   const [listOpen, setListOpen] = useState(false)
   const [searchLoading, setSearchLoading] = useState(false)
+  const [pastedGithubHint, setPastedGithubHint] = useState<string | null>(null)
   const searchGenerationRef = useRef(0)
   const lastFetchedQueryRef = useRef<string | null>(null)
 
@@ -47,19 +52,21 @@ export function useDeploySourceSelection() {
 
   const refreshSuggestions = useCallback(async (searchQuery: string, generation: number) => {
     try {
-      const rows = await getDeploySourceSuggestions(searchQuery, {
+      const result = await getDeploySourceSuggestions(searchQuery, {
         limit: SEARCH_LIMIT,
       })
       if (generation !== searchGenerationRef.current) {
         return
       }
-      setSuggestions(rows)
+      setSuggestions(result.suggestions)
+      setPastedGithubHint(result.pasted_github_hint)
       lastFetchedQueryRef.current = searchQuery
     } catch {
       if (generation !== searchGenerationRef.current) {
         return
       }
       setSuggestions([])
+      setPastedGithubHint(null)
       lastFetchedQueryRef.current = searchQuery
     } finally {
       if (generation === searchGenerationRef.current) {
@@ -130,22 +137,34 @@ export function useDeploySourceSelection() {
     lastFetchedQueryRef.current = null
   }
 
+  function tryCommitPastedGithubRepo(): DeploySourceSuggestion | null {
+    if (selection) {
+      return null
+    }
+    return findPastedGithubRepoSuggestion(query, suggestions)
+  }
+
   function clearSelection() {
     setSelection(null)
     setQuery('')
     setSuggestions([])
+    setPastedGithubHint(null)
     lastFetchedQueryRef.current = null
   }
 
   function onInputChange(nextRaw: string) {
     setSelection(null)
     setQuery(nextRaw)
+    setPastedGithubHint(null)
     setListOpen(true)
   }
 
   function onInputFocus() {
     setListOpen(true)
   }
+
+  const pastedGithubRepoPending =
+    !selection && queryLooksLikeGithubRepoUrl(query) && !searchLoading
 
   return {
     listboxId,
@@ -155,9 +174,12 @@ export function useDeploySourceSelection() {
     suggestions,
     listOpen,
     searchLoading,
+    pastedGithubRepoPending,
+    pastedGithubHint,
     displayValue,
     setSelection,
     applySuggestion,
+    tryCommitPastedGithubRepo,
     clearSelection,
     onInputChange,
     onInputFocus,

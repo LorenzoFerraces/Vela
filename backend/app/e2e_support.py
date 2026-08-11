@@ -150,6 +150,24 @@ def e2e_github_repos_if_enabled(
     return repos
 
 
+def e2e_github_repo_if_accessible(
+    access_token: str,
+    *,
+    owner: str,
+    repo: str,
+) -> GitHubRepo | None:
+    """Return a fixture repo when E2E mode is enabled and the user can access it."""
+    if not e2e_mode_enabled():
+        return None
+    if access_token != E2E_GITHUB_FAKE_TOKEN:
+        return None
+    target = f"{owner}/{repo}".lower()
+    for fixture_repo in _E2E_GITHUB_REPOS:
+        if fixture_repo.full_name.lower() == target:
+            return fixture_repo
+    return None
+
+
 def e2e_git_source_analysis_if_enabled(
     git_url: str,
     git_branch: str,

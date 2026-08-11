@@ -127,6 +127,10 @@ class DeployConfig(BaseModel):
         default=None,
         description="Target project for the deployment; defaults to the caller's personal workspace.",
     )
+    network: str | None = Field(
+        default=None,
+        description="Docker network to attach the container to (overrides orchestrator default).",
+    )
 
     @field_validator("route_path_prefix")
     @classmethod

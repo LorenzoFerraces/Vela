@@ -1005,3 +1005,337 @@ def test_traffic_routes_crud(make_authed_client) -> None:
         assert deleted.status_code == 204
         empty = client.get("/api/routes")
         assert empty.json() == []
+
+
+def test_stack_crud(api_client: TestClient) -> None:
+    """Stack create, list, get, deploy, and delete flow."""
+    # Create
+    body = {
+        "name": "test-stack",
+        "services": [
+            {
+                "service_name": "web",
+                "source_kind": "image",
+                "source_ref": "nginx:alpine",
+                "container_port": 80,
+                "env_vars": {},
+                "public_route": False,
+            }
+        ],
+    }
+    created = api_client.post("/api/stacks/", json=body)
+    assert created.status_code == 201
+    stack_id = created.json()["id"]
+
+    # List
+    listed = api_client.get("/api/stacks/")
+    assert len(listed.json()) >= 1
+
+    # Get
+    got = api_client.get(f"/api/stacks/{stack_id}")
+    assert got.status_code == 200
+    assert got.json()["name"] == "test-stack"
+
+    # Deploy
+    deployed = api_client.post(f"/api/stacks/{stack_id}/deploy")
+    assert deployed.status_code == 200
+
+    # Delete
+    deleted = api_client.delete(f"/api/stacks/{stack_id}")
+    assert deleted.status_code == 204
+
+    # Verify gone
+    gone = api_client.get(f"/api/stacks/{stack_id}")
+    assert gone.status_code == 404
+
+
+def test_stack_update_with_composition(api_client: TestClient) -> None:
+    """Stack update should handle child_stack_ids."""
+    # Create a child stack
+    child = api_client.post("/api/stacks/", json={
+        "name": "child-stack",
+        "services": [
+            {
+                "service_name": "db",
+                "source_kind": "image",
+                "source_ref": "postgres:15",
+                "container_port": 5432,
+                "env_vars": {},
+                "public_route": False,
+            }
+        ],
+    })
+    assert child.status_code == 201
+    child_id = child.json()["id"]
+
+    # Create parent stack referencing child
+    parent = api_client.post("/api/stacks/", json={
+        "name": "parent-stack",
+        "services": [
+            {
+                "service_name": "web",
+                "source_kind": "image",
+                "source_ref": "nginx:alpine",
+                "container_port": 80,
+                "env_vars": {},
+                "public_route": False,
+            }
+        ],
+        "child_stack_ids": [child_id],
+    })
+    assert parent.status_code == 201
+    parent_id = parent.json()["id"]
+    assert parent.json()["child_stack_ids"] == [child_id]
+
+    # Update parent with different child_stack_ids (empty)
+    updated = api_client.put(f"/api/stacks/{parent_id}", json={
+        "name": "parent-stack",
+        "services": [
+            {
+                "service_name": "web",
+                "source_kind": "image",
+                "source_ref": "nginx:alpine",
+                "container_port": 80,
+                "env_vars": {},
+                "public_route": False,
+            }
+        ],
+        "child_stack_ids": [],
+    })
+    assert updated.status_code == 200
+    assert updated.json()["child_stack_ids"] == []
+
+    # Cleanup
+    api_client.delete(f"/api/stacks/{parent_id}")
+    api_client.delete(f"/api/stacks/{child_id}")
+
+
+def test_stack_composition_cycle_prevention(api_client: TestClient) -> None:
+    """Creating a stack with a composition cycle should fail."""
+    # Create stack A
+    stack_a = api_client.post("/api/stacks/", json={
+        "name": "stack-a",
+        "services": [
+            {
+                "service_name": "svc-a",
+                "source_kind": "image",
+                "source_ref": "alpine:3",
+                "container_port": 80,
+                "env_vars": {},
+                "public_route": False,
+            }
+        ],
+    })
+    assert stack_a.status_code == 201
+    id_a = stack_a.json()["id"]
+
+    # Create stack B referencing A
+    stack_b = api_client.post("/api/stacks/", json={
+        "name": "stack-b",
+        "services": [
+            {
+                "service_name": "svc-b",
+                "source_kind": "image",
+                "source_ref": "alpine:3",
+                "container_port": 80,
+                "env_vars": {},
+                "public_route": False,
+            }
+        ],
+        "child_stack_ids": [id_a],
+    })
+    assert stack_b.status_code == 201
+    id_b = stack_b.json()["id"]
+
+    # Try to create stack C that references B, then update A to reference C (would create cycle A->C->B->A)
+    stack_c = api_client.post("/api/stacks/", json={
+        "name": "stack-c",
+        "services": [
+            {
+                "service_name": "svc-c",
+                "source_kind": "image",
+                "source_ref": "alpine:3",
+                "container_port": 80,
+                "env_vars": {},
+                "public_route": False,
+            }
+        ],
+        "child_stack_ids": [id_b],
+    })
+    assert stack_c.status_code == 201
+    id_c = stack_c.json()["id"]
+
+    # Now try to update A to reference C -- this would create A->C->B->A cycle
+    cycle_attempt = api_client.put(f"/api/stacks/{id_a}", json={
+        "name": "stack-a",
+        "services": [
+            {
+                "service_name": "svc-a",
+                "source_kind": "image",
+                "source_ref": "alpine:3",
+                "container_port": 80,
+                "env_vars": {},
+                "public_route": False,
+            }
+        ],
+        "child_stack_ids": [id_c],
+    })
+    assert cycle_attempt.status_code == 409
+
+    # Cleanup
+    api_client.delete(f"/api/stacks/{id_c}")
+    api_client.delete(f"/api/stacks/{id_b}")
+    api_client.delete(f"/api/stacks/{id_a}")
+
+
+def test_stack_compose_import(api_client: TestClient) -> None:
+    """Import a docker-compose YAML and verify services are created."""
+    compose_yaml = """
+version: "3.8"
+services:
+  web:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+    environment:
+      NGINX_HOST: example.com
+  redis:
+    image: redis:7
+    ports:
+      - "6379:6379"
+"""
+    resp = api_client.post("/api/stacks/import-compose", json={
+        "name": "imported-stack",
+        "yaml_content": compose_yaml,
+    })
+    assert resp.status_code == 201
+    data = resp.json()
+    assert data["stack"]["name"] == "imported-stack"
+    service_names = {s["service_name"] for s in data["stack"]["services"]}
+    assert "web" in service_names
+    assert "redis" in service_names
+
+    # Verify the stack is accessible
+    stack_id = data["stack"]["id"]
+    got = api_client.get(f"/api/stacks/{stack_id}")
+    assert got.status_code == 200
+    assert got.json()["name"] == "imported-stack"
+
+    # Cleanup
+    api_client.delete(f"/api/stacks/{stack_id}")
+
+
+def test_stack_deploy_creates_network(api_client: TestClient) -> None:
+    """Deploy should create the stack's Docker network."""
+    from app.core.containers.fake_orchestrator import FakeContainerOrchestrator
+
+    # Get the orchestrator from the test client
+    orchestrator = None
+    for dep in api_client.app.dependency_overrides.values():
+        result = dep()
+        if isinstance(result, FakeContainerOrchestrator):
+            orchestrator = result
+            break
+
+    body = {
+        "name": "network-test-stack",
+        "services": [
+            {
+                "service_name": "app",
+                "source_kind": "image",
+                "source_ref": "nginx:alpine",
+                "container_port": 80,
+                "env_vars": {},
+                "public_route": False,
+            }
+        ],
+    }
+    created = api_client.post("/api/stacks/", json=body)
+    assert created.status_code == 201
+    stack_id = created.json()["id"]
+    network_name = created.json()["network_name"]
+
+    # Deploy
+    deployed = api_client.post(f"/api/stacks/{stack_id}/deploy")
+    assert deployed.status_code == 200
+
+    # Verify network was created
+    if orchestrator:
+        assert network_name in orchestrator._networks
+
+    # Cleanup
+    api_client.delete(f"/api/stacks/{stack_id}")
+
+
+def test_stack_deploy_dockerfile_template_by_name(api_client: TestClient) -> None:
+    """Stack deploy resolves Dockerfile templates by name as well as UUID."""
+    create = api_client.post(
+        "/api/dockerfiles/",
+        json={"name": "stack-app", "contents": "FROM nginx:alpine\n"},
+    )
+    assert create.status_code == 201
+
+    stack = api_client.post(
+        "/api/stacks/",
+        json={
+            "name": "template-stack",
+            "services": [
+                {
+                    "service_name": "web",
+                    "source_kind": "dockerfile_template",
+                    "source_ref": "stack-app",
+                    "container_port": 80,
+                    "env_vars": {},
+                    "public_route": False,
+                }
+            ],
+        },
+    )
+    assert stack.status_code == 201
+    stack_id = stack.json()["id"]
+
+    deployed = api_client.post(f"/api/stacks/{stack_id}/deploy")
+    assert deployed.status_code == 200
+
+    api_client.delete(f"/api/stacks/{stack_id}")
+
+
+def test_stack_delete_cleans_network(api_client: TestClient) -> None:
+    """Delete should clean up the stack's Docker network."""
+    from app.core.containers.fake_orchestrator import FakeContainerOrchestrator
+
+    orchestrator = None
+    for dep in api_client.app.dependency_overrides.values():
+        result = dep()
+        if isinstance(result, FakeContainerOrchestrator):
+            orchestrator = result
+            break
+
+    body = {
+        "name": "cleanup-test-stack",
+        "services": [
+            {
+                "service_name": "app",
+                "source_kind": "image",
+                "source_ref": "nginx:alpine",
+                "container_port": 80,
+                "env_vars": {},
+                "public_route": False,
+            }
+        ],
+    }
+    created = api_client.post("/api/stacks/", json=body)
+    assert created.status_code == 201
+    stack_id = created.json()["id"]
+    network_name = created.json()["network_name"]
+
+    # Deploy (creates network)
+    api_client.post(f"/api/stacks/{stack_id}/deploy")
+
+    # Delete
+    deleted = api_client.delete(f"/api/stacks/{stack_id}")
+    assert deleted.status_code == 204
+
+    # Verify network was removed
+    if orchestrator:
+        assert network_name not in orchestrator._networks

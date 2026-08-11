@@ -23,6 +23,7 @@ from app.api.routes import (
     projects,
     scaling,
     settings,
+    stacks,
     traffic,
     users,
 )
@@ -168,6 +169,11 @@ def create_app() -> FastAPI:
         scaling.router,
         prefix=f"{API_PREFIX}/scaling",
         tags=["scaling"],
+    )
+    application.include_router(
+        stacks.router,
+        prefix=f"{API_PREFIX}/stacks",
+        tags=["stacks"],
     )
 
     @application.get(f"{API_PREFIX}/health", tags=["health"])
