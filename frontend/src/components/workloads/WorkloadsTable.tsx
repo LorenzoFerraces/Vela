@@ -290,7 +290,7 @@ export function WorkloadsTable({
                         >
                           {isLogExpanded ? 'Hide' : 'Show'}
                         </button>
-                        {containerRow.status === 'running' ? (
+                        {containerRow.status === 'running' && canModify ? (
                           <button
                             type="button"
                             className="btn btn--ghost btn--sm"

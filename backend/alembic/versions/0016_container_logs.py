@@ -48,13 +48,12 @@ def upgrade() -> None:
         "container_logs",
         ["container_id", "timestamp"],
     )
-    try:
+    conn = op.get_bind()
+    if conn.dialect.name == "postgresql":
         op.execute("CREATE EXTENSION IF NOT EXISTS pg_trgm")
         op.execute(
             "CREATE INDEX ix_container_logs_fts ON container_logs USING gin (message gin_trgm_ops)"
         )
-    except Exception:
-        pass
 
 
 def downgrade() -> None:

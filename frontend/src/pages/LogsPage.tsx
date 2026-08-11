@@ -45,6 +45,7 @@ export default function LogsPage() {
 
   const handleExport = async () => {
     const params: Record<string, string> = {}
+    if (search) params.q = search
     if (levelFilter) params.level = levelFilter
     if (containerFilter) params.container_id = containerFilter
     try {

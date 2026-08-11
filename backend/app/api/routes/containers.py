@@ -6,7 +6,8 @@ import asyncio
 import json
 import logging
 import uuid
-from typing import Annotated
+from contextlib import suppress
+from typing import Annotated, Callable
 from urllib.parse import urlparse
 
 from fastapi import (
@@ -310,6 +311,16 @@ def _route_updates_from_run_body(body: RunFromSourceRequest) -> dict[str, object
 
 
 _DEPLOYMENT_ENV_VALUE_REDACTED = "<REDACTED>"
+
+
+def _sanitize_url_for_audit(url: str) -> str:
+    """Remove userinfo, query, and fragment from URL for audit persistence."""
+    try:
+        parsed = urlparse(url)
+        clean = parsed._replace(netloc=parsed.hostname or "", query="", fragment="")
+        return clean.geturl()
+    except ValueError:
+        return url
 
 
 def _redacted_env_vars_for_history(env_vars: dict[str, str]) -> dict[str, str]:
@@ -897,7 +908,7 @@ async def run_from_user_source(
         target_id=info.id,
         details={
             "source_kind": "git",
-            "source_ref": git_url,
+            "source_ref": _sanitize_url_for_audit(git_url),
         },
     )
     return RunFromSourceResponse(
@@ -1124,19 +1135,27 @@ async def container_exec_ws(
         return
 
     async with _exec_semaphore:
+        exec_close_fn: Callable[[], None] | None = None
         try:
             cols, rows = 80, 24
+            pending_init: str | None = None
             try:
                 init_raw = await asyncio.wait_for(websocket.receive_text(), timeout=5.0)
-                init_msg = json.loads(init_raw)
-                cols = int(init_msg.get("cols", 80))
-                rows = int(init_msg.get("rows", 24))
-            except (asyncio.TimeoutError, json.JSONDecodeError, ValueError, KeyError):
+                try:
+                    init_msg = json.loads(init_raw)
+                    cols = int(init_msg.get("cols", 80))
+                    rows = int(init_msg.get("rows", 24))
+                except (json.JSONDecodeError, ValueError, KeyError):
+                    pending_init = init_raw
+            except asyncio.TimeoutError:
                 pass
 
-            stdout_iter, stdin_write, exec_close, exec_id = orchestrator.stream_exec(
+            stdout_iter, stdin_write, exec_close_fn, exec_id = orchestrator.stream_exec(
                 container_id, cols=cols, rows=rows
             )
+
+            if pending_init is not None:
+                stdin_write(pending_init.encode("utf-8"))
 
             async def _forward_to_client() -> None:
                 try:
@@ -1167,12 +1186,22 @@ async def container_exec_ws(
                 except Exception:
                     logger.warning("exec input error for %s", container_id)
 
-            await asyncio.gather(_forward_to_client(), _forward_to_container())
-            exec_close()
+            task_client = asyncio.create_task(_forward_to_client())
+            task_container = asyncio.create_task(_forward_to_container())
+            done, pending = await asyncio.wait(
+                {task_client, task_container}, return_when=asyncio.FIRST_COMPLETED
+            )
+            for t in pending:
+                t.cancel()
+                with suppress(asyncio.CancelledError):
+                    await t
         except WebSocketDisconnect:
             pass
         except Exception:
             logger.error("exec session error for %s", container_id)
+        finally:
+            if exec_close_fn is not None:
+                exec_close_fn()
 
 
 @router.get("/{container_id}/stats", response_model=ContainerStats)

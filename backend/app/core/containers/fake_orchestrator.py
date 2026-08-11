@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import threading
 import uuid
 from collections.abc import AsyncIterator, Callable
@@ -28,6 +29,8 @@ from app.core.exceptions import (
 )
 from app.core.models import ContainerInfo, ContainerStats, DeployConfig, HealthResult
 from app.core.containers.orchestrator import ContainerOrchestrator
+
+logger = logging.getLogger(__name__)
 
 
 class FakeContainerOrchestrator(ContainerOrchestrator):
@@ -334,7 +337,10 @@ class FakeContainerOrchestrator(ContainerOrchestrator):
                                     ),
                                     loop,
                                 ).result(timeout=10)
+                    except asyncio.TimeoutError:
+                        continue
                     except Exception:
+                        logger.warning("fake exec stdin error for %s", container_id)
                         break
             except Exception:
                 pass

@@ -123,16 +123,21 @@ async def export_logs(
             "message",
         ],
     )
+    def _sanitize(value: str) -> str:
+        if value and value[0] in ("=", "+", "-", "@"):
+            return f"'{value}"
+        return value
+
     writer.writeheader()
     for row in rows:
         writer.writerow(
             {
                 "timestamp": row.timestamp.isoformat(),
-                "container_id": row.container_id,
-                "container_name": row.container_name or "",
+                "container_id": _sanitize(row.container_id),
+                "container_name": _sanitize(row.container_name or ""),
                 "source": row.source,
                 "level": row.level,
-                "message": row.message,
+                "message": _sanitize(row.message),
             }
         )
 

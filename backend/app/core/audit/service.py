@@ -66,6 +66,7 @@ async def emit_audit_log(
         logger.exception(
             "Failed to emit audit log: action=%s target=%s", action, target_id
         )
+        await session.rollback()
 
 
 async def list_audit_logs(

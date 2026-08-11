@@ -44,7 +44,7 @@ export function ContainerTerminal({ containerId, onClose }: ContainerTerminalPro
     )
     wsRef.current = execWs
 
-    term.onData((chr) => execWs.send(chr))
+    term.onData((inputData) => execWs.send(inputData))
 
     const resizeObserver = new ResizeObserver(() => {
       fit.fit()

@@ -634,6 +634,7 @@ export function openContainerExecWebSocket(
   const params = new URLSearchParams({ access_token: token })
   const path = `/api/containers/${encodeURIComponent(containerId)}/exec/ws?${params.toString()}`
   const ws = new WebSocket(getApiWebSocketUrl(path))
+  ws.binaryType = 'arraybuffer'
 
   ws.onopen = () => onOpen()
   ws.onmessage = (event) => {
@@ -646,7 +647,9 @@ export function openContainerExecWebSocket(
   ws.onerror = () => onError()
 
   return {
-    send: (data) => ws.send(data),
+    send: (data) => {
+      if (ws.readyState === WebSocket.OPEN) ws.send(data)
+    },
     dispose: () => ws.close(),
   }
 }
