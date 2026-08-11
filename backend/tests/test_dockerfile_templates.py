@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from app.core.enums import SupportedLanguage
@@ -45,6 +47,9 @@ def test_java_maven_template_from_dependency_file() -> None:
     body = dockerfile_contents_for(info)
     assert "mvn" in body.lower() or "mvnw" in body.lower()
     assert "maven" in body.lower()
+    assert "COPY --from=builder /out/app.jar" in body
+    assert "target/*.jar" not in body
+    assert '*-plain.jar' in body
 
 
 def test_java_package_manager_override_wins_over_dependency_file() -> None:
@@ -68,12 +73,25 @@ def test_clojure_deps_template_by_default() -> None:
     body = dockerfile_contents_for(_info(SupportedLanguage.CLOJURE))
     assert "clojure" in body.lower()
     assert "tools-deps" in body.lower() or "clojure -t" in body.lower()
+    assert "|| echo" not in body
+    assert "test -f /out/app.jar" in body
 
 
 def test_clojure_lein_template_from_dependency_file() -> None:
     info = _info(SupportedLanguage.CLOJURE, dependency_file="project.clj")
     body = dockerfile_contents_for(info)
     assert "lein" in body.lower()
+
+
+def test_clojure_honors_language_version_and_start_command() -> None:
+    override = BuildOverride(
+        language=SupportedLanguage.CLOJURE,
+        language_version="17",
+        start_command=["java", "-cp", "app.jar", "clojure.main", "-m", "myapp.core"],
+    )
+    body = dockerfile_contents_for(_info(SupportedLanguage.CLOJURE), override=override)
+    assert "temurin-17" in body
+    assert '["java", "-cp", "app.jar", "clojure.main", "-m", "myapp.core"]' in body
 
 
 def test_rust_template_keywords() -> None:
@@ -99,8 +117,43 @@ def test_dotnet_template_keywords() -> None:
 def test_elixir_template_keywords() -> None:
     body = dockerfile_contents_for(_info(SupportedLanguage.ELIXIR))
     assert "mix release" in body.lower()
+    assert "|| echo" not in body
+    assert "test -d /src/_build/prod/rel" in body
+
+
+def test_go_python_node_rust_php_honor_override_fields() -> None:
+    cases: list[tuple[SupportedLanguage, str, list[str], str]] = [
+        (SupportedLanguage.GO, "1.22", ["./custom"], "golang:1.22-alpine"),
+        (SupportedLanguage.PYTHON, "3.11", ["uvicorn", "app:app"], "python:3.11-slim"),
+        (SupportedLanguage.JAVASCRIPT, "22", ["npm", "start"], "node:22-bookworm-slim"),
+        (SupportedLanguage.RUST, "1.80", ["./bin/app"], "rust:1.80-slim"),
+        (SupportedLanguage.PHP, "8.2", ["php", "public/index.php"], "php:8.2-cli"),
+    ]
+    for language, version, start_command, from_fragment in cases:
+        override = BuildOverride(
+            language=language,
+            language_version=version,
+            start_command=start_command,
+        )
+        body = dockerfile_contents_for(_info(language), override=override)
+        assert from_fragment in body
+        assert "CMD " + json.dumps(start_command) in body
 
 
 def test_unknown_language_raises_dockerfile_generation_error() -> None:
-    with pytest.raises(DockerfileGenerationError):
+    with pytest.raises(DockerfileGenerationError) as exc_info:
         dockerfile_contents_for(_info(SupportedLanguage.UNKNOWN))
+    assert "cannot generate a Dockerfile without a known language" in str(exc_info.value)
+
+
+def test_match_default_arm_message_for_unhandled_language() -> None:
+    """New enum members must hit the default arm, not fall through to None."""
+
+    class FakeLanguage:
+        def __str__(self) -> str:
+            return "cobol"
+
+    info = ProjectInfo.model_construct(language=FakeLanguage())  # type: ignore[arg-type]
+    with pytest.raises(DockerfileGenerationError) as exc_info:
+        dockerfile_contents_for(info)
+    assert "no built-in template for this language" in str(exc_info.value)
