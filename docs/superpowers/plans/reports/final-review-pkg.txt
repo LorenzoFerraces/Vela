@@ -1,0 +1,2056 @@
+COMMITS:
+1bc6ea2 docs: record Task 11 commit hash in report
+fd0be63 docs: note expanded language detection and build overrides
+b6713b7 docs: record Task 10 commit hash in report
+5b3ecf8 test: e2e for build override modal on stacks/containers
+92a43aa docs: note Task 9 follow-up commits in report
+fe41e38 fix: add stack builder modules required by build override wiring
+8f95093 docs: record Task 9 commit hash in report
+fb4e370 feat: stacks persist and prompt for per-service build overrides
+bfc38e8 docs: record Task 8 commit hash in report
+5aa425d feat: containers flow prompts for build override when needed
+505d1b8 docs: record Task 7 commit hash in report
+4280176 feat: shared BuildConfigModal for manual language overrides
+c63134b docs: record Task 6 commit hash in report
+8b6eddd feat: API support for build overrides and needs_build_override errors
+8509a96 docs: record Task 5 commit hash in report
+cc91b00 feat: persist build_override on stacks and deployment records
+b9f693e docs: record Task 4 commit hash in report
+f19b422 feat: honor build override and subdir in image builds
+60192b8 fix: harden Dockerfile templates for override and jar copy
+bb64712 feat: Dockerfile templates for JVM, Clojure, and expanded languages
+fdc1bca fix: make nested ignore fixture trackable; same-dir Clojure priority only
+a60e1f6 feat: robust multi-language project detection with shallow scan
+0aa119c feat: add BuildOverride model and NeedsBuildOverrideError
+STAT:
+ README.md                                          |   2 +
+ .../versions/0015_stack_service_git_branch.py      |  30 ++
+ backend/alembic/versions/0016_build_override.py    |  29 ++
+ backend/app/api/errors.py                          |  10 +
+ backend/app/api/routes/builder.py                  |   6 +-
+ backend/app/api/routes/containers.py               |   4 +
+ backend/app/api/routes/stacks.py                   |  49 +++
+ backend/app/api/schemas.py                         |  25 ++
+ backend/app/core/__init__.py                       |   4 +
+ backend/app/core/build/builder.py                  |   5 +-
+ backend/app/core/build/default_image_builder.py    |  18 +-
+ backend/app/core/containers/fake_orchestrator.py   |   7 +-
+ backend/app/core/deploy/deployment_history.py      |   3 +
+ backend/app/core/enums.py                          |   4 +
+ backend/app/core/exceptions.py                     |  12 +
+ backend/app/core/git/dockerfile_templates.py       | 350 ++++++++++++++++++
+ backend/app/core/git/git_ops.py                    |   8 +
+ backend/app/core/git/git_source_analysis.py        |  30 +-
+ backend/app/core/git/language_detection.py         | 220 ++++++++++++
+ backend/app/core/git/project_analysis.py           | 221 +++---------
+ backend/app/core/models.py                         |   9 +
+ backend/app/core/stacks/compose_parser.py          |  67 +++-
+ backend/app/core/stacks/deploy.py                  |  29 +-
+ backend/app/db/models.py                           |   3 +
+ backend/app/e2e_support.py                         |  43 +++
+ .../tests/fixtures/projects/clojure_deps/deps.edn  |   1 +
+ .../fixtures/projects/clojure_lein/project.clj     |   1 +
+ .../projects/cross_dir_tie/alpha_java/build.gradle |   3 +
+ .../projects/cross_dir_tie/beta_clojure/deps.edn   |   1 +
+ .../fixtures/projects/dockerfile_only/Dockerfile   |   1 +
+ .../tests/fixtures/projects/dotnet_cs/App.csproj   |   2 +
+ backend/tests/fixtures/projects/elixir_mix/mix.exs |   3 +
+ backend/tests/fixtures/projects/go_root/go.mod     |   3 +
+ .../fixtures/projects/gradle_java/build.gradle     |   3 +
+ .../fixtures/projects/gradle_kotlin/build.gradle   |   3 +
+ .../projects/jvm_clojure_priority/build.gradle     |   3 +
+ .../projects/jvm_clojure_priority/deps.edn         |   1 +
+ backend/tests/fixtures/projects/maven_java/pom.xml |   3 +
+ .../projects/nested_ignored/vendor/package.json    |   4 +
+ .../projects/nested_node/backend/package.json      |   4 +
+ .../tests/fixtures/projects/node_pkg/package.json  |   4 +
+ .../fixtures/projects/php_composer/composer.json   |   3 +
+ .../fixtures/projects/priority_go_over_node/go.mod |   3 +
+ .../projects/priority_go_over_node/package.json    |   4 +
+ .../fixtures/projects/python_req/requirements.txt  |   1 +
+ backend/tests/fixtures/projects/ruby_gem/Gemfile   |   1 +
+ .../tests/fixtures/projects/rust_cargo/Cargo.toml  |   3 +
+ backend/tests/test_api_integration.py              | 109 ++++++
+ backend/tests/test_build_override_model.py         |  25 ++
+ backend/tests/test_compose_parser.py               |  49 ++-
+ .../tests/test_default_image_builder_override.py   | 146 ++++++++
+ backend/tests/test_dockerfile_templates.py         | 159 +++++++++
+ backend/tests/test_ensure_dockerfile.py            | 113 ++++++
+ backend/tests/test_language_detection.py           | 155 ++++++++
+ docs/superpowers/plans/reports/task-10-brief.md    |  21 ++
+ docs/superpowers/plans/reports/task-10-report.md   |  34 ++
+ docs/superpowers/plans/reports/task-11-report.md   |  30 ++
+ docs/superpowers/plans/reports/task-4-report.md    |  64 ++++
+ docs/superpowers/plans/reports/task-5-report.md    |  37 ++
+ docs/superpowers/plans/reports/task-6-report.md    |  67 ++++
+ docs/superpowers/plans/reports/task-7-report.md    |  49 +++
+ docs/superpowers/plans/reports/task-8-report.md    |  40 +++
+ docs/superpowers/plans/reports/task-9-report.md    |  46 +++
+ frontend/e2e/build-override.spec.ts                |  87 +++++
+ frontend/src/api/client.ts                         |  38 ++
+ frontend/src/index.css                             | 196 ++++++++++
+ frontend/src/pages/ContainersPage.tsx              | 164 ++++++---
+ frontend/src/pages/StacksPage.tsx                  | 151 +++++++-
+ frontend/src/pages/containers/BuildConfigModal.tsx | 262 ++++++++++++++
+ frontend/src/pages/containers/buildOverride.ts     | 235 ++++++++++++
+ .../src/pages/containers/useGitSourceAnalysis.ts   |   7 +-
+ frontend/src/pages/stacks/StackBuilderPage.tsx     | 397 +++++++++++++++++----
+ frontend/src/pages/stacks/importTypes.ts           |   6 +
+ frontend/src/pages/stacks/serviceLinkDetection.ts  | 115 ++++++
+ 74 files changed, 3733 insertions(+), 312 deletions(-)
+DIFF (core paths):
+diff --git a/backend/app/api/errors.py b/backend/app/api/errors.py
+index c903951..a38735f 100644
+--- a/backend/app/api/errors.py
++++ b/backend/app/api/errors.py
+@@ -15,6 +15,7 @@ from app.core.exceptions import (
+     CloneError,
+     ComposeImportError,
+     GitSourceAnalysisError,
++    NeedsBuildOverrideError,
+     UnsupportedProjectError,
+     ContainerAlreadyRunningError,
+     ContainerNotFoundError,
+@@ -200,6 +201,15 @@ def register_exception_handlers(app) -> None:
+             content={"detail": str(exc)},
+         )
+ 
++    @app.exception_handler(NeedsBuildOverrideError)
++    async def needs_build_override_handler(
++        _request: Request, exc: NeedsBuildOverrideError
++    ) -> JSONResponse:
++        return JSONResponse(
++            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
++            content=exc.api_response_content(),
++        )
++
+     @app.exception_handler(RouteConfigurationError)
+     @app.exception_handler(ImageBuildError)
+     async def image_build_handler(_request: Request, exc: VelaError) -> JSONResponse:
+diff --git a/backend/app/api/routes/containers.py b/backend/app/api/routes/containers.py
+index 329828b..114a59f 100644
+--- a/backend/app/api/routes/containers.py
++++ b/backend/app/api/routes/containers.py
+@@ -342,6 +342,9 @@ async def _persist_run_deployment(
+                 command=list(body.command) if body.command else None,
+                 dockerfile_snapshot=dockerfile_snapshot,
+                 public_url=public_url,
++                build_override=(
++                    body.build_override.model_dump() if body.build_override else None
++                ),
+             ),
+         )
+     except Exception:
+@@ -804,6 +807,7 @@ async def run_from_user_source(
+             ProjectSource(git_url=git_url, branch=body.git_branch),
+             tag=tag,
+             access_token=access_token,
++            override=body.build_override,
+         )
+     except CloneError as exc:
+         if (
+diff --git a/backend/app/api/routes/stacks.py b/backend/app/api/routes/stacks.py
+index 20db672..374d162 100644
+--- a/backend/app/api/routes/stacks.py
++++ b/backend/app/api/routes/stacks.py
+@@ -21,8 +21,11 @@ from app.api.deps import (
+ from app.api.schemas import (
+     ComposeImportRequest,
+     ComposeImportResponse,
++    ComposeParseRequest,
++    ComposeParseResponse,
+     StackCreate,
+     StackPublic,
++    StackServiceCreate,
+     StackServicePublic,
+ )
+ from app.core.build.default_image_builder import DefaultImageBuilder
+@@ -89,6 +92,7 @@ async def create_user_stack(
+             service_name=s.service_name,
+             source_kind=s.source_kind,
+             source_ref=s.source_ref,
++            git_branch=s.git_branch,
+             container_port=s.container_port,
+             env_vars=s.env_vars,
+             command=s.command,
+@@ -96,6 +100,7 @@ async def create_user_stack(
+             depends_on=s.depends_on,
+             volumes=[v.model_dump() for v in s.volumes],
+             scaling_policy=s.scaling_policy.model_dump() if s.scaling_policy else None,
++            build_override=s.build_override.model_dump() if s.build_override else None,
+         )
+         for s in body.services
+     ]
+@@ -106,6 +111,24 @@ async def create_user_stack(
+     return result
+ 
+ 
++@router.post("/parse-compose", response_model=ComposeParseResponse)
++async def parse_compose_yaml(
++    body: ComposeParseRequest,
++    current_user: Annotated[User, Depends(get_current_user)],
++) -> ComposeParseResponse:
++    _ = current_user
++    services, warnings = parse_compose(body.yaml_content)
++    if not services:
++        raise HTTPException(
++            status_code=status.HTTP_400_BAD_REQUEST,
++            detail="Compose file contains no valid services.",
++        )
++    return ComposeParseResponse(
++        services=[_orm_service_to_create(service) for service in services],
++        warnings=warnings,
++    )
++
++
+ @router.post("/import-compose", response_model=ComposeImportResponse, status_code=status.HTTP_201_CREATED)
+ async def import_compose(
+     body: ComposeImportRequest,
+@@ -157,6 +180,7 @@ async def update_user_stack(
+             service_name=s.service_name,
+             source_kind=s.source_kind,
+             source_ref=s.source_ref,
++            git_branch=s.git_branch,
+             container_port=s.container_port,
+             env_vars=s.env_vars,
+             command=s.command,
+@@ -164,6 +188,7 @@ async def update_user_stack(
+             depends_on=s.depends_on,
+             volumes=[v.model_dump() for v in s.volumes],
+             scaling_policy=s.scaling_policy.model_dump() if s.scaling_policy else None,
++            build_override=s.build_override.model_dump() if s.build_override else None,
+         )
+         for s in body.services
+     ]
+@@ -265,6 +290,28 @@ async def deploy_user_stack(
+     return result
+ 
+ 
++def _orm_service_to_create(service: StackService) -> StackServiceCreate:
++    volumes = service.volumes or []
++    scaling = service.scaling_policy
++    source_kind = service.source_kind
++    if source_kind not in ("image", "git", "dockerfile_template"):
++        source_kind = "image"
++    return StackServiceCreate(
++        service_name=service.service_name,
++        source_kind=source_kind,  # type: ignore[arg-type]
++        source_ref=service.source_ref,
++        git_branch=service.git_branch,
++        container_port=service.container_port or 80,
++        env_vars=dict(service.env_vars or {}),
++        command=service.command,
++        public_route=bool(service.public_route),
++        depends_on=service.depends_on,
++        volumes=volumes or [],
++        scaling_policy=scaling,
++        build_override=service.build_override,
++    )
++
++
+ def _stack_to_public(
+     stack: Stack,
+     child_stack_ids: list[uuid.UUID] | None = None,
+@@ -282,6 +329,7 @@ def _stack_to_public(
+                 service_name=s.service_name,
+                 source_kind=s.source_kind,
+                 source_ref=s.source_ref,
++                git_branch=s.git_branch,
+                 container_port=s.container_port,
+                 env_vars=s.env_vars,
+                 command=s.command,
+@@ -289,6 +337,7 @@ def _stack_to_public(
+                 depends_on=s.depends_on,
+                 volumes=s.volumes,
+                 scaling_policy=s.scaling_policy,
++                build_override=s.build_override,
+             )
+             for s in stack.services
+         ],
+diff --git a/backend/app/api/schemas.py b/backend/app/api/schemas.py
+index 9c5513f..cb5157b 100644
+--- a/backend/app/api/schemas.py
++++ b/backend/app/api/schemas.py
+@@ -20,6 +20,7 @@ from app.core.containers.volume_uploads import (
+     VOLUME_UPLOAD_USER_QUOTA_BYTES,
+ )
+ from app.core.models import (
++    BuildOverride,
+     ContainerInfo,
+     ProjectSource,
+     ScalingPolicyConfig,
+@@ -164,6 +165,10 @@ class RunFromSourceRequest(BaseModel):
+         default=None,
+         description="When set, persist an auto-scaling policy for this container after deploy.",
+     )
++    build_override: BuildOverride | None = Field(
++        default=None,
++        description="Manual language / build settings when auto-detection is insufficient.",
++    )
+ 
+     @field_validator("env_vars")
+     @classmethod
+@@ -362,6 +367,10 @@ class BuilderBuildRequest(BaseModel):
+         max_length=256,
+         description="Image reference to assign to the built image (e.g. vela/myapp:dev).",
+     )
++    build_override: BuildOverride | None = Field(
++        default=None,
++        description="Manual language / build settings when auto-detection is insufficient.",
++    )
+ 
+ 
+ class BuilderAnalyzeRequest(BaseModel):
+@@ -407,6 +416,8 @@ class GitSourceAnalysis(BaseModel):
+         "generated_dockerfile"
+     )
+     summary_hint: str = ""
++    build_subdir: str | None = None
++    needs_manual_build_config: bool = False
+ 
+ 
+ class AiPrefillPreferences(BaseModel):
+@@ -510,6 +521,7 @@ class DeploymentRecordPublic(BaseModel):
+     env_vars: dict[str, str]
+     command: list[str] | None
+     dockerfile_snapshot: str | None
++    build_override: dict | None = None
+     public_url: str | None
+     created_at: datetime
+ 
+@@ -695,6 +707,7 @@ class StackServiceCreate(BaseModel):
+     service_name: str = Field(min_length=1, max_length=128)
+     source_kind: Literal["image", "git", "dockerfile_template"]
+     source_ref: str = Field(min_length=1, max_length=2048)
++    git_branch: str | None = Field(default=None, max_length=256)
+     container_port: int = Field(default=80, ge=1, le=65535)
+     env_vars: dict[str, str] = Field(default_factory=dict)
+     command: list[str] | None = None
+@@ -702,6 +715,7 @@ class StackServiceCreate(BaseModel):
+     depends_on: list[str] | None = None
+     volumes: list[VolumeMountRequest] = Field(default_factory=list)
+     scaling_policy: ScalingPolicyConfig | None = None
++    build_override: BuildOverride | None = None
+ 
+ 
+ class StackCreate(BaseModel):
+@@ -719,6 +733,7 @@ class StackServicePublic(BaseModel):
+     service_name: str
+     source_kind: str
+     source_ref: str
++    git_branch: str | None = None
+     container_port: int
+     env_vars: dict[str, str]
+     command: list[str] | None
+@@ -726,6 +741,7 @@ class StackServicePublic(BaseModel):
+     depends_on: list[str] | None
+     volumes: list
+     scaling_policy: dict | None
++    build_override: dict | None = None
+ 
+ 
+ class StackPublic(BaseModel):
+@@ -749,3 +765,12 @@ class ComposeImportRequest(BaseModel):
+ class ComposeImportResponse(BaseModel):
+     stack: StackPublic
+     warnings: list[str] = []
++
++
++class ComposeParseRequest(BaseModel):
++    yaml_content: str
++
++
++class ComposeParseResponse(BaseModel):
++    services: list[StackServiceCreate]
++    warnings: list[str] = []
+diff --git a/backend/app/core/build/builder.py b/backend/app/core/build/builder.py
+index cc4616f..0d448de 100644
+--- a/backend/app/core/build/builder.py
++++ b/backend/app/core/build/builder.py
+@@ -1,6 +1,6 @@
+ from abc import ABC, abstractmethod
+ 
+-from app.core.models import BuildResult, ProjectInfo, ProjectSource
++from app.core.models import BuildOverride, BuildResult, ProjectInfo, ProjectSource
+ 
+ 
+ class ImageBuilder(ABC):
+@@ -20,6 +20,7 @@ class ImageBuilder(ABC):
+         *,
+         tag: str,
+         access_token: str | None = None,
++        override: BuildOverride | None = None,
+     ) -> BuildResult:
+         """Full pipeline: clone ÔåÆ analyse ÔåÆ generate/detect Dockerfile ÔåÆ build.
+ 
+@@ -32,6 +33,8 @@ class ImageBuilder(ABC):
+             tag:    Image tag to assign to the built image.
+             access_token: Optional credential forwarded to the git clone for
+                 private HTTPS repos. Never stored alongside ``source``.
++            override: Optional client-supplied build settings when detection
++                fails or the user pins language / ``build_subdir``.
+ 
+         Returns:
+             A ``BuildResult`` with the image ID, tag, strategy used, and
+diff --git a/backend/app/core/build/default_image_builder.py b/backend/app/core/build/default_image_builder.py
+index c1bbd1a..9e9e565 100644
+--- a/backend/app/core/build/default_image_builder.py
++++ b/backend/app/core/build/default_image_builder.py
+@@ -10,7 +10,7 @@ from app.core.build.builder import ImageBuilder
+ from app.core.enums import BuildStrategy
+ from app.core.exceptions import AnalysisError
+ from app.core.git.git_ops import git_shallow_clone, rm_tree
+-from app.core.models import BuildResult, ProjectInfo, ProjectSource
++from app.core.models import BuildOverride, BuildResult, ProjectInfo, ProjectSource
+ from app.core.containers.orchestrator import ContainerOrchestrator
+ from app.core.git.project_analysis import (
+     analyze_project,
+@@ -80,6 +80,7 @@ class DefaultImageBuilder(ImageBuilder):
+         *,
+         tag: str,
+         access_token: str | None = None,
++        override: BuildOverride | None = None,
+     ) -> BuildResult:
+         """
+         Builds a container image from the given project source (either a Git repository or a local directory) and returns metadata about the completed build.
+@@ -88,6 +89,7 @@ class DefaultImageBuilder(ImageBuilder):
+             source (ProjectSource): Source describing either a Git repository (git_url, optional branch) or a local filesystem path (local_path).
+             tag (str): Image tag to apply to the built image.
+             access_token (str | None): Optional access token used when cloning private Git repositories.
++            override (BuildOverride | None): Optional manual language / subdir settings.
+         
+         Returns:
+             BuildResult: Contains the built image identifier and tag, the selected build strategy, an (empty) build log, and the analyzed ProjectInfo for the build context.
+@@ -112,16 +114,24 @@ class DefaultImageBuilder(ImageBuilder):
+ 
+         try:
+             strategy, info = ensure_dockerfile_for_build(
+-                Path(project_path), from_git_clone=source.git_url is not None
++                Path(project_path),
++                from_git_clone=source.git_url is not None,
++                override=override,
+             )
+-            dockerfile_path = Path(project_path) / "Dockerfile"
++            build_root = Path(project_path)
++            if info.build_subdir:
++                candidate = (build_root / info.build_subdir).resolve()
++                if not candidate.is_relative_to(build_root.resolve()):
++                    raise AnalysisError(str(build_root), "invalid build_subdir")
++                build_root = candidate
++            dockerfile_path = build_root / "Dockerfile"
+             dockerfile_snapshot = (
+                 dockerfile_path.read_text(encoding="utf-8")
+                 if dockerfile_path.is_file()
+                 else None
+             )
+             image_id = await self._orchestrator.build_image(
+-                project_path, tag=tag, dockerfile="Dockerfile"
++                str(build_root), tag=tag, dockerfile="Dockerfile"
+             )
+             return BuildResult(
+                 image_id=image_id,
+diff --git a/backend/app/core/enums.py b/backend/app/core/enums.py
+index 586e532..f428873 100644
+--- a/backend/app/core/enums.py
++++ b/backend/app/core/enums.py
+@@ -39,6 +39,10 @@ class SupportedLanguage(StrEnum):
+     JAVA = "java"
+     RUST = "rust"
+     RUBY = "ruby"
++    PHP = "php"
++    DOTNET = "dotnet"
++    ELIXIR = "elixir"
++    CLOJURE = "clojure"
+     UNKNOWN = "unknown"
+ 
+ 
+diff --git a/backend/app/core/exceptions.py b/backend/app/core/exceptions.py
+index 5b21353..a82b031 100644
+--- a/backend/app/core/exceptions.py
++++ b/backend/app/core/exceptions.py
+@@ -117,6 +117,18 @@ class UnsupportedProjectError(VelaError):
+         super().__init__(message)
+ 
+ 
++class NeedsBuildOverrideError(BuilderError):
++    """Detection failed; client should collect a BuildOverride via modal."""
++
++    code = "needs_build_override"
++
++    def __init__(self, message: str) -> None:
++        super().__init__(message)
++
++    def api_response_content(self) -> dict[str, object]:
++        return {"code": self.code, "detail": str(self)}
++
++
+ class CloneError(BuilderError):
+     def __init__(self, git_url: str, message: str) -> None:
+         self.git_url = git_url
+diff --git a/backend/app/core/git/dockerfile_templates.py b/backend/app/core/git/dockerfile_templates.py
+new file mode 100644
+index 0000000..6919b2b
+--- /dev/null
++++ b/backend/app/core/git/dockerfile_templates.py
+@@ -0,0 +1,350 @@
++"""Per-language Dockerfile text generators (no filesystem I/O)."""
++
++from __future__ import annotations
++
++import json
++
++from app.core.enums import SupportedLanguage
++from app.core.exceptions import DockerfileGenerationError
++from app.core.models import BuildOverride, ProjectInfo
++
++_GO_VERSION_DEFAULT = "1.23"
++_PYTHON_VERSION_DEFAULT = "3.12"
++_NODE_VERSION_DEFAULT = "20"
++_JVM_VERSION_DEFAULT = "21"
++_RUST_VERSION_DEFAULT = "1.82"
++_DOTNET_VERSION_DEFAULT = "8.0"
++_RUBY_VERSION_DEFAULT = "3.3"
++_PHP_VERSION_DEFAULT = "8.3"
++_ELIXIR_VERSION_DEFAULT = "1.17"
++_ELIXIR_OTP_DEFAULT = "27"
++
++__all__ = ["dockerfile_contents_for"]
++
++
++def dockerfile_contents_for(
++    info: ProjectInfo,
++    *,
++    override: BuildOverride | None = None,
++    from_git_clone: bool = False,
++) -> str:
++    """Return Dockerfile text for the given analysis (no I/O)."""
++    match info.language:
++        case SupportedLanguage.GO:
++            return _dockerfile_go(override)
++        case SupportedLanguage.PYTHON:
++            return _dockerfile_python(override)
++        case SupportedLanguage.JAVASCRIPT | SupportedLanguage.TYPESCRIPT:
++            if from_git_clone:
++                return _dockerfile_node_git_clone(override)
++            return _dockerfile_node(override)
++        case SupportedLanguage.JAVA:
++            return _dockerfile_java(info, override)
++        case SupportedLanguage.CLOJURE:
++            return _dockerfile_clojure(info, override)
++        case SupportedLanguage.RUST:
++            return _dockerfile_rust(override)
++        case SupportedLanguage.RUBY:
++            return _dockerfile_ruby(override)
++        case SupportedLanguage.PHP:
++            return _dockerfile_php(override)
++        case SupportedLanguage.DOTNET:
++            return _dockerfile_dotnet(override)
++        case SupportedLanguage.ELIXIR:
++            return _dockerfile_elixir(override)
++        case SupportedLanguage.UNKNOWN:
++            raise DockerfileGenerationError(
++                str(info.language),
++                "cannot generate a Dockerfile without a known language",
++            )
++        case _:
++            raise DockerfileGenerationError(
++                str(info.language),
++                "no built-in template for this language",
++            )
++
++
++def _cmd_line(default_tokens: list[str], override: BuildOverride | None) -> str:
++    tokens = override.start_command if override and override.start_command else default_tokens
++    return "CMD " + json.dumps(tokens)
++
++
++def _language_version(override: BuildOverride | None, default: str) -> str:
++    if override and override.language_version:
++        return override.language_version
++    return default
++
++
++def _dockerfile_go(override: BuildOverride | None) -> str:
++    version = _language_version(override, _GO_VERSION_DEFAULT)
++    cmd = _cmd_line(["./app"], override)
++    return f"""# Generated by Vela ÔÇö minimal Go service image
++FROM golang:{version}-alpine AS builder
++WORKDIR /src
++COPY go.mod go.sum* ./
++RUN go mod download
++COPY . .
++RUN CGO_ENABLED=0 go build -o /out/app .
++
++FROM alpine:3.20
++RUN apk add --no-cache ca-certificates
++WORKDIR /app
++COPY --from=builder /out/app ./app
++EXPOSE 8080
++USER nobody
++{cmd}
++"""
++
++
++def _dockerfile_python(override: BuildOverride | None) -> str:
++    version = _language_version(override, _PYTHON_VERSION_DEFAULT)
++    cmd = _cmd_line(["python", "-m", "http.server", "8000"], override)
++    return f"""# Generated by Vela ÔÇö minimal Python image
++FROM python:{version}-slim
++WORKDIR /app
++ENV PYTHONDONTWRITEBYTECODE=1 PIP_NO_CACHE_DIR=1
++COPY . .
++RUN pip install --no-cache-dir pip setuptools wheel \\
++    && if [ -f requirements.txt ]; then pip install --no-cache-dir -r requirements.txt; \\
++    else pip install --no-cache-dir .; fi
++EXPOSE 8000
++{cmd}
++"""
++
++
++def _dockerfile_node(override: BuildOverride | None) -> str:
++    version = _language_version(override, _NODE_VERSION_DEFAULT)
++    cmd = _cmd_line(
++        [
++            "sh",
++            "-c",
++            "npm run start || npm run dev || npm run preview -- --host 0.0.0.0 --port 4173",
++        ],
++        override,
++    )
++    return f"""# Generated by Vela ÔÇö Node/Vite/React (start, dev, or preview)
++FROM node:{version}-bookworm-slim
++WORKDIR /app
++COPY package.json package-lock.json* ./
++RUN if [ -f package-lock.json ]; then npm ci; else npm install; fi
++COPY . .
++EXPOSE 3000 5173 4173
++ENV NODE_ENV=development
++ENV HOST=0.0.0.0
++# Missing scripts must exit non-zero so ``||`` can fall through to ``dev`` / ``preview``.
++{cmd}
++"""
++
++
++def _dockerfile_node_git_clone(override: BuildOverride | None) -> str:
++    """Node template for repos cloned from Git: fixed install + dev server."""
++    version = _language_version(override, _NODE_VERSION_DEFAULT)
++    cmd = _cmd_line(
++        ["npm", "run", "dev", "--", "--host", "0.0.0.0", "--no-open"],
++        override,
++    )
++    return f"""# Generated by Vela ÔÇö Node from Git (npm ci + npm run dev)
++FROM node:{version}-bookworm-slim
++WORKDIR /app
++COPY package.json package-lock.json* ./
++RUN npm ci
++COPY . .
++EXPOSE 3000 5173 4173
++ENV NODE_ENV=development
++ENV HOST=0.0.0.0
++# Vite may try ``xdg-open`` if ``server.open`` is set; slim images have no browser.
++ENV BROWSER=none
++{cmd}
++"""
++
++
++def _resolve_java_build_tool(info: ProjectInfo, override: BuildOverride | None) -> str:
++    if override and override.package_manager in ("gradle", "maven"):
++        return override.package_manager
++    dependency_file = (info.dependency_file or "").lower()
++    if "pom.xml" in dependency_file:
++        return "maven"
++    return "gradle"
++
++
++def _dockerfile_java(info: ProjectInfo, override: BuildOverride | None) -> str:
++    version = _language_version(override, _JVM_VERSION_DEFAULT)
++    cmd = _cmd_line(["java", "-jar", "app.jar"], override)
++
++    if _resolve_java_build_tool(info, override) == "maven":
++        return f"""# Generated by Vela ÔÇö Java (Maven) multi-stage build
++FROM maven:3.9-eclipse-temurin-{version} AS builder
++WORKDIR /src
++COPY . .
++RUN ./mvnw -q -DskipTests package 2>/dev/null || mvn -q -DskipTests package
++RUN mkdir -p /out \\
++    && (find ./target -maxdepth 1 -name "*.jar" -not -name "*-plain.jar" -exec cp {{}} /out/app.jar \\; ) \\
++    || find ./target -maxdepth 1 -name "*.jar" -exec cp {{}} /out/app.jar \\;
++
++FROM eclipse-temurin:{version}-jre
++WORKDIR /app
++COPY --from=builder /out/app.jar ./app.jar
++EXPOSE 8080
++{cmd}
++"""
++
++    return f"""# Generated by Vela ÔÇö Java (Gradle) multi-stage build
++FROM gradle:8.10-jdk{version} AS builder
++WORKDIR /src
++COPY . .
++RUN ./gradlew bootJar -x test --no-daemon 2>/dev/null \\
++    || gradle bootJar -x test --no-daemon 2>/dev/null \\
++    || ./gradlew build -x test --no-daemon 2>/dev/null \\
++    || gradle build -x test --no-daemon
++RUN mkdir -p /out \\
++    && (find . -path "*/build/libs/*.jar" -not -name "*-plain.jar" -exec cp {{}} /out/app.jar \\; ) \\
++    || find . -path "*/build/libs/*.jar" -exec cp {{}} /out/app.jar \\;
++
++FROM eclipse-temurin:{version}-jre
++WORKDIR /app
++COPY --from=builder /out/app.jar ./app.jar
++EXPOSE 8080
++{cmd}
++"""
++
++
++def _resolve_clojure_tool(info: ProjectInfo, override: BuildOverride | None) -> str:
++    if override and override.package_manager in ("deps", "lein"):
++        return override.package_manager
++    dependency_file = (info.dependency_file or "").lower()
++    if "project.clj" in dependency_file:
++        return "lein"
++    return "deps"
++
++
++def _dockerfile_clojure(info: ProjectInfo, override: BuildOverride | None) -> str:
++    version = _language_version(override, _JVM_VERSION_DEFAULT)
++    cmd = _cmd_line(["java", "-jar", "app.jar"], override)
++
++    if _resolve_clojure_tool(info, override) == "lein":
++        return f"""# Generated by Vela ÔÇö Clojure (Leiningen) multi-stage build
++FROM clojure:temurin-{version}-lein AS builder
++WORKDIR /src
++COPY . .
++RUN lein uberjar
++RUN mkdir -p /out \\
++    && find ./target -name "*standalone*.jar" -exec cp {{}} /out/app.jar \\; \\
++    && test -f /out/app.jar
++
++FROM eclipse-temurin:{version}-jre
++WORKDIR /app
++COPY --from=builder /out/app.jar ./app.jar
++EXPOSE 8080
++{cmd}
++"""
++
++    return f"""# Generated by Vela ÔÇö Clojure (tools.deps) multi-stage build
++FROM clojure:temurin-{version}-tools-deps AS builder
++WORKDIR /src
++COPY . .
++RUN clojure -T:build uberjar 2>/dev/null || clojure -X:uberjar
++RUN mkdir -p /out \\
++    && find . -name "*.jar" -not -path "*/.cpcache/*" -exec cp {{}} /out/app.jar \\; \\
++    && test -f /out/app.jar
++
++FROM eclipse-temurin:{version}-jre
++WORKDIR /app
++COPY --from=builder /out/app.jar ./app.jar
++EXPOSE 8080
++{cmd}
++"""
++
++
++def _dockerfile_rust(override: BuildOverride | None) -> str:
++    version = _language_version(override, _RUST_VERSION_DEFAULT)
++    cmd = _cmd_line(
++        ["sh", "-c", "exec $(find ./bin -maxdepth 1 -type f -executable | head -n1)"],
++        override,
++    )
++    return f"""# Generated by Vela ÔÇö Rust multi-stage build
++FROM rust:{version}-slim AS builder
++WORKDIR /src
++COPY . .
++RUN cargo build --release
++
++FROM debian:bookworm-slim
++RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \\
++    && rm -rf /var/lib/apt/lists/*
++WORKDIR /app
++COPY --from=builder /src/target/release/ ./bin/
++EXPOSE 8080
++{cmd}
++"""
++
++
++def _dockerfile_ruby(override: BuildOverride | None) -> str:
++    version = _language_version(override, _RUBY_VERSION_DEFAULT)
++    cmd = _cmd_line(["bundle", "exec", "rackup", "-o", "0.0.0.0", "-p", "8080"], override)
++    return f"""# Generated by Vela ÔÇö Ruby (Bundler) image
++FROM ruby:{version}-slim
++WORKDIR /app
++RUN apt-get update && apt-get install -y --no-install-recommends build-essential \\
++    && rm -rf /var/lib/apt/lists/*
++COPY Gemfile Gemfile.lock* ./
++RUN bundle install
++COPY . .
++EXPOSE 8080
++{cmd}
++"""
++
++
++def _dockerfile_php(override: BuildOverride | None) -> str:
++    version = _language_version(override, _PHP_VERSION_DEFAULT)
++    cmd = _cmd_line(["php", "-S", "0.0.0.0:8080", "-t", "."], override)
++    return f"""# Generated by Vela ÔÇö PHP (Composer) built-in server
++FROM php:{version}-cli
++WORKDIR /app
++RUN apt-get update && apt-get install -y --no-install-recommends unzip git curl \\
++    && rm -rf /var/lib/apt/lists/* \\
++    && curl -sS https://getcomposer.org/installer | php -- --install-dir=/usr/local/bin --filename=composer
++COPY composer.json composer.lock* ./
++RUN composer install --no-dev --no-interaction --prefer-dist
++COPY . .
++EXPOSE 8080
++{cmd}
++"""
++
++
++def _dockerfile_dotnet(override: BuildOverride | None) -> str:
++    version = _language_version(override, _DOTNET_VERSION_DEFAULT)
++    cmd = _cmd_line(["dotnet", "app.dll"], override)
++    return f"""# Generated by Vela ÔÇö .NET multi-stage build
++FROM mcr.microsoft.com/dotnet/sdk:{version} AS builder
++WORKDIR /src
++COPY . .
++RUN dotnet publish -c Release -o /out
++
++FROM mcr.microsoft.com/dotnet/aspnet:{version}
++WORKDIR /app
++COPY --from=builder /out ./
++EXPOSE 8080
++ENV ASPNETCORE_URLS=http://0.0.0.0:8080
++{cmd}
++"""
++
++
++def _dockerfile_elixir(override: BuildOverride | None) -> str:
++    version = _language_version(override, _ELIXIR_VERSION_DEFAULT)
++    cmd = _cmd_line(["_build/prod/rel/app/bin/app", "start"], override)
++    return f"""# Generated by Vela ÔÇö Elixir release build
++FROM elixir:{version}-otp-{_ELIXIR_OTP_DEFAULT}-slim AS builder
++WORKDIR /src
++ENV MIX_ENV=prod
++RUN mix local.hex --force && mix local.rebar --force
++COPY mix.exs mix.lock* ./
++RUN mix deps.get --only prod
++COPY . .
++RUN mix release \\
++    && test -d /src/_build/prod/rel
++
++FROM elixir:{version}-otp-{_ELIXIR_OTP_DEFAULT}-slim
++WORKDIR /app
++COPY --from=builder /src/_build/prod/rel/ ./_build/prod/rel/
++EXPOSE 8080
++{cmd}
++"""
+diff --git a/backend/app/core/git/git_ops.py b/backend/app/core/git/git_ops.py
+index 99df57f..1e3e1ca 100644
+--- a/backend/app/core/git/git_ops.py
++++ b/backend/app/core/git/git_ops.py
+@@ -10,6 +10,7 @@ import subprocess
+ from pathlib import Path
+ 
+ from app.core.exceptions import CloneError
++from app.e2e_support import e2e_git_shallow_clone_if_enabled
+ 
+ _CREDENTIALS_IN_URL = re.compile(r"(https?://)([^/@:\s]+:)?[^/@\s]+@", re.IGNORECASE)
+ 
+@@ -28,6 +29,13 @@ async def git_shallow_clone(
+     (``ps``), or in any error message. Errors are sanitized to mask credentials
+     that callers might have embedded in the URL themselves.
+     """
++    if e2e_git_shallow_clone_if_enabled(
++        url=url,
++        branch=branch,
++        dest=dest,
++        access_token=access_token,
++    ):
++        return
+ 
+     cmd = _build_clone_command(url=url, branch=branch, dest=dest, access_token=access_token)
+ 
+diff --git a/backend/app/core/git/git_source_analysis.py b/backend/app/core/git/git_source_analysis.py
+index 2b368aa..9046ea6 100644
+--- a/backend/app/core/git/git_source_analysis.py
++++ b/backend/app/core/git/git_source_analysis.py
+@@ -13,6 +13,7 @@ from pydantic import ValidationError
+ 
+ from app.api.schemas import GitSourceAnalysis
+ from app.core.build.default_image_builder import DefaultImageBuilder
++from app.core.enums import SupportedLanguage
+ from app.core.exceptions import GitSourceAnalysisError
+ from app.core.git.project_analysis import analyze_project
+ from app.e2e_support import e2e_git_source_analysis_if_enabled
+@@ -230,6 +231,22 @@ def _merge_env_fallback(
+     return analysis.model_copy(update={"env_vars": extracted})
+ 
+ 
++def _enrich_with_local_detection(
++    analysis: GitSourceAnalysis,
++    project_root: Path,
++) -> GitSourceAnalysis:
++    info = analyze_project(project_root)
++    needs_manual = (
++        not info.has_dockerfile and info.language is SupportedLanguage.UNKNOWN
++    )
++    return analysis.model_copy(
++        update={
++            "build_subdir": info.build_subdir,
++            "needs_manual_build_config": needs_manual,
++        }
++    )
++
++
+ def _analysis_json_schema() -> dict:
+     """Gemini ``responseSchema`` subset (UPPERCASE types, ``nullable``, no type arrays)."""
+     return {
+@@ -368,6 +385,14 @@ def _fallback_analysis(project_root: Path, git_branch: str) -> GitSourceAnalysis
+         if info.has_dockerfile
+         else "Vela will generate a Dockerfile for this project."
+     )
++    needs_manual = (
++        not info.has_dockerfile and info.language is SupportedLanguage.UNKNOWN
++    )
++    if needs_manual:
++        hint = (
++            "No Dockerfile or recognized project markers were found. "
++            "Choose a language and build settings to continue."
++        )
+     return GitSourceAnalysis(
+         git_branch=git_branch,
+         container_port=port,
+@@ -379,6 +404,8 @@ def _fallback_analysis(project_root: Path, git_branch: str) -> GitSourceAnalysis
+         has_dockerfile=info.has_dockerfile,
+         build_strategy=strategy,
+         summary_hint=hint,
++        build_subdir=info.build_subdir,
++        needs_manual_build_config=needs_manual,
+     )
+ 
+ 
+@@ -405,7 +432,8 @@ async def analyze_git_source(
+         if _gemini_api_key() is None:
+             return _merge_env_fallback(_fallback_analysis(root, git_branch), context)
+         analysis = await _call_gemini(context, git_url, git_branch)
+-        return _merge_env_fallback(analysis, context)
++        enriched = _enrich_with_local_detection(analysis, root)
++        return _merge_env_fallback(enriched, context)
+     finally:
+         from app.core.git.git_ops import rm_tree
+ 
+diff --git a/backend/app/core/git/language_detection.py b/backend/app/core/git/language_detection.py
+new file mode 100644
+index 0000000..7f5402c
+--- /dev/null
++++ b/backend/app/core/git/language_detection.py
+@@ -0,0 +1,220 @@
++"""Detect a project's language from filesystem markers (root first, then a shallow scan)."""
++
++from __future__ import annotations
++
++import json
++from collections.abc import Callable, Iterator
++from pathlib import Path
++
++from app.core.enums import SupportedLanguage
++from app.core.exceptions import AnalysisError
++from app.core.models import ProjectInfo
++
++MAX_SCAN_DEPTH = 2
++
++IGNORE_DIR_NAMES: frozenset[str] = frozenset(
++    {
++        ".git",
++        "node_modules",
++        "vendor",
++        "target",
++        "build",
++        "dist",
++        ".gradle",
++        ".idea",
++        "__pycache__",
++        ".venv",
++        "venv",
++        "bundle",
++        "obj",
++        "_build",
++        ".dart_tool",
++    }
++)
++
++_MarkerMatcher = Callable[[Path], str | None]
++
++
++def _match_exact(*names: str) -> _MarkerMatcher:
++    def _matcher(directory: Path) -> str | None:
++        for name in names:
++            if (directory / name).is_file():
++                return name
++        return None
++
++    return _matcher
++
++
++def _match_glob(*patterns: str) -> _MarkerMatcher:
++    def _matcher(directory: Path) -> str | None:
++        for pattern in patterns:
++            matches = sorted(directory.glob(pattern))
++            if matches:
++                return matches[0].name
++        return None
++
++    return _matcher
++
++
++# Ascending priority; second int breaks same-directory ties (e.g. Clojure over Gradle).
++_MARKER_RULES: list[tuple[tuple[int, int], SupportedLanguage, _MarkerMatcher]] = [
++    ((1, 0), SupportedLanguage.GO, _match_exact("go.mod")),
++    ((2, 0), SupportedLanguage.CLOJURE, _match_exact("deps.edn", "project.clj", "bb.edn")),
++    (
++        (2, 1),
++        SupportedLanguage.JAVA,
++        _match_exact(
++            "pom.xml",
++            "build.gradle",
++            "build.gradle.kts",
++            "settings.gradle",
++            "settings.gradle.kts",
++        ),
++    ),
++    ((3, 0), SupportedLanguage.RUST, _match_exact("Cargo.toml")),
++    ((4, 0), SupportedLanguage.ELIXIR, _match_exact("mix.exs")),
++    ((5, 0), SupportedLanguage.DOTNET, _match_glob("*.csproj", "*.fsproj", "*.vbproj")),
++    ((6, 0), SupportedLanguage.PHP, _match_exact("composer.json")),
++    ((7, 0), SupportedLanguage.RUBY, _match_exact("Gemfile")),
++    ((8, 0), SupportedLanguage.JAVASCRIPT, _match_exact("package.json")),
++    (
++        (9, 0),
++        SupportedLanguage.PYTHON,
++        _match_exact("requirements.txt", "pyproject.toml", "Pipfile"),
++    ),
++]
++
++
++def _read_text(path: Path) -> str | None:
++    try:
++        return path.read_text(encoding="utf-8")
++    except OSError:
++        return None
++
++
++def _detect_kotlin_framework(directory: Path, marker_filename: str) -> str | None:
++    if (directory / "src" / "main" / "kotlin").is_dir():
++        return "kotlin"
++    if not marker_filename.startswith("build.gradle"):
++        return None
++    content = _read_text(directory / marker_filename)
++    if content is not None and "kotlin" in content.lower():
++        return "kotlin"
++    return None
++
++
++def _read_json(path: Path) -> dict | None:
++    try:
++        raw = path.read_text(encoding="utf-8")
++    except OSError:
++        return None
++    try:
++        parsed = json.loads(raw)
++    except json.JSONDecodeError:
++        return None
++    return parsed if isinstance(parsed, dict) else None
++
++
++def _resolve_js_language(directory: Path) -> SupportedLanguage:
++    if (directory / "tsconfig.json").is_file():
++        return SupportedLanguage.TYPESCRIPT
++    data = _read_json(directory / "package.json") or {}
++    deps = {**(data.get("dependencies") or {}), **(data.get("devDependencies") or {})}
++    if "typescript" in deps:
++        return SupportedLanguage.TYPESCRIPT
++    return SupportedLanguage.JAVASCRIPT
++
++
++def _directory_marker(
++    directory: Path,
++) -> tuple[tuple[int, int], SupportedLanguage, str] | None:
++    for rank, language, matcher in _MARKER_RULES:
++        filename = matcher(directory)
++        if filename is not None:
++            return rank, language, filename
++    return None
++
++
++def _child_dirs(directory: Path) -> Iterator[Path]:
++    try:
++        children = sorted(directory.iterdir())
++    except OSError:
++        return
++    for child in children:
++        if child.is_dir() and child.name not in IGNORE_DIR_NAMES:
++            yield child
++
++
++def _dirs_at_depth(root: Path, depth: int) -> Iterator[Path]:
++    if depth == 0:
++        yield root
++        return
++    for parent in _dirs_at_depth(root, depth - 1):
++        yield from _child_dirs(parent)
++
++
++def _find_marker_dir(
++    root: Path,
++) -> tuple[Path, SupportedLanguage, str] | None:
++    for depth in range(MAX_SCAN_DEPTH + 1):
++        candidates: list[tuple[tuple[int, int], Path, SupportedLanguage, str]] = []
++        for directory in _dirs_at_depth(root, depth):
++            found = _directory_marker(directory)
++            if found is not None:
++                rank, language, filename = found
++                candidates.append((rank, directory, language, filename))
++        if candidates:
++            candidates.sort(key=lambda candidate: (candidate[0][0], candidate[1].as_posix()))
++            _, directory, language, filename = candidates[0]
++            return directory, language, filename
++    return None
++
++
++def _detect_dockerfile(root: Path, effective_root: Path) -> tuple[bool, str | None]:
++    for candidate_dir in (effective_root, root):
++        dockerfile = candidate_dir / "Dockerfile"
++        if dockerfile.is_file():
++            return True, dockerfile.relative_to(root).as_posix()
++    return False, None
++
++
++def analyze_project(project_root: Path) -> ProjectInfo:
++    """Inspect a project directory: root markers first, then a shallow, ignore-aware scan."""
++    root = project_root.resolve()
++    if not root.is_dir():
++        raise AnalysisError(str(project_root), "path is not a directory")
++
++    marker = _find_marker_dir(root)
++
++    if marker is None:
++        language = SupportedLanguage.UNKNOWN
++        dependency_file = None
++        build_subdir = None
++        framework = None
++        effective_root = root
++    else:
++        marker_dir, language, filename = marker
++        if language is SupportedLanguage.JAVASCRIPT:
++            language = _resolve_js_language(marker_dir)
++        framework = (
++            _detect_kotlin_framework(marker_dir, filename)
++            if language is SupportedLanguage.JAVA
++            else None
++        )
++        relative_dir = marker_dir.relative_to(root)
++        build_subdir = None if relative_dir == Path() else relative_dir.as_posix()
++        dependency_file = (
++            filename if build_subdir is None else f"{build_subdir}/{filename}"
++        )
++        effective_root = marker_dir
++
++    has_dockerfile, dockerfile_path = _detect_dockerfile(root, effective_root)
++
++    return ProjectInfo(
++        language=language,
++        framework=framework,
++        dependency_file=dependency_file,
++        has_dockerfile=has_dockerfile,
++        dockerfile_path=dockerfile_path,
++        build_subdir=build_subdir,
++    )
+diff --git a/backend/app/core/git/project_analysis.py b/backend/app/core/git/project_analysis.py
+index 27d5d88..156834d 100644
+--- a/backend/app/core/git/project_analysis.py
++++ b/backend/app/core/git/project_analysis.py
+@@ -1,110 +1,35 @@
+-"""Detect project type from filesystem markers and generate Dockerfiles when missing."""
++"""Ensure a Dockerfile exists for a build: detect language, apply overrides, generate templates."""
+ 
+ from __future__ import annotations
+ 
+-import json
+ from pathlib import Path
+ 
+ from app.core.enums import BuildStrategy, SupportedLanguage
+-from app.core.exceptions import AnalysisError, DockerfileGenerationError, UnsupportedProjectError
+-from app.core.models import ProjectInfo
++from app.core.exceptions import AnalysisError, DockerfileGenerationError, NeedsBuildOverrideError
++from app.core.git.dockerfile_templates import dockerfile_contents_for
++from app.core.git.language_detection import analyze_project
++from app.core.models import BuildOverride, ProjectInfo
+ 
++__all__ = [
++    "analyze_project",
++    "dockerfile_contents_for",
++    "ensure_dockerfile_for_build",
++]
+ 
+-def _read_json(path: Path) -> dict | None:
+-    try:
+-        raw = path.read_text(encoding="utf-8")
+-    except OSError:
+-        return None
+-    try:
+-        out = json.loads(raw)
+-    except json.JSONDecodeError:
+-        return None
+-    return out if isinstance(out, dict) else None
+-
+-
+-def analyze_project(project_root: Path) -> ProjectInfo:
+-    """Inspect a project directory (root ``Dockerfile`` and common markers)."""
+-    root = project_root.resolve()
+-    if not root.is_dir():
+-        raise AnalysisError(str(project_root), "path is not a directory")
+-
+-    dockerfile_path: str | None = None
+-    has_dockerfile = (root / "Dockerfile").is_file()
+-    if has_dockerfile:
+-        dockerfile_path = "Dockerfile"
+-
+-    if (root / "go.mod").is_file():
+-        return ProjectInfo(
+-            language=SupportedLanguage.GO,
+-            has_dockerfile=has_dockerfile,
+-            dockerfile_path=dockerfile_path,
+-            dependency_file="go.mod",
+-        )
+-
+-    if (root / "requirements.txt").is_file():
+-        return ProjectInfo(
+-            language=SupportedLanguage.PYTHON,
+-            has_dockerfile=has_dockerfile,
+-            dockerfile_path=dockerfile_path,
+-            dependency_file="requirements.txt",
+-        )
+-
+-    if (root / "pyproject.toml").is_file():
+-        return ProjectInfo(
+-            language=SupportedLanguage.PYTHON,
+-            has_dockerfile=has_dockerfile,
+-            dockerfile_path=dockerfile_path,
+-            dependency_file="pyproject.toml",
+-        )
+ 
+-    pkg = root / "package.json"
+-    if pkg.is_file():
+-        data = _read_json(pkg) or {}
+-        deps = {**(data.get("dependencies") or {}), **(data.get("devDependencies") or {})}
+-        is_ts = (root / "tsconfig.json").is_file() or "typescript" in deps
+-        lang = SupportedLanguage.TYPESCRIPT if is_ts else SupportedLanguage.JAVASCRIPT
+-        return ProjectInfo(
+-            language=lang,
+-            has_dockerfile=has_dockerfile,
+-            dockerfile_path=dockerfile_path,
+-            dependency_file="package.json",
+-        )
++def _resolve_build_subdir(override: BuildOverride | None, info: ProjectInfo) -> str | None:
++    if override is not None and override.build_subdir:
++        return override.build_subdir
++    return info.build_subdir
+ 
+-    return ProjectInfo(
+-        language=SupportedLanguage.UNKNOWN,
+-        has_dockerfile=has_dockerfile,
+-        dockerfile_path=dockerfile_path,
+-        dependency_file=None,
+-    )
+ 
+-
+-def dockerfile_contents_for(
+-    info: ProjectInfo, *, from_git_clone: bool = False
+-) -> str:
+-    """Return Dockerfile text for the given analysis (no I/O)."""
+-    match info.language:
+-        case SupportedLanguage.GO:
+-            return _dockerfile_go()
+-        case SupportedLanguage.PYTHON:
+-            return _dockerfile_python()
+-        case SupportedLanguage.JAVASCRIPT | SupportedLanguage.TYPESCRIPT:
+-            if from_git_clone:
+-                return _dockerfile_node_git_clone()
+-            return _dockerfile_node()
+-        case SupportedLanguage.UNKNOWN:
+-            raise DockerfileGenerationError(
+-                str(info.language),
+-                "cannot generate a Dockerfile without a known language",
+-            )
+-        case (
+-            SupportedLanguage.JAVA
+-            | SupportedLanguage.RUST
+-            | SupportedLanguage.RUBY
+-        ):
+-            raise DockerfileGenerationError(
+-                str(info.language),
+-                "no built-in template for this language",
+-            )
++def _effective_root(root: Path, build_subdir: str | None) -> Path:
++    if not build_subdir:
++        return root
++    candidate = (root / build_subdir).resolve()
++    if not candidate.is_relative_to(root):
++        raise AnalysisError(str(root), f"invalid build_subdir: {build_subdir!r}")
++    return candidate
+ 
+ 
+ def ensure_dockerfile_for_build(
+@@ -112,100 +37,46 @@ def ensure_dockerfile_for_build(
+     *,
+     dockerfile_name: str = "Dockerfile",
+     from_git_clone: bool = False,
++    override: BuildOverride | None = None,
+ ) -> tuple[BuildStrategy, ProjectInfo]:
+-    """If ``dockerfile_name`` is missing, write a generated Dockerfile; return strategy + info."""
++    """Prefer an existing Dockerfile; otherwise generate from override or detection."""
+     root = project_root.resolve()
+-    target = root / dockerfile_name
+     info = analyze_project(root)
+ 
++    build_subdir = _resolve_build_subdir(override, info)
++    effective_root = _effective_root(root, build_subdir)
++    target = effective_root / dockerfile_name
++    dockerfile_path = target.relative_to(root).as_posix()
++
+     if target.is_file():
+         return BuildStrategy.DOCKERFILE_EXISTS, info.model_copy(
+-            update={"has_dockerfile": True, "dockerfile_path": dockerfile_name}
++            update={
++                "has_dockerfile": True,
++                "dockerfile_path": dockerfile_path,
++                "build_subdir": build_subdir,
++            }
+         )
+ 
+-    if info.language is SupportedLanguage.UNKNOWN:
+-        raise UnsupportedProjectError(
++    if override is not None:
++        language = override.language
++    elif info.language is not SupportedLanguage.UNKNOWN:
++        language = info.language
++    else:
++        raise NeedsBuildOverrideError(
+             "No Dockerfile in project root and no supported markers were found. "
+-            "Add a Dockerfile, or add one of: package.json, requirements.txt, "
+-            "pyproject.toml, go.mod."
++            "Add a Dockerfile, or select a language and build settings manually."
+         )
+ 
+-    try:
+-        body = dockerfile_contents_for(info, from_git_clone=from_git_clone)
+-    except DockerfileGenerationError:
+-        raise
++    result_info = info.model_copy(update={"language": language, "build_subdir": build_subdir})
++    body = dockerfile_contents_for(result_info, override=override, from_git_clone=from_git_clone)
++
+     try:
+         target.write_text(body, encoding="utf-8")
+     except OSError as exc:
+         raise DockerfileGenerationError(
+-            str(info.language), f"failed to write {target}: {exc}"
++            str(language), f"failed to write {target}: {exc}"
+         ) from exc
+ 
+-    return BuildStrategy.GENERATED_DOCKERFILE, info.model_copy(
+-        update={"has_dockerfile": True, "dockerfile_path": dockerfile_name}
++    return BuildStrategy.GENERATED_DOCKERFILE, result_info.model_copy(
++        update={"has_dockerfile": True, "dockerfile_path": dockerfile_path}
+     )
+-
+-
+-def _dockerfile_go() -> str:
+-    return """# Generated by Vela ÔÇö minimal Go service image
+-FROM golang:1.23-alpine AS builder
+-WORKDIR /src
+-COPY go.mod go.sum* ./
+-RUN go mod download
+-COPY . .
+-RUN CGO_ENABLED=0 go build -o /out/app .
+-
+-FROM alpine:3.20
+-RUN apk add --no-cache ca-certificates
+-WORKDIR /app
+-COPY --from=builder /out/app ./app
+-EXPOSE 8080
+-USER nobody
+-CMD ["./app"]
+-"""
+-
+-
+-def _dockerfile_python() -> str:
+-    return """# Generated by Vela ÔÇö minimal Python image
+-FROM python:3.12-slim
+-WORKDIR /app
+-ENV PYTHONDONTWRITEBYTECODE=1 PIP_NO_CACHE_DIR=1
+-COPY . .
+-RUN pip install --no-cache-dir pip setuptools wheel \\
+-    && if [ -f requirements.txt ]; then pip install --no-cache-dir -r requirements.txt; \\
+-    else pip install --no-cache-dir .; fi
+-EXPOSE 8000
+-CMD ["python", "-m", "http.server", "8000"]
+-"""
+-
+-
+-def _dockerfile_node() -> str:
+-    return """# Generated by Vela ÔÇö Node/Vite/React (start, dev, or preview)
+-FROM node:20-bookworm-slim
+-WORKDIR /app
+-COPY package.json package-lock.json* ./
+-RUN if [ -f package-lock.json ]; then npm ci; else npm install; fi
+-COPY . .
+-EXPOSE 3000 5173 4173
+-ENV NODE_ENV=development
+-ENV HOST=0.0.0.0
+-# Missing scripts must exit non-zero so ``||`` can fall through to ``dev`` / ``preview``.
+-CMD ["sh", "-c", "npm run start || npm run dev || npm run preview -- --host 0.0.0.0 --port 4173"]
+-"""
+-
+-
+-def _dockerfile_node_git_clone() -> str:
+-    """Node template for repos cloned from Git: fixed install + dev server."""
+-    return """# Generated by Vela ÔÇö Node from Git (npm ci + npm run dev)
+-FROM node:20-bookworm-slim
+-WORKDIR /app
+-COPY package.json package-lock.json* ./
+-RUN npm ci
+-COPY . .
+-EXPOSE 3000 5173 4173
+-ENV NODE_ENV=development
+-ENV HOST=0.0.0.0
+-# Vite may try ``xdg-open`` if ``server.open`` is set; slim images have no browser.
+-ENV BROWSER=none
+-CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0", "--no-open"]
+-"""
+diff --git a/backend/app/core/models.py b/backend/app/core/models.py
+index 5014a54..eb62586 100644
+--- a/backend/app/core/models.py
++++ b/backend/app/core/models.py
+@@ -208,6 +208,14 @@ class ProjectSource(BaseModel):
+         return self
+ 
+ 
++class BuildOverride(BaseModel):
++    language: SupportedLanguage
++    language_version: str | None = None
++    package_manager: str | None = None
++    build_subdir: str | None = None
++    start_command: list[str] | None = None
++
++
+ class ProjectInfo(BaseModel):
+     language: SupportedLanguage
+     language_version: str | None = None
+@@ -216,6 +224,7 @@ class ProjectInfo(BaseModel):
+     dependency_file: str | None = None
+     has_dockerfile: bool = False
+     dockerfile_path: str | None = None
++    build_subdir: str | None = None
+ 
+ 
+ class BuildResult(BaseModel):
+diff --git a/backend/app/core/stacks/deploy.py b/backend/app/core/stacks/deploy.py
+index 8313292..499d916 100644
+--- a/backend/app/core/stacks/deploy.py
++++ b/backend/app/core/stacks/deploy.py
+@@ -17,12 +17,25 @@ from app.core.containers.docker_orchestrator import (
+ from app.core.containers.orchestrator import ContainerOrchestrator
+ from app.core.containers.volume_uploads import resolve_volume_upload_path
+ from app.core.enums import RestartPolicy
+-from app.core.exceptions import CloneError
+-from app.core.models import ContainerInfo, DeployConfig, ProjectSource, VolumeMount
++from app.core.exceptions import CloneError, NeedsBuildOverrideError
++from app.core.models import (
++    BuildOverride,
++    ContainerInfo,
++    DeployConfig,
++    ProjectSource,
++    VolumeMount,
++)
+ from app.core.traffic.traffic_router import TrafficRouter
+ from app.db.models import DeploymentRecord, Stack, StackService, User
+ 
+ 
++def _build_override_from_service(service: StackService) -> BuildOverride | None:
++    raw = service.build_override
++    if not raw:
++        return None
++    return BuildOverride.model_validate(raw)
++
++
+ async def deploy_stack(
+     session: AsyncSession,
+     orchestrator: ContainerOrchestrator,
+@@ -128,6 +141,13 @@ async def deploy_stack(
+         if len(deployed_containers) < len(services):
+             failed_service = services[len(deployed_containers)].service_name
+ 
++        if isinstance(exc, NeedsBuildOverrideError):
++            if failed_service:
++                raise NeedsBuildOverrideError(
++                    f"Deploy failed on service '{failed_service}': {exc}"
++                ) from exc
++            raise
++
+         return {
+             "error": str(exc),
+             "failed_service": failed_service,
+@@ -165,13 +185,16 @@ async def _resolve_service_image(
+             )
+ 
+             git_url = service.source_ref.strip()
++            branch = (service.git_branch or "main").strip() or "main"
+             access_token = await _github_token_for_url(session, user, git_url)
+             tag = f"vela/gitbuild:{uuid.uuid4().hex[:12]}"
++            override = _build_override_from_service(service)
+             try:
+                 build_result = await image_builder.build_from_source(
+-                    ProjectSource(git_url=git_url, branch="main"),
++                    ProjectSource(git_url=git_url, branch=branch),
+                     tag=tag,
+                     access_token=access_token,
++                    override=override,
+                 )
+             except CloneError as exc:
+                 if (
+diff --git a/backend/app/db/models.py b/backend/app/db/models.py
+index 726429a..c287996 100644
+--- a/backend/app/db/models.py
++++ b/backend/app/db/models.py
+@@ -291,6 +291,7 @@ class DeploymentRecord(Base):
+     env_vars: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+     command: Mapped[list | None] = mapped_column(JSON, nullable=True)
+     dockerfile_snapshot: Mapped[str | None] = mapped_column(Text, nullable=True)
++    build_override: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+     public_url: Mapped[str | None] = mapped_column(String(2048), nullable=True)
+     stack_id: Mapped[uuid.UUID | None] = mapped_column(
+         Uuid(as_uuid=True),
+@@ -469,6 +470,7 @@ class StackService(Base):
+     service_name: Mapped[str] = mapped_column(String(128), nullable=False)
+     source_kind: Mapped[str] = mapped_column(String(32), nullable=False)
+     source_ref: Mapped[str] = mapped_column(String(2048), nullable=False)
++    git_branch: Mapped[str | None] = mapped_column(String(256), nullable=True)
+     container_port: Mapped[int] = mapped_column(Integer, nullable=False, default=80)
+     env_vars: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+     command: Mapped[list | None] = mapped_column(JSON, nullable=True)
+@@ -476,6 +478,7 @@ class StackService(Base):
+     depends_on: Mapped[list | None] = mapped_column(JSON, nullable=True)
+     volumes: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+     scaling_policy: Mapped[dict | None] = mapped_column(JSON, nullable=True)
++    build_override: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+     created_at: Mapped[datetime] = mapped_column(
+         DateTime(timezone=True), nullable=False, default=_utcnow,
+     )
+diff --git a/frontend/src/pages/containers/BuildConfigModal.tsx b/frontend/src/pages/containers/BuildConfigModal.tsx
+new file mode 100644
+index 0000000..5a96acb
+--- /dev/null
++++ b/frontend/src/pages/containers/BuildConfigModal.tsx
+@@ -0,0 +1,262 @@
++import { useEffect, useId, useRef, useState } from 'react'
++import type { BuildOverride, BuildOverrideLanguage } from '../../api/client'
++import {
++  BUILD_OVERRIDE_LANGUAGES,
++  defaultLanguageVersion,
++  defaultPackageManager,
++  emptyBuildOverride,
++  formatStartCommand,
++  isBuildOverrideLanguage,
++  languageLabel,
++  normalizeBuildOverride,
++  packageManagersForLanguage,
++  parseStartCommand,
++} from './buildOverride'
++
++type BuildConfigModalProps = {
++  open: boolean
++  onCancel: () => void
++  onConfirm: (override: BuildOverride) => void
++  initial?: BuildOverride | null
++}
++
++type FormState = {
++  language: BuildOverrideLanguage
++  languageVersion: string
++  packageManager: string
++  buildSubdir: string
++  startCommand: string
++}
++
++function formStateFromOverride(override: BuildOverride | null | undefined): FormState {
++  const base = override ? normalizeBuildOverride(override) : emptyBuildOverride()
++  return {
++    language: base.language,
++    languageVersion: base.language_version ?? '',
++    packageManager: base.package_manager ?? defaultPackageManager(base.language) ?? '',
++    buildSubdir: base.build_subdir ?? '',
++    startCommand: formatStartCommand(base.start_command),
++  }
++}
++
++export default function BuildConfigModal({
++  open,
++  onCancel,
++  onConfirm,
++  initial = null,
++}: BuildConfigModalProps) {
++  const titleId = useId()
++  const dialogRef = useRef<HTMLDivElement>(null)
++  const [form, setForm] = useState<FormState>(() => formStateFromOverride(initial))
++
++  useEffect(() => {
++    if (!open) {
++      return
++    }
++    setForm(formStateFromOverride(initial))
++  }, [open, initial])
++
++  useEffect(() => {
++    if (!open) {
++      return
++    }
++    const previouslyFocused = document.activeElement as HTMLElement | null
++    dialogRef.current?.focus()
++    function onKeyDown(event: KeyboardEvent) {
++      if (event.key === 'Escape') {
++        event.preventDefault()
++        onCancel()
++      }
++    }
++    window.addEventListener('keydown', onKeyDown)
++    return () => {
++      window.removeEventListener('keydown', onKeyDown)
++      previouslyFocused?.focus()
++    }
++  }, [open, onCancel])
++
++  if (!open) {
++    return null
++  }
++
++  const packageManagers = packageManagersForLanguage(form.language)
++
++  function setLanguage(language: BuildOverrideLanguage) {
++    setForm((previous) => ({
++      ...previous,
++      language,
++      languageVersion: defaultLanguageVersion(language),
++      packageManager: defaultPackageManager(language) ?? '',
++    }))
++  }
++
++  function handleConfirm() {
++    onConfirm(
++      normalizeBuildOverride({
++        language: form.language,
++        language_version: form.languageVersion,
++        package_manager: packageManagers.length > 0 ? form.packageManager : null,
++        build_subdir: form.buildSubdir,
++        start_command: parseStartCommand(form.startCommand),
++      }),
++    )
++  }
++
++  return (
++    <div className="stacks-modal-backdrop" role="presentation" onClick={onCancel}>
++      <div
++        ref={dialogRef}
++        className="stacks-modal stacks-modal--build-config"
++        role="dialog"
++        aria-modal="true"
++        aria-labelledby={titleId}
++        tabIndex={-1}
++        onClick={(event) => event.stopPropagation()}
++      >
++        <header className="stacks-modal__header">
++          <h2 id={titleId} className="stacks-modal__title">
++            Build configuration
++          </h2>
++          <p className="stacks-modal__lead">
++            Choose language and build settings so Vela can generate a Dockerfile.
++          </p>
++        </header>
++
++        <div className="stacks-modal__body">
++          <div className="containers-form__stack">
++            <label className="containers-form__label" htmlFor="build-config-language">
++              Language
++            </label>
++            <select
++              id="build-config-language"
++              className="containers-form__input containers-form__select"
++              value={form.language}
++              onChange={(event) => {
++                const value = event.target.value
++                if (isBuildOverrideLanguage(value)) {
++                  setLanguage(value)
++                }
++              }}
++            >
++              {BUILD_OVERRIDE_LANGUAGES.map((language) => (
++                <option key={language} value={language}>
++                  {languageLabel(language)}
++                </option>
++              ))}
++            </select>
++          </div>
++
++          <div className="containers-form__grid">
++            <div className="containers-form__stack">
++              <label
++                className="containers-form__label"
++                htmlFor="build-config-version"
++              >
++                Version (optional)
++              </label>
++              <input
++                id="build-config-version"
++                className="containers-form__input"
++                type="text"
++                value={form.languageVersion}
++                onChange={(event) =>
++                  setForm((previous) => ({
++                    ...previous,
++                    languageVersion: event.target.value,
++                  }))
++                }
++                placeholder={defaultLanguageVersion(form.language)}
++              />
++            </div>
++
++            {packageManagers.length > 0 ? (
++              <div className="containers-form__stack">
++                <label
++                  className="containers-form__label"
++                  htmlFor="build-config-package-manager"
++                >
++                  Package manager
++                </label>
++                <select
++                  id="build-config-package-manager"
++                  className="containers-form__input containers-form__select"
++                  value={form.packageManager}
++                  onChange={(event) =>
++                    setForm((previous) => ({
++                      ...previous,
++                      packageManager: event.target.value,
++                    }))
++                  }
++                >
++                  {packageManagers.map((option) => (
++                    <option key={option.value} value={option.value}>
++                      {option.label}
++                    </option>
++                  ))}
++                </select>
++              </div>
++            ) : (
++              <div className="containers-form__stack" aria-hidden="true" />
++            )}
++          </div>
++
++          <div className="containers-form__stack">
++            <label className="containers-form__label" htmlFor="build-config-subdir">
++              Build subdirectory (optional)
++            </label>
++            <input
++              id="build-config-subdir"
++              className="containers-form__input"
++              type="text"
++              value={form.buildSubdir}
++              onChange={(event) =>
++                setForm((previous) => ({
++                  ...previous,
++                  buildSubdir: event.target.value,
++                }))
++              }
++              placeholder="backend"
++            />
++            <p className="containers-form__hint">
++              Relative path when the app lives under a monorepo folder.
++            </p>
++          </div>
++
++          <div className="containers-form__stack">
++            <label
++              className="containers-form__label"
++              htmlFor="build-config-start-command"
++            >
++              Start command (optional)
++            </label>
++            <input
++              id="build-config-start-command"
++              className="containers-form__input"
++              type="text"
++              value={form.startCommand}
++              onChange={(event) =>
++                setForm((previous) => ({
++                  ...previous,
++                  startCommand: event.target.value,
++                }))
++              }
++              placeholder="java -jar app.jar"
++            />
++            <p className="containers-form__hint">
++              Space-separated tokens for the container CMD.
++            </p>
++          </div>
++        </div>
++
++        <footer className="stacks-modal__footer">
++          <button type="button" className="btn btn--ghost" onClick={onCancel}>
++            Cancel
++          </button>
++          <button type="button" className="btn btn--primary" onClick={handleConfirm}>
++            Save build config
++          </button>
++        </footer>
++      </div>
++    </div>
++  )
++}
+diff --git a/frontend/src/pages/containers/buildOverride.ts b/frontend/src/pages/containers/buildOverride.ts
+new file mode 100644
+index 0000000..6f20419
+--- /dev/null
++++ b/frontend/src/pages/containers/buildOverride.ts
+@@ -0,0 +1,235 @@
++import type { BuildOverride, BuildOverrideLanguage } from '../../api/client'
++
++export const BUILD_OVERRIDE_LANGUAGES: readonly BuildOverrideLanguage[] = [
++  'python',
++  'javascript',
++  'typescript',
++  'go',
++  'java',
++  'rust',
++  'ruby',
++  'php',
++  'dotnet',
++  'elixir',
++  'clojure',
++] as const
++
++export type PackageManagerOption = {
++  value: string
++  label: string
++}
++
++function isRecord(value: unknown): value is Record<string, unknown> {
++  return typeof value === 'object' && value !== null
++}
++
++function hasStringBody(error: unknown): error is { body: string } {
++  return isRecord(error) && typeof error.body === 'string'
++}
++
++export function isNeedsBuildOverrideError(error: unknown): boolean {
++  if (!hasStringBody(error)) {
++    return false
++  }
++  try {
++    const parsed: unknown = JSON.parse(error.body)
++    return (
++      isRecord(parsed) &&
++      parsed.code === 'needs_build_override'
++    )
++  } catch {
++    return false
++  }
++}
++
++export function parseFailedServiceNameFromError(error: unknown): string | null {
++  if (!hasStringBody(error)) {
++    return null
++  }
++  try {
++    const parsed: unknown = JSON.parse(error.body)
++    if (!isRecord(parsed) || typeof parsed.detail !== 'string') {
++      return null
++    }
++    const match = /Deploy failed on service '([^']+)'/.exec(parsed.detail)
++    return match?.[1] ?? null
++  } catch {
++    return null
++  }
++}
++
++export function isBuildOverrideLanguage(
++  value: string,
++): value is BuildOverrideLanguage {
++  return (BUILD_OVERRIDE_LANGUAGES as readonly string[]).includes(value)
++}
++
++export function packageManagersForLanguage(
++  language: BuildOverrideLanguage,
++): PackageManagerOption[] {
++  switch (language) {
++    case 'java':
++      return [
++        { value: 'gradle', label: 'Gradle' },
++        { value: 'maven', label: 'Maven' },
++      ]
++    case 'javascript':
++    case 'typescript':
++      return [
++        { value: 'npm', label: 'npm' },
++        { value: 'pnpm', label: 'pnpm' },
++        { value: 'yarn', label: 'Yarn' },
++      ]
++    case 'clojure':
++      return [
++        { value: 'deps', label: 'Clojure CLI (deps.edn)' },
++        { value: 'lein', label: 'Leiningen' },
++      ]
++    case 'python':
++    case 'go':
++    case 'rust':
++    case 'ruby':
++    case 'php':
++    case 'dotnet':
++    case 'elixir':
++      return []
++    default: {
++      const _exhaustive: never = language
++      return _exhaustive
++    }
++  }
++}
++
++export function defaultPackageManager(
++  language: BuildOverrideLanguage,
++): string | null {
++  const options = packageManagersForLanguage(language)
++  return options[0]?.value ?? null
++}
++
++export function defaultLanguageVersion(
++  language: BuildOverrideLanguage,
++): string {
++  switch (language) {
++    case 'python':
++      return '3.12'
++    case 'javascript':
++    case 'typescript':
++      return '20'
++    case 'go':
++      return '1.22'
++    case 'java':
++    case 'clojure':
++      return '21'
++    case 'rust':
++      return '1.75'
++    case 'ruby':
++      return '3.3'
++    case 'php':
++      return '8.3'
++    case 'dotnet':
++      return '8.0'
++    case 'elixir':
++      return '1.16'
++    default: {
++      const _exhaustive: never = language
++      return _exhaustive
++    }
++  }
++}
++
++export function languageLabel(language: BuildOverrideLanguage): string {
++  switch (language) {
++    case 'python':
++      return 'Python'
++    case 'javascript':
++      return 'JavaScript'
++    case 'typescript':
++      return 'TypeScript'
++    case 'go':
++      return 'Go'
++    case 'java':
++      return 'Java'
++    case 'rust':
++      return 'Rust'
++    case 'ruby':
++      return 'Ruby'
++    case 'php':
++      return 'PHP'
++    case 'dotnet':
++      return '.NET'
++    case 'elixir':
++      return 'Elixir'
++    case 'clojure':
++      return 'Clojure'
++    default: {
++      const _exhaustive: never = language
++      return _exhaustive
++    }
++  }
++}
++
++export function parseStartCommand(value: string): string[] | null {
++  const trimmed = value.trim()
++  if (!trimmed) {
++    return null
++  }
++  return trimmed.split(/\s+/).filter(Boolean)
++}
++
++export function formatStartCommand(command: string[] | null | undefined): string {
++  return (command ?? []).join(' ')
++}
++
++export function emptyBuildOverride(
++  language: BuildOverrideLanguage = 'python',
++): BuildOverride {
++  return {
++    language,
++    language_version: defaultLanguageVersion(language),
++    package_manager: defaultPackageManager(language),
++    build_subdir: null,
++    start_command: null,
++  }
++}
++
++export function normalizeBuildOverride(override: BuildOverride): BuildOverride {
++  const languageVersion = override.language_version?.trim() || null
++  const buildSubdir = override.build_subdir?.trim() || null
++  const packageManagers = packageManagersForLanguage(override.language)
++  const packageManager =
++    packageManagers.length === 0
++      ? null
++      : override.package_manager &&
++          packageManagers.some((option) => option.value === override.package_manager)
++        ? override.package_manager
++        : defaultPackageManager(override.language)
++  const startCommand =
++    override.start_command && override.start_command.length > 0
++      ? override.start_command
++      : null
++
++  return {
++    language: override.language,
++    language_version: languageVersion,
++    package_manager: packageManager,
++    build_subdir: buildSubdir,
++    start_command: startCommand,
++  }
++}
++
++export function buildOverrideFromAnalysis(analysis: {
++  language: string | null
++  build_subdir: string | null
++  start_command: string[] | null
++}): BuildOverride {
++  const language =
++    analysis.language && isBuildOverrideLanguage(analysis.language)
++      ? analysis.language
++      : 'python'
++  return normalizeBuildOverride({
++    ...emptyBuildOverride(language),
++    build_subdir: analysis.build_subdir,
++    start_command: analysis.start_command,
++  })
++}

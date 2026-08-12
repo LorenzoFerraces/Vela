@@ -65,3 +65,4 @@ Result: pass (new cases + related stack/git suite)
 
 - Staged only backend API/core/test files for this task; frontend left unstaged.
 - `git_branch` WIP in schemas/stacks/tests was retained and committed with build_override because the persistence test uses both fields.
+- Also included `compose_parser.py` + `test_compose_parser.py` so preserved parse-compose / git URL detection WIP stays coherent with the stacks route and integration tests.

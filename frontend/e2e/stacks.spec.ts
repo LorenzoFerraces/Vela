@@ -59,7 +59,9 @@ test.describe('Stacks page', () => {
     })
   })
 
-  test('imports a compose file into a stack', async ({ authenticatedPage }) => {
+  test('parses compose, reviews services, then saves from builder', async ({
+    authenticatedPage,
+  }) => {
     const stackName = `e2e-import-${Date.now()}`
 
     await authenticatedPage.goto('/stacks/import')
@@ -75,11 +77,37 @@ test.describe('Stacks page', () => {
 services:
   web:
     image: nginx:alpine
+    environment:
+      REDIS_HOST: redis
+    depends_on:
+      - redis
   redis:
     image: redis:7
 `)
-    await authenticatedPage.getByRole('button', { name: 'Import' }).click()
-    await expect(authenticatedPage).toHaveURL(/\/stacks$/)
+    await authenticatedPage.getByRole('button', { name: 'Parse' }).click()
+
+    const dialog = authenticatedPage.getByRole('dialog', {
+      name: 'Review imported services',
+    })
+    await expect(dialog).toBeVisible()
+    await expect(dialog.getByLabel('Service name').first()).toHaveValue('web')
+    await expect(dialog.getByText('Depends on: redis')).toBeVisible()
+    await dialog.getByRole('button', { name: 'Continue to builder' }).click()
+
+    await expect(authenticatedPage).toHaveURL(/\/stacks\/new/)
+    await expect(authenticatedPage.getByLabel('Stack name')).toHaveValue(stackName)
+    await expect(authenticatedPage.getByLabel('Service name')).toHaveValue('web')
+    await expect(
+      authenticatedPage.getByText('Service links'),
+    ).toBeVisible()
+    await expect(
+      authenticatedPage.locator('.stacks-service-links').getByRole('button', {
+        name: 'redis',
+      }),
+    ).toBeVisible()
+
+    await authenticatedPage.getByRole('button', { name: 'Save Stack' }).click()
+    await expect(authenticatedPage).toHaveURL(/\/stacks$/, { timeout: 15_000 })
     await expect(authenticatedPage.getByText(stackName)).toBeVisible()
   })
 })
