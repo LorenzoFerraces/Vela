@@ -43,6 +43,23 @@ export function isNeedsBuildOverrideError(error: unknown): boolean {
   }
 }
 
+/** Service name from stack deploy detail, e.g. `Deploy failed on service 'web': …`. */
+export function parseFailedServiceNameFromError(error: unknown): string | null {
+  if (!hasStringBody(error)) {
+    return null
+  }
+  try {
+    const parsed: unknown = JSON.parse(error.body)
+    if (!isRecord(parsed) || typeof parsed.detail !== 'string') {
+      return null
+    }
+    const match = /Deploy failed on service '([^']+)'/.exec(parsed.detail)
+    return match?.[1] ?? null
+  } catch {
+    return null
+  }
+}
+
 export function isBuildOverrideLanguage(
   value: string,
 ): value is BuildOverrideLanguage {

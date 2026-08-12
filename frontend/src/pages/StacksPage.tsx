@@ -4,11 +4,59 @@ import {
   deleteStack,
   deployStack,
   formatApiError,
+  getStack,
   listStacks,
+  updateStack,
+  type BuildOverride,
   type Stack,
+  type StackService,
+  type StackServiceCreate,
 } from '../api/client'
+import BuildConfigModal from './containers/BuildConfigModal'
+import {
+  isNeedsBuildOverrideError,
+  parseFailedServiceNameFromError,
+} from './containers/buildOverride'
 
 type Banner = { tone: 'ok' | 'err'; text: string } | null
+
+function stackServiceToCreate(service: StackService): StackServiceCreate {
+  return {
+    service_name: service.service_name,
+    source_kind: service.source_kind,
+    source_ref: service.source_ref,
+    git_branch: service.git_branch,
+    container_port: service.container_port,
+    env_vars: service.env_vars,
+    command: service.command,
+    public_route: service.public_route,
+    depends_on: service.depends_on,
+    volumes: service.volumes,
+    scaling_policy: service.scaling_policy,
+    build_override: service.build_override ?? null,
+  }
+}
+
+function resolveFailedService(
+  stack: Stack,
+  failedServiceName: string | null,
+): StackService | null {
+  if (failedServiceName) {
+    const named = stack.services.find(
+      (service) => service.service_name === failedServiceName,
+    )
+    if (named) {
+      return named
+    }
+  }
+  return (
+    stack.services.find(
+      (service) => service.source_kind === 'git' && !service.build_override,
+    ) ??
+    stack.services.find((service) => service.source_kind === 'git') ??
+    null
+  )
+}
 
 function StackRow({
   stack,
@@ -70,6 +118,14 @@ export default function StacksPage() {
   const [busy, setBusy] = useState(false)
   const [banner, setBanner] = useState<Banner>(null)
   const [pendingDelete, setPendingDelete] = useState<string | null>(null)
+  const [buildConfigOpen, setBuildConfigOpen] = useState(false)
+  const [buildConfigInitial, setBuildConfigInitial] = useState<BuildOverride | null>(
+    null,
+  )
+  const [pendingDeployStackId, setPendingDeployStackId] = useState<string | null>(
+    null,
+  )
+  const [pendingServiceName, setPendingServiceName] = useState<string | null>(null)
   const deleteTimer = useRef<ReturnType<typeof setTimeout>>(undefined)
 
   const loadStacks = useCallback(async () => {
@@ -93,18 +149,98 @@ export default function StacksPage() {
     }
   }, [])
 
-  const handleDeploy = useCallback(async (id: string) => {
+  const openBuildConfigForDeployFailure = useCallback(
+    async (stackId: string, error: unknown) => {
+      try {
+        const stack = await getStack(stackId)
+        const failedName = parseFailedServiceNameFromError(error)
+        const service = resolveFailedService(stack, failedName)
+        if (!service) {
+          setBanner({
+            tone: 'err',
+            text: formatApiError(error),
+          })
+          return
+        }
+        setPendingDeployStackId(stackId)
+        setPendingServiceName(service.service_name)
+        setBuildConfigInitial(service.build_override ?? null)
+        setBuildConfigOpen(true)
+        setBanner({
+          tone: 'err',
+          text: `Build config needed for service '${service.service_name}'.`,
+        })
+      } catch (loadError) {
+        setBanner({ tone: 'err', text: formatApiError(loadError) })
+      }
+    },
+    [],
+  )
+
+  const handleDeploy = useCallback(
+    async (id: string) => {
+      setBusy(true)
+      setBanner(null)
+      try {
+        await deployStack(id)
+        setBanner({ tone: 'ok', text: 'Stack deployed.' })
+        await loadStacks()
+      } catch (err) {
+        if (isNeedsBuildOverrideError(err)) {
+          await openBuildConfigForDeployFailure(id, err)
+          return
+        }
+        setBanner({ tone: 'err', text: formatApiError(err) })
+      } finally {
+        setBusy(false)
+      }
+    },
+    [loadStacks, openBuildConfigForDeployFailure],
+  )
+
+  function closeBuildConfigModal() {
+    setBuildConfigOpen(false)
+    setPendingDeployStackId(null)
+    setPendingServiceName(null)
+    setBuildConfigInitial(null)
+  }
+
+  async function onBuildConfigConfirm(override: BuildOverride) {
+    const stackId = pendingDeployStackId
+    const serviceName = pendingServiceName
+    closeBuildConfigModal()
+    if (!stackId || !serviceName) {
+      return
+    }
+
     setBusy(true)
     setBanner(null)
     try {
-      await deployStack(id)
+      const stack = await getStack(stackId)
+      const services = stack.services.map((service) => {
+        const create = stackServiceToCreate(service)
+        if (service.service_name === serviceName) {
+          return { ...create, build_override: override }
+        }
+        return create
+      })
+      await updateStack(stackId, {
+        name: stack.name,
+        services,
+      })
+      await deployStack(stackId)
       setBanner({ tone: 'ok', text: 'Stack deployed.' })
+      await loadStacks()
     } catch (err) {
+      if (isNeedsBuildOverrideError(err)) {
+        await openBuildConfigForDeployFailure(stackId, err)
+        return
+      }
       setBanner({ tone: 'err', text: formatApiError(err) })
     } finally {
       setBusy(false)
     }
-  }, [])
+  }
 
   const handleDelete = useCallback(async (id: string) => {
     if (pendingDelete === id) {
@@ -215,6 +351,15 @@ export default function StacksPage() {
           Refresh
         </button>
       </div>
+
+      <BuildConfigModal
+        open={buildConfigOpen}
+        initial={buildConfigInitial}
+        onCancel={closeBuildConfigModal}
+        onConfirm={(override) => {
+          void onBuildConfigConfirm(override)
+        }}
+      />
     </section>
   )
 }

@@ -17,7 +17,7 @@ from app.core.containers.docker_orchestrator import (
 from app.core.containers.orchestrator import ContainerOrchestrator
 from app.core.containers.volume_uploads import resolve_volume_upload_path
 from app.core.enums import RestartPolicy
-from app.core.exceptions import CloneError
+from app.core.exceptions import CloneError, NeedsBuildOverrideError
 from app.core.models import (
     BuildOverride,
     ContainerInfo,
@@ -141,6 +141,13 @@ async def deploy_stack(
         failed_service = None
         if len(deployed_containers) < len(services):
             failed_service = services[len(deployed_containers)].service_name
+
+        if isinstance(exc, NeedsBuildOverrideError):
+            if failed_service:
+                raise NeedsBuildOverrideError(
+                    f"Deploy failed on service '{failed_service}': {exc}"
+                ) from exc
+            raise
 
         return {
             "error": str(exc),

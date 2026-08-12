@@ -1,18 +1,29 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import {
+  analyzeGitSource,
   createStack,
   formatApiError,
   getStack,
   uploadVolumeFolder,
   updateStack,
+  type BuildOverride,
   type ScalingPolicyRequest,
   type StackServiceCreate,
 } from '../../api/client'
+import BuildConfigModal from '../containers/BuildConfigModal'
+import {
+  buildOverrideFromAnalysis,
+  languageLabel,
+} from '../containers/buildOverride'
 import { DeploySourceCombobox } from '../containers/DeploySourceCombobox'
 import { useDeploySourceSelection } from '../containers/useDeploySourceSelection'
 import { useImageRefAvailability } from '../containers/useImageRefAvailability'
 import type { DeploySourceSelection } from '../containers/deploySourceTypes'
+import {
+  selectionShowsGitBranch,
+  sourceLooksLikeGitUrl,
+} from '../containers/deploySourceTypes'
 import type { EnvVarRow, VolumeMountRow } from '../containers/runFormAdvanced'
 import {
   createEmptyVolumeMountRow,
@@ -23,7 +34,13 @@ import {
   volumesFromRows,
 } from '../containers/runFormAdvanced'
 import { ContainersRunScalingFields } from '../containers/ContainersRunScalingFields'
+import type { ImportedStackState } from './importTypes'
 import StackVisualizer from './StackVisualizer'
+import {
+  detectServiceLinks,
+  findServiceNameMatches,
+  renderHighlightedValue,
+} from './serviceLinkDetection'
 
 type Banner = { tone: 'ok' | 'err'; text: string } | null
 
@@ -33,17 +50,29 @@ function ServiceEditForm({
   onUpdate,
   onPatch,
   onRemove,
+  onClose,
   siblingNames,
+  onSelectSibling,
 }: {
   service: StackServiceCreate
   index: number
   onUpdate: (index: number, field: keyof StackServiceCreate, value: unknown) => void
   onPatch: (index: number, patch: Partial<StackServiceCreate>) => void
   onRemove: (index: number) => void
+  onClose: () => void
   siblingNames: string[]
+  onSelectSibling: (serviceName: string) => void
 }) {
-  const [advancedOpen, setAdvancedOpen] = useState(false)
+  const [advancedOpen, setAdvancedOpen] = useState(
+    () => Object.keys(service.env_vars || {}).length > 0,
+  )
   const [pickingVolumeIndex, setPickingVolumeIndex] = useState<number | null>(null)
+  const [buildConfigOpen, setBuildConfigOpen] = useState(false)
+  const [buildConfigInitial, setBuildConfigInitial] = useState<BuildOverride | null>(
+    null,
+  )
+  const [buildConfigBusy, setBuildConfigBusy] = useState(false)
+  const [buildConfigError, setBuildConfigError] = useState<string | null>(null)
   const folderInputRef = useRef<HTMLInputElement>(null)
   const envRows = useMemo(
     () => envRowsFromRecord(service.env_vars || {}),
@@ -89,45 +118,71 @@ function ServiceEditForm({
   useEffect(() => {
     if (initializedRef.current) return
     initializedRef.current = true
-    if (service.source_ref) {
-      if (service.source_kind === 'git') {
-        const url = service.source_ref
-        applySuggestion({
-          kind: 'git',
-          url,
-          name: url,
-          default_branch: 'main',
-        })
-      } else if (service.source_kind === 'dockerfile_template') {
-        applySuggestion({
-          kind: 'dockerfile_template',
-          id: service.source_ref,
-          name: service.source_ref,
-        })
-      } else {
-        applySuggestion({
-          kind: 'image',
-          ref: service.source_ref,
-          label: service.source_ref,
+    if (!service.source_ref) return
+
+    const sourceRef = service.source_ref
+    if (service.source_kind === 'git' || sourceLooksLikeGitUrl(sourceRef)) {
+      const branch = service.git_branch?.trim() || 'main'
+      applySuggestion({
+        kind: 'git',
+        url: sourceRef,
+        name: sourceRef,
+        default_branch: branch,
+      })
+      if (service.source_kind !== 'git' || !service.git_branch) {
+        onPatch(index, {
+          source_kind: 'git',
+          source_ref: sourceRef,
+          git_branch: branch,
         })
       }
+    } else if (service.source_kind === 'dockerfile_template') {
+      applySuggestion({
+        kind: 'dockerfile_template',
+        id: sourceRef,
+        name: sourceRef,
+      })
+    } else {
+      applySuggestion({
+        kind: 'image',
+        ref: sourceRef,
+        label: sourceRef,
+      })
     }
-  }, [service.source_ref, service.source_kind, applySuggestion])
+  }, [
+    service.source_ref,
+    service.source_kind,
+    service.git_branch,
+    applySuggestion,
+    index,
+    onPatch,
+  ])
 
   const commitSelection = useCallback(
     (sel: DeploySourceSelection | null) => {
       if (!sel) return
       switch (sel.kind) {
         case 'image':
-          onPatch(index, { source_kind: 'image', source_ref: sel.ref })
+          onPatch(index, {
+            source_kind: 'image',
+            source_ref: sel.ref,
+            git_branch: null,
+            build_override: null,
+          })
           break
         case 'git':
-          onPatch(index, { source_kind: 'git', source_ref: sel.url })
+          onPatch(index, {
+            source_kind: 'git',
+            source_ref: sel.url,
+            git_branch: sel.defaultBranch || 'main',
+          })
           break
         case 'dockerfile_template':
           onPatch(index, {
             source_kind: 'dockerfile_template',
             source_ref: sel.templateId,
+            git_branch: null,
+            build_override: null,
           })
           break
         default: {
@@ -138,6 +193,34 @@ function ServiceEditForm({
     },
     [index, onPatch]
   )
+
+  function openBuildConfigModal(initial?: BuildOverride | null) {
+    setBuildConfigInitial(initial ?? service.build_override ?? null)
+    setBuildConfigError(null)
+    setBuildConfigOpen(true)
+  }
+
+  async function onAnalyzeGitSource() {
+    if (!service.source_ref.trim()) {
+      setBuildConfigError('Choose a git repository first.')
+      return
+    }
+    setBuildConfigBusy(true)
+    setBuildConfigError(null)
+    try {
+      const analysis = await analyzeGitSource({
+        git_url: service.source_ref.trim(),
+        git_branch: service.git_branch?.trim() || 'main',
+      })
+      if (analysis.needs_manual_build_config) {
+        openBuildConfigModal(buildOverrideFromAnalysis(analysis))
+      }
+    } catch (error) {
+      setBuildConfigError(formatApiError(error))
+    } finally {
+      setBuildConfigBusy(false)
+    }
+  }
 
   const updateEnvRow = (rowIndex: number, patch: Partial<EnvVarRow>) => {
     const next = envRows.map((row, i) => (i === rowIndex ? { ...row, ...patch } : row))
@@ -213,16 +296,36 @@ function ServiceEditForm({
     onUpdate(index, 'scaling_policy', policy)
   }
 
+  const serviceLinks = useMemo(
+    () =>
+      detectServiceLinks(service.env_vars, siblingNames, service.depends_on),
+    [service.env_vars, siblingNames, service.depends_on],
+  )
+
   return (
     <div className="containers-form stacks-builder__edit-form">
-      <button
-        type="button"
-        className="btn btn--danger btn--sm"
-        onClick={(e) => { e.stopPropagation(); onRemove(index); }}
-        style={{ alignSelf: 'flex-end', marginBottom: '0.5rem' }}
-      >
-        Remove
-      </button>
+      <div className="stacks-builder__edit-form-actions">
+        <button
+          type="button"
+          className="btn btn--ghost btn--sm"
+          onClick={(event) => {
+            event.stopPropagation()
+            onClose()
+          }}
+        >
+          Close
+        </button>
+        <button
+          type="button"
+          className="btn btn--danger btn--sm"
+          onClick={(event) => {
+            event.stopPropagation()
+            onRemove(index)
+          }}
+        >
+          Remove
+        </button>
+      </div>
 
       <div className="containers-form__grid">
         <div className="containers-form__stack">
@@ -314,6 +417,65 @@ function ServiceEditForm({
         />
       </div>
 
+      {selectionShowsGitBranch(selection) ? (
+        <div className="containers-form__stack">
+          <label
+            className="containers-form__label"
+            htmlFor={`svc-${index}-branch`}
+          >
+            Git branch
+          </label>
+          <input
+            id={`svc-${index}-branch`}
+            className="containers-form__input"
+            type="text"
+            value={service.git_branch || 'main'}
+            onChange={(e) => onUpdate(index, 'git_branch', e.target.value)}
+            placeholder="main"
+          />
+          <div className="stacks-builder__build-actions">
+            <button
+              type="button"
+              className="btn btn--ghost btn--sm"
+              disabled={buildConfigBusy || !service.source_ref.trim()}
+              onClick={() => void onAnalyzeGitSource()}
+            >
+              {buildConfigBusy ? 'Analyzing…' : 'Analyze repo'}
+            </button>
+            <button
+              type="button"
+              className="btn btn--ghost btn--sm"
+              onClick={() => openBuildConfigModal(service.build_override ?? null)}
+            >
+              Configure build
+            </button>
+          </div>
+          {service.build_override ? (
+            <p className="containers-muted containers-form__hint">
+              Build override: {languageLabel(service.build_override.language)}
+              {service.build_override.language_version
+                ? ` ${service.build_override.language_version}`
+                : ''}
+              {service.build_override.package_manager
+                ? ` · ${service.build_override.package_manager}`
+                : ''}
+              {service.build_override.build_subdir
+                ? ` · ${service.build_override.build_subdir}`
+                : ''}
+            </p>
+          ) : (
+            <p className="containers-muted containers-form__hint">
+              Optional when auto-detect cannot pick a language.
+            </p>
+          )}
+          {buildConfigError ? (
+            <p className="settings-banner settings-banner--err" role="alert">
+              {buildConfigError}
+            </p>
+          ) : null}
+        </div>
+      ) : null}
+
       <label className="stacks-builder__checkbox">
         <input
           type="checkbox"
@@ -377,34 +539,53 @@ function ServiceEditForm({
           <div className="containers-form__advanced-body">
             <p className="containers-form__label">Environment variables</p>
             <ul className="containers-env-list">
-              {envRows.map((row, rowIndex) => (
-                <li key={rowIndex} className="containers-env-list__row">
-                  <input
-                    className="containers-form__input"
-                    type="text"
-                    placeholder="KEY"
-                    aria-label={`Environment variable name ${rowIndex + 1}`}
-                    value={row.key}
-                    onChange={(e) => updateEnvRow(rowIndex, { key: e.target.value })}
-                  />
-                  <input
-                    className="containers-form__input"
-                    type="text"
-                    placeholder="value"
-                    aria-label={`Environment variable value ${rowIndex + 1}`}
-                    value={row.value}
-                    onChange={(e) => updateEnvRow(rowIndex, { value: e.target.value })}
-                  />
-                  <button
-                    type="button"
-                    className="btn btn--ghost btn--compact"
-                    onClick={() => removeEnvRow(rowIndex)}
-                    aria-label={`Remove environment variable ${rowIndex + 1}`}
-                  >
-                    Remove
-                  </button>
-                </li>
-              ))}
+              {envRows.map((row, rowIndex) => {
+                const matches = findServiceNameMatches(row.value, siblingNames)
+                const previewParts = renderHighlightedValue(row.value, matches)
+                return (
+                  <li key={rowIndex} className="containers-env-list__row containers-env-list__row--stacked">
+                    <div className="containers-env-list__fields">
+                      <input
+                        className="containers-form__input"
+                        type="text"
+                        placeholder="KEY"
+                        aria-label={`Environment variable name ${rowIndex + 1}`}
+                        value={row.key}
+                        onChange={(e) => updateEnvRow(rowIndex, { key: e.target.value })}
+                      />
+                      <input
+                        className="containers-form__input"
+                        type="text"
+                        placeholder="value"
+                        aria-label={`Environment variable value ${rowIndex + 1}`}
+                        value={row.value}
+                        onChange={(e) => updateEnvRow(rowIndex, { value: e.target.value })}
+                      />
+                      <button
+                        type="button"
+                        className="btn btn--ghost btn--compact"
+                        onClick={() => removeEnvRow(rowIndex)}
+                        aria-label={`Remove environment variable ${rowIndex + 1}`}
+                      >
+                        Remove
+                      </button>
+                    </div>
+                    {matches.length > 0 ? (
+                      <p className="stacks-env-link-preview" aria-label="Service references in value">
+                        {previewParts.map((part) =>
+                          part.highlighted ? (
+                            <span key={part.key} className="stacks-env-link-preview__hit">
+                              {part.text}
+                            </span>
+                          ) : (
+                            <span key={part.key}>{part.text}</span>
+                          ),
+                        )}
+                      </p>
+                    ) : null}
+                  </li>
+                )
+              })}
             </ul>
             <button
               type="button"
@@ -413,6 +594,37 @@ function ServiceEditForm({
             >
               Add variable
             </button>
+
+            {serviceLinks.length > 0 ? (
+              <div className="stacks-service-links">
+                <p className="stacks-service-links__title">Service links</p>
+                <ul className="stacks-service-links__list">
+                  {serviceLinks.map((link) => (
+                    <li
+                      key={`${link.envKey}-${link.serviceName}`}
+                      className="stacks-service-links__item"
+                    >
+                      <span>
+                        {service.service_name || `service-${index + 1}`} →{' '}
+                        <button
+                          type="button"
+                          className="stacks-service-links__target"
+                          onClick={() => onSelectSibling(link.serviceName)}
+                        >
+                          {link.serviceName}
+                        </button>{' '}
+                        via <code>{link.envKey}</code>
+                      </span>
+                      {!link.inDependsOn ? (
+                        <span className="stacks-service-links__hint">
+                          Not listed in Depends on
+                        </span>
+                      ) : null}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
 
             <label className="containers-form__label" htmlFor={`svc-${index}-command`}>
               Start command
@@ -491,6 +703,16 @@ function ServiceEditForm({
           </div>
         ) : null}
       </div>
+
+      <BuildConfigModal
+        open={buildConfigOpen}
+        initial={buildConfigInitial}
+        onCancel={() => setBuildConfigOpen(false)}
+        onConfirm={(override) => {
+          onPatch(index, { build_override: override })
+          setBuildConfigOpen(false)
+        }}
+      />
     </div>
   )
 }
@@ -498,12 +720,31 @@ function ServiceEditForm({
 export default function StackBuilderPage() {
   const { id: editId } = useParams<{ id?: string }>()
   const navigate = useNavigate()
+  const location = useLocation()
   const [services, setServices] = useState<StackServiceCreate[]>([])
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null)
   const [highlightIndex, setHighlightIndex] = useState<number | null>(null)
   const [listLoading, setListLoading] = useState(!!editId)
   const [banner, setBanner] = useState<Banner>(null)
   const [stackName, setStackName] = useState('')
+  const importSeedApplied = useRef(false)
+
+  useEffect(() => {
+    if (editId || importSeedApplied.current) return
+    const state = location.state as ImportedStackState | null
+    if (!state?.importedStack?.services?.length) return
+    importSeedApplied.current = true
+    setStackName(state.importedStack.name || '')
+    setServices(state.importedStack.services)
+    setSelectedIndex(0)
+    if (state.composeWarnings?.length) {
+      setBanner({
+        tone: 'ok',
+        text: `Imported with warnings: ${state.composeWarnings.join(' · ')}`,
+      })
+    }
+    navigate('.', { replace: true, state: null })
+  }, [editId, location.state, navigate])
 
   useEffect(() => {
     if (!editId) return
@@ -516,6 +757,7 @@ export default function StackBuilderPage() {
             service_name: s.service_name,
             source_kind: s.source_kind,
             source_ref: s.source_ref,
+            git_branch: s.git_branch,
             container_port: s.container_port,
             env_vars: s.env_vars,
             command: s.command,
@@ -523,6 +765,7 @@ export default function StackBuilderPage() {
             depends_on: s.depends_on,
             volumes: s.volumes,
             scaling_policy: s.scaling_policy,
+            build_override: s.build_override ?? null,
           }))
         )
       } catch (err) {
@@ -568,8 +811,10 @@ export default function StackBuilderPage() {
       service_name: '',
       source_kind: 'image',
       source_ref: '',
+      git_branch: null,
       container_port: 80,
       public_route: false,
+      build_override: null,
     }
     setServices((prev) => {
       const next = [...prev, newService]
@@ -683,14 +928,18 @@ export default function StackBuilderPage() {
                             : '',
                         ]
                           .filter(Boolean)
-                          .join()}
+                          .join(' ')}
                         role="button"
                         tabIndex={0}
-                        onClick={() => setSelectedIndex(index)}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter' || e.key === ' ') {
-                            e.preventDefault()
-                            setSelectedIndex(index)
+                        onClick={() =>
+                          setSelectedIndex((prev) => (prev === index ? null : index))
+                        }
+                        onKeyDown={(event) => {
+                          if (event.key === 'Enter' || event.key === ' ') {
+                            event.preventDefault()
+                            setSelectedIndex((prev) =>
+                              prev === index ? null : index,
+                            )
                           }
                         }}
                       >
@@ -708,10 +957,20 @@ export default function StackBuilderPage() {
                     onUpdate={updateService}
                     onPatch={patchService}
                     onRemove={removeService}
+                    onClose={() => setSelectedIndex(null)}
                     siblingNames={services
                       .filter((_, i) => i !== selectedIndex)
                       .map((s) => s.service_name)
                       .filter((n): n is string => !!n && n.length > 0)}
+                    onSelectSibling={(serviceName) => {
+                      const nextIndex = services.findIndex(
+                        (candidate) => candidate.service_name === serviceName,
+                      )
+                      if (nextIndex === -1) return
+                      setSelectedIndex(nextIndex)
+                      setHighlightIndex(nextIndex)
+                      window.setTimeout(() => setHighlightIndex(null), 2000)
+                    }}
                   />
                 )}
               </>
@@ -748,7 +1007,9 @@ export default function StackBuilderPage() {
                 services={services}
                 highlightedIndex={highlightIndex}
                 selectedIndex={selectedIndex}
-                onNodeClick={(index) => setSelectedIndex(index)}
+                onNodeClick={(index) =>
+                  setSelectedIndex((prev) => (prev === index ? null : index))
+                }
                 onDependencyChange={(serviceIndex, dependsOn) => {
                   updateService(serviceIndex, 'depends_on', dependsOn)
                 }}
