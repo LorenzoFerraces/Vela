@@ -1,7 +1,7 @@
 # Task 4 Report: Image builder + stack deploy pass override / build_subdir
 
 **Status:** DONE  
-**Commit:** (pending) — feat: honor build override and subdir in image builds  
+**Commit:** `f19b422` — feat: honor build override and subdir in image builds  
 **Date:** 2026-08-11
 
 ## Summary
