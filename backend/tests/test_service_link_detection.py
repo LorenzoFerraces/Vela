@@ -15,6 +15,9 @@ def find_service_name_matches(value: str, sibling_names: list[str]) -> list[tupl
     for service_name in sorted_names:
         pattern = re.compile(rf"(?<![A-Za-z0-9_-]){re.escape(service_name)}(?![A-Za-z0-9_-])")
         for match in pattern.finditer(value):
+            # Skip URL schemes (e.g. mongodb://...) — only hostnames are links.
+            if value[match.end() : match.end() + 3] == "://":
+                continue
             matches.append((service_name, match.start(), match.end()))
     matches.sort(key=lambda item: (item[1], -item[2]))
     non_overlapping: list[tuple[str, int, int]] = []

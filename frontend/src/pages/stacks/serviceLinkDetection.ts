@@ -34,10 +34,13 @@ export function findServiceNameMatches(
     )
     for (const match of value.matchAll(pattern)) {
       const start = match.index ?? 0
+      const end = start + serviceName.length
+      // Skip URL schemes (e.g. mongodb://...) — only hostnames are links.
+      if (value.slice(end, end + 3) === '://') continue
       matches.push({
         serviceName,
         start,
-        end: start + serviceName.length,
+        end,
       })
     }
   }
