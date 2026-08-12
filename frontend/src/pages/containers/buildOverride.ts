@@ -202,3 +202,20 @@ export function normalizeBuildOverride(override: BuildOverride): BuildOverride {
     start_command: startCommand,
   }
 }
+
+/** Seed the modal from analyze-source when language / paths are known. */
+export function buildOverrideFromAnalysis(analysis: {
+  language: string | null
+  build_subdir: string | null
+  start_command: string[] | null
+}): BuildOverride {
+  const language =
+    analysis.language && isBuildOverrideLanguage(analysis.language)
+      ? analysis.language
+      : 'python'
+  return normalizeBuildOverride({
+    ...emptyBuildOverride(language),
+    build_subdir: analysis.build_subdir,
+    start_command: analysis.start_command,
+  })
+}
