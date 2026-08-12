@@ -1,7 +1,7 @@
 # Task 5 Report: DB migration for build_override
 
 **Status:** DONE  
-**Commit:** (see git log after commit)  
+**Commit:** `cc91b00` — feat: persist build_override on stacks and deployment records  
 **Date:** 2026-08-11
 
 ## Summary
