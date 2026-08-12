@@ -43,6 +43,19 @@ def ensure_dockerfile_for_build(
     root = project_root.resolve()
     info = analyze_project(root)
 
+    explicit_build_subdir = (
+        override.build_subdir if override is not None and override.build_subdir else None
+    )
+    # Root Dockerfile wins unless the caller explicitly chose a nested build_subdir.
+    if (root / dockerfile_name).is_file() and explicit_build_subdir is None:
+        return BuildStrategy.DOCKERFILE_EXISTS, info.model_copy(
+            update={
+                "has_dockerfile": True,
+                "dockerfile_path": dockerfile_name,
+                "build_subdir": None,
+            }
+        )
+
     build_subdir = _resolve_build_subdir(override, info)
     effective_root = _effective_root(root, build_subdir)
     target = effective_root / dockerfile_name

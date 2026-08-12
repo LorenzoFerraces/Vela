@@ -1061,6 +1061,54 @@ def test_run_from_git_needs_build_override(
     assert "detail" in body
 
 
+def test_stack_deploy_needs_build_override(
+    api_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def empty_clone(
+        *,
+        url: str,
+        branch: str,
+        dest: Path,
+        access_token: str | None = None,
+    ) -> None:
+        _ = url, branch, access_token
+        dest.mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setattr(
+        "app.core.build.default_image_builder.git_shallow_clone",
+        empty_clone,
+    )
+
+    created = api_client.post(
+        "/api/stacks/",
+        json={
+            "name": "needs-override-stack",
+            "services": [
+                {
+                    "service_name": "api",
+                    "source_kind": "git",
+                    "source_ref": "https://github.com/example/empty.git",
+                    "git_branch": "main",
+                    "container_port": 80,
+                    "env_vars": {},
+                    "public_route": False,
+                }
+            ],
+        },
+    )
+    assert created.status_code == 201
+    stack_id = created.json()["id"]
+
+    deployed = api_client.post(f"/api/stacks/{stack_id}/deploy")
+    assert deployed.status_code == 422
+    body = deployed.json()
+    assert body["code"] == "needs_build_override"
+    assert "api" in body["detail"]
+
+    api_client.delete(f"/api/stacks/{stack_id}")
+
+
 def test_stack_crud(api_client: TestClient) -> None:
     """Stack create, list, get, deploy, and delete flow."""
     # Create

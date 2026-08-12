@@ -28,3 +28,30 @@ f:\lolo\fac\Vela\.venv\Scripts\python.exe -m pytest tests/test_language_detectio
 ## Notes / concerns
 
 - Brief path `..\..\.venv\Scripts\python.exe` from `backend/` is wrong on this layout; use repo-root `.venv` (`../.venv` or absolute).
+
+---
+
+# Final feature review fixes
+
+**Status:** DONE  
+**Date:** 2026-08-11
+
+## Critical — root Dockerfile precedence
+
+`ensure_dockerfile_for_build` now short-circuits when `{project_root}/Dockerfile` exists and `override.build_subdir` is not set: strategy `DOCKERFILE_EXISTS`, `build_subdir` cleared so nested markers cannot relocate the build context. Explicit `override.build_subdir` keeps nested behavior. `DefaultImageBuilder` follows `info.build_subdir`, so root win uses the project root as context.
+
+Regression tests:
+- `test_root_dockerfile_wins_over_nested_markers` (ensure)
+- `test_explicit_override_build_subdir_ignores_root_dockerfile` (ensure)
+- `test_root_dockerfile_builds_from_project_root` (DefaultImageBuilder)
+
+## Important — stack deploy `needs_build_override`
+
+Added `test_stack_deploy_needs_build_override`: empty git clone via monkeypatch → stack deploy returns 422 with `code=needs_build_override` and `detail` naming the failing service (`api`).
+
+## Tests
+
+```text
+f:\lolo\fac\Vela\.venv\Scripts\python.exe -m pytest tests/test_ensure_dockerfile.py tests/test_default_image_builder_override.py tests/test_api_integration.py::test_run_from_git_needs_build_override tests/test_api_integration.py::test_stack_deploy_needs_build_override -q
+# 18 passed
+```

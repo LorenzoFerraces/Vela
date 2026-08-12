@@ -49,6 +49,28 @@ async def test_nested_marker_builds_from_subdir(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_root_dockerfile_builds_from_project_root(tmp_path: Path) -> None:
+    """Root Dockerfile must win over nested markers for the build context."""
+    (tmp_path / "Dockerfile").write_text("FROM scratch\n", encoding="utf-8")
+    backend = tmp_path / "backend"
+    backend.mkdir()
+    (backend / "package.json").write_text("{}\n", encoding="utf-8")
+
+    orchestrator = RecordingOrchestrator()
+    builder = DefaultImageBuilder(orchestrator=orchestrator)
+
+    result = await builder.build_from_source(
+        ProjectSource(local_path=str(tmp_path)),
+        tag="test:root-dockerfile",
+    )
+
+    assert result.strategy is BuildStrategy.DOCKERFILE_EXISTS
+    assert result.project_info.build_subdir is None
+    assert len(orchestrator.build_paths) == 1
+    assert Path(orchestrator.build_paths[0]).resolve() == tmp_path.resolve()
+
+
+@pytest.mark.asyncio
 async def test_override_build_subdir_used_as_context(tmp_path: Path) -> None:
     apps = tmp_path / "apps" / "api"
     apps.mkdir(parents=True)
