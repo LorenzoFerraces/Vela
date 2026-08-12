@@ -127,6 +127,10 @@ class DeployConfig(BaseModel):
         default=None,
         description="Target project for the deployment; defaults to the caller's personal workspace.",
     )
+    network: str | None = Field(
+        default=None,
+        description="Docker network to attach the container to (overrides orchestrator default).",
+    )
 
     @field_validator("route_path_prefix")
     @classmethod
@@ -204,6 +208,14 @@ class ProjectSource(BaseModel):
         return self
 
 
+class BuildOverride(BaseModel):
+    language: SupportedLanguage
+    language_version: str | None = None
+    package_manager: str | None = None
+    build_subdir: str | None = None
+    start_command: list[str] | None = None
+
+
 class ProjectInfo(BaseModel):
     language: SupportedLanguage
     language_version: str | None = None
@@ -212,6 +224,7 @@ class ProjectInfo(BaseModel):
     dependency_file: str | None = None
     has_dockerfile: bool = False
     dockerfile_path: str | None = None
+    build_subdir: str | None = None
 
 
 class BuildResult(BaseModel):

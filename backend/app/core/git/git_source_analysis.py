@@ -13,6 +13,7 @@ from pydantic import ValidationError
 
 from app.api.schemas import GitSourceAnalysis
 from app.core.build.default_image_builder import DefaultImageBuilder
+from app.core.enums import SupportedLanguage
 from app.core.exceptions import GitSourceAnalysisError
 from app.core.git.project_analysis import analyze_project
 from app.e2e_support import e2e_git_source_analysis_if_enabled
@@ -230,6 +231,22 @@ def _merge_env_fallback(
     return analysis.model_copy(update={"env_vars": extracted})
 
 
+def _enrich_with_local_detection(
+    analysis: GitSourceAnalysis,
+    project_root: Path,
+) -> GitSourceAnalysis:
+    info = analyze_project(project_root)
+    needs_manual = (
+        not info.has_dockerfile and info.language is SupportedLanguage.UNKNOWN
+    )
+    return analysis.model_copy(
+        update={
+            "build_subdir": info.build_subdir,
+            "needs_manual_build_config": needs_manual,
+        }
+    )
+
+
 def _analysis_json_schema() -> dict:
     """Gemini ``responseSchema`` subset (UPPERCASE types, ``nullable``, no type arrays)."""
     return {
@@ -368,6 +385,14 @@ def _fallback_analysis(project_root: Path, git_branch: str) -> GitSourceAnalysis
         if info.has_dockerfile
         else "Vela will generate a Dockerfile for this project."
     )
+    needs_manual = (
+        not info.has_dockerfile and info.language is SupportedLanguage.UNKNOWN
+    )
+    if needs_manual:
+        hint = (
+            "No Dockerfile or recognized project markers were found. "
+            "Choose a language and build settings to continue."
+        )
     return GitSourceAnalysis(
         git_branch=git_branch,
         container_port=port,
@@ -379,6 +404,8 @@ def _fallback_analysis(project_root: Path, git_branch: str) -> GitSourceAnalysis
         has_dockerfile=info.has_dockerfile,
         build_strategy=strategy,
         summary_hint=hint,
+        build_subdir=info.build_subdir,
+        needs_manual_build_config=needs_manual,
     )
 
 
@@ -405,7 +432,8 @@ async def analyze_git_source(
         if _gemini_api_key() is None:
             return _merge_env_fallback(_fallback_analysis(root, git_branch), context)
         analysis = await _call_gemini(context, git_url, git_branch)
-        return _merge_env_fallback(analysis, context)
+        enriched = _enrich_with_local_detection(analysis, root)
+        return _merge_env_fallback(enriched, context)
     finally:
         from app.core.git.git_ops import rm_tree
 

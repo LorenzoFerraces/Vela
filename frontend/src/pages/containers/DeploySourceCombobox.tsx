@@ -14,11 +14,14 @@ type DeploySourceComboboxProps = {
   suggestions: DeploySourceSuggestion[]
   listOpen: boolean
   searchLoading: boolean
+  pastedGithubRepoPending?: boolean
+  pastedGithubHint?: string | null
   imageRefCheck: ImageRefCheckState
   onInputChange: (value: string) => void
   onInputFocus: () => void
   onPickSuggestion: (suggestion: DeploySourceSuggestion) => void
   onRequestImageCheck: (ref: string) => void
+  onCommitPastedGithubRepo?: () => void
 }
 
 /**
@@ -137,11 +140,14 @@ export function DeploySourceCombobox({
   suggestions,
   listOpen,
   searchLoading,
+  pastedGithubRepoPending = false,
+  pastedGithubHint = null,
   imageRefCheck,
   onInputChange,
   onInputFocus,
   onPickSuggestion,
   onRequestImageCheck,
+  onCommitPastedGithubRepo,
 }: DeploySourceComboboxProps) {
   const registryCheckEnabled = selectionNeedsRegistryCheck(selection)
   const groupedKinds: DeploySourceSuggestion['kind'][] = [
@@ -166,7 +172,14 @@ export function DeploySourceCombobox({
           value={displayValue}
           onChange={(event) => onInputChange(event.target.value)}
           onFocus={onInputFocus}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter' && onCommitPastedGithubRepo) {
+              event.preventDefault()
+              onCommitPastedGithubRepo()
+            }
+          }}
           onBlur={() => {
+            onCommitPastedGithubRepo?.()
             if (selection?.kind === 'image') {
               void onRequestImageCheck(selection.ref)
             }
@@ -197,7 +210,11 @@ export function DeploySourceCombobox({
             ) : null}
             {!searchLoading && suggestions.length === 0 ? (
               <li className="deploy-source-combobox__empty" role="presentation">
-                No matches. Try another search.
+                {pastedGithubHint
+                  ? pastedGithubHint
+                  : pastedGithubRepoPending
+                    ? 'Repository not found or you do not have access. Connect GitHub in Settings if this is a private repo.'
+                    : 'No matches. Try another search.'}
               </li>
             ) : null}
             {!searchLoading

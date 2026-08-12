@@ -473,7 +473,9 @@ class DockerOrchestrator(ContainerOrchestrator):
                 kwargs["nano_cpus"] = nano_cpus
             if hc is not None:
                 kwargs["healthcheck"] = hc
-            if self._default_network:
+            if config.network:
+                kwargs["network"] = config.network
+            elif self._default_network:
                 kwargs["network"] = self._default_network
             if config.volumes:
                 kwargs["mounts"] = [
@@ -1016,3 +1018,19 @@ class DockerOrchestrator(ContainerOrchestrator):
             }
         )
         return await self.deploy(replica_config)
+
+    async def create_network(self, name: str) -> None:
+        existing = [
+            n
+            for n in self._client.networks.list(filters={"name": name})
+            if n.name == name
+        ]
+        if not existing:
+            self._client.networks.create(name, driver="bridge")
+
+    async def remove_network(self, name: str) -> None:
+        try:
+            network = self._client.networks.get(name)
+            network.remove()
+        except docker.errors.NotFound:
+            pass

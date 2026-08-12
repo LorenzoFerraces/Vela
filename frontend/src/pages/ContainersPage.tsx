@@ -6,13 +6,19 @@ import {
   runContainerFromSource,
   startContainer,
   stopContainer,
+  type BuildOverride,
   type RunFromSourceRequest,
   type ScalingPolicyRequest,
 } from '../api/client'
+import BuildConfigModal from './containers/BuildConfigModal'
+import {
+  buildOverrideFromAnalysis,
+  isNeedsBuildOverrideError,
+} from './containers/buildOverride'
 import { ContainersFormMessageBanner } from './containers/ContainersFormMessageBanner'
 import { ContainersRunAdvancedFields } from './containers/ContainersRunAdvancedFields'
 import { ContainersRunFormFields } from './containers/ContainersRunFormFields'
-import { validateScalingPolicy } from './containers/ContainersRunScalingFields'
+import { validateScalingPolicy } from './containers/scalingPolicyUtils'
 import { DeployProjectSelect } from './containers/DeployProjectSelect'
 import { DeploySourceCombobox } from './containers/DeploySourceCombobox'
 import { Toast } from '../components/Toast'
@@ -46,6 +52,12 @@ export default function ContainersPage() {
   ])
   const [startCommand, setStartCommand] = useState('')
   const [scalingPolicy, setScalingPolicy] = useState<ScalingPolicyRequest | null>(null)
+  const [buildOverride, setBuildOverride] = useState<BuildOverride | null>(null)
+  const [buildConfigOpen, setBuildConfigOpen] = useState(false)
+  const [buildConfigInitial, setBuildConfigInitial] = useState<BuildOverride | null>(
+    null,
+  )
+  const [retryRunAfterConfirm, setRetryRunAfterConfirm] = useState(false)
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState<FormMessage | null>(null)
   const [rowBusy, setRowBusy] = useState<string | null>(null)
@@ -90,6 +102,21 @@ export default function ContainersPage() {
     setVolumeRows([createEmptyVolumeMountRow()])
     setStartCommand('')
     setScalingPolicy(null)
+    setBuildOverride(null)
+  }
+
+  function closeBuildConfigModal() {
+    setBuildConfigOpen(false)
+    setRetryRunAfterConfirm(false)
+  }
+
+  function openBuildConfigModal(options: {
+    initial?: BuildOverride | null
+    retryOnConfirm?: boolean
+  }) {
+    setBuildConfigInitial(options.initial ?? buildOverride)
+    setRetryRunAfterConfirm(options.retryOnConfirm ?? false)
+    setBuildConfigOpen(true)
   }
 
   function validateVolumeRows(): string | null {
@@ -132,15 +159,27 @@ export default function ContainersPage() {
     setImageRefCheck({ status: 'idle' })
   }
 
-  function onAnalyzeGitSource() {
+  async function onAnalyzeGitSource() {
     const selection = deploySource.selection
     if (selection?.kind !== 'git') {
       return
     }
-    void gitAnalysis.runAnalysis(selection.url, gitBranch.trim() || 'main')
+    const analysis = await gitAnalysis.runAnalysis(
+      selection.url,
+      gitBranch.trim() || 'main',
+    )
+    if (analysis?.needs_manual_build_config) {
+      openBuildConfigModal({
+        initial: buildOverrideFromAnalysis(analysis),
+        retryOnConfirm: false,
+      })
+    }
   }
 
-  function buildRunRequest(container_port: number): RunFromSourceRequest | null {
+  function buildRunRequest(
+    container_port: number,
+    override: BuildOverride | null = buildOverride,
+  ): RunFromSourceRequest | null {
     const selection = deploySource.selection
     if (!selection || !deployProjects.selectedProjectId) {
       return null
@@ -160,6 +199,7 @@ export default function ContainersPage() {
       volumes: volumesFromRows(volumeRows),
       project_id: deployProjects.selectedProjectId,
       scaling_policy: scalingPolicy,
+      build_override: override,
     }
     switch (selection.kind) {
       case 'image':
@@ -180,6 +220,85 @@ export default function ContainersPage() {
           source_kind: 'dockerfile_template',
           dockerfile_template_id: selection.templateId,
         }
+      default: {
+        const _exhaustive: never = selection
+        return _exhaustive
+      }
+    }
+  }
+
+  async function executeRun(override: BuildOverride | null = buildOverride) {
+    const parsedPort = parseInt(containerPort.trim(), 10)
+    if (
+      Number.isNaN(parsedPort) ||
+      parsedPort < 1 ||
+      parsedPort > 65535
+    ) {
+      setMessage({
+        type: 'err',
+        text: 'Enter a container port between 1 and 65535.',
+      })
+      return
+    }
+
+    const volumeError = validateVolumeRows()
+    if (volumeError) {
+      setMessage({ type: 'err', text: volumeError })
+      return
+    }
+
+    if (scalingValidationError) {
+      setMessage({ type: 'err', text: scalingValidationError })
+      return
+    }
+
+    setBusy(true)
+    setMessage(null)
+    try {
+      const requestBody = buildRunRequest(parsedPort, override)
+      if (!requestBody) {
+        setMessage({
+          type: 'err',
+          text: 'Choose a deploy source from the search results.',
+        })
+        return
+      }
+      const response = await runContainerFromSource(requestBody)
+      const routeNote = response.route_wired
+        ? ' Traefik route registered.'
+        : ''
+      const scalingWarning =
+        typeof response.scaling_policy_warning === 'string' &&
+        response.scaling_policy_warning.length > 0
+          ? ` ${response.scaling_policy_warning}`
+          : ''
+      const publicUrl =
+        typeof response.public_url === 'string' &&
+        response.public_url.length > 0
+          ? response.public_url
+          : undefined
+      setMessage({
+        type: 'ok',
+        text: `Started (${response.kind}) as ${response.container.name} — image ${response.image}.${routeNote}${scalingWarning}`,
+        publicUrl,
+      })
+      deploySource.clearSelection()
+      setContainerName('')
+      setGitBranch('main')
+      setContainerPort('80')
+      resetAdvancedFields()
+      await refresh()
+    } catch (error) {
+      if (isNeedsBuildOverrideError(error)) {
+        openBuildConfigModal({
+          initial: override,
+          retryOnConfirm: true,
+        })
+        return
+      }
+      setMessage({ type: 'err', text: formatApiError(error) })
+    } finally {
+      setBusy(false)
     }
   }
 
@@ -223,70 +342,16 @@ export default function ContainersPage() {
         }
       }
     }
-    const parsedPort = parseInt(containerPort.trim(), 10)
-    if (
-      Number.isNaN(parsedPort) ||
-      parsedPort < 1 ||
-      parsedPort > 65535
-    ) {
-      setMessage({
-        type: 'err',
-        text: 'Enter a container port between 1 and 65535.',
-      })
-      return
-    }
 
-    const volumeError = validateVolumeRows()
-    if (volumeError) {
-      setMessage({ type: 'err', text: volumeError })
-      return
-    }
+    await executeRun(buildOverride)
+  }
 
-    if (scalingValidationError) {
-      setMessage({ type: 'err', text: scalingValidationError })
-      return
-    }
-
-    setBusy(true)
-    setMessage(null)
-    try {
-      const requestBody = buildRunRequest(parsedPort)
-      if (!requestBody) {
-        setMessage({
-          type: 'err',
-          text: 'Choose a deploy source from the search results.',
-        })
-        return
-      }
-      const response = await runContainerFromSource(requestBody)
-      const routeNote = response.route_wired
-        ? ' Traefik route registered.'
-        : ''
-      const scalingWarning =
-        typeof response.scaling_policy_warning === 'string' &&
-        response.scaling_policy_warning.length > 0
-          ? ` ${response.scaling_policy_warning}`
-          : ''
-      const publicUrl =
-        typeof response.public_url === 'string' &&
-        response.public_url.length > 0
-          ? response.public_url
-          : undefined
-      setMessage({
-        type: 'ok',
-        text: `Started (${response.kind}) as ${response.container.name} — image ${response.image}.${routeNote}${scalingWarning}`,
-        publicUrl,
-      })
-      deploySource.clearSelection()
-      setContainerName('')
-      setGitBranch('main')
-      setContainerPort('80')
-      resetAdvancedFields()
-      await refresh()
-    } catch (error) {
-      setMessage({ type: 'err', text: formatApiError(error) })
-    } finally {
-      setBusy(false)
+  async function onBuildConfigConfirm(override: BuildOverride) {
+    setBuildOverride(override)
+    const shouldRetry = retryRunAfterConfirm
+    closeBuildConfigModal()
+    if (shouldRetry) {
+      await executeRun(override)
     }
   }
 
@@ -354,11 +419,19 @@ export default function ContainersPage() {
           suggestions={deploySource.suggestions}
           listOpen={deploySource.listOpen}
           searchLoading={deploySource.searchLoading}
+          pastedGithubRepoPending={deploySource.pastedGithubRepoPending}
+          pastedGithubHint={deploySource.pastedGithubHint}
           imageRefCheck={imageRefCheck}
           onInputChange={deploySource.onInputChange}
           onInputFocus={deploySource.onInputFocus}
           onPickSuggestion={applyDeploySuggestion}
           onRequestImageCheck={runImageRefAvailabilityCheck}
+          onCommitPastedGithubRepo={() => {
+            const committed = deploySource.tryCommitPastedGithubRepo()
+            if (committed) {
+              applyDeploySuggestion(committed)
+            }
+          }}
         />
         <DeployProjectSelect
           projects={deployProjects.projects}
@@ -377,7 +450,7 @@ export default function ContainersPage() {
           onGitBranchChange={setGitBranch}
           gitAnalysisLoading={gitAnalysis.analysisLoading}
           gitAnalysisError={gitAnalysis.analysisError}
-          onAnalyzeGit={showGitBranch ? onAnalyzeGitSource : undefined}
+          onAnalyzeGit={showGitBranch ? () => void onAnalyzeGitSource() : undefined}
         />
         <ContainersRunAdvancedFields
           envRows={envRows}
@@ -442,6 +515,15 @@ export default function ContainersPage() {
       <Toast
         message={gitAnalysis.successToast}
         onDismiss={gitAnalysis.dismissSuccessToast}
+      />
+
+      <BuildConfigModal
+        open={buildConfigOpen}
+        initial={buildConfigInitial}
+        onCancel={closeBuildConfigModal}
+        onConfirm={(override) => {
+          void onBuildConfigConfirm(override)
+        }}
       />
     </section>
   )

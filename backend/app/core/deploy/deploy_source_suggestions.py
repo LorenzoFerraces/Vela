@@ -12,7 +12,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core import user_library
 from app.core.exceptions import ProviderConnectionError
 from app.core.oauth import decrypt_identity_token, get_github_identity, list_user_repos
-from app.core.oauth.github import GitHubRepo
+from app.core.oauth.github import (
+    GitHubRepo,
+    find_accessible_repo_by_name,
+    parse_github_repo_url,
+)
 from app.core.containers.orchestrator import ContainerOrchestrator
 from app.core.build.registry_image_suggestions import (
     fetch_docker_hub_suggestions,
@@ -49,6 +53,7 @@ DeploySourceSuggestion = (
 
 class DeploySourcesResponse(BaseModel):
     suggestions: list[DeploySourceSuggestion] = Field(default_factory=list)
+    pasted_github_hint: str | None = None
 
 
 def _git_clone_url(html_url: str) -> str:
@@ -132,6 +137,45 @@ async def _load_github_repos(
         return []
 
 
+async def _resolve_pasted_github_repo(
+    identity: UserOAuthIdentity | None,
+    query: str,
+) -> tuple[DeploySourceGitSuggestion | None, str | None]:
+    repo_ref = parse_github_repo_url(query)
+    if repo_ref is None:
+        return None, None
+    if identity is None or not identity.access_token_encrypted:
+        return None, "Connect GitHub in Settings to deploy private repositories."
+    token = decrypt_identity_token(identity)
+    preferred_owners = [repo_ref.owner]
+    if identity.username:
+        preferred_owners.append(identity.username)
+    try:
+        outcome = await find_accessible_repo_by_name(
+            token,
+            repo_name=repo_ref.repo,
+            preferred_owners=preferred_owners,
+        )
+    except Exception:
+        return None, None
+    if outcome.repo is None or not outcome.repo.html_url:
+        if outcome.org_sso_authorize_url:
+            return (
+                None,
+                "Authorize Vela for your GitHub organization, then retry. "
+                "Open GitHub → Settings → Applications → Vela → Configure SSO.",
+            )
+        return None, None
+    return (
+        DeploySourceGitSuggestion(
+            url=_git_clone_url(outcome.repo.html_url),
+            name=outcome.repo.full_name or f"{repo_ref.owner}/{repo_ref.repo}",
+            default_branch=outcome.repo.default_branch or "main",
+        ),
+        None,
+    )
+
+
 async def collect_deploy_source_suggestions(
     *,
     session: AsyncSession,
@@ -164,10 +208,18 @@ async def collect_deploy_source_suggestions(
     )
 
     stripped = query.strip()
+    pasted_repo_ref = parse_github_repo_url(stripped)
+    if pasted_repo_ref is not None:
+        git_slots = max(git_slots, 30)
     suggestions: list[DeploySourceSuggestion] = []
 
+    github_search_query = (
+        pasted_repo_ref.repo if pasted_repo_ref is not None else stripped
+    )
+    hub_search_query = "" if pasted_repo_ref is not None else stripped
+
     local_tags_task = asyncio.create_task(_load_local_image_tags(orchestrator))
-    hub_rows_task = asyncio.create_task(_load_docker_hub_rows(stripped, image_slots))
+    hub_rows_task = asyncio.create_task(_load_docker_hub_rows(hub_search_query, image_slots))
 
     templates = await user_library.list_dockerfile_templates_matching_name(
         session,
@@ -176,19 +228,24 @@ async def collect_deploy_source_suggestions(
         limit=template_slots,
     )
     identity = await get_github_identity(session, user.id)
+    pasted_repo_task = asyncio.create_task(
+        _resolve_pasted_github_repo(identity, stripped)
+    )
     repos_task = asyncio.create_task(
         _load_github_repos(
             identity,
-            stripped=stripped,
+            stripped=github_search_query,
             git_slots=git_slots,
         )
     )
 
-    local_tags, hub_rows, repos = await asyncio.gather(
+    local_tags, hub_rows, repos, pasted_resolution = await asyncio.gather(
         local_tags_task,
         hub_rows_task,
         repos_task,
+        pasted_repo_task,
     )
+    pasted_repo, pasted_github_hint = pasted_resolution
     for item in merge_image_suggestions(
         query=stripped,
         limit=image_slots,
@@ -215,4 +272,18 @@ async def collect_deploy_source_suggestions(
             )
         )
 
-    return DeploySourcesResponse(suggestions=suggestions[:bounded_limit])
+    if pasted_repo is not None:
+        suggestions = [
+            row
+            for row in suggestions
+            if not (
+                isinstance(row, DeploySourceGitSuggestion)
+                and row.url == pasted_repo.url
+            )
+        ]
+        suggestions.insert(0, pasted_repo)
+
+    return DeploySourcesResponse(
+        suggestions=suggestions[:bounded_limit],
+        pasted_github_hint=pasted_github_hint,
+    )

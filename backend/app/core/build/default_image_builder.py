@@ -10,7 +10,7 @@ from app.core.build.builder import ImageBuilder
 from app.core.enums import BuildStrategy
 from app.core.exceptions import AnalysisError
 from app.core.git.git_ops import git_shallow_clone, rm_tree
-from app.core.models import BuildResult, ProjectInfo, ProjectSource
+from app.core.models import BuildOverride, BuildResult, ProjectInfo, ProjectSource
 from app.core.containers.orchestrator import ContainerOrchestrator
 from app.core.git.project_analysis import (
     analyze_project,
@@ -80,6 +80,7 @@ class DefaultImageBuilder(ImageBuilder):
         *,
         tag: str,
         access_token: str | None = None,
+        override: BuildOverride | None = None,
     ) -> BuildResult:
         """
         Builds a container image from the given project source (either a Git repository or a local directory) and returns metadata about the completed build.
@@ -88,6 +89,7 @@ class DefaultImageBuilder(ImageBuilder):
             source (ProjectSource): Source describing either a Git repository (git_url, optional branch) or a local filesystem path (local_path).
             tag (str): Image tag to apply to the built image.
             access_token (str | None): Optional access token used when cloning private Git repositories.
+            override (BuildOverride | None): Optional manual language / subdir settings.
         
         Returns:
             BuildResult: Contains the built image identifier and tag, the selected build strategy, an (empty) build log, and the analyzed ProjectInfo for the build context.
@@ -112,16 +114,24 @@ class DefaultImageBuilder(ImageBuilder):
 
         try:
             strategy, info = ensure_dockerfile_for_build(
-                Path(project_path), from_git_clone=source.git_url is not None
+                Path(project_path),
+                from_git_clone=source.git_url is not None,
+                override=override,
             )
-            dockerfile_path = Path(project_path) / "Dockerfile"
+            build_root = Path(project_path)
+            if info.build_subdir:
+                candidate = (build_root / info.build_subdir).resolve()
+                if not candidate.is_relative_to(build_root.resolve()):
+                    raise AnalysisError(str(build_root), "invalid build_subdir")
+                build_root = candidate
+            dockerfile_path = build_root / "Dockerfile"
             dockerfile_snapshot = (
                 dockerfile_path.read_text(encoding="utf-8")
                 if dockerfile_path.is_file()
                 else None
             )
             image_id = await self._orchestrator.build_image(
-                project_path, tag=tag, dockerfile="Dockerfile"
+                str(build_root), tag=tag, dockerfile="Dockerfile"
             )
             return BuildResult(
                 image_id=image_id,

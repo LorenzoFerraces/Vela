@@ -15,6 +15,7 @@ from app.core.exceptions import (
     DockerfileGenerationError,
     ImageBuildError,
     ImageNotFoundError,
+    NeedsBuildOverrideError,
     OrchestratorError,
     ProviderConnectionError,
     RegistryAccessDeniedError,
@@ -27,6 +28,7 @@ from app.core.exceptions import (
     VelaError,
 )
 from app.core.models import (
+    BuildOverride,
     BuildResult,
     ContainerInfo,
     ContainerStats,
@@ -48,6 +50,7 @@ from app.core.containers.orchestrator import ContainerOrchestrator
 from app.core.smoke import SMOKE_DEPLOY
 
 __all__ = [
+    "BuildOverride",
     "BuildResult",
     "BuildStrategy",
     "BuilderError",
@@ -70,6 +73,7 @@ __all__ = [
     "ImageBuilder",
     "ImageBuildError",
     "ImageNotFoundError",
+    "NeedsBuildOverrideError",
     "OrchestratorError",
     "RegistryAccessDeniedError",
     "PortMapping",
