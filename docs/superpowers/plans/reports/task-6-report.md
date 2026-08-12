@@ -1,7 +1,7 @@
 # Task 6 Report: API schemas, error handler, analyze enrichment, route wiring
 
 **Status:** DONE  
-**Commit:** (see git log) — feat: API support for build overrides and needs_build_override errors  
+**Commit:** `8b6eddd` — feat: API support for build overrides and needs_build_override errors  
 **Date:** 2026-08-11
 
 ## Summary
