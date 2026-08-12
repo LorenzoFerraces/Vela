@@ -1,7 +1,7 @@
 # Task 10 Report: E2E coverage for build override modal
 
 **Status:** DONE  
-**Commit:** (see git log)  
+**Commit:** `5b3ecf8` — test: e2e for build override modal on stacks/containers  
 **Date:** 2026-08-11
 
 ## Summary
