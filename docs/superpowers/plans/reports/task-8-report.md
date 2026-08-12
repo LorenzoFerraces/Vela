@@ -1,7 +1,7 @@
 # Task 8 Report: Wire Containers run + analyze flow
 
 **Status:** DONE  
-**Commit:** (see git log) — feat: containers flow prompts for build override when needed  
+**Commit:** `5aa425d` — feat: containers flow prompts for build override when needed  
 **Date:** 2026-08-11
 
 ## Summary
