@@ -18,9 +18,23 @@ from app.core.containers.orchestrator import ContainerOrchestrator
 from app.core.containers.volume_uploads import resolve_volume_upload_path
 from app.core.enums import RestartPolicy
 from app.core.exceptions import CloneError
-from app.core.models import ContainerInfo, DeployConfig, ProjectSource, VolumeMount
+from app.core.models import (
+    BuildOverride,
+    ContainerInfo,
+    DeployConfig,
+    ProjectSource,
+    VolumeMount,
+)
 from app.core.traffic.traffic_router import TrafficRouter
 from app.db.models import DeploymentRecord, Stack, StackService, User
+
+
+def _build_override_from_service(service: StackService) -> BuildOverride | None:
+    """Parse persisted JSON ``build_override`` into a ``BuildOverride`` when present."""
+    raw = getattr(service, "build_override", None)
+    if not raw:
+        return None
+    return BuildOverride.model_validate(raw)
 
 
 async def deploy_stack(
@@ -165,13 +179,16 @@ async def _resolve_service_image(
             )
 
             git_url = service.source_ref.strip()
+            branch = (service.git_branch or "main").strip() or "main"
             access_token = await _github_token_for_url(session, user, git_url)
             tag = f"vela/gitbuild:{uuid.uuid4().hex[:12]}"
+            override = _build_override_from_service(service)
             try:
                 build_result = await image_builder.build_from_source(
-                    ProjectSource(git_url=git_url, branch="main"),
+                    ProjectSource(git_url=git_url, branch=branch),
                     tag=tag,
                     access_token=access_token,
+                    override=override,
                 )
             except CloneError as exc:
                 if (

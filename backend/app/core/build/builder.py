@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 
-from app.core.models import BuildResult, ProjectInfo, ProjectSource
+from app.core.models import BuildOverride, BuildResult, ProjectInfo, ProjectSource
 
 
 class ImageBuilder(ABC):
@@ -20,6 +20,7 @@ class ImageBuilder(ABC):
         *,
         tag: str,
         access_token: str | None = None,
+        override: BuildOverride | None = None,
     ) -> BuildResult:
         """Full pipeline: clone → analyse → generate/detect Dockerfile → build.
 
@@ -32,6 +33,8 @@ class ImageBuilder(ABC):
             tag:    Image tag to assign to the built image.
             access_token: Optional credential forwarded to the git clone for
                 private HTTPS repos. Never stored alongside ``source``.
+            override: Optional client-supplied build settings when detection
+                fails or the user pins language / ``build_subdir``.
 
         Returns:
             A ``BuildResult`` with the image ID, tag, strategy used, and
