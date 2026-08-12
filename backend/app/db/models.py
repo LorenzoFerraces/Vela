@@ -291,6 +291,7 @@ class DeploymentRecord(Base):
     env_vars: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
     command: Mapped[list | None] = mapped_column(JSON, nullable=True)
     dockerfile_snapshot: Mapped[str | None] = mapped_column(Text, nullable=True)
+    build_override: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     public_url: Mapped[str | None] = mapped_column(String(2048), nullable=True)
     stack_id: Mapped[uuid.UUID | None] = mapped_column(
         Uuid(as_uuid=True),
@@ -469,6 +470,7 @@ class StackService(Base):
     service_name: Mapped[str] = mapped_column(String(128), nullable=False)
     source_kind: Mapped[str] = mapped_column(String(32), nullable=False)
     source_ref: Mapped[str] = mapped_column(String(2048), nullable=False)
+    git_branch: Mapped[str | None] = mapped_column(String(256), nullable=True)
     container_port: Mapped[int] = mapped_column(Integer, nullable=False, default=80)
     env_vars: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
     command: Mapped[list | None] = mapped_column(JSON, nullable=True)
@@ -476,6 +478,7 @@ class StackService(Base):
     depends_on: Mapped[list | None] = mapped_column(JSON, nullable=True)
     volumes: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
     scaling_policy: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    build_override: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=_utcnow,
     )
