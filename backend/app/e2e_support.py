@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import uuid
+from pathlib import Path
 from typing import TYPE_CHECKING
 from urllib.parse import unquote, urlparse
 
@@ -21,6 +22,9 @@ from app.db.models import User, UserOAuthIdentity
 
 if TYPE_CHECKING:
     from app.api.schemas import GitSourceAnalysis
+
+# Analyze / build path that forces the shared BuildConfigModal in Playwright.
+E2E_NEEDS_MANUAL_BRANCH = "needs-manual"
 
 E2E_USER_EMAIL = "e2e@example.com"
 E2E_USER_PASSWORD = "e2e-test-password-min-8"
@@ -178,6 +182,21 @@ def e2e_git_source_analysis_if_enabled(
         return None
     _ = git_url
     branch = (git_branch or "main").strip() or "main"
+    needs_manual = branch.casefold() == E2E_NEEDS_MANUAL_BRANCH
+    if needs_manual:
+        return GitSourceAnalysis(
+            git_branch=branch,
+            container_port=8080,
+            container_name="repo",
+            env_vars={},
+            start_command=None,
+            language=None,
+            framework=None,
+            has_dockerfile=False,
+            build_strategy="generated_dockerfile",
+            summary_hint="E2E fixture: no markers; choose build settings manually.",
+            needs_manual_build_config=True,
+        )
     return GitSourceAnalysis(
         git_branch=branch,
         container_port=5173,
@@ -189,7 +208,32 @@ def e2e_git_source_analysis_if_enabled(
         has_dockerfile=False,
         build_strategy="generated_dockerfile",
         summary_hint="E2E fixture: Vite dev server on port 5173.",
+        needs_manual_build_config=False,
     )
+
+
+def e2e_git_shallow_clone_if_enabled(
+    *,
+    url: str,
+    branch: str,
+    dest: Path,
+    access_token: str | None = None,
+) -> bool:
+    """
+    When E2E mode is on, create an empty clone destination (no language markers)
+    so builds exercise ``needs_build_override`` / override Dockerfile generation
+    without calling real GitHub.
+
+    Returns:
+        True if the stub handled the clone; False if the real git clone should run.
+    """
+    if not e2e_mode_enabled():
+        return False
+    _ = url, branch, access_token
+    if dest.exists():
+        return True
+    dest.mkdir(parents=True, exist_ok=False)
+    return True
 
 
 async def ensure_e2e_database() -> None:

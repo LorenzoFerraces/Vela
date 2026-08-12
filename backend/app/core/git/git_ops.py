@@ -10,6 +10,7 @@ import subprocess
 from pathlib import Path
 
 from app.core.exceptions import CloneError
+from app.e2e_support import e2e_git_shallow_clone_if_enabled
 
 _CREDENTIALS_IN_URL = re.compile(r"(https?://)([^/@:\s]+:)?[^/@\s]+@", re.IGNORECASE)
 
@@ -28,6 +29,13 @@ async def git_shallow_clone(
     (``ps``), or in any error message. Errors are sanitized to mask credentials
     that callers might have embedded in the URL themselves.
     """
+    if e2e_git_shallow_clone_if_enabled(
+        url=url,
+        branch=branch,
+        dest=dest,
+        access_token=access_token,
+    ):
+        return
 
     cmd = _build_clone_command(url=url, branch=branch, dest=dest, access_token=access_token)
 
