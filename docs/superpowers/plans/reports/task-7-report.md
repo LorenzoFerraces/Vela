@@ -1,7 +1,7 @@
 # Task 7 Report: Frontend types + shared BuildConfigModal
 
 **Status:** DONE  
-**Commit:** _(pending)_ — feat: shared BuildConfigModal for manual language overrides  
+**Commit:** `4280176` — feat: shared BuildConfigModal for manual language overrides  
 **Date:** 2026-08-11
 
 ## Summary
