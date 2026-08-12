@@ -2,6 +2,7 @@
 
 **Status:** Complete  
 **Commit:** `fb4e370` — feat: stacks persist and prompt for per-service build overrides  
+**Follow-ups:** `8f95093` (report hash), `fe41e38` (importTypes + serviceLinkDetection modules required by builder)  
 **Date:** 2026-08-11
 
 ## Summary
