@@ -235,7 +235,6 @@ def _enrich_with_local_detection(
     analysis: GitSourceAnalysis,
     project_root: Path,
 ) -> GitSourceAnalysis:
-    """Attach build_subdir / needs_manual_build_config from marker scan."""
     info = analyze_project(project_root)
     needs_manual = (
         not info.has_dockerfile and info.language is SupportedLanguage.UNKNOWN

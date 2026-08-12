@@ -204,6 +204,8 @@ VITE_API_BASE_URL=http://127.0.0.1:8000
 
 **Sign-in:** use **Register** (`/register`) or **Log in** (`/login`). After a successful register or login, the UI stores the access token in **localStorage** under `vela.access_token` and sends it on API requests. Protected app routes redirect to `/login` when you are not signed in.
 
+**Git builds:** auto-detect Go, Python, Node, Java/Clojure, Rust, Ruby, PHP, .NET, and Elixir (root + shallow scan); Containers and Stacks open a build override modal when inference is insufficient.
+
 ## Useful commands
 
 | Action | Command |

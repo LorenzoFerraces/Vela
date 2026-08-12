@@ -1,9 +1,4 @@
-"""Per-language Dockerfile text generators.
-
-Templates never touch the filesystem: wrapper scripts (``./gradlew``, ``./mvnw``) are
-preferred with a shell fallback (``|| gradle ...``) baked into the generated Dockerfile
-itself, so the same template covers repos with and without a committed wrapper.
-"""
+"""Per-language Dockerfile text generators (no filesystem I/O)."""
 
 from __future__ import annotations
 
@@ -190,7 +185,6 @@ FROM eclipse-temurin:{version}-jre
 WORKDIR /app
 COPY --from=builder /out/app.jar ./app.jar
 EXPOSE 8080
-# Override start_command when the fat jar's main class cannot be inferred automatically.
 {cmd}
 """
 
@@ -210,7 +204,6 @@ FROM eclipse-temurin:{version}-jre
 WORKDIR /app
 COPY --from=builder /out/app.jar ./app.jar
 EXPOSE 8080
-# Override start_command when the fat jar's main class cannot be inferred automatically.
 {cmd}
 """
 
@@ -242,7 +235,6 @@ FROM eclipse-temurin:{version}-jre
 WORKDIR /app
 COPY --from=builder /out/app.jar ./app.jar
 EXPOSE 8080
-# Set start_command to override the discovered ``-main`` entrypoint if needed.
 {cmd}
 """
 
@@ -259,8 +251,6 @@ FROM eclipse-temurin:{version}-jre
 WORKDIR /app
 COPY --from=builder /out/app.jar ./app.jar
 EXPOSE 8080
-# Clojure's main namespace is rarely inferable automatically — set start_command, e.g.
-# ["java", "-cp", "app.jar", "clojure.main", "-m", "myapp.core"].
 {cmd}
 """
 
@@ -283,7 +273,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates
 WORKDIR /app
 COPY --from=builder /src/target/release/ ./bin/
 EXPOSE 8080
-# Runs the first executable found; override start_command if the crate has multiple binaries.
 {cmd}
 """
 
@@ -300,7 +289,6 @@ COPY Gemfile Gemfile.lock* ./
 RUN bundle install
 COPY . .
 EXPOSE 8080
-# Defaults to rackup; override start_command for Rails (``bin/rails server``) or a Puma config.
 {cmd}
 """
 
@@ -336,7 +324,6 @@ WORKDIR /app
 COPY --from=builder /out ./
 EXPOSE 8080
 ENV ASPNETCORE_URLS=http://0.0.0.0:8080
-# Assumes a single project publishes ``app.dll``; override start_command for multi-project solutions.
 {cmd}
 """
 
@@ -359,6 +346,5 @@ FROM elixir:{version}-otp-{_ELIXIR_OTP_DEFAULT}-slim
 WORKDIR /app
 COPY --from=builder /src/_build/prod/rel/ ./_build/prod/rel/
 EXPOSE 8080
-# Release name defaults to the app name in mix.exs; override start_command if different.
 {cmd}
 """

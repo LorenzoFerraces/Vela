@@ -1,10 +1,4 @@
-"""Detect a project's language from filesystem markers (root first, then a shallow scan).
-
-Scan order: check the project root; if nothing matches, walk depth <= ``MAX_SCAN_DEPTH``
-breadth-first, skipping noise directories (``IGNORE_DIR_NAMES``). The shallowest directory
-with a matching marker wins; ties are broken by marker priority (see ``_MARKER_RULES``),
-then by relative path for determinism.
-"""
+"""Detect a project's language from filesystem markers (root first, then a shallow scan)."""
 
 from __future__ import annotations
 
@@ -62,9 +56,7 @@ def _match_glob(*patterns: str) -> _MarkerMatcher:
     return _matcher
 
 
-# Ordered ascending by priority (lowest tuple wins). The second tuple element only
-# disambiguates markers within the same tier when they live in the same directory
-# (e.g. Clojure's ``deps.edn`` beats a co-located Gradle wrapper).
+# Ascending priority; second int breaks same-directory ties (e.g. Clojure over Gradle).
 _MARKER_RULES: list[tuple[tuple[int, int], SupportedLanguage, _MarkerMatcher]] = [
     ((1, 0), SupportedLanguage.GO, _match_exact("go.mod")),
     ((2, 0), SupportedLanguage.CLOJURE, _match_exact("deps.edn", "project.clj", "bb.edn")),
@@ -172,9 +164,6 @@ def _find_marker_dir(
                 rank, language, filename = found
                 candidates.append((rank, directory, language, filename))
         if candidates:
-            # Only the primary tier (candidate[0][0]) matters across directories: the
-            # Clojure-over-Gradle sub-rank is a same-directory rule already resolved by
-            # ``_directory_marker``, so cross-directory ties fall back to path only.
             candidates.sort(key=lambda candidate: (candidate[0][0], candidate[1].as_posix()))
             _, directory, language, filename = candidates[0]
             return directory, language, filename

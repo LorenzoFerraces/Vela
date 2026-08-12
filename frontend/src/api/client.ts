@@ -414,7 +414,6 @@ export interface VolumeMountRequest {
   target: string
 }
 
-/** Manual language / build settings when auto-detection fails or needs a nudge. */
 export type BuildOverrideLanguage =
   | 'python'
   | 'javascript'

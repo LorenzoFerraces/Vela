@@ -30,8 +30,7 @@ from app.db.models import DeploymentRecord, Stack, StackService, User
 
 
 def _build_override_from_service(service: StackService) -> BuildOverride | None:
-    """Parse persisted JSON ``build_override`` into a ``BuildOverride`` when present."""
-    raw = getattr(service, "build_override", None)
+    raw = service.build_override
     if not raw:
         return None
     return BuildOverride.model_validate(raw)

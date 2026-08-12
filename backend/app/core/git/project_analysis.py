@@ -1,9 +1,4 @@
-"""Orchestrate Dockerfile generation for projects analyzed by ``language_detection``.
-
-``analyze_project`` and ``dockerfile_contents_for`` are re-exported here (rather than
-redefined) so existing callers can keep importing them from this module while the
-marker-scanning and template logic live in ``language_detection`` / ``dockerfile_templates``.
-"""
+"""Ensure a Dockerfile exists for a build: detect language, apply overrides, generate templates."""
 
 from __future__ import annotations
 
@@ -44,13 +39,7 @@ def ensure_dockerfile_for_build(
     from_git_clone: bool = False,
     override: BuildOverride | None = None,
 ) -> tuple[BuildStrategy, ProjectInfo]:
-    """Resolve a build strategy for ``project_root``.
-
-    Resolution order: an existing Dockerfile at the effective root always wins (never
-    overwritten); otherwise an explicit ``override`` generates a Dockerfile for its
-    language; otherwise auto-detection generates one when the detected language is known;
-    otherwise a typed ``NeedsBuildOverrideError`` asks the caller to collect an override.
-    """
+    """Prefer an existing Dockerfile; otherwise generate from override or detection."""
     root = project_root.resolve()
     info = analyze_project(root)
 

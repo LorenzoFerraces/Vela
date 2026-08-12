@@ -23,7 +23,6 @@ from app.db.models import User, UserOAuthIdentity
 if TYPE_CHECKING:
     from app.api.schemas import GitSourceAnalysis
 
-# Analyze / build path that forces the shared BuildConfigModal in Playwright.
 E2E_NEEDS_MANUAL_BRANCH = "needs-manual"
 
 E2E_USER_EMAIL = "e2e@example.com"

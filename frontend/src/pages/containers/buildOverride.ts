@@ -27,7 +27,6 @@ function hasStringBody(error: unknown): error is { body: string } {
   return isRecord(error) && typeof error.body === 'string'
 }
 
-/** True when an API failure asks the client to collect a BuildOverride. */
 export function isNeedsBuildOverrideError(error: unknown): boolean {
   if (!hasStringBody(error)) {
     return false
@@ -43,7 +42,6 @@ export function isNeedsBuildOverrideError(error: unknown): boolean {
   }
 }
 
-/** Service name from stack deploy detail, e.g. `Deploy failed on service 'web': …`. */
 export function parseFailedServiceNameFromError(error: unknown): string | null {
   if (!hasStringBody(error)) {
     return null
@@ -220,7 +218,6 @@ export function normalizeBuildOverride(override: BuildOverride): BuildOverride {
   }
 }
 
-/** Seed the modal from analyze-source when language / paths are known. */
 export function buildOverrideFromAnalysis(analysis: {
   language: string | null
   build_subdir: string | null
