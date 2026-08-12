@@ -20,6 +20,7 @@ from app.core.containers.volume_uploads import (
     VOLUME_UPLOAD_USER_QUOTA_BYTES,
 )
 from app.core.models import (
+    BuildOverride,
     ContainerInfo,
     ProjectSource,
     ScalingPolicyConfig,
@@ -163,6 +164,10 @@ class RunFromSourceRequest(BaseModel):
     scaling_policy: ScalingPolicyConfig | None = Field(
         default=None,
         description="When set, persist an auto-scaling policy for this container after deploy.",
+    )
+    build_override: BuildOverride | None = Field(
+        default=None,
+        description="Manual language / build settings when auto-detection is insufficient.",
     )
 
     @field_validator("env_vars")
@@ -362,6 +367,10 @@ class BuilderBuildRequest(BaseModel):
         max_length=256,
         description="Image reference to assign to the built image (e.g. vela/myapp:dev).",
     )
+    build_override: BuildOverride | None = Field(
+        default=None,
+        description="Manual language / build settings when auto-detection is insufficient.",
+    )
 
 
 class BuilderAnalyzeRequest(BaseModel):
@@ -407,6 +416,8 @@ class GitSourceAnalysis(BaseModel):
         "generated_dockerfile"
     )
     summary_hint: str = ""
+    build_subdir: str | None = None
+    needs_manual_build_config: bool = False
 
 
 class AiPrefillPreferences(BaseModel):
@@ -510,6 +521,7 @@ class DeploymentRecordPublic(BaseModel):
     env_vars: dict[str, str]
     command: list[str] | None
     dockerfile_snapshot: str | None
+    build_override: dict | None = None
     public_url: str | None
     created_at: datetime
 
@@ -695,6 +707,7 @@ class StackServiceCreate(BaseModel):
     service_name: str = Field(min_length=1, max_length=128)
     source_kind: Literal["image", "git", "dockerfile_template"]
     source_ref: str = Field(min_length=1, max_length=2048)
+    git_branch: str | None = Field(default=None, max_length=256)
     container_port: int = Field(default=80, ge=1, le=65535)
     env_vars: dict[str, str] = Field(default_factory=dict)
     command: list[str] | None = None
@@ -702,6 +715,7 @@ class StackServiceCreate(BaseModel):
     depends_on: list[str] | None = None
     volumes: list[VolumeMountRequest] = Field(default_factory=list)
     scaling_policy: ScalingPolicyConfig | None = None
+    build_override: BuildOverride | None = None
 
 
 class StackCreate(BaseModel):
@@ -719,6 +733,7 @@ class StackServicePublic(BaseModel):
     service_name: str
     source_kind: str
     source_ref: str
+    git_branch: str | None = None
     container_port: int
     env_vars: dict[str, str]
     command: list[str] | None
@@ -726,6 +741,7 @@ class StackServicePublic(BaseModel):
     depends_on: list[str] | None
     volumes: list
     scaling_policy: dict | None
+    build_override: dict | None = None
 
 
 class StackPublic(BaseModel):
@@ -748,4 +764,13 @@ class ComposeImportRequest(BaseModel):
 
 class ComposeImportResponse(BaseModel):
     stack: StackPublic
+    warnings: list[str] = []
+
+
+class ComposeParseRequest(BaseModel):
+    yaml_content: str
+
+
+class ComposeParseResponse(BaseModel):
+    services: list[StackServiceCreate]
     warnings: list[str] = []

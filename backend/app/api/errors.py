@@ -15,6 +15,7 @@ from app.core.exceptions import (
     CloneError,
     ComposeImportError,
     GitSourceAnalysisError,
+    NeedsBuildOverrideError,
     UnsupportedProjectError,
     ContainerAlreadyRunningError,
     ContainerNotFoundError,
@@ -198,6 +199,15 @@ def register_exception_handlers(app) -> None:
         return JSONResponse(
             status_code=status.HTTP_400_BAD_REQUEST,
             content={"detail": str(exc)},
+        )
+
+    @app.exception_handler(NeedsBuildOverrideError)
+    async def needs_build_override_handler(
+        _request: Request, exc: NeedsBuildOverrideError
+    ) -> JSONResponse:
+        return JSONResponse(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            content=exc.api_response_content(),
         )
 
     @app.exception_handler(RouteConfigurationError)

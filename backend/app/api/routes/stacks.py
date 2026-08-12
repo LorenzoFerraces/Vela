@@ -21,8 +21,11 @@ from app.api.deps import (
 from app.api.schemas import (
     ComposeImportRequest,
     ComposeImportResponse,
+    ComposeParseRequest,
+    ComposeParseResponse,
     StackCreate,
     StackPublic,
+    StackServiceCreate,
     StackServicePublic,
 )
 from app.core.build.default_image_builder import DefaultImageBuilder
@@ -89,6 +92,7 @@ async def create_user_stack(
             service_name=s.service_name,
             source_kind=s.source_kind,
             source_ref=s.source_ref,
+            git_branch=s.git_branch,
             container_port=s.container_port,
             env_vars=s.env_vars,
             command=s.command,
@@ -96,6 +100,7 @@ async def create_user_stack(
             depends_on=s.depends_on,
             volumes=[v.model_dump() for v in s.volumes],
             scaling_policy=s.scaling_policy.model_dump() if s.scaling_policy else None,
+            build_override=s.build_override.model_dump() if s.build_override else None,
         )
         for s in body.services
     ]
@@ -104,6 +109,24 @@ async def create_user_stack(
     result = _stack_to_public(stack, body.child_stack_ids or [])
     await session.commit()
     return result
+
+
+@router.post("/parse-compose", response_model=ComposeParseResponse)
+async def parse_compose_yaml(
+    body: ComposeParseRequest,
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> ComposeParseResponse:
+    _ = current_user
+    services, warnings = parse_compose(body.yaml_content)
+    if not services:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Compose file contains no valid services.",
+        )
+    return ComposeParseResponse(
+        services=[_orm_service_to_create(service) for service in services],
+        warnings=warnings,
+    )
 
 
 @router.post("/import-compose", response_model=ComposeImportResponse, status_code=status.HTTP_201_CREATED)
@@ -157,6 +180,7 @@ async def update_user_stack(
             service_name=s.service_name,
             source_kind=s.source_kind,
             source_ref=s.source_ref,
+            git_branch=s.git_branch,
             container_port=s.container_port,
             env_vars=s.env_vars,
             command=s.command,
@@ -164,6 +188,7 @@ async def update_user_stack(
             depends_on=s.depends_on,
             volumes=[v.model_dump() for v in s.volumes],
             scaling_policy=s.scaling_policy.model_dump() if s.scaling_policy else None,
+            build_override=s.build_override.model_dump() if s.build_override else None,
         )
         for s in body.services
     ]
@@ -265,6 +290,28 @@ async def deploy_user_stack(
     return result
 
 
+def _orm_service_to_create(service: StackService) -> StackServiceCreate:
+    volumes = service.volumes or []
+    scaling = service.scaling_policy
+    source_kind = service.source_kind
+    if source_kind not in ("image", "git", "dockerfile_template"):
+        source_kind = "image"
+    return StackServiceCreate(
+        service_name=service.service_name,
+        source_kind=source_kind,  # type: ignore[arg-type]
+        source_ref=service.source_ref,
+        git_branch=service.git_branch,
+        container_port=service.container_port or 80,
+        env_vars=dict(service.env_vars or {}),
+        command=service.command,
+        public_route=bool(service.public_route),
+        depends_on=service.depends_on,
+        volumes=volumes or [],
+        scaling_policy=scaling,
+        build_override=service.build_override,
+    )
+
+
 def _stack_to_public(
     stack: Stack,
     child_stack_ids: list[uuid.UUID] | None = None,
@@ -282,6 +329,7 @@ def _stack_to_public(
                 service_name=s.service_name,
                 source_kind=s.source_kind,
                 source_ref=s.source_ref,
+                git_branch=s.git_branch,
                 container_port=s.container_port,
                 env_vars=s.env_vars,
                 command=s.command,
@@ -289,6 +337,7 @@ def _stack_to_public(
                 depends_on=s.depends_on,
                 volumes=s.volumes,
                 scaling_policy=s.scaling_policy,
+                build_override=s.build_override,
             )
             for s in stack.services
         ],

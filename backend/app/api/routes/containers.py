@@ -342,6 +342,9 @@ async def _persist_run_deployment(
                 command=list(body.command) if body.command else None,
                 dockerfile_snapshot=dockerfile_snapshot,
                 public_url=public_url,
+                build_override=(
+                    body.build_override.model_dump() if body.build_override else None
+                ),
             ),
         )
     except Exception:
@@ -804,6 +807,7 @@ async def run_from_user_source(
             ProjectSource(git_url=git_url, branch=body.git_branch),
             tag=tag,
             access_token=access_token,
+            override=body.build_override,
         )
     except CloneError as exc:
         if (

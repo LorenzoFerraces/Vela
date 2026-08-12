@@ -2,9 +2,36 @@
 
 from __future__ import annotations
 
+import re
+
 import yaml
 
 from app.db.models import StackService
+
+# ${VAR:-default} or ${VAR-default} — capture default when host env is unavailable.
+_BRACE_DEFAULT_PATTERN = re.compile(
+    r"\$\{([A-Za-z_][A-Za-z0-9_]*)(?:(:-|-)([^}]*))?\}"
+)
+# Bare $VAR (not preceded by another $).
+_SIMPLE_VAR_PATTERN = re.compile(r"(?<!\$)\$([A-Za-z_][A-Za-z0-9_]*)")
+
+
+def resolve_compose_interpolation(value: str) -> str:
+    """Resolve Compose/shell-style env interpolation for import into Vela.
+
+    Host environment is not available during import, so:
+    - ``${VAR:-default}`` / ``${VAR-default}`` → ``default``
+    - ``${VAR}`` / ``$VAR`` → empty string
+    """
+
+    def replace_braced(match: re.Match[str]) -> str:
+        default = match.group(3)
+        if default is not None:
+            return default
+        return ""
+
+    resolved = _BRACE_DEFAULT_PATTERN.sub(replace_braced, value)
+    return _SIMPLE_VAR_PATTERN.sub("", resolved)
 
 
 def parse_compose(yaml_content: str) -> tuple[list[StackService], list[str]]:
@@ -45,6 +72,7 @@ def _parse_service(
     warnings: list[str] = []
 
     source_kind, source_ref = _resolve_source(config, name, warnings)
+    git_branch = "main" if source_kind == "git" else None
     container_port = _extract_container_port(config, warnings)
     env_vars = _extract_env(config)
 
@@ -62,6 +90,7 @@ def _parse_service(
             service_name=name,
             source_kind=source_kind,
             source_ref=source_ref,
+            git_branch=git_branch,
             container_port=container_port,
             env_vars=env_vars,
             command=command,
@@ -69,6 +98,16 @@ def _parse_service(
             depends_on=depends_on if depends_on else None,
         ),
         warnings,
+    )
+
+
+def _looks_like_git_url(value: str) -> bool:
+    stripped = value.strip()
+    return (
+        stripped.startswith("git@")
+        or stripped.startswith("http://")
+        or stripped.startswith("https://")
+        or stripped.startswith("ssh://")
     )
 
 
@@ -80,14 +119,25 @@ def _resolve_source(
     """Determine source_kind and source_ref from image or build config."""
     image = config.get("image")
     if image:
-        return "image", str(image)
+        image_ref = str(image).strip()
+        if _looks_like_git_url(image_ref):
+            warnings.append(
+                f"Service '{name}': image looks like a git URL — treating as git source."
+            )
+            return "git", image_ref
+        return "image", image_ref
 
     build = config.get("build")
     if isinstance(build, str):
-        return "dockerfile_template", build
+        build_ref = build.strip()
+        if _looks_like_git_url(build_ref):
+            return "git", build_ref
+        return "dockerfile_template", build_ref
     if isinstance(build, dict):
-        context = build.get("context", ".")
-        return "dockerfile_template", str(context)
+        context = str(build.get("context", ".")).strip()
+        if _looks_like_git_url(context):
+            return "git", context
+        return "dockerfile_template", context
 
     warnings.append(f"Service '{name}': no image or build specified, defaulting to 'nginx:alpine'.")
     return "image", "nginx:alpine"
@@ -124,14 +174,17 @@ def _extract_env(config: dict) -> dict[str, str]:
     """Extract environment variables from list or dict format."""
     env = config.get("environment", {})
     if isinstance(env, dict):
-        return {str(k): str(v) if v is not None else "" for k, v in env.items()}
+        return {
+            str(key): resolve_compose_interpolation(str(value) if value is not None else "")
+            for key, value in env.items()
+        }
     if isinstance(env, list):
-        result = {}
+        result: dict[str, str] = {}
         for item in env:
             item_str = str(item)
             if "=" in item_str:
                 key, _, value = item_str.partition("=")
-                result[key] = value
+                result[key] = resolve_compose_interpolation(value)
             else:
                 result[item_str] = ""
         return result

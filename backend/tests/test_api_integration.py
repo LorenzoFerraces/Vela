@@ -1007,6 +1007,60 @@ def test_traffic_routes_crud(make_authed_client) -> None:
         assert empty.json() == []
 
 
+def test_stack_create_persists_build_override(api_client: TestClient) -> None:
+    body = {
+        "name": "ovr",
+        "services": [
+            {
+                "service_name": "app",
+                "source_kind": "git",
+                "source_ref": "https://github.com/example/app.git",
+                "git_branch": "main",
+                "build_override": {"language": "java", "package_manager": "gradle"},
+            }
+        ],
+    }
+    resp = api_client.post("/api/stacks/", json=body)
+    assert resp.status_code == 201
+    assert resp.json()["services"][0]["build_override"]["language"] == "java"
+
+    stack_id = resp.json()["id"]
+    api_client.delete(f"/api/stacks/{stack_id}")
+
+
+def test_run_from_git_needs_build_override(
+    api_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def empty_clone(
+        *,
+        url: str,
+        branch: str,
+        dest: Path,
+        access_token: str | None = None,
+    ) -> None:
+        _ = url, branch, access_token
+        dest.mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setattr(
+        "app.core.build.default_image_builder.git_shallow_clone",
+        empty_clone,
+    )
+
+    response = api_client.post(
+        "/api/containers/run",
+        json={
+            "source": "https://github.com/example/empty.git",
+            "git_branch": "main",
+            "container_port": 80,
+        },
+    )
+    assert response.status_code == 422
+    body = response.json()
+    assert body["code"] == "needs_build_override"
+    assert "detail" in body
+
+
 def test_stack_crud(api_client: TestClient) -> None:
     """Stack create, list, get, deploy, and delete flow."""
     # Create
@@ -1223,6 +1277,61 @@ services:
 
     # Cleanup
     api_client.delete(f"/api/stacks/{stack_id}")
+
+
+def test_stack_parse_compose(api_client: TestClient) -> None:
+    """Parse compose returns services without creating a stack."""
+    compose_yaml = """
+services:
+  web:
+    image: nginx:alpine
+    environment:
+      HOST: example.com
+    depends_on:
+      - redis
+  redis:
+    image: redis:7
+    volumes:
+      - ./data:/data
+"""
+    before = api_client.get("/api/stacks/")
+    assert before.status_code == 200
+    count_before = len(before.json())
+
+    resp = api_client.post("/api/stacks/parse-compose", json={"yaml_content": compose_yaml})
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    service_names = {s["service_name"] for s in data["services"]}
+    assert service_names == {"web", "redis"}
+    web = next(s for s in data["services"] if s["service_name"] == "web")
+    assert web["source_ref"] == "nginx:alpine"
+    assert web["env_vars"]["HOST"] == "example.com"
+    assert web["depends_on"] == ["redis"]
+    assert any("volumes" in warning for warning in data["warnings"])
+
+    after = api_client.get("/api/stacks/")
+    assert len(after.json()) == count_before
+
+
+def test_stack_parse_compose_git_url(api_client: TestClient) -> None:
+    compose_yaml = """
+services:
+  app:
+    build:
+      context: https://github.com/LorenzoFerraces/Commit-y-me-voy.git
+"""
+    resp = api_client.post("/api/stacks/parse-compose", json={"yaml_content": compose_yaml})
+    assert resp.status_code == 200, resp.text
+    app = resp.json()["services"][0]
+    assert app["source_kind"] == "git"
+    assert app["source_ref"] == "https://github.com/LorenzoFerraces/Commit-y-me-voy.git"
+    assert app["git_branch"] == "main"
+
+
+def test_stack_parse_compose_empty(api_client: TestClient) -> None:
+    resp = api_client.post("/api/stacks/parse-compose", json={"yaml_content": "services: {}"})
+    assert resp.status_code == 400
+    assert "no valid services" in resp.json()["detail"].lower()
 
 
 def test_stack_deploy_creates_network(api_client: TestClient) -> None:
