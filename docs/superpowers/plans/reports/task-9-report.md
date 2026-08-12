@@ -1,7 +1,7 @@
 # Task 9 Report: Wire Stacks builder + list deploy
 
 **Status:** Complete  
-**Commit:** (pending) — feat: stacks persist and prompt for per-service build overrides  
+**Commit:** `fb4e370` — feat: stacks persist and prompt for per-service build overrides  
 **Date:** 2026-08-11
 
 ## Summary
