@@ -34,6 +34,7 @@ f:\lolo\fac\Vela\.venv\Scripts\python.exe -m pytest tests/test_language_detectio
 # Final feature review fixes
 
 **Status:** DONE  
+**Commit:** `8328b47` — fix: root Dockerfile wins over nested markers; test stack needs_build_override  
 **Date:** 2026-08-11
 
 ## Critical — root Dockerfile precedence
