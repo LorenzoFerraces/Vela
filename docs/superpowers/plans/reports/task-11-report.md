@@ -1,7 +1,7 @@
 # Task 11 Report: Deslop + short README note
 
 **Status:** DONE  
-**Commit:** (see git log after commit)  
+**Commit:** `fd0be63` — docs: note expanded language detection and build overrides  
 **Date:** 2026-08-11
 
 ## Summary
