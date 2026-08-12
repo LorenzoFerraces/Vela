@@ -414,6 +414,28 @@ export interface VolumeMountRequest {
   target: string
 }
 
+/** Manual language / build settings when auto-detection fails or needs a nudge. */
+export type BuildOverrideLanguage =
+  | 'python'
+  | 'javascript'
+  | 'typescript'
+  | 'go'
+  | 'java'
+  | 'rust'
+  | 'ruby'
+  | 'php'
+  | 'dotnet'
+  | 'elixir'
+  | 'clojure'
+
+export type BuildOverride = {
+  language: BuildOverrideLanguage
+  language_version?: string | null
+  package_manager?: string | null
+  build_subdir?: string | null
+  start_command?: string[] | null
+}
+
 export interface RunFromSourceRequest {
   source_kind?: RunSourceKind
   source?: string
@@ -433,6 +455,7 @@ export interface RunFromSourceRequest {
   project_id?: string | null
   volumes?: VolumeMountRequest[]
   scaling_policy?: ScalingPolicyRequest | null
+  build_override?: BuildOverride | null
 }
 
 export interface RunFromSourceResponse {
@@ -722,6 +745,8 @@ export type GitSourceAnalysis = {
   has_dockerfile: boolean
   build_strategy: 'dockerfile_exists' | 'generated_dockerfile'
   summary_hint: string
+  build_subdir: string | null
+  needs_manual_build_config: boolean
 }
 
 export type DeploymentRecord = {
@@ -740,6 +765,7 @@ export type DeploymentRecord = {
   dockerfile_snapshot: string | null
   public_url: string | null
   created_at: string
+  build_override?: BuildOverride | null
 }
 
 export type DeploymentEnvDiff = {
@@ -1351,6 +1377,7 @@ export interface StackService {
   service_name: string
   source_kind: 'image' | 'git' | 'dockerfile_template'
   source_ref: string
+  git_branch: string | null
   container_port: number
   env_vars: Record<string, string>
   command: string[] | null
@@ -1358,6 +1385,7 @@ export interface StackService {
   depends_on: string[] | null
   volumes: VolumeMountRequest[]
   scaling_policy: ScalingPolicyRequest | null
+  build_override?: BuildOverride | null
 }
 
 export interface Stack {
@@ -1374,6 +1402,7 @@ export interface StackServiceCreate {
   service_name: string
   source_kind: 'image' | 'git' | 'dockerfile_template'
   source_ref: string
+  git_branch?: string | null
   container_port?: number
   env_vars?: Record<string, string>
   command?: string[] | null
@@ -1381,6 +1410,7 @@ export interface StackServiceCreate {
   depends_on?: string[] | null
   volumes?: VolumeMountRequest[]
   scaling_policy?: ScalingPolicyRequest | null
+  build_override?: BuildOverride | null
 }
 
 export async function listStacks(): Promise<Stack[]> {
@@ -1411,6 +1441,15 @@ export async function importCompose(body: {
   yaml_content: string
 }): Promise<{ stack: Stack; warnings: string[] }> {
   return apiPost<{ stack: Stack; warnings: string[] }>('/api/stacks/import-compose', body)
+}
+
+export async function parseCompose(body: {
+  yaml_content: string
+}): Promise<{ services: StackServiceCreate[]; warnings: string[] }> {
+  return apiPost<{ services: StackServiceCreate[]; warnings: string[] }>(
+    '/api/stacks/parse-compose',
+    body,
+  )
 }
 
 export async function getStack(id: string): Promise<Stack> {
