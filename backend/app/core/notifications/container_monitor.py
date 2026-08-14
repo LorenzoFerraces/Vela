@@ -26,9 +26,12 @@ from app.db.models import DeploymentRecord, User
 
 logger = logging.getLogger(__name__)
 
-MONITOR_INTERVAL_SECONDS = int(
-    os.environ.get("VELA_CONTAINER_MONITOR_INTERVAL_SECONDS", "15")
-)
+
+def get_monitor_interval_seconds() -> int:
+    return max(1, int(os.environ.get("VELA_CONTAINER_MONITOR_INTERVAL_SECONDS", "15")))
+
+
+MONITOR_INTERVAL_SECONDS = get_monitor_interval_seconds()
 MONITOR_ENABLED = os.environ.get("VELA_CONTAINER_MONITOR_ENABLED", "1").strip() != "0"
 ALERT_LOG_TAIL_LINES = max(1, int(os.environ.get("VELA_ALERT_LOG_TAIL_LINES", "200")))
 
@@ -355,7 +358,7 @@ async def run_monitoring_loop() -> None:
     logger.info(
         "Starting container monitoring (interval=%ss); "
         "state resets on API restart — wait one interval after deploy before stopping",
-        MONITOR_INTERVAL_SECONDS,
+        get_monitor_interval_seconds(),
     )
 
     from app.api.deps import get_orchestrator
@@ -379,4 +382,4 @@ async def run_monitoring_loop() -> None:
         except Exception as e:
             logger.exception("Unexpected error in monitoring loop: %s", e)
 
-        await asyncio.sleep(MONITOR_INTERVAL_SECONDS)
+        await asyncio.sleep(get_monitor_interval_seconds())

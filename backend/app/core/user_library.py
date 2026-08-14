@@ -126,6 +126,32 @@ async def get_dockerfile_template(
     return row
 
 
+async def resolve_dockerfile_template(
+    session: AsyncSession,
+    owner_id: uuid.UUID,
+    source_ref: str,
+) -> Dockerfile:
+    """Resolve a saved Dockerfile template by UUID or exact name."""
+    trimmed = source_ref.strip()
+    if not trimmed:
+        raise DockerfileTemplateNotFoundError(source_ref)
+
+    try:
+        template_id = uuid.UUID(trimmed)
+    except ValueError:
+        template_id = None
+
+    if template_id is not None:
+        return await get_dockerfile_template(session, owner_id, template_id)
+
+    rows = await list_dockerfile_templates(session, owner_id)
+    for row in rows:
+        if row.name == trimmed:
+            return row
+
+    raise DockerfileTemplateNotFoundError(trimmed)
+
+
 async def create_dockerfile_template(
     session: AsyncSession,
     owner_id: uuid.UUID,

@@ -1,13 +1,5 @@
 import { expect, fakeUser, test } from './fixtures'
 
-const connectedGithubStatus = {
-  connected: true,
-  login: 'vela-user',
-  avatar_url: 'https://avatars.example.com/u/1',
-  scopes: ['repo', 'read:user'],
-  connected_at: '2026-03-15T10:00:00.000Z',
-}
-
 const profileUser = {
   ...fakeUser,
   display_name: 'E2E User',

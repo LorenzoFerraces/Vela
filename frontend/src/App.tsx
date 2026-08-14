@@ -10,6 +10,9 @@ import SettingsPage from './pages/SettingsPage'
 import TeamsPage from './pages/TeamsPage'
 import BuilderPage from './pages/BuilderPage'
 import ImagesPage from './pages/ImagesPage'
+import StacksPage from './pages/StacksPage'
+import StackBuilderPage from './pages/stacks/StackBuilderPage'
+import ComposeImportPage from './pages/stacks/ComposeImportPage'
 /**
  * Defines the application's client-side routes and layout.
  *
@@ -69,6 +72,38 @@ export default function App() {
           element={
             <RequireAuth>
               <SettingsPage />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/stacks"
+          element={
+            <RequireAuth>
+              <StacksPage />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/stacks/new"
+          element={
+            <RequireAuth>
+              <StackBuilderPage />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/stacks/import"
+          element={
+            <RequireAuth>
+              <ComposeImportPage />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/stacks/:id"
+          element={
+            <RequireAuth>
+              <StackBuilderPage />
             </RequireAuth>
           }
         />

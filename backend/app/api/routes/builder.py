@@ -31,7 +31,11 @@ async def build_from_source(
     image_builder: Annotated[DefaultImageBuilder, Depends(get_image_builder)],
 ) -> BuildResult:
     """Full pipeline: clone or local path → ensure Dockerfile → ``docker build``."""
-    return await image_builder.build_from_source(body.source, tag=body.tag)
+    return await image_builder.build_from_source(
+        body.source,
+        tag=body.tag,
+        override=body.build_override,
+    )
 
 
 @router.post("/analyze", response_model=ProjectInfo)

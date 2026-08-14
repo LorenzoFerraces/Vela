@@ -245,6 +245,18 @@ export async function apiPatch<TResponse, TBody = unknown>(
   })
 }
 
+export async function apiPut<TResponse, TBody = unknown>(
+  path: string,
+  body: TBody,
+  options: ApiRequestOptions = {}
+): Promise<TResponse> {
+  return apiRequest<TResponse>(
+    path,
+    { method: 'PUT', body: JSON.stringify(body) },
+    options
+  )
+}
+
 /**
  * Send a DELETE request to the API for the given path.
  *
@@ -402,6 +414,27 @@ export interface VolumeMountRequest {
   target: string
 }
 
+export type BuildOverrideLanguage =
+  | 'python'
+  | 'javascript'
+  | 'typescript'
+  | 'go'
+  | 'java'
+  | 'rust'
+  | 'ruby'
+  | 'php'
+  | 'dotnet'
+  | 'elixir'
+  | 'clojure'
+
+export type BuildOverride = {
+  language: BuildOverrideLanguage
+  language_version?: string | null
+  package_manager?: string | null
+  build_subdir?: string | null
+  start_command?: string[] | null
+}
+
 export interface RunFromSourceRequest {
   source_kind?: RunSourceKind
   source?: string
@@ -421,6 +454,7 @@ export interface RunFromSourceRequest {
   project_id?: string | null
   volumes?: VolumeMountRequest[]
   scaling_policy?: ScalingPolicyRequest | null
+  build_override?: BuildOverride | null
 }
 
 export interface RunFromSourceResponse {
@@ -482,15 +516,22 @@ export type DeploySourceSuggestion =
 export async function getDeploySourceSuggestions(
   query: string,
   options: { limit?: number } = {}
-): Promise<DeploySourceSuggestion[]> {
+): Promise<{
+  suggestions: DeploySourceSuggestion[]
+  pasted_github_hint: string | null
+}> {
   const params = new URLSearchParams({ q: query })
   if (options.limit != null) {
     params.set('limit', String(options.limit))
   }
-  const data = await apiGet<{ suggestions: DeploySourceSuggestion[] }>(
-    `/api/containers/deploy-sources?${params.toString()}`
-  )
-  return data.suggestions
+  const data = await apiGet<{
+    suggestions: DeploySourceSuggestion[]
+    pasted_github_hint?: string | null
+  }>(`/api/containers/deploy-sources?${params.toString()}`)
+  return {
+    suggestions: data.suggestions,
+    pasted_github_hint: data.pasted_github_hint ?? null,
+  }
 }
 
 /**
@@ -703,6 +744,8 @@ export type GitSourceAnalysis = {
   has_dockerfile: boolean
   build_strategy: 'dockerfile_exists' | 'generated_dockerfile'
   summary_hint: string
+  build_subdir: string | null
+  needs_manual_build_config: boolean
 }
 
 export type DeploymentRecord = {
@@ -721,6 +764,7 @@ export type DeploymentRecord = {
   dockerfile_snapshot: string | null
   public_url: string | null
   created_at: string
+  build_override?: BuildOverride | null
 }
 
 export type DeploymentEnvDiff = {
@@ -1328,4 +1372,101 @@ export async function listGithubRepoBranches(
   const owner = encodeURIComponent(fullName.slice(0, slashIndex))
   const repo = encodeURIComponent(fullName.slice(slashIndex + 1))
   return apiGet<GithubBranch[]>(`/api/github/repos/${owner}/${repo}/branches`)
+}
+
+// ---------------------------------------------------------------------------
+// Stacks
+// ---------------------------------------------------------------------------
+
+export interface StackService {
+  id: string
+  stack_id: string
+  service_name: string
+  source_kind: 'image' | 'git' | 'dockerfile_template'
+  source_ref: string
+  git_branch: string | null
+  container_port: number
+  env_vars: Record<string, string>
+  command: string[] | null
+  public_route: boolean
+  depends_on: string[] | null
+  volumes: VolumeMountRequest[]
+  scaling_policy: ScalingPolicyRequest | null
+  build_override?: BuildOverride | null
+}
+
+export interface Stack {
+  id: string
+  project_id: string
+  name: string
+  network_name: string
+  created_at: string
+  services: StackService[]
+  child_stack_ids: string[]
+}
+
+export interface StackServiceCreate {
+  service_name: string
+  source_kind: 'image' | 'git' | 'dockerfile_template'
+  source_ref: string
+  git_branch?: string | null
+  container_port?: number
+  env_vars?: Record<string, string>
+  command?: string[] | null
+  public_route?: boolean
+  depends_on?: string[] | null
+  volumes?: VolumeMountRequest[]
+  scaling_policy?: ScalingPolicyRequest | null
+  build_override?: BuildOverride | null
+}
+
+export async function listStacks(): Promise<Stack[]> {
+  return apiGet<Stack[]>('/api/stacks/')
+}
+
+export async function createStack(body: {
+  name: string
+  project_id?: string
+  services: StackServiceCreate[]
+  child_stack_ids?: string[]
+}): Promise<Stack> {
+  return apiPost<Stack>('/api/stacks/', body)
+}
+
+export async function updateStack(id: string, body: {
+  name: string
+  project_id?: string
+  services: StackServiceCreate[]
+  child_stack_ids?: string[]
+}): Promise<Stack> {
+  return apiPut<Stack>(`/api/stacks/${encodeURIComponent(id)}`, body)
+}
+
+export async function importCompose(body: {
+  name: string
+  project_id?: string
+  yaml_content: string
+}): Promise<{ stack: Stack; warnings: string[] }> {
+  return apiPost<{ stack: Stack; warnings: string[] }>('/api/stacks/import-compose', body)
+}
+
+export async function parseCompose(body: {
+  yaml_content: string
+}): Promise<{ services: StackServiceCreate[]; warnings: string[] }> {
+  return apiPost<{ services: StackServiceCreate[]; warnings: string[] }>(
+    '/api/stacks/parse-compose',
+    body,
+  )
+}
+
+export async function getStack(id: string): Promise<Stack> {
+  return apiGet<Stack>(`/api/stacks/${encodeURIComponent(id)}`)
+}
+
+export async function deleteStack(id: string): Promise<void> {
+  await apiDelete(`/api/stacks/${encodeURIComponent(id)}`)
+}
+
+export async function deployStack(id: string): Promise<Record<string, unknown>> {
+  return apiPost<Record<string, unknown>>(`/api/stacks/${encodeURIComponent(id)}/deploy`, {})
 }

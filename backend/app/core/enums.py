@@ -39,6 +39,10 @@ class SupportedLanguage(StrEnum):
     JAVA = "java"
     RUST = "rust"
     RUBY = "ruby"
+    PHP = "php"
+    DOTNET = "dotnet"
+    ELIXIR = "elixir"
+    CLOJURE = "clojure"
     UNKNOWN = "unknown"
 
 

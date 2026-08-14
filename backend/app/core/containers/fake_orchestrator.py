@@ -42,6 +42,7 @@ class FakeContainerOrchestrator(ContainerOrchestrator):
             _containers (dict[str, ContainerInfo]): Mapping of container id to stored container info.
             _images (set[str]): Available image references; initially contains common test images.
             _built_tags (list[str]): Sequence of tags recorded when build_image is called.
+            _built_paths (list[str]): Build-context paths passed to build_image, in call order.
             last_deploy_config (DeployConfig | None): The most recent deploy config passed to deploy, or None.
             verify_calls (list[str]): Ordered list of image refs passed to verify_image_reference_available.
             _verify_handlers (dict[str, Callable[[], None]]): Optional per-image handlers invoked during verification.
@@ -49,9 +50,16 @@ class FakeContainerOrchestrator(ContainerOrchestrator):
         self._containers: dict[str, ContainerInfo] = {}
         self._images: set[str] = {"nginx:alpine", "python:3.12-slim"}
         self._built_tags: list[str] = []
+        self._built_paths: list[str] = []
         self.last_deploy_config: DeployConfig | None = None
         self.verify_calls: list[str] = []
         self._verify_handlers: dict[str, Callable[[], None]] = {}
+        self._networks: set[str] = set()
+        self._deploy_fail_images: set[str] = set()
+
+    def fail_deploy_for_image(self, image_ref: str) -> None:
+        """Cause future deploy() calls for this image to raise RuntimeError."""
+        self._deploy_fail_images.add(image_ref.strip())
 
     def register_image(self, image_ref: str) -> None:
         """
@@ -98,6 +106,9 @@ class FakeContainerOrchestrator(ContainerOrchestrator):
             ContainerInfo: A newly created container record in `RUNNING` state with a generated `id`, the resolved `name`, merged `labels` (including route-related labels when `config.route_host` is set), computed `access_url`, and the current UTC creation timestamp. The container is stored in the orchestrator's internal container registry.
         """
         self.last_deploy_config = config
+        image_ref = config.image.strip()
+        if image_ref in self._deploy_fail_images:
+            raise RuntimeError(f"Simulated deploy failure for {image_ref}")
         labels = {
             VELA_MANAGED_LABEL: VELA_MANAGED_VALUE,
             **config.labels,
@@ -340,14 +351,15 @@ class FakeContainerOrchestrator(ContainerOrchestrator):
         Create a fake image record and return a synthetic image digest.
 
         Parameters:
-            path (str): Ignored; included for API compatibility.
+            path (str): Build context path; recorded on ``_built_paths`` for assertions.
             tag (str): The image tag to register and record as built.
             dockerfile (str): Ignored; included for API compatibility.
 
         Returns:
             digest (str): A synthetic digest string in the form `sha256:fake-<tag>` where `:` in the tag is replaced by `-`.
         """
-        _ = path, dockerfile
+        _ = dockerfile
+        self._built_paths.append(path)
         self.register_image(tag)
         self._built_tags.append(tag)
         return f"sha256:fake-{tag.replace(':', '-')}"
@@ -424,6 +436,12 @@ class FakeContainerOrchestrator(ContainerOrchestrator):
             self.register_image(stripped)
             return
         raise ImageNotFoundError(stripped)
+
+    async def create_network(self, name: str) -> None:
+        self._networks.add(name)
+
+    async def remove_network(self, name: str) -> None:
+        self._networks.discard(name)
 
     def _require_container(self, container_id: str) -> ContainerInfo:
         """

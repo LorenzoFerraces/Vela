@@ -448,3 +448,189 @@ def _seed_identity(
             await session.commit()
 
     asyncio.run(run())
+
+
+@pytest.mark.parametrize(
+    ("raw", "owner", "repo"),
+    [
+        ("https://github.com/octocat/Hello-World", "octocat", "Hello-World"),
+        ("https://github.com/octocat/Hello-World.git", "octocat", "Hello-World"),
+        (
+            "https://github.com/octocat/Hello-World/tree/main",
+            "octocat",
+            "Hello-World",
+        ),
+        ("git@github.com:octocat/Hello-World.git", "octocat", "Hello-World"),
+    ],
+)
+def test_parse_github_repo_url(raw: str, owner: str, repo: str) -> None:
+    parsed = github_oauth.parse_github_repo_url(raw)
+    assert parsed is not None
+    assert parsed.owner == owner
+    assert parsed.repo == repo
+
+
+def test_deploy_sources_resolves_pasted_github_url_when_user_has_access(
+    api_client: TestClient,
+    db_session_factory: async_sessionmaker,
+    seeded_user: User,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _seed_identity(db_session_factory, seeded_user.id, token="ghp_value")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/repos/octocat/Hello-World":
+            return httpx.Response(
+                200,
+                json={
+                    "full_name": "octocat/Hello-World",
+                    "default_branch": "main",
+                    "private": False,
+                    "html_url": "https://github.com/octocat/Hello-World",
+                    "description": "first repo",
+                },
+            )
+        return httpx.Response(404)
+
+    _install_transport(monkeypatch, handler)
+
+    response = api_client.get(
+        "/api/containers/deploy-sources",
+        params={"q": "https://github.com/octocat/Hello-World"},
+    )
+    assert response.status_code == 200
+    git_rows = [
+        row for row in response.json()["suggestions"] if row["kind"] == "git"
+    ]
+    assert any(row["name"] == "octocat/Hello-World" for row in git_rows)
+
+
+def test_deploy_sources_omits_pasted_github_url_without_access(
+    api_client: TestClient,
+    db_session_factory: async_sessionmaker,
+    seeded_user: User,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _seed_identity(db_session_factory, seeded_user.id, token="ghp_value")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/repos/octocat/private-repo":
+            return httpx.Response(404)
+        return httpx.Response(404)
+
+    _install_transport(monkeypatch, handler)
+
+    response = api_client.get(
+        "/api/containers/deploy-sources",
+        params={"q": "https://github.com/octocat/private-repo"},
+    )
+    assert response.status_code == 200
+    git_rows = [
+        row for row in response.json()["suggestions"] if row["kind"] == "git"
+    ]
+    assert not any(row["name"] == "octocat/private-repo" for row in git_rows)
+
+
+def test_deploy_sources_pasted_github_url_falls_back_to_connected_user_fork(
+    api_client: TestClient,
+    db_session_factory: async_sessionmaker,
+    seeded_user: User,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Wrong owner in a pasted URL still resolves when the user owns a fork."""
+    _seed_identity(db_session_factory, seeded_user.id, token="ghp_value")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.startswith("/repos/"):
+            return httpx.Response(404)
+        if request.url.path == "/user/repos":
+            return httpx.Response(
+                200,
+                json=[
+                    {
+                        "full_name": "octocat/Hello-World",
+                        "default_branch": "main",
+                        "private": True,
+                        "html_url": "https://github.com/octocat/Hello-World",
+                        "description": "fork",
+                    }
+                ],
+            )
+        if request.url.path == "/search/repositories":
+            return httpx.Response(200, json={"items": []})
+        return httpx.Response(404)
+
+    _install_transport(monkeypatch, handler)
+
+    response = api_client.get(
+        "/api/containers/deploy-sources",
+        params={"q": "https://github.com/wrong-owner/Hello-World"},
+    )
+    assert response.status_code == 200
+    git_rows = [
+        row for row in response.json()["suggestions"] if row["kind"] == "git"
+    ]
+    assert any(row["name"] == "octocat/Hello-World" for row in git_rows)
+
+
+def test_deploy_sources_pasted_github_url_paginates_user_repos(
+    api_client: TestClient,
+    db_session_factory: async_sessionmaker,
+    seeded_user: User,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Private forks beyond the first page of /user/repos are still discoverable."""
+    _seed_identity(db_session_factory, seeded_user.id, token="ghp_value")
+
+    filler = [
+        {
+            "full_name": f"octocat/filler-{index}",
+            "default_branch": "main",
+            "private": False,
+            "html_url": f"https://github.com/octocat/filler-{index}",
+            "description": None,
+        }
+        for index in range(100)
+    ]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.startswith("/repos/"):
+            return httpx.Response(403)
+        if request.url.path == "/user/repos":
+            page = int(request.url.params.get("page", "1"))
+            if page == 1:
+                return httpx.Response(200, json=filler)
+            if page == 2:
+                return httpx.Response(
+                    200,
+                    json=[
+                        {
+                            "full_name": "octocat/Hello-World",
+                            "default_branch": "main",
+                            "private": True,
+                            "html_url": "https://github.com/octocat/Hello-World",
+                            "description": "fork",
+                        }
+                    ],
+                )
+            return httpx.Response(200, json=[])
+        if request.url.path == "/search/repositories":
+            return httpx.Response(200, json={"items": []})
+        if request.url.path == "/user":
+            return httpx.Response(
+                200,
+                json={"id": 99, "login": "octocat", "avatar_url": None},
+            )
+        return httpx.Response(404)
+
+    _install_transport(monkeypatch, handler)
+
+    response = api_client.get(
+        "/api/containers/deploy-sources",
+        params={"q": "https://github.com/octocat/Hello-World"},
+    )
+    assert response.status_code == 200
+    git_rows = [
+        row for row in response.json()["suggestions"] if row["kind"] == "git"
+    ]
+    assert any(row["name"] == "octocat/Hello-World" for row in git_rows)
