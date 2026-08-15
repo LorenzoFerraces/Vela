@@ -28,7 +28,7 @@ test.describe('login form', () => {
     await page.goto('/login?next=%2Fcontainers')
     await page.getByLabel('Email').fill(E2E_USER_EMAIL)
     await page.getByLabel('Password').fill(E2E_USER_PASSWORD)
-    await page.getByRole('button', { name: 'Sign in' }).click()
+    await page.getByRole('button', { name: 'Sign in', exact: true }).click()
 
     await expect(page).toHaveURL(`${baseURL}/containers`)
     await expect(
@@ -40,7 +40,7 @@ test.describe('login form', () => {
     await page.goto('/login')
     await page.getByLabel('Email').fill(E2E_USER_EMAIL)
     await page.getByLabel('Password').fill('wrong-password-value')
-    await page.getByRole('button', { name: 'Sign in' }).click()
+    await page.getByRole('button', { name: 'Sign in', exact: true }).click()
 
     await expect(page.getByRole('alert')).toContainText(
       'Invalid email or password.',
