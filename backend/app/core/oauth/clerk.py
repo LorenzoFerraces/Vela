@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import os
 import time
 from dataclasses import dataclass
@@ -12,9 +13,6 @@ from jwt import InvalidTokenError
 
 from app.core.exceptions import ClerkTokenError, IntegrationConfigurationError
 
-_JWKS_URL_TEMPLATE = (
-    "https://{pk}.clerk.accounts.clerkdev.com/.well-known/jwks.json"
-)
 _JWKS_CACHE_TTL_SECONDS = 3600
 
 _jwks_cache: dict[str, object] | None = None
@@ -27,6 +25,19 @@ class ClerkClaims:
     external_id: str
 
 
+def clerk_frontend_api_host(publishable_key: str) -> str:
+    """Decode the Clerk Frontend API hostname embedded in a publishable key."""
+    parts = publishable_key.split("_", 2)
+    if len(parts) != 3 or parts[0] != "pk" or not parts[2]:
+        raise IntegrationConfigurationError(
+            "VELA_CLERK_PUBLISHABLE_KEY is not a valid Clerk publishable key."
+        )
+    encoded = parts[2]
+    padded = encoded + "=" * (-len(encoded) % 4)
+    domain = base64.urlsafe_b64decode(padded).decode("utf-8")
+    return domain.rstrip("$")
+
+
 def _publishable_key() -> str:
     pk = os.environ.get("VELA_CLERK_PUBLISHABLE_KEY", "").strip()
     if not pk:
@@ -36,13 +47,19 @@ def _publishable_key() -> str:
     return pk
 
 
-def clerk_available() -> tuple[bool, str | None]:
+def clerk_available() -> tuple[bool, str | None, str | None]:
     pk = os.environ.get("VELA_CLERK_PUBLISHABLE_KEY", "").strip()
-    return (bool(pk), pk if pk else None)
+    if not pk:
+        return (False, None, None)
+    try:
+        return (True, pk, clerk_frontend_api_host(pk))
+    except IntegrationConfigurationError:
+        return (False, None, None)
 
 
 def _jwks_url() -> str:
-    return _JWKS_URL_TEMPLATE.format(pk=_publishable_key())
+    host = clerk_frontend_api_host(_publishable_key())
+    return f"https://{host}/.well-known/jwks.json"
 
 
 async def _fetch_jwks() -> dict[str, object]:

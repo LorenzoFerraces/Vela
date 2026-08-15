@@ -21,7 +21,10 @@ export default function LoginPage() {
   const [password, setPassword] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [errorText, setErrorText] = useState<string | null>(null)
-  const [clerkKey, setClerkKey] = useState<string | null>(null)
+  const [clerkConfig, setClerkConfig] = useState<{
+    publishableKey: string
+    frontendApi: string
+  } | null>(null)
   const clerkLoaded = useRef(false)
 
   const params = new URLSearchParams(location.search)
@@ -29,12 +32,29 @@ export default function LoginPage() {
 
   useEffect(() => {
     let cancelled = false
-    apiRequest<{ clerk_enabled: boolean; clerk_publishable_key: string | null }>(
+    apiRequest<{
+      clerk_enabled: boolean
+      clerk_publishable_key: string | null
+      clerk_frontend_api: string | null
+    }>(
       '/api/auth/config',
       { method: 'GET' },
       { skipAuth: true }
     )
-      .then(data => { if (!cancelled && data.clerk_enabled) setClerkKey(data.clerk_publishable_key) })
+      .then(data => {
+        if (
+          cancelled
+          || !data.clerk_enabled
+          || !data.clerk_publishable_key
+          || !data.clerk_frontend_api
+        ) {
+          return
+        }
+        setClerkConfig({
+          publishableKey: data.clerk_publishable_key,
+          frontendApi: data.clerk_frontend_api,
+        })
+      })
       .catch(() => {})
     return () => { cancelled = true }
   }, [])
@@ -46,14 +66,17 @@ export default function LoginPage() {
   }, [status, navigate, nextPath])
 
   useEffect(() => {
-    if (!clerkKey) return
+    if (!clerkConfig) return
 
     const loadClerk = () => {
       if (clerkLoaded.current) return
       clerkLoaded.current = true
       return new Promise<void>((resolve, reject) => {
         const script = document.createElement('script')
-        script.src = `https://${clerkKey}.clerk.accounts.clerkdev.com/npm/@clerk/clerk-js@latest/dist/clerk.browser.js`
+        script.async = true
+        script.crossOrigin = 'anonymous'
+        script.setAttribute('data-clerk-publishable-key', clerkConfig.publishableKey)
+        script.src = `https://${clerkConfig.frontendApi}/npm/@clerk/clerk-js@latest/dist/clerk.browser.js`
         script.onload = () => resolve()
         script.onerror = () => reject(new Error('Failed to load Clerk'))
         document.head.appendChild(script)
@@ -61,10 +84,13 @@ export default function LoginPage() {
     }
 
     let cancelled = false
-    loadClerk().then(() => {
+    loadClerk().then(async () => {
       if (cancelled) return
       const clerk = (window as any).Clerk
-      if (clerk && clerk.session) {
+      if (!clerk) return
+      await clerk.load()
+      if (cancelled) return
+      if (clerk.session) {
         setSubmitting(true)
         clerk.session.getToken('vela').then(async (token: string) => {
           if (cancelled) return
@@ -78,7 +104,7 @@ export default function LoginPage() {
       }
     }).catch(() => {})
     return () => { cancelled = true }
-  }, [clerkKey, clerkLogin, navigate, nextPath])
+  }, [clerkConfig, clerkLogin, navigate, nextPath])
 
   async function onSubmit(event: React.FormEvent) {
     event.preventDefault()
@@ -151,7 +177,7 @@ export default function LoginPage() {
           </button>
         </form>
 
-        {clerkKey ? (
+        {clerkConfig ? (
           <>
             <div className="auth-form__divider">
               <hr className="auth-form__divider-line" />

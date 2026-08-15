@@ -11,9 +11,12 @@ import app.core.oauth.clerk as clerk_mod
 from app.core.exceptions import ClerkTokenError, IntegrationConfigurationError
 from app.core.oauth.clerk import (
     ClerkClaims,
+    clerk_frontend_api_host,
     reset_jwks_cache_for_tests,
     verify_clerk_token,
 )
+
+TEST_CLERK_PUBLISHABLE_KEY = "pk_test_c2FtcGxlMTIzLmNsZXJrLmFjY291bnRzLmRldiQ"
 
 
 @pytest.fixture(autouse=True)
@@ -21,6 +24,10 @@ def _clear_cache():
     reset_jwks_cache_for_tests()
     yield
     reset_jwks_cache_for_tests()
+
+
+def test_clerk_frontend_api_host_decodes_embedded_domain() -> None:
+    assert clerk_frontend_api_host(TEST_CLERK_PUBLISHABLE_KEY) == "sample123.clerk.accounts.dev"
 
 
 def test_missing_publishable_key_raises(monkeypatch: Any) -> None:
@@ -31,7 +38,7 @@ def test_missing_publishable_key_raises(monkeypatch: Any) -> None:
 
 @pytest.mark.asyncio
 async def test_verify_clerk_token_success(monkeypatch: Any) -> None:
-    monkeypatch.setenv("VELA_CLERK_PUBLISHABLE_KEY", "pk_test_sample123")
+    monkeypatch.setenv("VELA_CLERK_PUBLISHABLE_KEY", TEST_CLERK_PUBLISHABLE_KEY)
 
     async def fake_fetch() -> dict[str, object]:
         return {"keys": [{"kty": "RSA", "alg": "RS256", "use": "sig"}]}
@@ -39,8 +46,8 @@ async def test_verify_clerk_token_success(monkeypatch: Any) -> None:
     fake_payload = {
         "email": "ClerkUser@Example.COM",
         "sub": "user_2Xabc",
-        "iss": "https://pk_test_sample123.clerk.accounts.clerkdev.com",
-        "aud": "pk_test_sample123",
+        "iss": "https://sample123.clerk.accounts.dev",
+        "aud": TEST_CLERK_PUBLISHABLE_KEY,
     }
 
     with patch.object(clerk_mod, "_fetch_jwks", new=fake_fetch):
@@ -52,7 +59,7 @@ async def test_verify_clerk_token_success(monkeypatch: Any) -> None:
 
 @pytest.mark.asyncio
 async def test_verify_clerk_token_missing_email_raises(monkeypatch: Any) -> None:
-    monkeypatch.setenv("VELA_CLERK_PUBLISHABLE_KEY", "pk_test_sample123")
+    monkeypatch.setenv("VELA_CLERK_PUBLISHABLE_KEY", TEST_CLERK_PUBLISHABLE_KEY)
 
     async def fake_fetch() -> dict[str, object]:
         return {"keys": [{"kty": "RSA", "alg": "RS256"}]}
@@ -65,7 +72,7 @@ async def test_verify_clerk_token_missing_email_raises(monkeypatch: Any) -> None
 
 @pytest.mark.asyncio
 async def test_verify_clerk_token_invalid_signature_raises(monkeypatch: Any) -> None:
-    monkeypatch.setenv("VELA_CLERK_PUBLISHABLE_KEY", "pk_test_sample123")
+    monkeypatch.setenv("VELA_CLERK_PUBLISHABLE_KEY", TEST_CLERK_PUBLISHABLE_KEY)
 
     async def fake_fetch() -> dict[str, object]:
         return {"keys": [{"kty": "RSA", "alg": "RS256"}]}

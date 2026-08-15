@@ -7,6 +7,8 @@ from unittest.mock import AsyncMock, patch
 
 from app.core.oauth.clerk import ClerkClaims
 
+TEST_CLERK_PUBLISHABLE_KEY = "pk_test_c2FtcGxlMTIzLmNsZXJrLmFjY291bnRzLmRldiQ"
+
 
 def _mock_clerk_verify() -> ClerkClaims:
     return ClerkClaims(email="clerk-user@example.com", external_id="user_2Xtest")
@@ -20,7 +22,7 @@ def _patch_clerk_verify():
 
 
 def test_clerk_exchange_creates_new_user(db_app: Any, monkeypatch: Any) -> None:
-    monkeypatch.setenv("VELA_CLERK_PUBLISHABLE_KEY", "pk_test_sample123")
+    monkeypatch.setenv("VELA_CLERK_PUBLISHABLE_KEY", TEST_CLERK_PUBLISHABLE_KEY)
 
     from fastapi.testclient import TestClient
 
@@ -39,7 +41,7 @@ def test_clerk_exchange_creates_new_user(db_app: Any, monkeypatch: Any) -> None:
 
 
 def test_clerk_exchange_links_existing_user(db_app: Any, monkeypatch: Any) -> None:
-    monkeypatch.setenv("VELA_CLERK_PUBLISHABLE_KEY", "pk_test_sample123")
+    monkeypatch.setenv("VELA_CLERK_PUBLISHABLE_KEY", TEST_CLERK_PUBLISHABLE_KEY)
 
     from fastapi.testclient import TestClient
 
@@ -78,7 +80,7 @@ def test_clerk_exchange_missing_config_returns_503(db_app: Any, monkeypatch: Any
 
 
 def test_clerk_exchange_invalid_token_returns_400(db_app: Any, monkeypatch: Any) -> None:
-    monkeypatch.setenv("VELA_CLERK_PUBLISHABLE_KEY", "pk_test_sample123")
+    monkeypatch.setenv("VELA_CLERK_PUBLISHABLE_KEY", TEST_CLERK_PUBLISHABLE_KEY)
 
     from app.core.exceptions import ClerkTokenError
     from fastapi.testclient import TestClient
@@ -111,7 +113,7 @@ def test_clerk_exchange_empty_body_returns_422(db_app: Any) -> None:
 
 
 def test_clerk_exchange_account_already_linked_returns_409(db_app: Any, monkeypatch: Any) -> None:
-    monkeypatch.setenv("VELA_CLERK_PUBLISHABLE_KEY", "pk_test_sample123")
+    monkeypatch.setenv("VELA_CLERK_PUBLISHABLE_KEY", TEST_CLERK_PUBLISHABLE_KEY)
 
     def mock_verify_different_email(_token: str) -> ClerkClaims:
         return ClerkClaims(email="other@example.com", external_id="user_2Xtest")

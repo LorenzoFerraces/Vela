@@ -588,6 +588,7 @@ class ClerkExchangeRequest(BaseModel):
 class AuthConfigResponse(BaseModel):
     clerk_enabled: bool
     clerk_publishable_key: str | None = None
+    clerk_frontend_api: str | None = None
 
 
 # ---------------------------------------------------------------------------

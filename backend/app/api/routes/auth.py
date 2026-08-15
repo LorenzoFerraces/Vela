@@ -34,10 +34,11 @@ router = APIRouter()
 @router.get("/config", response_model=AuthConfigResponse)
 async def auth_config() -> AuthConfigResponse:
     """Return which auth providers are available."""
-    enabled, key = clerk_available()
+    enabled, key, frontend_api = clerk_available()
     return AuthConfigResponse(
         clerk_enabled=enabled,
         clerk_publishable_key=key if enabled else None,
+        clerk_frontend_api=frontend_api if enabled else None,
     )
 
 
@@ -81,7 +82,7 @@ async def clerk_exchange(
     object_storage: Annotated[ObjectStorage, Depends(get_object_storage)],
 ) -> TokenResponse:
     """Exchange a Clerk frontend JWT for a Vela access token."""
-    enabled, _ = clerk_available()
+    enabled, _, _ = clerk_available()
     if not enabled:
         raise IntegrationConfigurationError(
             "Clerk authentication is not configured."
