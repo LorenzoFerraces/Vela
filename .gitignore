@@ -26,3 +26,5 @@ frontend/dist/
 playwright-report/
 test-results/
 blob-report/
+
+.gradle/
