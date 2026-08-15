@@ -465,7 +465,7 @@ to:
             >
 ```
 
-- [ ] **Step 4: Typecheck and build**
+- [x] **Step 4: Typecheck and build**
 
 Run: `npx tsc -b --noEmit` then `npm run build`
 Expected: no type errors, build succeeds. (There is no frontend unit-test harness; tsc/build is the gate. `clerkBusy` must be used or TS's noUnusedLocals will flag it — the button `disabled` uses it.)
@@ -490,7 +490,7 @@ git commit -m "fix: use no-arg Clerk getToken and add clerkBusy state"
 - Consumes: `location` (already `useLocation()` at line 19), `clerkConfig` (gates whether the button renders).
 - Produces: `afterSignInUrl` = `window.location.origin + '/login' + location.search`.
 
-- [ ] **Step 1: Update `afterSignInUrl`**
+- [x] **Step 1: Update `afterSignInUrl`**
 
 Replace `onClerkClick` (lines 127-132) with:
 
@@ -505,7 +505,7 @@ Replace `onClerkClick` (lines 127-132) with:
   }
 ```
 
-- [ ] **Step 2: Typecheck and build**
+- [x] **Step 2: Typecheck and build**
 
 Run: `npx tsc -b --noEmit` then `npm run build`
 Expected: no type errors, build succeeds.

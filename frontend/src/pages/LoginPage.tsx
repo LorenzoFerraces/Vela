@@ -135,7 +135,9 @@ export default function LoginPage() {
   function onClerkClick() {
     const clerk = (window as any).Clerk
     if (clerk) {
-      clerk.redirectToSignIn({ afterSignInUrl: window.location.href })
+      clerk.redirectToSignIn({
+        afterSignInUrl: `${window.location.origin}/login${location.search}`,
+      })
     }
   }
 
