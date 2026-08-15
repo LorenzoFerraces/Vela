@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import base64
+import time
 from typing import Any
 from unittest.mock import patch
 
+import jwt as pyjwt
 import pytest
+from cryptography.hazmat.primitives.asymmetric import rsa
 
 import app.core.oauth.clerk as clerk_mod
 from app.core.exceptions import ClerkTokenError, IntegrationConfigurationError
@@ -36,23 +40,68 @@ def test_missing_publishable_key_raises(monkeypatch: Any) -> None:
         clerk_mod._publishable_key()
 
 
-@pytest.mark.asyncio
-async def test_verify_clerk_token_success(monkeypatch: Any) -> None:
-    monkeypatch.setenv("VELA_CLERK_PUBLISHABLE_KEY", TEST_CLERK_PUBLISHABLE_KEY)
+def _make_rsa_kid() -> tuple[str, rsa.RSAPrivateKey]:
+    private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    return "test-clerk-key", private_key
 
-    async def fake_fetch() -> dict[str, object]:
-        return {"keys": [{"kty": "RSA", "alg": "RS256", "use": "sig"}]}
 
-    fake_payload = {
-        "email": "ClerkUser@Example.COM",
-        "sub": "user_2Xabc",
-        "iss": "https://sample123.clerk.accounts.dev",
-        "aud": TEST_CLERK_PUBLISHABLE_KEY,
+def _jwks_for(kid: str, private_key: rsa.RSAPrivateKey) -> dict[str, object]:
+    public_numbers = private_key.public_key().public_numbers()
+    n_bytes = public_numbers.n.to_bytes((public_numbers.n.bit_length() + 7) // 8, "big")
+    e_bytes = public_numbers.e.to_bytes((public_numbers.e.bit_length() + 7) // 8, "big")
+    return {
+        "keys": [{
+            "kty": "RSA",
+            "alg": "RS256",
+            "use": "sig",
+            "kid": kid,
+            "n": base64.urlsafe_b64encode(n_bytes).rstrip(b"=").decode("ascii"),
+            "e": base64.urlsafe_b64encode(e_bytes).rstrip(b"=").decode("ascii"),
+        }]
     }
 
+
+def _sign_clerk_token(
+    private_key: rsa.RSAPrivateKey,
+    *,
+    kid: str,
+    email: str,
+    sub: str,
+    audience: str,
+) -> str:
+    now = int(time.time())
+    return pyjwt.encode(
+        {
+            "email": email,
+            "sub": sub,
+            "aud": audience,
+            "iss": "https://sample123.clerk.accounts.dev",
+            "exp": now + 600,
+            "iat": now,
+        },
+        private_key,
+        algorithm="RS256",
+        headers={"kid": kid},
+    )
+
+
+@pytest.mark.asyncio
+async def test_verify_clerk_token_success_with_real_key(monkeypatch: Any) -> None:
+    monkeypatch.setenv("VELA_CLERK_PUBLISHABLE_KEY", TEST_CLERK_PUBLISHABLE_KEY)
+    kid, private_key = _make_rsa_kid()
+    token = _sign_clerk_token(
+        private_key,
+        kid=kid,
+        email="ClerkUser@Example.COM",
+        sub="user_2Xabc",
+        audience=TEST_CLERK_PUBLISHABLE_KEY,
+    )
+
+    async def fake_fetch() -> dict[str, object]:
+        return _jwks_for(kid, private_key)
+
     with patch.object(clerk_mod, "_fetch_jwks", new=fake_fetch):
-        with patch("app.core.oauth.clerk.jwt.decode", return_value=fake_payload):
-            claims = await verify_clerk_token("fake.token.here")
+        claims = await verify_clerk_token(token)
 
     assert claims == ClerkClaims(email="clerkuser@example.com", external_id="user_2Xabc")
 
@@ -60,26 +109,69 @@ async def test_verify_clerk_token_success(monkeypatch: Any) -> None:
 @pytest.mark.asyncio
 async def test_verify_clerk_token_missing_email_raises(monkeypatch: Any) -> None:
     monkeypatch.setenv("VELA_CLERK_PUBLISHABLE_KEY", TEST_CLERK_PUBLISHABLE_KEY)
+    kid, private_key = _make_rsa_kid()
+    now = int(time.time())
+    token = pyjwt.encode(
+        {
+            "sub": "user_1",
+            "aud": TEST_CLERK_PUBLISHABLE_KEY,
+            "iss": "https://x",
+            "exp": now + 600,
+            "iat": now,
+        },
+        private_key,
+        algorithm="RS256",
+        headers={"kid": kid},
+    )
 
     async def fake_fetch() -> dict[str, object]:
-        return {"keys": [{"kty": "RSA", "alg": "RS256"}]}
+        return _jwks_for(kid, private_key)
 
     with patch.object(clerk_mod, "_fetch_jwks", new=fake_fetch):
-        with patch("app.core.oauth.clerk.jwt.decode", return_value={"sub": "user_1"}):
-            with pytest.raises(ClerkTokenError, match="missing the email claim"):
-                await verify_clerk_token("fake.token")
+        with pytest.raises(ClerkTokenError, match="missing the email claim"):
+            await verify_clerk_token(token)
 
 
 @pytest.mark.asyncio
-async def test_verify_clerk_token_invalid_signature_raises(monkeypatch: Any) -> None:
+async def test_verify_clerk_token_unknown_kid_raises(monkeypatch: Any) -> None:
     monkeypatch.setenv("VELA_CLERK_PUBLISHABLE_KEY", TEST_CLERK_PUBLISHABLE_KEY)
+    kid, private_key = _make_rsa_kid()
+    token = pyjwt.encode(
+        {
+            "sub": "user_1",
+            "aud": TEST_CLERK_PUBLISHABLE_KEY,
+            "iss": "https://x",
+            "exp": int(time.time()) + 600,
+        },
+        private_key,
+        algorithm="RS256",
+        headers={"kid": kid},
+    )
 
     async def fake_fetch() -> dict[str, object]:
-        return {"keys": [{"kty": "RSA", "alg": "RS256"}]}
-
-    from jwt import InvalidTokenError
+        return _jwks_for(f"{kid}-other", private_key)
 
     with patch.object(clerk_mod, "_fetch_jwks", new=fake_fetch):
-        with patch("app.core.oauth.clerk.jwt.decode", side_effect=InvalidTokenError("bad sig")):
-            with pytest.raises(ClerkTokenError):
-                await verify_clerk_token("bad.token")
+        with pytest.raises(ClerkTokenError, match="no matching key"):
+            await verify_clerk_token(token)
+
+
+@pytest.mark.asyncio
+async def test_verify_clerk_token_wrong_key_raises(monkeypatch: Any) -> None:
+    monkeypatch.setenv("VELA_CLERK_PUBLISHABLE_KEY", TEST_CLERK_PUBLISHABLE_KEY)
+    kid, signer_key = _make_rsa_kid()
+    token = _sign_clerk_token(
+        signer_key,
+        kid=kid,
+        email="u@x.com",
+        sub="user_1",
+        audience=TEST_CLERK_PUBLISHABLE_KEY,
+    )
+    _, other_key = _make_rsa_kid()
+
+    async def fake_fetch() -> dict[str, object]:
+        return _jwks_for(kid, other_key)
+
+    with patch.object(clerk_mod, "_fetch_jwks", new=fake_fetch):
+        with pytest.raises(ClerkTokenError, match="invalid"):
+            await verify_clerk_token(token)

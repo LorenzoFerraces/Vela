@@ -86,15 +86,24 @@ async def verify_clerk_token(token: str) -> ClerkClaims:
     jwks = await _get_jwks()
 
     try:
+        jwk_set = jwt.PyJWKSet.from_dict(jwks)
+        kid = jwt.get_unverified_header(token).get("kid")
+        try:
+            jwk = jwk_set[kid]  # type: ignore[index]
+        except KeyError as exc:
+            raise ClerkTokenError(
+                "Clerk token has no matching key (kid not in JWKS)."
+            ) from exc
         payload = jwt.decode(
             token,
-            key=jwks,
-            options={"verify_aud": True},
+            key=jwk,
             algorithms=["RS256"],
             audience=_publishable_key(),
         )
     except InvalidTokenError as exc:
-        raise ClerkTokenError("Clerk authentication failed.") from exc
+        raise ClerkTokenError(
+            "Clerk token is invalid (signature, expiry, or audience)."
+        ) from exc
 
     email = payload.get("email")
     if not isinstance(email, str) or not email:
