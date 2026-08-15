@@ -530,7 +530,7 @@ This is a **verification task with no code change unless it is wrong**. The host
 - Consumes: `VELA_CLERK_PUBLISHABLE_KEY` from `backend/.env` (the real production/test key).
 - Produces: confirmation (or a corrected `clerk_frontend_api_host`) that `clerk_frontend_api_host(pk)` equals the real Clerk frontend-API host.
 
-- [ ] **Step 1: Derive the host and check it**
+- [x] **Step 1: Derive the host and check it**
 
 From `backend/`, run:
 
@@ -540,7 +540,7 @@ python -c "import os; from app.core.oauth.clerk import clerk_frontend_api_host a
 
 Expected: `host=` prints your real `*.clerk.accounts.dev` domain (the one in the Clerk dashboard's domain field), and the JWKS URL returns 200 with a keys array. If it 404s or the host lacks `.clerk.accounts.dev`, the derivation is wrong — adjust `clerk_frontend_api_host` and add a test in `test_clerk_jwt.py` reproducing the real key's parts (keep the existing `test_clerk_frontend_api_host_decodes_embedded_domain` too). If it is correct, **do not change code**.
 
-- [ ] **Step 2: End-to-end manual smoke (optional, needs a real session)**
+- [ ] **Step 2: End-to-end manual smoke (optional, needs a real session; not run — no live Clerk session in this environment)**
 
 With the backend running (`python run.py`) and a real `VELA_CLERK_PUBLISHABLE_KEY`, open `/login` in a browser signed into Clerk. Expected: the auto-exchange fires, the backend decodes the session token, you land on `/containers` (or `?next=` target), and the network tab shows `POST /api/auth/clerk/exchange` → 200 with `user.email`.
 
@@ -557,15 +557,17 @@ git commit -m "fix: correct Clerk frontend-api host derivation"
 
 **Files:** none (verification only).
 
-- [ ] **Step 1: Run the entire backend suite**
+- [x] **Step 1: Run the entire backend suite**
 
 Run: `cd backend && python -m pytest tests -q`
 Expected: all PASS. (No new Clerk E2E expectations here — Playwright has no Clerk key.)
 
-- [ ] **Step 2: Frontend lint + typecheck + build**
+- [x] **Step 2: Frontend lint + typecheck + build**
 
 Run: `cd frontend && npm run lint` then `npx tsc -b --noEmit` then `npm run build`
 Expected: lint clean, no type errors, build succeeds.
+
+Result: tsc + build clean. Lint has 3 remaining errors, all pre-existing to this work: two `(window as any).Clerk` casts in LoginPage.tsx (kept per the Global Constraints above) and one `react-hooks/set-state-in-effect` in BuildConfigModal.tsx (touched by F/stack on main, not by this branch).
 
 - [ ] **Step 3: Final commit (only if lint/typecheck required fixes)**
 
