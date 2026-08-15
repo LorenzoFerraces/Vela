@@ -71,7 +71,7 @@ Existing domains: `auth/`, `oauth/`, `security/`, `traffic/`, `containers/`, `bu
 - **Headed**: `npm run test:e2e:headed`
 - **UI runner**: `npm run test:e2e:ui`
 
-The suite drives the real SPA against the real FastAPI process. Playwright `webServer` starts both on **separate ports** (API: 8001, Vite: 5174). The API uses SQLite at `backend/e2e-playwright.db` and `FakeContainerOrchestrator`.
+The suite drives the real SPA against the real FastAPI process. Playwright `webServer` starts both on **separate ports** (API: 8000, Vite: 5173 — the `e2eApiPort` / `e2eVitePort` defaults in `frontend/playwright.config.ts`, overridable via `PW_API_PORT` / `PW_VITE_PORT`). `reuseExistingServer` is off, so stop any dev server on those ports before running. The API uses SQLite at `backend/e2e-playwright.db` and `FakeContainerOrchestrator`.
 
 **No `page.route` mocking** for app flows — tests hit the live backend with seeded E2E users. The only direct API test is `e2e/api.spec.ts` (`GET /api/health`). Reserve network interception for external systems only (e.g., OAuth redirects).
 
@@ -105,4 +105,34 @@ E2E user credentials in `frontend/e2e/constants.ts` must stay in sync with `back
 
 ## Cleaning AI-generated changes (deslop)
 
+After substantive agent-generated edits on a branch, run the **deslop** Cursor skill on the diff: remove unnecessary comments, abnormal defensive `try`/`except` on trusted paths, `any` casts used only to silence types, and deeply nested structure that does not match surrounding code — **without changing behavior** except for clear bugs. Prefer small, focused cleanups over broad rewrites.
+
+## TypeScript / React (frontend)
+
+- **Avoid `instanceof` when practical.** Prefer discriminated unions, narrow with `typeof` / `in`, small type-predicate helpers, or parsing/validation (e.g. Zod) so behavior does not depend on prototype chains or cross-realm objects.
+- Use `instanceof` only where it is clearly the best tool (e.g. a well-owned `Error` subclass in the same bundle) and document why if it is non-obvious.
+- **Keep page and component files from growing too large.** Split out subviews, hooks, and shared UI into focused modules when a file becomes hard to scan or review.
+- **Reuse across pages** when the same UI or logic appears in more than one place — extract shared components or hooks rather than duplicating large blocks.
+- **`useEffect`**: Prefer deriving state during render, event handlers, or library patterns that avoid sync-on-mount when they suffice. Reserve effects for real side effects (subscriptions, imperative DOM, syncing with external systems) and avoid redundant or overly chained effects that are hard to reason about.
+
+## UI and forms (user experience)
+
+- **Prioritize user experience** when designing and building interfaces: flows should feel clear, fast, and respectful of attention.
+- **Follow common UX patterns** where they apply: clear navigation and hierarchy, visible loading and success/error feedback, sensible empty states, destructive actions behind confirmation, keyboard-friendly controls where the rest of the app does the same. Stay consistent with existing pages in this repo before introducing a new interaction model.
+- **Loading states**: Prefer **skeleton placeholders** that mirror the final layout over blank screens or generic “Loading…” text. Keep structure stable so the page feels responsive. Use **optimistic UI** when it is safe (update local state immediately, reconcile on success or roll back with a clear error on failure) so actions feel instant.
+- **When usability or user flow is unclear** (e.g. multi-step flows, dense data, unfamiliar domain), ask for product or design guidance or propose **short** options in chat instead of guessing a one-off pattern.
+- **Keep form fields short and concise** (labels, placeholders, helper text). Prefer tight copy over verbose prose.
+- **Avoid long explanations** inline on the form; if something needs detail, link to docs or a collapsible help pattern rather than wall-of-text above fields.
+- **Long forms are fine to split**: use **multi-step flows** or **modals** (and related patterns) so users are not overwhelmed by a single scrolling page of inputs.
+- **Containers** (`frontend/src/pages/ContainersPage.tsx`): the run form always uses **public routes** (`public_route: true`), a user-selected **container port** (defaults to 80; Git analysis may pre-fill when enabled in settings), no host port mapping, and shows **Git branch** only when the source looks like a Git URL (same `git@` / `http(s)://` / `ssh://` prefix rules as `POST /api/containers/run` on the server).
+
+## Errors shown to users (frontend and API)
+
+- **Surface client-facing messages**, not raw implementation details. Do not let low-level or library errors reach the UI unchanged when a clearer explanation is possible.
+- **Frontend**: On failure, show a short, actionable string (e.g. from API `detail` or a mapped message). Avoid re-throwing or logging-only flows that leave the user with a generic “Something went wrong” or a stack trace in production UI.
+- **Backend**: Prefer structured HTTP errors (`detail`, optional fields) from domain exceptions; avoid leaking stack traces or internal identifiers in normal error responses. Map unexpected failures to a safe generic message when appropriate.
+
+## Verification
+
+- **Always run both backend and E2E tests after substantive changes** before claiming work is complete. Run `python -m pytest` in `backend/` and the Playwright E2E suite in `frontend/e2e/`. Do not skip verification—tests are the only check that persists after the session ends.
 After substantive agent edits, clean the diff: remove unnecessary comments, abnormal `try`/`except` on trusted paths, `any` casts only to silence types, and deeply nested structure that doesn't match surrounding code — **without changing behavior** except for clear bugs.

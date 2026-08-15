@@ -13,6 +13,8 @@ from app.core.exceptions import (
     AvatarValidationError,
     BuilderError,
     CloneError,
+    ClerkAccountAlreadyLinkedError,
+    ClerkTokenError,
     ComposeImportError,
     GitSourceAnalysisError,
     NeedsBuildOverrideError,
@@ -359,6 +361,24 @@ def register_exception_handlers(app) -> None:
             content={"detail": str(exc)},
         )
 
+    @app.exception_handler(ClerkTokenError)
+    async def clerk_token_handler(
+        _request: Request, exc: ClerkTokenError
+    ) -> JSONResponse:
+        return JSONResponse(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            content={"detail": str(exc)},
+        )
+
+    @app.exception_handler(ClerkAccountAlreadyLinkedError)
+    async def clerk_linked_handler(
+        _request: Request, exc: ClerkAccountAlreadyLinkedError
+    ) -> JSONResponse:
+        return JSONResponse(
+            status_code=status.HTTP_409_CONFLICT,
+            content={"detail": str(exc)},
+        )
+
     @app.exception_handler(IntegrationError)
     async def integration_handler(
         _request: Request, exc: IntegrationError
@@ -369,18 +389,26 @@ def register_exception_handlers(app) -> None:
         )
 
     @app.exception_handler(StackNotFoundError)
-    async def handle_stack_not_found(_request: Request, exc: StackNotFoundError) -> JSONResponse:
-        return JSONResponse(status_code=status.HTTP_404_NOT_FOUND, content={"detail": str(exc)})
+    async def handle_stack_not_found(
+        _request: Request, exc: StackNotFoundError
+    ) -> JSONResponse:
+        return JSONResponse(
+            status_code=status.HTTP_404_NOT_FOUND, content={"detail": str(exc)}
+        )
 
     @app.exception_handler(StackCompositionCycleError)
-    async def handle_stack_cycle(_request: Request, exc: StackCompositionCycleError) -> JSONResponse:
+    async def handle_stack_cycle(
+        _request: Request, exc: StackCompositionCycleError
+    ) -> JSONResponse:
         return JSONResponse(
             status_code=status.HTTP_409_CONFLICT,
             content={"detail": str(exc), "stack_names": exc.stack_names},
         )
 
     @app.exception_handler(ComposeImportError)
-    async def handle_compose_import(_request: Request, exc: ComposeImportError) -> JSONResponse:
+    async def handle_compose_import(
+        _request: Request, exc: ComposeImportError
+    ) -> JSONResponse:
         return JSONResponse(
             status_code=status.HTTP_400_BAD_REQUEST,
             content={"detail": str(exc), "warnings": exc.warnings},

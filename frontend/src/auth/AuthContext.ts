@@ -8,6 +8,7 @@ export interface AuthContextValue {
   user: UserPublic | null
   login: (body: LoginRequest) => Promise<UserPublic>
   register: (body: RegisterRequest) => Promise<UserPublic>
+  clerkLogin: (clerkToken: string) => Promise<UserPublic>
   logout: () => void
   refreshUser: () => Promise<void>
 }

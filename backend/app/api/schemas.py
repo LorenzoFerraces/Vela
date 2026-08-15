@@ -581,6 +581,16 @@ class TokenResponse(BaseModel):
     user: UserPublic
 
 
+class ClerkExchangeRequest(BaseModel):
+    clerk_token: str = Field(..., min_length=1, max_length=4096)
+
+
+class AuthConfigResponse(BaseModel):
+    clerk_enabled: bool
+    clerk_publishable_key: str | None = None
+    clerk_frontend_api: str | None = None
+
+
 # ---------------------------------------------------------------------------
 # GitHub OAuth schemas
 # ---------------------------------------------------------------------------
