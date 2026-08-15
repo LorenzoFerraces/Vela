@@ -71,7 +71,7 @@ Existing domains: `auth/`, `oauth/`, `security/`, `traffic/`, `containers/`, `bu
 - **Headed**: `npm run test:e2e:headed`
 - **UI runner**: `npm run test:e2e:ui`
 
-The suite drives the real SPA against the real FastAPI process. Playwright `webServer` starts both on **separate ports** (API: 8001, Vite: 5174). The API uses SQLite at `backend/e2e-playwright.db` and `FakeContainerOrchestrator`.
+The suite drives the real SPA against the real FastAPI process. Playwright `webServer` starts both on **separate ports** (API: 8000, Vite: 5173 — the `e2eApiPort` / `e2eVitePort` defaults in `frontend/playwright.config.ts`, overridable via `PW_API_PORT` / `PW_VITE_PORT`). `reuseExistingServer` is off, so stop any dev server on those ports before running. The API uses SQLite at `backend/e2e-playwright.db` and `FakeContainerOrchestrator`.
 
 **No `page.route` mocking** for app flows — tests hit the live backend with seeded E2E users. The only direct API test is `e2e/api.spec.ts` (`GET /api/health`). Reserve network interception for external systems only (e.g., OAuth redirects).
 

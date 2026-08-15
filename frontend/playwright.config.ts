@@ -80,12 +80,14 @@ export default defineConfig({
       use: { ...devices['Desktop Chrome'] },
     },
   ],
+  // Never reuse a running dev server: it lacks e2eApiEnv (E2E DB, Clerk disabled),
+  // and the default ports match the dev ports. Free 8000/5173 before running.
   webServer: [
     {
       command: apiServerCommand,
       cwd: backendRoot,
       url: apiHealthURL,
-      reuseExistingServer: true,
+      reuseExistingServer: false,
       timeout: 120_000,
       env: {
         ...process.env,
@@ -95,7 +97,7 @@ export default defineConfig({
     {
       command: `npx vite --host 127.0.0.1 --port ${e2eVitePort}`,
       url: baseURL,
-      reuseExistingServer: true,
+      reuseExistingServer: false,
       timeout: 120_000,
       env: {
         ...process.env,

@@ -11,7 +11,11 @@ import httpx
 import jwt
 from jwt import InvalidTokenError
 
-from app.core.exceptions import ClerkTokenError, IntegrationConfigurationError
+from app.core.exceptions import (
+    ClerkTokenError,
+    IntegrationConfigurationError,
+    ProviderConnectionError,
+)
 
 _JWKS_CACHE_TTL_SECONDS = 3600
 
@@ -68,53 +72,75 @@ async def _fetch_jwks() -> dict[str, object]:
             resp = await client.get(_jwks_url())
         resp.raise_for_status()
     except httpx.HTTPError as exc:
-        raise ClerkTokenError("Clerk is temporarily unavailable.") from exc
+        raise ProviderConnectionError("Clerk is temporarily unavailable.") from exc
     return resp.json()
 
 
-async def _get_jwks() -> dict[str, object]:
+async def _get_jwks(*, force_refresh: bool = False) -> dict[str, object]:
     global _jwks_cache, _jwks_loaded_at
     now = time.time()
-    if _jwks_cache is None or (now - _jwks_loaded_at) > _JWKS_CACHE_TTL_SECONDS:
+    if (
+        force_refresh
+        or _jwks_cache is None
+        or (now - _jwks_loaded_at) > _JWKS_CACHE_TTL_SECONDS
+    ):
         _jwks_cache = await _fetch_jwks()
         _jwks_loaded_at = now
     return _jwks_cache
 
 
+def _allowed_origins() -> frozenset[str]:
+    raw = os.environ.get("VELA_ALLOWED_ORIGINS", "")
+    return frozenset(origin.strip() for origin in raw.split(",") if origin.strip())
+
+
 async def verify_clerk_token(token: str) -> ClerkClaims:
     """Verify a Clerk frontend JWT and return extracted claims.
 
-    Raises ``ClerkTokenError`` on invalid signature, expiry, or missing claims.
+    Raises ``ClerkTokenError`` on invalid signature, expiry, issuer, audience, azp,
+    or missing required claims.
     """
+    publishable_key = _publishable_key()
     jwks = await _get_jwks()
 
     try:
-        jwk_set = jwt.PyJWKSet.from_dict(jwks)
         kid = jwt.get_unverified_header(token).get("kid")
+        jwk_set = jwt.PyJWKSet.from_dict(jwks)
         try:
             jwk = jwk_set[kid]  # type: ignore[index]
-        except KeyError as exc:
-            raise ClerkTokenError(
-                "Clerk token has no matching key (kid not in JWKS)."
-            ) from exc
+        except KeyError:
+            jwks = await _get_jwks(force_refresh=True)
+            jwk_set = jwt.PyJWKSet.from_dict(jwks)
+            try:
+                jwk = jwk_set[kid]  # type: ignore[index]
+            except KeyError as exc:
+                raise ClerkTokenError(
+                    "Clerk token has no matching key (kid not in JWKS)."
+                ) from exc
         payload = jwt.decode(
             token,
             key=jwk,
             algorithms=["RS256"],
-            audience=_publishable_key(),
+            audience=publishable_key,
+            issuer=f"https://{clerk_frontend_api_host(publishable_key)}",
+            options={"require": ["exp", "nbf", "iss", "sub"]},
         )
     except InvalidTokenError as exc:
         raise ClerkTokenError(
-            "Clerk token is invalid (signature, expiry, or audience)."
+            "Clerk token is invalid (signature, expiry, audience, or issuer)."
         ) from exc
 
     email = payload.get("email")
     if not isinstance(email, str) or not email:
         raise ClerkTokenError("Clerk token is missing the email claim.")
 
-    external_id = payload.get("sub", "")
-    if not isinstance(external_id, str):
-        external_id = str(external_id)
+    external_id = payload.get("sub")
+    if not isinstance(external_id, str) or not external_id:
+        raise ClerkTokenError("Clerk token is missing the sub claim.")
+
+    azp = payload.get("azp")
+    if azp is not None and azp not in _allowed_origins():
+        raise ClerkTokenError("Clerk token azp is not an allowed origin.")
 
     return ClerkClaims(email=email.strip().lower(), external_id=external_id)
 

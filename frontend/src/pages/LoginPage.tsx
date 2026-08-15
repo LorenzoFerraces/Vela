@@ -26,7 +26,7 @@ export default function LoginPage() {
     publishableKey: string
     frontendApi: string
   } | null>(null)
-  const clerkLoaded = useRef(false)
+  const clerkLoadPromise = useRef<Promise<void> | null>(null)
 
   const params = new URLSearchParams(location.search)
   const nextPath = safeNextPath(params.get('next'))
@@ -70,18 +70,23 @@ export default function LoginPage() {
     if (!clerkConfig) return
 
     const loadClerk = () => {
-      if (clerkLoaded.current) return Promise.resolve()
-      clerkLoaded.current = true
-      return new Promise<void>((resolve, reject) => {
-        const script = document.createElement('script')
-        script.async = true
-        script.crossOrigin = 'anonymous'
-        script.setAttribute('data-clerk-publishable-key', clerkConfig.publishableKey)
-        script.src = `https://${clerkConfig.frontendApi}/npm/@clerk/clerk-js@latest/dist/clerk.browser.js`
-        script.onload = () => resolve()
-        script.onerror = () => reject(new Error('Failed to load Clerk'))
-        document.head.appendChild(script)
-      })
+      if (!clerkLoadPromise.current) {
+        const loadPromise = new Promise<void>((resolve, reject) => {
+          const script = document.createElement('script')
+          script.async = true
+          script.crossOrigin = 'anonymous'
+          script.setAttribute('data-clerk-publishable-key', clerkConfig.publishableKey)
+          script.src = `https://${clerkConfig.frontendApi}/npm/@clerk/clerk-js@latest/dist/clerk.browser.js`
+          script.onload = () => resolve()
+          script.onerror = () => reject(new Error('Failed to load Clerk'))
+          document.head.appendChild(script)
+        })
+        clerkLoadPromise.current = loadPromise
+        loadPromise.catch(() => {
+          clerkLoadPromise.current = null
+        })
+      }
+      return clerkLoadPromise.current
     }
 
     let cancelled = false
@@ -110,7 +115,9 @@ export default function LoginPage() {
           }
         })
       }
-    }).catch(() => {})
+    }).catch(() => {
+      if (!cancelled) setErrorText('Clerk could not be loaded. Check your connection and reload the page.')
+    })
     return () => { cancelled = true }
   }, [clerkConfig, clerkLogin, navigate, nextPath])
 

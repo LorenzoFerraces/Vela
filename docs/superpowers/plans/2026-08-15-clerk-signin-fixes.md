@@ -245,17 +245,18 @@ git commit -m "fix: verify Clerk JWT against JWKS by kid (real crypto)"
 
 ---
 
-### Task 2: Surface JWKS network failures as a clean 400
+### Task 2: Surface JWKS network failures as a 503 (provider unavailable)
 
-If `https://{frontendApi}/.well-known/jwks.json` is unreachable or returns an HTTP error, `_fetch_jwks` currently lets `httpx` exceptions propagate, producing an unhandled 500. Wrap it so the user sees a short, actionable message.
+If `https://{frontendApi}/.well-known/jwks.json` is unreachable or returns an HTTP error, `_fetch_jwks` currently lets `httpx` exceptions propagate, producing an unhandled 500. Wrap it in `ProviderConnectionError` so the failure maps to **HTTP 503** (provider outage, retry later) rather than **400** (bad token), and the user sees a short, actionable message.
 
 **Files:**
 - Modify: `backend/app/core/oauth/clerk.py:65-69` (`_fetch_jwks`)
 - Test: `backend/tests/test_clerk_jwt.py`
+- Test: `backend/tests/test_clerk_exchange.py` (integration: JWKS provider failure → 503)
 
 **Interfaces:**
-- Consumes: `ClerkTokenError` (already imported at `clerk.py:14`), `httpx` (already imported at `clerk.py:10`).
-- Produces: `_fetch_jwks() -> dict[str, object]` that raises `ClerkTokenError("Clerk is temporarily unavailable.")` on any `httpx.HTTPError`.
+- Consumes: `ProviderConnectionError` (from `app.core.exceptions`, mapped to 503 in `app/api/errors.py`), `httpx` (already imported at `clerk.py:10`).
+- Produces: `_fetch_jwks() -> dict[str, object]` that raises `ProviderConnectionError("Clerk is temporarily unavailable.")` on any `httpx.HTTPError`.
 
 - [x] **Step 1: Write the failing test**
 
@@ -263,7 +264,7 @@ Add this test to `backend/tests/test_clerk_jwt.py`:
 
 ```python
 @pytest.mark.asyncio
-async def test_fetch_jwks_network_error_raises_clerk_error(monkeypatch: Any) -> None:
+async def test_fetch_jwks_network_error_raises_provider_error(monkeypatch: Any) -> None:
     monkeypatch.setenv("VELA_CLERK_PUBLISHABLE_KEY", TEST_CLERK_PUBLISHABLE_KEY)
 
     async def failing_client(timeout: float) -> Any:
@@ -272,7 +273,7 @@ async def test_fetch_jwks_network_error_raises_clerk_error(monkeypatch: Any) -> 
         raise httpx.ConnectError("boom")
 
     with patch.object(clerk_mod.httpx, "AsyncClient", side_effect=failing_client):
-        with pytest.raises(ClerkTokenError, match="temporarily unavailable"):
+        with pytest.raises(ProviderConnectionError, match="temporarily unavailable"):
             await clerk_mod._fetch_jwks()
 ```
 
@@ -281,7 +282,7 @@ async def test_fetch_jwks_network_error_raises_clerk_error(monkeypatch: Any) -> 
 - [x] **Step 2: Run to verify it fails**
 
 Run: `python -m pytest tests/test_clerk_jwt.py::test_fetch_jwks_network_error_raises_clerk_error -q`
-Expected: FAIL — the current `_fetch_jwks` lets the `httpx.ConnectError` escape (it is **not** a `ClerkTokenError`, so `pytest.raises(ClerkTokenError)` does not catch it).
+Expected: FAIL — the current `_fetch_jwks` lets the `httpx.ConnectError` escape (it is **not** a `ProviderConnectionError`, so `pytest.raises(ProviderConnectionError)` does not catch it).
 
 - [x] **Step 3: Wrap the fetch**
 
@@ -289,12 +290,12 @@ In `backend/app/core/oauth/clerk.py`, replace `_fetch_jwks` (lines 65-69) with:
 
 ```python
 async def _fetch_jwks() -> dict[str, object]:
-    async with httpx.AsyncClient(timeout=10.0) as client:
-        resp = await client.get(_jwks_url())
     try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(_jwks_url())
         resp.raise_for_status()
     except httpx.HTTPError as exc:
-        raise ClerkTokenError("Clerk is temporarily unavailable.") from exc
+        raise ProviderConnectionError("Clerk is temporarily unavailable.") from exc
     return resp.json()
 ```
 
@@ -306,8 +307,8 @@ Expected: all tests PASS (including the new network-error test).
 - [x] **Step 5: Commit**
 
 ```bash
-git add backend/app/core/oauth/clerk.py backend/tests/test_clerk_jwt.py
-git commit -m "fix: map JWKS fetch failures to a Clerk token error"
+git add backend/app/core/oauth/clerk.py backend/tests/test_clerk_jwt.py backend/tests/test_clerk_exchange.py
+git commit -m "fix: map JWKS fetch failures to a provider connection error (503)"
 ```
 
 ---

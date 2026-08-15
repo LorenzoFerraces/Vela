@@ -13,7 +13,11 @@ import pytest
 from cryptography.hazmat.primitives.asymmetric import rsa
 
 import app.core.oauth.clerk as clerk_mod
-from app.core.exceptions import ClerkTokenError, IntegrationConfigurationError
+from app.core.exceptions import (
+    ClerkTokenError,
+    IntegrationConfigurationError,
+    ProviderConnectionError,
+)
 from app.core.oauth.clerk import (
     ClerkClaims,
     clerk_frontend_api_host,
@@ -78,12 +82,26 @@ def _sign_clerk_token(
             "aud": audience,
             "iss": "https://sample123.clerk.accounts.dev",
             "exp": now + 600,
+            "nbf": now,
             "iat": now,
         },
         private_key,
         algorithm="RS256",
         headers={"kid": kid},
     )
+
+
+def _full_claims(*, email: str = "u@x.com", sub: str = "user_1") -> dict[str, object]:
+    now = int(time.time())
+    return {
+        "email": email,
+        "sub": sub,
+        "aud": TEST_CLERK_PUBLISHABLE_KEY,
+        "iss": "https://sample123.clerk.accounts.dev",
+        "exp": now + 600,
+        "nbf": now,
+        "iat": now,
+    }
 
 
 @pytest.mark.asyncio
@@ -111,19 +129,9 @@ async def test_verify_clerk_token_success_with_real_key(monkeypatch: Any) -> Non
 async def test_verify_clerk_token_missing_email_raises(monkeypatch: Any) -> None:
     monkeypatch.setenv("VELA_CLERK_PUBLISHABLE_KEY", TEST_CLERK_PUBLISHABLE_KEY)
     kid, private_key = _make_rsa_kid()
-    now = int(time.time())
-    token = pyjwt.encode(
-        {
-            "sub": "user_1",
-            "aud": TEST_CLERK_PUBLISHABLE_KEY,
-            "iss": "https://x",
-            "exp": now + 600,
-            "iat": now,
-        },
-        private_key,
-        algorithm="RS256",
-        headers={"kid": kid},
-    )
+    claims = _full_claims()
+    del claims["email"]
+    token = pyjwt.encode(claims, private_key, algorithm="RS256", headers={"kid": kid})
 
     async def fake_fetch() -> dict[str, object]:
         return _jwks_for(kid, private_key)
@@ -138,12 +146,7 @@ async def test_verify_clerk_token_unknown_kid_raises(monkeypatch: Any) -> None:
     monkeypatch.setenv("VELA_CLERK_PUBLISHABLE_KEY", TEST_CLERK_PUBLISHABLE_KEY)
     kid, private_key = _make_rsa_kid()
     token = pyjwt.encode(
-        {
-            "sub": "user_1",
-            "aud": TEST_CLERK_PUBLISHABLE_KEY,
-            "iss": "https://x",
-            "exp": int(time.time()) + 600,
-        },
+        _full_claims(),
         private_key,
         algorithm="RS256",
         headers={"kid": kid},
@@ -179,12 +182,82 @@ async def test_verify_clerk_token_wrong_key_raises(monkeypatch: Any) -> None:
 
 
 @pytest.mark.asyncio
-async def test_fetch_jwks_network_error_raises_clerk_error(monkeypatch: Any) -> None:
+async def test_fetch_jwks_network_error_raises_provider_error(monkeypatch: Any) -> None:
     monkeypatch.setenv("VELA_CLERK_PUBLISHABLE_KEY", TEST_CLERK_PUBLISHABLE_KEY)
 
     def failing_client(*args: Any, **kwargs: Any) -> Any:
         raise httpx.ConnectError("boom")
 
     with patch.object(clerk_mod.httpx, "AsyncClient", side_effect=failing_client):
-        with pytest.raises(ClerkTokenError, match="temporarily unavailable"):
+        with pytest.raises(ProviderConnectionError, match="temporarily unavailable"):
             await clerk_mod._fetch_jwks()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("missing_claim", ["exp", "nbf", "iss", "sub"])
+async def test_verify_clerk_token_missing_required_claim_raises(
+    monkeypatch: Any, missing_claim: str
+) -> None:
+    monkeypatch.setenv("VELA_CLERK_PUBLISHABLE_KEY", TEST_CLERK_PUBLISHABLE_KEY)
+    kid, private_key = _make_rsa_kid()
+    claims = _full_claims()
+    del claims[missing_claim]
+    token = pyjwt.encode(claims, private_key, algorithm="RS256", headers={"kid": kid})
+
+    async def fake_fetch() -> dict[str, object]:
+        return _jwks_for(kid, private_key)
+
+    with patch.object(clerk_mod, "_fetch_jwks", new=fake_fetch):
+        with pytest.raises(ClerkTokenError, match="invalid"):
+            await verify_clerk_token(token)
+
+
+@pytest.mark.asyncio
+async def test_verify_clerk_token_wrong_issuer_raises(monkeypatch: Any) -> None:
+    monkeypatch.setenv("VELA_CLERK_PUBLISHABLE_KEY", TEST_CLERK_PUBLISHABLE_KEY)
+    kid, private_key = _make_rsa_kid()
+    claims = _full_claims()
+    claims["iss"] = "https://evil.example.com"
+    token = pyjwt.encode(claims, private_key, algorithm="RS256", headers={"kid": kid})
+
+    async def fake_fetch() -> dict[str, object]:
+        return _jwks_for(kid, private_key)
+
+    with patch.object(clerk_mod, "_fetch_jwks", new=fake_fetch):
+        with pytest.raises(ClerkTokenError, match="invalid"):
+            await verify_clerk_token(token)
+
+
+@pytest.mark.asyncio
+async def test_verify_clerk_token_disallowed_azp_raises(monkeypatch: Any) -> None:
+    monkeypatch.setenv("VELA_CLERK_PUBLISHABLE_KEY", TEST_CLERK_PUBLISHABLE_KEY)
+    monkeypatch.setenv("VELA_ALLOWED_ORIGINS", "http://localhost:5173")
+    kid, private_key = _make_rsa_kid()
+    claims = _full_claims()
+    claims["azp"] = "https://evil.example.com"
+    token = pyjwt.encode(claims, private_key, algorithm="RS256", headers={"kid": kid})
+
+    async def fake_fetch() -> dict[str, object]:
+        return _jwks_for(kid, private_key)
+
+    with patch.object(clerk_mod, "_fetch_jwks", new=fake_fetch):
+        with pytest.raises(ClerkTokenError, match="azp"):
+            await verify_clerk_token(token)
+
+
+@pytest.mark.asyncio
+async def test_verify_clerk_token_allowed_azp_accepted(monkeypatch: Any) -> None:
+    monkeypatch.setenv("VELA_CLERK_PUBLISHABLE_KEY", TEST_CLERK_PUBLISHABLE_KEY)
+    monkeypatch.setenv("VELA_ALLOWED_ORIGINS", "http://localhost:5173")
+    kid, private_key = _make_rsa_kid()
+    claims = _full_claims()
+    claims["azp"] = "http://localhost:5173"
+    token = pyjwt.encode(claims, private_key, algorithm="RS256", headers={"kid": kid})
+
+    async def fake_fetch() -> dict[str, object]:
+        return _jwks_for(kid, private_key)
+
+    with patch.object(clerk_mod, "_fetch_jwks", new=fake_fetch):
+        out = await verify_clerk_token(token)
+
+    assert out == ClerkClaims(email="u@x.com", external_id="user_1")
