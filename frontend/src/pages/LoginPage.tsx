@@ -20,6 +20,7 @@ export default function LoginPage() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [submitting, setSubmitting] = useState(false)
+  const [clerkBusy, setClerkBusy] = useState(false)
   const [errorText, setErrorText] = useState<string | null>(null)
   const [clerkConfig, setClerkConfig] = useState<{
     publishableKey: string
@@ -69,7 +70,7 @@ export default function LoginPage() {
     if (!clerkConfig) return
 
     const loadClerk = () => {
-      if (clerkLoaded.current) return
+      if (clerkLoaded.current) return Promise.resolve()
       clerkLoaded.current = true
       return new Promise<void>((resolve, reject) => {
         const script = document.createElement('script')
@@ -91,15 +92,22 @@ export default function LoginPage() {
       await clerk.load()
       if (cancelled) return
       if (clerk.session) {
-        setSubmitting(true)
-        clerk.session.getToken('vela').then(async (token: string) => {
+        setClerkBusy(true)
+        clerk.session.getToken().then(async (token: string) => {
           if (cancelled) return
-          await clerkLogin(token)
-          navigate(nextPath, { replace: true })
-        }).catch((error: Error) => {
-          if (!cancelled) setErrorText(formatApiError(error))
-        }).finally(() => {
-          if (!cancelled) setSubmitting(false)
+          try {
+            await clerkLogin(token)
+            navigate(nextPath, { replace: true })
+          } catch (error) {
+            if (!cancelled) setErrorText(formatApiError(error))
+          } finally {
+            if (!cancelled) setClerkBusy(false)
+          }
+        }).catch(() => {
+          if (!cancelled) {
+            setClerkBusy(false)
+            setErrorText('Clerk sign-in could not start. Try clicking the button once.')
+          }
         })
       }
     }).catch(() => {})
@@ -186,7 +194,7 @@ export default function LoginPage() {
             <button
               type="button"
               className="btn btn--outline auth-form__clerk"
-              disabled={submitting}
+              disabled={submitting || clerkBusy}
               onClick={onClerkClick}
             >
               Sign in with Clerk

@@ -323,7 +323,7 @@ git commit -m "fix: map JWKS fetch failures to a Clerk token error"
 - Consumes: `IntegrityError` (imported at `identity.py:9`), `ClerkAccountAlreadyLinkedError` (imported at `identity.py:12`).
 - Produces: `upsert_clerk_identity(session, *, user_id, external_id) -> UserOAuthIdentity` — signature unchanged. On a constraint violation it now raises `ClerkAccountAlreadyLinkedError()` (→409) instead of 500.
 
-- [ ] **Step 1: Add the guard**
+- [x] **Step 1: Add the guard**
 
 In `backend/app/core/oauth/identity.py`, replace the tail of `upsert_clerk_identity` (lines 169-171: `await session.commit()` / `await session.refresh(identity)` / `return identity`) with:
 
@@ -346,14 +346,14 @@ In `backend/app/core/oauth/identity.py`, replace the tail of `upsert_clerk_ident
 
 This matches `upsert_github_identity` exactly (identity.py:85-97).
 
-- [ ] **Step 2: Regression-check the full backend suite**
+- [x] **Step 2: Regression-check the full backend suite**
 
 This guard protects a true concurrency race that cannot be deterministically triggered in a single-process SQLite test without mocking internals, so it is regression-checked via the existing suite rather than a bespoke mock test. The user-facing duplicate case (`owner.user_id != user_id` → 409) is already deterministically covered by `test_clerk_exchange_account_already_linked_returns_409`.
 
 Run: `python -m pytest tests/test_clerk_exchange.py tests/test_github_oauth.py -q`
 Expected: all PASS (no regression). The new `except` branch is only reached when a `(provider, provider_subject)` constraint fires; nothing in the suite intentionally triggers that, so existing behavior is unchanged.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add backend/app/core/oauth/identity.py
@@ -377,7 +377,7 @@ Two frontend bugs in `frontend/src/pages/LoginPage.tsx`:
 - Consumes: `clerkLogin` (from `useAuth`), `navigate`, `nextPath`, `formatApiError`, `clerkConfig`.
 - Produces: a `clerkBusy: boolean` state that is true while the Clerk auto-exchange is in flight; the Clerk button is disabled when `clerkBusy`.
 
-- [ ] **Step 1: Add the `clerkBusy` state**
+- [x] **Step 1: Add the `clerkBusy` state**
 
 In `frontend/src/pages/LoginPage.tsx`, after `const [submitting, setSubmitting] = useState(false)` (line 22), add:
 
@@ -385,7 +385,7 @@ In `frontend/src/pages/LoginPage.tsx`, after `const [submitting, setSubmitting] 
   const [clerkBusy, setClerkBusy] = useState(false)
 ```
 
-- [ ] **Step 2: Rewrite the auto-exchange effect**
+- [x] **Step 2: Rewrite the auto-exchange effect**
 
 Replace the effect that starts `if (!clerkConfig) return` (lines 68-107) with:
 
@@ -441,7 +441,7 @@ Replace the effect that starts `if (!clerkConfig) return` (lines 68-107) with:
 
 (Only three lines differ from the original: `setClkBusy`→`setClerkBusy(true)`, `getToken('vela')`→`getToken()`, and the exchange body swapped from the old `.finally` chain into `try/catch/finally` with an explicit `catch` fallback.)
 
-- [ ] **Step 3: Gate the Clerk button on `clerkBusy`**
+- [x] **Step 3: Gate the Clerk button on `clerkBusy`**
 
 In the Clerk button (lines 186-193), change:
 
