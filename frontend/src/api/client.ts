@@ -1076,12 +1076,24 @@ export async function registerUser(
   )
 }
 
+/**
+ * Authenticates a user with login credentials.
+ *
+ * @param body - The user's login credentials
+ * @returns The authentication token response
+ */
 export async function login(body: LoginRequest): Promise<TokenResponse> {
   return apiPost<TokenResponse, LoginRequest>('/api/auth/login', body, {
     skipAuth: true,
   })
 }
 
+/**
+ * Exchanges a Clerk authentication token for an API access token.
+ *
+ * @param clerkToken - The Clerk token to exchange
+ * @returns The authenticated user's token response
+ */
 export async function clerkLogin(clerkToken: string): Promise<TokenResponse> {
   return apiPost<TokenResponse, { clerk_token: string }>(
     '/api/auth/clerk/exchange',
@@ -1090,6 +1102,11 @@ export async function clerkLogin(clerkToken: string): Promise<TokenResponse> {
   )
 }
 
+/**
+ * Retrieves the authenticated user's public profile.
+ *
+ * @returns The current user's public profile
+ */
 export async function getMe(): Promise<UserPublic> {
   return apiGet<UserPublic>('/api/auth/me')
 }

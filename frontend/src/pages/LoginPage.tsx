@@ -3,6 +3,12 @@ import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { ApiError, apiRequest, formatApiError } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 
+/**
+ * Resolves a requested redirect path to a safe application path.
+ *
+ * @param rawNext - The encoded redirect path to evaluate
+ * @returns The decoded path if it starts with `/`; otherwise, `/containers`
+ */
 function safeNextPath(rawNext: string | null): string {
   if (!rawNext) return '/containers'
   try {
@@ -13,6 +19,11 @@ function safeNextPath(rawNext: string | null): string {
   }
 }
 
+/**
+ * Renders the sign-in page with email/password and optional Clerk authentication.
+ *
+ * @returns The sign-in page interface.
+ */
 export default function LoginPage() {
   const { login, clerkLogin, status } = useAuth()
   const navigate = useNavigate()

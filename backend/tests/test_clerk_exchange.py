@@ -86,6 +86,12 @@ def test_clerk_exchange_invalid_token_returns_400(db_app: Any, monkeypatch: Any)
     from fastapi.testclient import TestClient
 
     async def raise_clerk_error(_token: str):
+        """
+        Raise a token verification error for an invalid Clerk token.
+        
+        Raises:
+        	ClerkTokenError: Always, indicating that token verification failed.
+        """
         raise ClerkTokenError("Clerk token verification failed: bad signature")
 
     with patch(

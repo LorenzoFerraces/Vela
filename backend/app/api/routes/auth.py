@@ -43,6 +43,16 @@ async def auth_config() -> AuthConfigResponse:
 
 
 def _token_response(user: User, object_storage: ObjectStorage) -> TokenResponse:
+    """
+    Builds an authentication response for a user.
+    
+    Parameters:
+        user (User): The user for whom to create the response.
+        object_storage (ObjectStorage): Storage used to build the user's public profile.
+    
+    Returns:
+        TokenResponse: An access token and the user's public profile.
+    """
     return TokenResponse(
         access_token=create_access_token(user.id),
         user=user_public_from_snapshot(user_to_snapshot(user, object_storage)),
@@ -81,7 +91,15 @@ async def clerk_exchange(
     session: Annotated[AsyncSession, Depends(get_db)],
     object_storage: Annotated[ObjectStorage, Depends(get_object_storage)],
 ) -> TokenResponse:
-    """Exchange a Clerk frontend JWT for a Vela access token."""
+    """
+    Exchange a Clerk frontend JWT for a Vela access token, creating and linking a user when needed.
+    
+    Returns:
+        TokenResponse: The Vela access token and public user data.
+    
+    Raises:
+        IntegrationConfigurationError: If Clerk authentication is not configured.
+    """
     enabled, _, _ = clerk_available()
     if not enabled:
         raise IntegrationConfigurationError(

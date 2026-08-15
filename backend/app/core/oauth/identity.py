@@ -111,7 +111,11 @@ async def delete_github_identity(
 
 
 def decrypt_identity_token(identity: UserOAuthIdentity) -> str | None:
-    """Decrypt the stored access token; ``None`` when the row predates token storage."""
+    """Decrypts the stored access token for an OAuth identity.
+    
+    Returns:
+    	str | None: The decrypted access token, or `None` when no token is stored.
+    """
     if identity.access_token_encrypted is None:
         return None
     return decrypt_secret(identity.access_token_encrypted)
@@ -120,6 +124,15 @@ def decrypt_identity_token(identity: UserOAuthIdentity) -> str | None:
 async def get_clerk_identity(
     session: AsyncSession, user_id: uuid.UUID
 ) -> UserOAuthIdentity | None:
+    """
+    Retrieve a user's Clerk OAuth identity.
+    
+    Parameters:
+    	user_id (uuid.UUID): The ID of the user whose identity to retrieve.
+    
+    Returns:
+    	UserOAuthIdentity | None: The user's Clerk identity, or `None` if no identity is associated with the user.
+    """
     return await session.scalar(
         select(UserOAuthIdentity).where(
             UserOAuthIdentity.user_id == user_id,
@@ -131,6 +144,14 @@ async def get_clerk_identity(
 async def get_clerk_identity_by_subject(
     session: AsyncSession, provider_subject: str
 ) -> UserOAuthIdentity | None:
+    """Retrieve a user's Clerk OAuth identity by its provider subject.
+    
+    Parameters:
+        provider_subject (str): The external subject identifier assigned by Clerk.
+    
+    Returns:
+        UserOAuthIdentity | None: The matching Clerk identity, or `None` if no identity exists.
+    """
     return await session.scalar(
         select(UserOAuthIdentity).where(
             UserOAuthIdentity.provider == CLERK_PROVIDER,
@@ -145,7 +166,20 @@ async def upsert_clerk_identity(
     user_id: uuid.UUID,
     external_id: str,
 ) -> UserOAuthIdentity:
-    """Insert or update the user's Clerk identity. Commits before returning."""
+    """
+    Create or update a user's Clerk identity and persist the change.
+    
+    Parameters:
+        user_id (uuid.UUID): Identifier of the user who owns the identity.
+        external_id (str): Clerk subject identifying the external account.
+    
+    Returns:
+        UserOAuthIdentity: The persisted Clerk identity.
+    
+    Raises:
+        ClerkAccountAlreadyLinkedError: If the Clerk account belongs to another user.
+        IntegrityError: If persistence fails for an integrity constraint unrelated to account linking.
+    """
     owner = await get_clerk_identity_by_subject(session, external_id)
     if owner is not None and owner.user_id != user_id:
         raise ClerkAccountAlreadyLinkedError()

@@ -282,6 +282,12 @@ class GitHubAPIError(IntegrationError):
     """A call to the GitHub REST API failed."""
 
     def __init__(self, message: str = "GitHub request failed.") -> None:
+        """
+        Initialize the exception with a GitHub request failure message.
+        
+        Parameters:
+        	message (str): Error message to associate with the exception.
+        """
         super().__init__(message)
 
 
@@ -289,6 +295,12 @@ class ClerkTokenError(IntegrationError):
     """Clerk token verification failed (bad signature, expired, missing claims)."""
 
     def __init__(self, message: str = "Clerk authentication failed.") -> None:
+        """
+        Initialize a Clerk authentication error with a user-facing message.
+        
+        Parameters:
+            message (str): The error message. Defaults to "Clerk authentication failed."
+        """
         super().__init__(message)
 
 
@@ -302,6 +314,12 @@ class GitHubAccountAlreadyLinkedError(IntegrationError):
             "Disconnect it from the other account first, or sign in as that user."
         ),
     ) -> None:
+        """
+        Initialize an error indicating that a GitHub account is already linked to another Vela user.
+        
+        Parameters:
+        	message (str): Custom error message to use.
+        """
         super().__init__(message)
 
 
@@ -315,6 +333,12 @@ class ClerkAccountAlreadyLinkedError(IntegrationError):
             "Sign in as that user instead."
         ),
     ) -> None:
+        """
+        Initialize the error with a message describing the existing Clerk account link.
+        
+        Parameters:
+            message (str): Error message to expose.
+        """
         super().__init__(message)
 
 

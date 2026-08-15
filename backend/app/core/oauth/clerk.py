@@ -39,6 +39,15 @@ def clerk_frontend_api_host(publishable_key: str) -> str:
 
 
 def _publishable_key() -> str:
+    """
+    Retrieve the configured Clerk publishable key.
+    
+    Returns:
+    	str: The publishable key from `VELA_CLERK_PUBLISHABLE_KEY`.
+    
+    Raises:
+    	IntegrationConfigurationError: If the environment variable is missing or empty.
+    """
     pk = os.environ.get("VELA_CLERK_PUBLISHABLE_KEY", "").strip()
     if not pk:
         raise IntegrationConfigurationError(
@@ -48,6 +57,12 @@ def _publishable_key() -> str:
 
 
 def clerk_available() -> tuple[bool, str | None, str | None]:
+    """
+    Determine whether Clerk is configured with a valid publishable key.
+    
+    Returns:
+    	tuple[bool, str | None, str | None]: A tuple containing availability, the publishable key, and its frontend API hostname; unavailable configurations return `(False, None, None)`.
+    """
     pk = os.environ.get("VELA_CLERK_PUBLISHABLE_KEY", "").strip()
     if not pk:
         return (False, None, None)
@@ -58,11 +73,24 @@ def clerk_available() -> tuple[bool, str | None, str | None]:
 
 
 def _jwks_url() -> str:
+    """Build the Clerk JSON Web Key Set endpoint URL.
+    
+    Returns:
+    	str: The URL of the Clerk JWKS endpoint.
+    """
     host = clerk_frontend_api_host(_publishable_key())
     return f"https://{host}/.well-known/jwks.json"
 
 
 async def _fetch_jwks() -> dict[str, object]:
+    """Retrieve Clerk's JSON Web Key Set.
+    
+    Returns:
+    	dict[str, object]: The JWKS response data.
+    
+    Raises:
+    	ClerkTokenError: If the Clerk request fails.
+    """
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
             resp = await client.get(_jwks_url())
@@ -73,6 +101,12 @@ async def _fetch_jwks() -> dict[str, object]:
 
 
 async def _get_jwks() -> dict[str, object]:
+    """
+    Retrieve the Clerk JSON Web Key Set, using the in-memory cache while it remains valid.
+    
+    Returns:
+    	dict[str, object]: The current JSON Web Key Set.
+    """
     global _jwks_cache, _jwks_loaded_at
     now = time.time()
     if _jwks_cache is None or (now - _jwks_loaded_at) > _JWKS_CACHE_TTL_SECONDS:
@@ -82,9 +116,18 @@ async def _get_jwks() -> dict[str, object]:
 
 
 async def verify_clerk_token(token: str) -> ClerkClaims:
-    """Verify a Clerk frontend JWT and return extracted claims.
-
-    Raises ``ClerkTokenError`` on invalid signature, expiry, or missing claims.
+    """
+    Verify a Clerk frontend JWT and extract its normalized claims.
+    
+    Parameters:
+        token (str): Clerk frontend JWT to verify.
+    
+    Returns:
+        ClerkClaims: The normalized email address and external user ID.
+    
+    Raises:
+        ClerkTokenError: If the token is invalid, has no matching signing key,
+            or lacks a nonempty email claim.
     """
     jwks = await _get_jwks()
 

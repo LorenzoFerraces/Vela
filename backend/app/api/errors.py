@@ -356,6 +356,14 @@ def register_exception_handlers(app) -> None:
     async def integration_config_handler(
         _request: Request, exc: IntegrationConfigurationError
     ) -> JSONResponse:
+        """Return a service-unavailable response for integration configuration errors.
+        
+        Parameters:
+            exc (IntegrationConfigurationError): The integration configuration error to include in the response.
+        
+        Returns:
+            JSONResponse: A 503 response containing the error detail.
+        """
         return JSONResponse(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             content={"detail": str(exc)},
@@ -365,6 +373,15 @@ def register_exception_handlers(app) -> None:
     async def clerk_token_handler(
         _request: Request, exc: ClerkTokenError
     ) -> JSONResponse:
+        """Handle Clerk token errors as bad-request responses.
+        
+        Parameters:
+        	_request (Request): The incoming HTTP request.
+        	exc (ClerkTokenError): The Clerk token error to serialize.
+        
+        Returns:
+        	JSONResponse: A 400 response containing the error detail.
+        """
         return JSONResponse(
             status_code=status.HTTP_400_BAD_REQUEST,
             content={"detail": str(exc)},
@@ -374,6 +391,7 @@ def register_exception_handlers(app) -> None:
     async def clerk_linked_handler(
         _request: Request, exc: ClerkAccountAlreadyLinkedError
     ) -> JSONResponse:
+        """Return a conflict response when a Clerk account is already linked."""
         return JSONResponse(
             status_code=status.HTTP_409_CONFLICT,
             content={"detail": str(exc)},
@@ -383,6 +401,7 @@ def register_exception_handlers(app) -> None:
     async def integration_handler(
         _request: Request, exc: IntegrationError
     ) -> JSONResponse:
+        """Handle integration failures by returning a 502 Bad Gateway response."""
         return JSONResponse(
             status_code=status.HTTP_502_BAD_GATEWAY,
             content={"detail": str(exc)},
@@ -392,6 +411,15 @@ def register_exception_handlers(app) -> None:
     async def handle_stack_not_found(
         _request: Request, exc: StackNotFoundError
     ) -> JSONResponse:
+        """Handle a missing stack error with a 404 Not Found response.
+        
+        Parameters:
+        	_request (Request): The incoming HTTP request.
+        	exc (StackNotFoundError): The missing stack error.
+        
+        Returns:
+        	JSONResponse: A 404 response containing the error details.
+        """
         return JSONResponse(
             status_code=status.HTTP_404_NOT_FOUND, content={"detail": str(exc)}
         )
@@ -400,6 +428,15 @@ def register_exception_handlers(app) -> None:
     async def handle_stack_cycle(
         _request: Request, exc: StackCompositionCycleError
     ) -> JSONResponse:
+        """
+        Handle stack composition cycle errors with a conflict response containing the error detail and affected stack names.
+        
+        Parameters:
+            exc (StackCompositionCycleError): The stack composition cycle error to serialize.
+        
+        Returns:
+            JSONResponse: A 409 Conflict response with the error detail and stack names.
+        """
         return JSONResponse(
             status_code=status.HTTP_409_CONFLICT,
             content={"detail": str(exc), "stack_names": exc.stack_names},
@@ -409,6 +446,15 @@ def register_exception_handlers(app) -> None:
     async def handle_compose_import(
         _request: Request, exc: ComposeImportError
     ) -> JSONResponse:
+        """
+        Handle errors raised during Compose import operations.
+        
+        Parameters:
+            exc (ComposeImportError): The import error containing the failure detail and warnings.
+        
+        Returns:
+            JSONResponse: A 400 Bad Request response containing the error detail and warnings.
+        """
         return JSONResponse(
             status_code=status.HTTP_400_BAD_REQUEST,
             content={"detail": str(exc), "warnings": exc.warnings},

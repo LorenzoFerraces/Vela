@@ -42,11 +42,26 @@ def test_missing_publishable_key_raises(monkeypatch: Any) -> None:
 
 
 def _make_rsa_kid() -> tuple[str, rsa.RSAPrivateKey]:
+    """Generate a test RSA private key and its key identifier.
+    
+    Returns:
+    	tuple[str, rsa.RSAPrivateKey]: The identifier and private key used to sign test tokens.
+    """
     private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
     return "test-clerk-key", private_key
 
 
 def _jwks_for(kid: str, private_key: rsa.RSAPrivateKey) -> dict[str, object]:
+    """
+    Builds a JWKS containing the public key corresponding to an RSA private key.
+    
+    Parameters:
+    	kid (str): Identifier assigned to the key in the JWKS.
+    	private_key (rsa.RSAPrivateKey): RSA private key whose public key is represented.
+    
+    Returns:
+    	dict[str, object]: JWKS data containing the RSA signing key.
+    """
     public_numbers = private_key.public_key().public_numbers()
     n_bytes = public_numbers.n.to_bytes((public_numbers.n.bit_length() + 7) // 8, "big")
     e_bytes = public_numbers.e.to_bytes((public_numbers.e.bit_length() + 7) // 8, "big")
@@ -70,6 +85,19 @@ def _sign_clerk_token(
     sub: str,
     audience: str,
 ) -> str:
+    """
+    Create a signed Clerk-style JWT for testing token verification.
+    
+    Parameters:
+        private_key (rsa.RSAPrivateKey): Private key used to sign the token.
+        kid (str): Key identifier included in the token header.
+        email (str): Email claim value.
+        sub (str): Subject claim value.
+        audience (str): Audience claim value.
+    
+    Returns:
+        str: The encoded RS256-signed JWT.
+    """
     now = int(time.time())
     return pyjwt.encode(
         {

@@ -30,6 +30,12 @@ interface AuthProviderProps {
   children: ReactNode
 }
 
+/**
+ * Provides authentication state and operations through React context.
+ *
+ * @param children - React content rendered within the authentication context
+ * @returns The authentication context provider containing `children`
+ */
 export function AuthProvider({ children }: AuthProviderProps) {
   const [status, setStatus] = useState<AuthStatus>(() =>
     getAccessToken() ? 'loading' : 'anonymous'
