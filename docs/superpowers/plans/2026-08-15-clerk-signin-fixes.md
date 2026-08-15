@@ -257,7 +257,7 @@ If `https://{frontendApi}/.well-known/jwks.json` is unreachable or returns an HT
 - Consumes: `ClerkTokenError` (already imported at `clerk.py:14`), `httpx` (already imported at `clerk.py:10`).
 - Produces: `_fetch_jwks() -> dict[str, object]` that raises `ClerkTokenError("Clerk is temporarily unavailable.")` on any `httpx.HTTPError`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Add this test to `backend/tests/test_clerk_jwt.py`:
 
@@ -278,12 +278,12 @@ async def test_fetch_jwks_network_error_raises_clerk_error(monkeypatch: Any) -> 
 
 (`httpx` is importable in the test file — add `import httpx` to the top imports if it is not present. It is not currently imported in this file, so add it.)
 
-- [ ] **Step 2: Run to verify it fails**
+- [x] **Step 2: Run to verify it fails**
 
 Run: `python -m pytest tests/test_clerk_jwt.py::test_fetch_jwks_network_error_raises_clerk_error -q`
 Expected: FAIL — the current `_fetch_jwks` lets the `httpx.ConnectError` escape (it is **not** a `ClerkTokenError`, so `pytest.raises(ClerkTokenError)` does not catch it).
 
-- [ ] **Step 3: Wrap the fetch**
+- [x] **Step 3: Wrap the fetch**
 
 In `backend/app/core/oauth/clerk.py`, replace `_fetch_jwks` (lines 65-69) with:
 
@@ -298,12 +298,12 @@ async def _fetch_jwks() -> dict[str, object]:
     return resp.json()
 ```
 
-- [ ] **Step 4: Run to verify it passes**
+- [x] **Step 4: Run to verify it passes**
 
 Run: `python -m pytest tests/test_clerk_jwt.py -q`
 Expected: all tests PASS (including the new network-error test).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add backend/app/core/oauth/clerk.py backend/tests/test_clerk_jwt.py

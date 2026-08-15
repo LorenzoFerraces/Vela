@@ -166,6 +166,17 @@ async def upsert_clerk_identity(
         identity.provider_subject = external_id
         identity.updated_at = now
 
-    await session.commit()
+    try:
+        await session.commit()
+    except IntegrityError as exc:
+        await session.rollback()
+        detail = str(getattr(exc, "orig", None) or exc).lower()
+        if (
+            "uq_oauth_provider_subject" in detail
+            or "provider_subject" in detail
+        ):
+            raise ClerkAccountAlreadyLinkedError() from exc
+        raise
+
     await session.refresh(identity)
     return identity
