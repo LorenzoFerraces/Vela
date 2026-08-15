@@ -25,6 +25,7 @@ from app.api.routes import (
     projects,
     scaling,
     settings,
+    stacks,
     traffic,
     users,
 )
@@ -188,6 +189,9 @@ def create_app() -> FastAPI:
         audit.router,
         prefix=f"{API_PREFIX}/audit",
         tags=["audit"],
+        stacks.router,
+        prefix=f"{API_PREFIX}/stacks",
+        tags=["stacks"],
     )
 
     @application.get(f"{API_PREFIX}/health", tags=["health"])

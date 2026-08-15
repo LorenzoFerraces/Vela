@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
-import { ApiError, formatApiError } from '../api/client'
+import { ApiError, apiRequest, formatApiError } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 
 function safeNextPath(rawNext: string | null): string {
@@ -14,22 +14,112 @@ function safeNextPath(rawNext: string | null): string {
 }
 
 export default function LoginPage() {
-  const { login, status } = useAuth()
+  const { login, clerkLogin, status } = useAuth()
   const navigate = useNavigate()
   const location = useLocation()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [submitting, setSubmitting] = useState(false)
+  const [clerkBusy, setClerkBusy] = useState(false)
   const [errorText, setErrorText] = useState<string | null>(null)
+  const [clerkConfig, setClerkConfig] = useState<{
+    publishableKey: string
+    frontendApi: string
+  } | null>(null)
+  const clerkLoadPromise = useRef<Promise<void> | null>(null)
 
   const params = new URLSearchParams(location.search)
   const nextPath = safeNextPath(params.get('next'))
+
+  useEffect(() => {
+    let cancelled = false
+    apiRequest<{
+      clerk_enabled: boolean
+      clerk_publishable_key: string | null
+      clerk_frontend_api: string | null
+    }>(
+      '/api/auth/config',
+      { method: 'GET' },
+      { skipAuth: true }
+    )
+      .then(data => {
+        if (
+          cancelled
+          || !data.clerk_enabled
+          || !data.clerk_publishable_key
+          || !data.clerk_frontend_api
+        ) {
+          return
+        }
+        setClerkConfig({
+          publishableKey: data.clerk_publishable_key,
+          frontendApi: data.clerk_frontend_api,
+        })
+      })
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [])
 
   useEffect(() => {
     if (status === 'authenticated') {
       navigate(nextPath, { replace: true })
     }
   }, [status, navigate, nextPath])
+
+  useEffect(() => {
+    if (!clerkConfig) return
+
+    const loadClerk = () => {
+      if (!clerkLoadPromise.current) {
+        const loadPromise = new Promise<void>((resolve, reject) => {
+          const script = document.createElement('script')
+          script.async = true
+          script.crossOrigin = 'anonymous'
+          script.setAttribute('data-clerk-publishable-key', clerkConfig.publishableKey)
+          script.src = `https://${clerkConfig.frontendApi}/npm/@clerk/clerk-js@latest/dist/clerk.browser.js`
+          script.onload = () => resolve()
+          script.onerror = () => reject(new Error('Failed to load Clerk'))
+          document.head.appendChild(script)
+        })
+        clerkLoadPromise.current = loadPromise
+        loadPromise.catch(() => {
+          clerkLoadPromise.current = null
+        })
+      }
+      return clerkLoadPromise.current
+    }
+
+    let cancelled = false
+    loadClerk().then(async () => {
+      if (cancelled) return
+      const clerk = (window as any).Clerk
+      if (!clerk) return
+      await clerk.load()
+      if (cancelled) return
+      if (clerk.session) {
+        setClerkBusy(true)
+        clerk.session.getToken().then(async (token: string) => {
+          if (cancelled) return
+          try {
+            await clerkLogin(token)
+            navigate(nextPath, { replace: true })
+          } catch (error) {
+            if (!cancelled) setErrorText(formatApiError(error))
+          } finally {
+            if (!cancelled) setClerkBusy(false)
+          }
+        }).catch(() => {
+          if (!cancelled) {
+            setClerkBusy(false)
+            setErrorText('Clerk sign-in could not start. Try clicking the button once.')
+          }
+        })
+      }
+    }).catch(() => {
+      if (!cancelled) setErrorText('Clerk could not be loaded. Check your connection and reload the page.')
+    })
+    return () => { cancelled = true }
+  }, [clerkConfig, clerkLogin, navigate, nextPath])
 
   async function onSubmit(event: React.FormEvent) {
     event.preventDefault()
@@ -46,6 +136,15 @@ export default function LoginPage() {
       }
     } finally {
       setSubmitting(false)
+    }
+  }
+
+  function onClerkClick() {
+    const clerk = (window as any).Clerk
+    if (clerk) {
+      clerk.redirectToSignIn({
+        afterSignInUrl: `${window.location.origin}/login${location.search}`,
+      })
     }
   }
 
@@ -95,11 +194,22 @@ export default function LoginPage() {
           </button>
         </form>
 
-        {/*
-          Future: render OAuth buttons (Google / Microsoft / GitHub) below.
-          Each button will navigate to /api/auth/oauth/{provider}/start and
-          land back on this page with ?token=...; AuthProvider stays unchanged.
-        */}
+        {clerkConfig ? (
+          <>
+            <div className="auth-form__divider">
+              <hr className="auth-form__divider-line" />
+              <span className="auth-form__divider-text">or</span>
+            </div>
+            <button
+              type="button"
+              className="btn btn--outline auth-form__clerk"
+              disabled={submitting || clerkBusy}
+              onClick={onClerkClick}
+            >
+              Sign in with Clerk
+            </button>
+          </>
+        ) : null}
 
         <p className="auth-form__footer">
           New to Vela?{' '}

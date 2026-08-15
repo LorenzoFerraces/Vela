@@ -166,3 +166,15 @@ class ContainerOrchestrator(ABC):
         ``vela.replica_of`` label is set to ``base_config.name`` so that
         :meth:`list_replicas` can discover it.
         """
+
+    # ------------------------------------------------------------------
+    # Network management (stacks)
+    # ------------------------------------------------------------------
+
+    @abstractmethod
+    async def create_network(self, name: str) -> None:
+        """Create a Docker network for stack services."""
+
+    @abstractmethod
+    async def remove_network(self, name: str) -> None:
+        """Remove a Docker network."""

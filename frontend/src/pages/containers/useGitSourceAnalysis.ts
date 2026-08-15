@@ -53,7 +53,10 @@ export function useGitSourceAnalysis(setters: GitAnalysisFormSetters) {
   }, [])
 
   const runAnalysis = useCallback(
-    async (gitUrl: string, gitBranch: string) => {
+    async (
+      gitUrl: string,
+      gitBranch: string,
+    ): Promise<GitSourceAnalysis | null> => {
       setAnalysisLoading(true)
       setAnalysisError(null)
       setSuccessToast(null)
@@ -76,8 +79,10 @@ export function useGitSourceAnalysis(setters: GitAnalysisFormSetters) {
         setSuccessToast(
           hint || 'Repository analyzed. Deploy settings updated.'
         )
+        return analysis
       } catch (error) {
         setAnalysisError(formatApiError(error))
+        return null
       } finally {
         setAnalysisLoading(false)
       }

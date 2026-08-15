@@ -1,110 +1,35 @@
-"""Detect project type from filesystem markers and generate Dockerfiles when missing."""
+"""Ensure a Dockerfile exists for a build: detect language, apply overrides, generate templates."""
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 from app.core.enums import BuildStrategy, SupportedLanguage
-from app.core.exceptions import AnalysisError, DockerfileGenerationError, UnsupportedProjectError
-from app.core.models import ProjectInfo
+from app.core.exceptions import AnalysisError, DockerfileGenerationError, NeedsBuildOverrideError
+from app.core.git.dockerfile_templates import dockerfile_contents_for
+from app.core.git.language_detection import analyze_project
+from app.core.models import BuildOverride, ProjectInfo
+
+__all__ = [
+    "analyze_project",
+    "dockerfile_contents_for",
+    "ensure_dockerfile_for_build",
+]
 
 
-def _read_json(path: Path) -> dict | None:
-    try:
-        raw = path.read_text(encoding="utf-8")
-    except OSError:
-        return None
-    try:
-        out = json.loads(raw)
-    except json.JSONDecodeError:
-        return None
-    return out if isinstance(out, dict) else None
+def _resolve_build_subdir(override: BuildOverride | None, info: ProjectInfo) -> str | None:
+    if override is not None and override.build_subdir:
+        return override.build_subdir
+    return info.build_subdir
 
 
-def analyze_project(project_root: Path) -> ProjectInfo:
-    """Inspect a project directory (root ``Dockerfile`` and common markers)."""
-    root = project_root.resolve()
-    if not root.is_dir():
-        raise AnalysisError(str(project_root), "path is not a directory")
-
-    dockerfile_path: str | None = None
-    has_dockerfile = (root / "Dockerfile").is_file()
-    if has_dockerfile:
-        dockerfile_path = "Dockerfile"
-
-    if (root / "go.mod").is_file():
-        return ProjectInfo(
-            language=SupportedLanguage.GO,
-            has_dockerfile=has_dockerfile,
-            dockerfile_path=dockerfile_path,
-            dependency_file="go.mod",
-        )
-
-    if (root / "requirements.txt").is_file():
-        return ProjectInfo(
-            language=SupportedLanguage.PYTHON,
-            has_dockerfile=has_dockerfile,
-            dockerfile_path=dockerfile_path,
-            dependency_file="requirements.txt",
-        )
-
-    if (root / "pyproject.toml").is_file():
-        return ProjectInfo(
-            language=SupportedLanguage.PYTHON,
-            has_dockerfile=has_dockerfile,
-            dockerfile_path=dockerfile_path,
-            dependency_file="pyproject.toml",
-        )
-
-    pkg = root / "package.json"
-    if pkg.is_file():
-        data = _read_json(pkg) or {}
-        deps = {**(data.get("dependencies") or {}), **(data.get("devDependencies") or {})}
-        is_ts = (root / "tsconfig.json").is_file() or "typescript" in deps
-        lang = SupportedLanguage.TYPESCRIPT if is_ts else SupportedLanguage.JAVASCRIPT
-        return ProjectInfo(
-            language=lang,
-            has_dockerfile=has_dockerfile,
-            dockerfile_path=dockerfile_path,
-            dependency_file="package.json",
-        )
-
-    return ProjectInfo(
-        language=SupportedLanguage.UNKNOWN,
-        has_dockerfile=has_dockerfile,
-        dockerfile_path=dockerfile_path,
-        dependency_file=None,
-    )
-
-
-def dockerfile_contents_for(
-    info: ProjectInfo, *, from_git_clone: bool = False
-) -> str:
-    """Return Dockerfile text for the given analysis (no I/O)."""
-    match info.language:
-        case SupportedLanguage.GO:
-            return _dockerfile_go()
-        case SupportedLanguage.PYTHON:
-            return _dockerfile_python()
-        case SupportedLanguage.JAVASCRIPT | SupportedLanguage.TYPESCRIPT:
-            if from_git_clone:
-                return _dockerfile_node_git_clone()
-            return _dockerfile_node()
-        case SupportedLanguage.UNKNOWN:
-            raise DockerfileGenerationError(
-                str(info.language),
-                "cannot generate a Dockerfile without a known language",
-            )
-        case (
-            SupportedLanguage.JAVA
-            | SupportedLanguage.RUST
-            | SupportedLanguage.RUBY
-        ):
-            raise DockerfileGenerationError(
-                str(info.language),
-                "no built-in template for this language",
-            )
+def _effective_root(root: Path, build_subdir: str | None) -> Path:
+    if not build_subdir:
+        return root
+    candidate = (root / build_subdir).resolve()
+    if not candidate.is_relative_to(root):
+        raise AnalysisError(str(root), f"invalid build_subdir: {build_subdir!r}")
+    return candidate
 
 
 def ensure_dockerfile_for_build(
@@ -112,100 +37,59 @@ def ensure_dockerfile_for_build(
     *,
     dockerfile_name: str = "Dockerfile",
     from_git_clone: bool = False,
+    override: BuildOverride | None = None,
 ) -> tuple[BuildStrategy, ProjectInfo]:
-    """If ``dockerfile_name`` is missing, write a generated Dockerfile; return strategy + info."""
+    """Prefer an existing Dockerfile; otherwise generate from override or detection."""
     root = project_root.resolve()
-    target = root / dockerfile_name
     info = analyze_project(root)
+
+    explicit_build_subdir = (
+        override.build_subdir if override is not None and override.build_subdir else None
+    )
+    # Root Dockerfile wins unless the caller explicitly chose a nested build_subdir.
+    if (root / dockerfile_name).is_file() and explicit_build_subdir is None:
+        return BuildStrategy.DOCKERFILE_EXISTS, info.model_copy(
+            update={
+                "has_dockerfile": True,
+                "dockerfile_path": dockerfile_name,
+                "build_subdir": None,
+            }
+        )
+
+    build_subdir = _resolve_build_subdir(override, info)
+    effective_root = _effective_root(root, build_subdir)
+    target = effective_root / dockerfile_name
+    dockerfile_path = target.relative_to(root).as_posix()
 
     if target.is_file():
         return BuildStrategy.DOCKERFILE_EXISTS, info.model_copy(
-            update={"has_dockerfile": True, "dockerfile_path": dockerfile_name}
+            update={
+                "has_dockerfile": True,
+                "dockerfile_path": dockerfile_path,
+                "build_subdir": build_subdir,
+            }
         )
 
-    if info.language is SupportedLanguage.UNKNOWN:
-        raise UnsupportedProjectError(
+    if override is not None:
+        language = override.language
+    elif info.language is not SupportedLanguage.UNKNOWN:
+        language = info.language
+    else:
+        raise NeedsBuildOverrideError(
             "No Dockerfile in project root and no supported markers were found. "
-            "Add a Dockerfile, or add one of: package.json, requirements.txt, "
-            "pyproject.toml, go.mod."
+            "Add a Dockerfile, or select a language and build settings manually."
         )
 
-    try:
-        body = dockerfile_contents_for(info, from_git_clone=from_git_clone)
-    except DockerfileGenerationError:
-        raise
+    result_info = info.model_copy(update={"language": language, "build_subdir": build_subdir})
+    body = dockerfile_contents_for(result_info, override=override, from_git_clone=from_git_clone)
+
     try:
         target.write_text(body, encoding="utf-8")
     except OSError as exc:
         raise DockerfileGenerationError(
-            str(info.language), f"failed to write {target}: {exc}"
+            str(language), f"failed to write {target}: {exc}"
         ) from exc
 
-    return BuildStrategy.GENERATED_DOCKERFILE, info.model_copy(
-        update={"has_dockerfile": True, "dockerfile_path": dockerfile_name}
+    return BuildStrategy.GENERATED_DOCKERFILE, result_info.model_copy(
+        update={"has_dockerfile": True, "dockerfile_path": dockerfile_path}
     )
-
-
-def _dockerfile_go() -> str:
-    return """# Generated by Vela — minimal Go service image
-FROM golang:1.23-alpine AS builder
-WORKDIR /src
-COPY go.mod go.sum* ./
-RUN go mod download
-COPY . .
-RUN CGO_ENABLED=0 go build -o /out/app .
-
-FROM alpine:3.20
-RUN apk add --no-cache ca-certificates
-WORKDIR /app
-COPY --from=builder /out/app ./app
-EXPOSE 8080
-USER nobody
-CMD ["./app"]
-"""
-
-
-def _dockerfile_python() -> str:
-    return """# Generated by Vela — minimal Python image
-FROM python:3.12-slim
-WORKDIR /app
-ENV PYTHONDONTWRITEBYTECODE=1 PIP_NO_CACHE_DIR=1
-COPY . .
-RUN pip install --no-cache-dir pip setuptools wheel \\
-    && if [ -f requirements.txt ]; then pip install --no-cache-dir -r requirements.txt; \\
-    else pip install --no-cache-dir .; fi
-EXPOSE 8000
-CMD ["python", "-m", "http.server", "8000"]
-"""
-
-
-def _dockerfile_node() -> str:
-    return """# Generated by Vela — Node/Vite/React (start, dev, or preview)
-FROM node:20-bookworm-slim
-WORKDIR /app
-COPY package.json package-lock.json* ./
-RUN if [ -f package-lock.json ]; then npm ci; else npm install; fi
-COPY . .
-EXPOSE 3000 5173 4173
-ENV NODE_ENV=development
-ENV HOST=0.0.0.0
-# Missing scripts must exit non-zero so ``||`` can fall through to ``dev`` / ``preview``.
-CMD ["sh", "-c", "npm run start || npm run dev || npm run preview -- --host 0.0.0.0 --port 4173"]
-"""
-
-
-def _dockerfile_node_git_clone() -> str:
-    """Node template for repos cloned from Git: fixed install + dev server."""
-    return """# Generated by Vela — Node from Git (npm ci + npm run dev)
-FROM node:20-bookworm-slim
-WORKDIR /app
-COPY package.json package-lock.json* ./
-RUN npm ci
-COPY . .
-EXPOSE 3000 5173 4173
-ENV NODE_ENV=development
-ENV HOST=0.0.0.0
-# Vite may try ``xdg-open`` if ``server.open`` is set; slim images have no browser.
-ENV BROWSER=none
-CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0", "--no-open"]
-"""

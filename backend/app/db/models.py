@@ -294,7 +294,13 @@ class DeploymentRecord(Base):
     env_vars: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
     command: Mapped[list | None] = mapped_column(JSON, nullable=True)
     dockerfile_snapshot: Mapped[str | None] = mapped_column(Text, nullable=True)
+    build_override: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     public_url: Mapped[str | None] = mapped_column(String(2048), nullable=True)
+    stack_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("stacks.id", ondelete="SET NULL"),
+        nullable=True, index=True,
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=_utcnow, index=True
     )
@@ -481,4 +487,92 @@ class ContainerLog(Base):
             "container_id",
             "timestamp",
         ),
+# ---------------------------------------------------------------------------
+# Stacks
+# ---------------------------------------------------------------------------
+
+
+class Stack(Base):
+    __tablename__ = "stacks"
+    __table_args__ = (
+        UniqueConstraint("project_id", "name", name="uq_stacks_project_name"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4,
+    )
+    project_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("projects.id", ondelete="CASCADE"),
+        nullable=False, index=True,
+    )
+    name: Mapped[str] = mapped_column(String(128), nullable=False)
+    network_name: Mapped[str] = mapped_column(String(128), nullable=False, unique=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utcnow,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow,
+    )
+
+    project: Mapped["Project"] = relationship()
+    services: Mapped[list["StackService"]] = relationship(
+        back_populates="stack", cascade="all, delete-orphan",
+    )
+    compositions_parent: Mapped[list["StackComposition"]] = relationship(
+        foreign_keys="StackComposition.parent_stack_id", cascade="all, delete-orphan",
+    )
+    compositions_child: Mapped[list["StackComposition"]] = relationship(
+        foreign_keys="StackComposition.child_stack_id", cascade="all, delete-orphan",
+    )
+
+
+class StackService(Base):
+    __tablename__ = "stack_services"
+    __table_args__ = (
+        UniqueConstraint("stack_id", "service_name", name="uq_stack_services_stack_name"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4,
+    )
+    stack_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("stacks.id", ondelete="CASCADE"),
+        nullable=False, index=True,
+    )
+    service_name: Mapped[str] = mapped_column(String(128), nullable=False)
+    source_kind: Mapped[str] = mapped_column(String(32), nullable=False)
+    source_ref: Mapped[str] = mapped_column(String(2048), nullable=False)
+    git_branch: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    container_port: Mapped[int] = mapped_column(Integer, nullable=False, default=80)
+    env_vars: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    command: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    public_route: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    depends_on: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    volumes: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    scaling_policy: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    build_override: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utcnow,
+    )
+
+    stack: Mapped["Stack"] = relationship(back_populates="services")
+
+
+class StackComposition(Base):
+    __tablename__ = "stack_compositions"
+    __table_args__ = (
+        UniqueConstraint("parent_stack_id", "child_stack_id", name="uq_stack_compositions_parent_child"),
+    )
+
+    parent_stack_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("stacks.id", ondelete="CASCADE"),
+        nullable=False, primary_key=True,
+    )
+    child_stack_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("stacks.id", ondelete="CASCADE"),
+        nullable=False, primary_key=True,
     )

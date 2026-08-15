@@ -3,59 +3,105 @@
 Conventions for tooling, dependencies, naming, and Python style. Follow this file when changing the repo.
 
 ## Repo management
-- **Keep the readme concise** when adding or updating the readme file, prevent it from being too verbose, prefer short explanations
+
+- **Keep the readme concise** when adding or updating the readme file.
 
 ## Package management (pnpm / npm)
 
-- **Do not introduce caret (`^`) or tilde (`~`) ranges** when adding or updating dependencies in `package.json`. Prefer **exact versions** (e.g. `"18.2.0"`, not `"^18.2.0"`).
-- **pnpm**: If the project uses pnpm, treat `save-exact` as mandatory behavior: new dependencies must be pinned. Do not rely on loose semver in `package.json`.
-- **Configuration**: The repo keeps a root-level policy in `frontend/.npmrc` so installs default to exact saves. After adding a dependency, verify `package.json` has **no** `^` / `~` on that entry.
+- **Exact versions only** in `package.json` — no `^` or `~`. `frontend/.npmrc` sets `save-exact=true`. After adding a dependency, verify the entry has no range prefix.
 
-## `.npmrc`
+## Backend setup
 
-- `frontend/.npmrc` sets `save-exact=true` so **new dependencies are saved without `^` automatically** (for npm and pnpm in this directory).
-- Do not remove `save-exact=true` without team agreement.
+- **Virtualenv**: create at the **repo root** (`python -m venv .venv`), not inside `backend/`. Playwright's `webServer` resolves `<repoRoot>/.venv/Scripts/python.exe` to launch uvicorn.
+- **Install**: `pip install -e ".[dev]"` from `backend/`.
+- **Run**: `python run.py` from `backend/` (uvicorn on port 8000, reload on).
+- **Env file**: `backend/.env` — see README for full variable list.
 
-## Variable and identifier naming
+### Database
 
-- Use **clear, full words** for variables, functions, and parameters (e.g. `container_id`, `request_body`, `orchestrator`).
-- **Avoid** cryptic abbreviations and **single-letter** names except where idiomatic and extremely local (e.g. short loop index in a comprehension is acceptable; a function parameter named `x` or `c` is not).
+- Local Postgres via `docker compose -f docker-compose.dev.yml up -d` (host port **15432** → container 5432).
+- `VELA_DATABASE_URL` uses `postgresql+asyncpg` for the API runtime.
+- Alembic uses **sync psycopg** (`sync_database_url_for_alembic` in `app/db/engine.py`) — do not change this.
+- Apply migrations: `alembic upgrade head` from `backend/`.
 
-## Python
+### Key env vars
 
-- Prefer the **most idiomatic (“Pythonic”)** style: explicit is better than implicit; use standard library and typing where it helps clarity; follow existing project patterns (imports at top of file, structured errors, `match`/`case` for exhaustiveness on unions when appropriate).
-- Match surrounding modules for layout, naming, and error handling unless you are deliberately standardizing a new pattern (then document it here in a short note).
+| Variable | Purpose |
+|----------|---------|
+| `VELA_FAKE_ORCHESTRATOR=1` | Swaps real Docker for `FakeContainerOrchestrator` (tests, E2E) |
+| `VELA_E2E=1` | Enables E2E mode: seeds users, mocks GitHub, allows DB reset |
+| `VELA_E2E_ALLOW_DB_RESET=1` | Required alongside `VELA_E2E` to permit schema drop+create |
+| `VELA_TRAFFIC_ROUTER` | `noop` (default), `traefik_file`, or `kubernetes` |
+| `VELA_OBJECT_STORAGE` | `memory` (default for dev/tests) or `r2` |
 
 ## Backend structure (MVC)
 
-Keep new and refactored code aligned with this separation of concerns under `backend/app/`:
+Under `backend/app/`:
 
-- **Model** (`app/core/`): Domain logic, orchestration, and integrations (e.g. Docker, routing helpers). Core modules should not own HTTP wiring; they expose functions or types the API layer calls.
-- **View** (API presentation): Request and response shapes and serialization — e.g. `app/api/schemas.py` and any route-local response models. This is the contract the client sees.
-- **Controller** (`app/api/routes/`, `app.py`, `deps.py`): Thin HTTP handlers — parse and validate input, call into `app/core/`, map domain errors to HTTP responses, return view models. Avoid embedding heavy business logic in route functions.
-
-When adding a feature, place logic in the right layer instead of growing “god” route modules.
+- **Model** (`app/core/`): Domain logic, orchestration, integrations. No HTTP wiring.
+- **View** (`app/api/schemas.py`): Request/response shapes and serialization.
+- **Controller** (`app/api/routes/`, `app.py`, `deps.py`): Thin HTTP handlers.
 
 ### `app/core/` domain packages
 
-Group related modules under `app/core/<domain>/` when that domain has **three or more** Python modules (count submodules in the package, not `__init__.py`). Smaller areas stay as single modules at `app/core/` root (e.g. `enums.py`, `models.py`, `exceptions.py`, `user_library.py`).
+Group modules under `app/core/<domain>/` when the domain has **3+** Python modules. Smaller areas stay flat at `app/core/` root.
 
-Existing domains: `auth/`, `oauth/`, `security/`, `traffic/`, `containers/`, `build/`, `git/`, `deploy/`, `notifications/`. Prefer imports from the concrete module (e.g. `from app.core.traffic.traffic_router import TrafficRouter`) or the package’s public surface in `__init__.py` when re-exporting a small API.
-
-When a new feature grows past two modules in the same area, create or extend a domain package instead of adding more flat files at `app/core/`.
+Existing domains: `auth/`, `oauth/`, `security/`, `traffic/`, `containers/`, `build/`, `git/`, `deploy/`, `notifications/`, `profile/`, `storage/`, `projects/`, `scaling/`.
 
 ## Backend testing
 
-- Prefer **real wiring** over mocks. Do not add tests that mock away the behavior you are trying to verify.
-- **Unit tests** are for **isolated** logic only: small models, validators, parsing helpers, and other pure functions in `app/core/` that do not need HTTP, DB, or Docker.
-- **Integration tests** are the default for API and user-visible behavior: exercise routes with `TestClient`, the real app factory, and in-memory SQLite (the existing `conftest` DB override). Call through to **core and route layers**; avoid replacing orchestrators, builders, or auth with `MagicMock` except where Docker, GitHub, or other external services are genuinely unavailable in CI — and keep any such mock narrowly scoped to that boundary.
-- When testing safety-critical paths (auth, ownership, deploy contracts), assert on **HTTP responses and persisted state**, not on whether a mock method was called.
+- **Pytest**: `cd backend && python -m pytest tests -q`
+- **conftest.py** wires real routes with `TestClient`, in-memory SQLite, and `FakeContainerOrchestrator` — no Docker required.
+- Fixtures: `api_client` (authenticated), `other_user_client`, `anonymous_client`, `integration_app`, `db_app`.
+- **Prefer real wiring** over mocks. Unit tests only for isolated pure logic. Integration tests are the default for API behavior.
+- For safety-critical paths (auth, ownership, deploy), assert on HTTP responses and persisted state, not mock calls.
 
-## Frontend testing
+## Frontend
 
-- **E2E tests** (`frontend/e2e/`) should run the **real frontend against the real local API** (Playwright `webServer` config). Do **not** stub `/api/**` with `page.route` to fake responses for flows you are verifying; those tests should reflect end-to-end behavior.
-- Reserve browser network interception for **external systems** the app cannot control in dev (e.g. third-party OAuth redirects). Document why when interception is unavoidable.
-- **Unit or component tests** (if added) belong on small utilities and presentational pieces; page-level behavior belongs in unmocked E2E, not in tests that replace the API client with fixtures.
+- **Dev server**: `cd frontend && npm run dev` (Vite on port 5173).
+- **Build**: `npm run build` (runs `tsc -b && vite build`).
+- **Lint**: `npm run lint`.
+- Override API URL in `frontend/.env.local`: `VITE_API_BASE_URL=http://127.0.0.1:8000`.
+- Auth token stored in `localStorage` under `vela.access_token`.
+
+## Frontend E2E tests (Playwright)
+
+- **Run**: `cd frontend && npm run test:e2e`
+- **Single spec**: `npm run test:e2e -- e2e/auth.spec.ts`
+- **Headed**: `npm run test:e2e:headed`
+- **UI runner**: `npm run test:e2e:ui`
+
+The suite drives the real SPA against the real FastAPI process. Playwright `webServer` starts both on **separate ports** (API: 8000, Vite: 5173 — the `e2eApiPort` / `e2eVitePort` defaults in `frontend/playwright.config.ts`, overridable via `PW_API_PORT` / `PW_VITE_PORT`). `reuseExistingServer` is off, so stop any dev server on those ports before running. The API uses SQLite at `backend/e2e-playwright.db` and `FakeContainerOrchestrator`.
+
+**No `page.route` mocking** for app flows — tests hit the live backend with seeded E2E users. The only direct API test is `e2e/api.spec.ts` (`GET /api/health`). Reserve network interception for external systems only (e.g., OAuth redirects).
+
+E2E user credentials in `frontend/e2e/constants.ts` must stay in sync with `backend/app/e2e_support.py`.
+
+## Variable and identifier naming
+
+- Use **clear, full words** (`container_id`, `request_body`). Avoid cryptic abbreviations and single-letter names except idiomatic local loop indices.
+
+## Python style
+
+- Idiomatic Python: explicit, typed where helpful, `match`/`case` for exhaustiveness on unions. Match surrounding modules for layout and error handling.
+
+## TypeScript / React
+
+- **Avoid `instanceof`** — prefer discriminated unions, `typeof`/`in`, type predicates, or Zod parsing.
+- **Split large files** — extract subviews, hooks, shared UI when a file is hard to scan.
+- **Reuse** — extract shared components when the same UI appears in 2+ places.
+- **`useEffect`** — derive state during render or in event handlers when possible. Reserve effects for real side effects.
+
+## UI and forms
+
+- **Skeleton placeholders** over "Loading…" text. **Optimistic UI** when safe.
+- **Short, concise** form labels and helper text. Split long forms into multi-step flows or modals.
+- **Containers page**: run form uses `public_route: true`, user-selected container port (default 80), no host port mapping. Git branch shown only when source has `git@` / `http(s)://` / `ssh://` prefix.
+
+## Errors shown to users
+
+- **Frontend**: show short, actionable messages from API `detail`. No stack traces or generic "Something went wrong".
+- **Backend**: structured HTTP errors from domain exceptions. Map unexpected failures to a safe generic message.
 
 ## Cleaning AI-generated changes (deslop)
 
@@ -85,3 +131,8 @@ After substantive agent-generated edits on a branch, run the **deslop** Cursor s
 - **Surface client-facing messages**, not raw implementation details. Do not let low-level or library errors reach the UI unchanged when a clearer explanation is possible.
 - **Frontend**: On failure, show a short, actionable string (e.g. from API `detail` or a mapped message). Avoid re-throwing or logging-only flows that leave the user with a generic “Something went wrong” or a stack trace in production UI.
 - **Backend**: Prefer structured HTTP errors (`detail`, optional fields) from domain exceptions; avoid leaking stack traces or internal identifiers in normal error responses. Map unexpected failures to a safe generic message when appropriate.
+
+## Verification
+
+- **Always run both backend and E2E tests after substantive changes** before claiming work is complete. Run `python -m pytest` in `backend/` and the Playwright E2E suite in `frontend/e2e/`. Do not skip verification—tests are the only check that persists after the session ends.
+After substantive agent edits, clean the diff: remove unnecessary comments, abnormal `try`/`except` on trusted paths, `any` casts only to silence types, and deeply nested structure that doesn't match surrounding code — **without changing behavior** except for clear bugs.
