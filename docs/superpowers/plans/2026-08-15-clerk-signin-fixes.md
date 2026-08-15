@@ -34,7 +34,7 @@ The current code passes the raw JWKS dict to `jwt.decode(key=jwks, ...)`. On PyJ
 - Consumes: `_get_jwks() -> dict[str, object]` (returns the JWKS `{"keys": [...]}`), `_publishable_key() -> str`, `ClerkTokenError`, `IntegrationConfigurationError`.
 - Produces: `verify_clerk_token(token: str) -> ClerkClaims` where `ClerkClaims = ClerkClaims(email: str, external_id: str)`. Existing callers (`app/api/routes/auth.py::clerk_exchange`) rely on this exact signature and the `ClerkTokenError`→400 behavior — do **not** change them.
 
-- [ ] **Step 1: Add real crypto to the test file**
+- [x] **Step 1: Add real crypto to the test file**
 
 In `backend/tests/test_clerk_jwt.py`, add these imports inside the existing `from __future__ import annotations` block's import section (top of file, after the `import pytest` line):
 
@@ -109,7 +109,7 @@ def _sign_clerk_token(
     )
 ```
 
-- [ ] **Step 2: Replace the three masked-`jwt.decode` tests with real-crypto tests**
+- [x] **Step 2: Replace the three masked-`jwt.decode` tests with real-crypto tests**
 
 In `backend/tests/test_clerk_jwt.py`, replace the three async tests `test_verify_clerk_token_success`, `test_verify_clerk_token_missing_email_raises`, and `test_verify_clerk_token_invalid_signature_raises` (currently lines 39-85, all of which `patch` `app.core.oauth.clerk.jwt.decode`) with:
 
@@ -175,12 +175,12 @@ async def test_verify_clerk_token_wrong_key_raises(monkeypatch: Any) -> None:
 
 Note: the `_make_rsa_kid` helper returns the same `kid` string; for the "missing key" assertion the JWKS is built from a *different* key, so `jwk_set[kid]` has no matching key and raises. (If you instead want to test a truly-absent `kid`, sign with `kid="absent"` and supply the JWKS for `kid="other"`.)
 
-- [ ] **Step 3: Run the new tests to confirm they fail**
+- [x] **Step 3: Run the new tests to confirm they fail**
 
 Run: `python -m pytest tests/test_clerk_jwt.py -q`
 Expected: `test_verify_clerk_token_success_with_real_key` FAILS with `TypeError: Expecting a PEM-formatted key` (that is the C1 bug — the current `verify_clerk_token` passes the JWKS dict as `key=`). The other two also fail until Step 4.
 
-- [ ] **Step 4: Rework `verify_clerk_token`**
+- [x] **Step 4: Rework `verify_clerk_token`**
 
 In `backend/app/core/oauth/clerk.py`, replace the body of `verify_clerk_token` (lines 81-107) with:
 
@@ -226,17 +226,17 @@ async def verify_clerk_token(token: str) -> ClerkClaims:
 
 `jwt` is already `import jwt` at the top (line 11); `jwt.PyJWKSet`, `jwt.get_unverified_header`, and `jwt.decode` are all available without new imports. `InvalidTokenError` is already imported (line 12). Note the redundant `options={"verify_aud": True}` is removed — `verify_aud` defaults to `True` in PyJWT.
 
-- [ ] **Step 5: Run the tests to confirm they pass**
+- [x] **Step 5: Run the tests to confirm they pass**
 
 Run: `python -m pytest tests/test_clerk_jwt.py -q`
 Expected: all tests in this file PASS.
 
-- [ ] **Step 6: Lint + typecheck**
+- [x] **Step 6: Lint + typecheck**
 
 Run: `python -m ruff check app/core/oauth/clerk.py tests/test_clerk_jwt.py` then `python -m mypy app/core/oauth/clerk.py`
 Expected: no errors. (If `get_unverified_header(...).get("kid")` is flagged by mypy for the dict index, the value is `Any`-typed from the header dict, so it should not error; if it does, add a `# type: ignore[index]` on the `jwk_set[kid]` line — do not restructure.)
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add backend/app/core/oauth/clerk.py backend/tests/test_clerk_jwt.py

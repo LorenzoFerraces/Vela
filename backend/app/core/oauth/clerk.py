@@ -63,9 +63,12 @@ def _jwks_url() -> str:
 
 
 async def _fetch_jwks() -> dict[str, object]:
-    async with httpx.AsyncClient(timeout=10.0) as client:
-        resp = await client.get(_jwks_url())
-    resp.raise_for_status()
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(_jwks_url())
+        resp.raise_for_status()
+    except httpx.HTTPError as exc:
+        raise ClerkTokenError("Clerk is temporarily unavailable.") from exc
     return resp.json()
 
 

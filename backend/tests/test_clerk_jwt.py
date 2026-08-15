@@ -7,6 +7,7 @@ import time
 from typing import Any
 from unittest.mock import patch
 
+import httpx
 import jwt as pyjwt
 import pytest
 from cryptography.hazmat.primitives.asymmetric import rsa
@@ -175,3 +176,15 @@ async def test_verify_clerk_token_wrong_key_raises(monkeypatch: Any) -> None:
     with patch.object(clerk_mod, "_fetch_jwks", new=fake_fetch):
         with pytest.raises(ClerkTokenError, match="invalid"):
             await verify_clerk_token(token)
+
+
+@pytest.mark.asyncio
+async def test_fetch_jwks_network_error_raises_clerk_error(monkeypatch: Any) -> None:
+    monkeypatch.setenv("VELA_CLERK_PUBLISHABLE_KEY", TEST_CLERK_PUBLISHABLE_KEY)
+
+    def failing_client(*args: Any, **kwargs: Any) -> Any:
+        raise httpx.ConnectError("boom")
+
+    with patch.object(clerk_mod.httpx, "AsyncClient", side_effect=failing_client):
+        with pytest.raises(ClerkTokenError, match="temporarily unavailable"):
+            await clerk_mod._fetch_jwks()
