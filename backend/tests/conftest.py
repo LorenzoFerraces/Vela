@@ -17,6 +17,8 @@ os.environ.setdefault(
 os.environ.setdefault("VELA_AUTH_SECRET", "test-secret-please-do-not-use-in-prod")
 os.environ.setdefault("VELA_AUTH_ACCESS_TOKEN_TTL_MINUTES", "60")
 os.environ.setdefault("VELA_FAKE_ORCHESTRATOR", "1")
+# Keep the background collector out of unit tests (it would hit a separate engine).
+os.environ.setdefault("VELA_LOG_COLLECTOR_ENABLED", "0")
 # Force default so a developer .env cannot change module-level monitor constants.
 os.environ["VELA_CONTAINER_MONITOR_INTERVAL_SECONDS"] = "15"
 os.environ.setdefault("VELA_OBJECT_STORAGE", "memory")

@@ -6,8 +6,9 @@ import asyncio
 import logging
 import os
 import re
+from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
-from typing import NamedTuple
+from typing import Any, NamedTuple
 
 import sqlalchemy as sa
 
@@ -45,8 +46,14 @@ async def cleanup_old_logs(session, retention_days: int = RETENTION_DAYS) -> int
 
 
 class LogCollector:
-    def __init__(self, orchestrator: ContainerOrchestrator) -> None:
+    def __init__(
+        self,
+        orchestrator: ContainerOrchestrator,
+        *,
+        session_factory: Callable[[], Any] | None = None,
+    ) -> None:
         self._orchestrator = orchestrator
+        self._session_factory = session_factory or get_session_factory
         self._running = False
         self._task: asyncio.Task[None] | None = None
         self._last_seen: dict[str, str] = {}
@@ -147,8 +154,7 @@ class LogCollector:
         if not all_logs:
             return
 
-        session_factory = get_session_factory()
-        async with session_factory() as session:
+        async with self._session_factory() as session:
             for batch_start in range(0, len(all_logs), BATCH_SIZE):
                 batch = all_logs[batch_start : batch_start + BATCH_SIZE]
                 await batch_insert_logs(session, batch)
@@ -156,8 +162,7 @@ class LogCollector:
 
     async def _cleanup(self) -> None:
         try:
-            session_factory = get_session_factory()
-            async with session_factory() as session:
+            async with self._session_factory() as session:
                 deleted = await cleanup_old_logs(session)
                 logger.info("Cleaned up %d old log entries", deleted)
         except Exception:
