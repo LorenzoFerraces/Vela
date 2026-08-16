@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { exportLogs, formatApiError, getLogs } from '../api/client'
-import type { LogEntry } from '../api/client'
+import type { LogEntry, LogQueryParams } from '../api/client'
 
 const LEVEL_STYLES: Record<string, { bg: string; text: string }> = {
   info: { bg: 'rgba(107, 114, 128, 0.12)', text: '#9aa5b4' },
@@ -12,50 +13,61 @@ const LEVEL_STYLES: Record<string, { bg: string; text: string }> = {
 const LIMIT = 100
 
 export default function LogsPage() {
+  const [searchParams] = useSearchParams()
   const [entries, setEntries] = useState<LogEntry[]>([])
   const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [levelFilter, setLevelFilter] = useState('')
-  const [containerFilter, setContainerFilter] = useState('')
+  const [containerFilter, setContainerFilter] = useState(
+    () => searchParams.get('container_id') ?? ''
+  )
   const [offset, setOffset] = useState(0)
   const [error, setError] = useState<string | null>(null)
   const fetchRequestRef = useRef(0)
 
+  const hasContainer = containerFilter.trim().length > 0
+
   const fetchLogs = useCallback(async () => {
     const requestId = fetchRequestRef.current + 1
     fetchRequestRef.current = requestId
-    setLoading(true)
-    setError(null)
+    const params: LogQueryParams = {
+      container_id: containerFilter.trim(),
+      limit: LIMIT,
+      offset,
+    }
+    if (search) params.q = search
+    if (levelFilter) params.level = levelFilter
     try {
-      const params: Record<string, string | number> = { limit: LIMIT, offset }
-      if (search) params.q = search
-      if (levelFilter) params.level = levelFilter
-      if (containerFilter) params.container_id = containerFilter
-      const res = await getLogs(params as any)
-      if (fetchRequestRef.current !== requestId) return
-      setEntries(res.entries)
-      setTotal(res.total)
+      const res = await getLogs(params)
+      if (fetchRequestRef.current === requestId) {
+        setEntries(res.entries)
+        setTotal(res.total)
+        setError(null)
+      }
     } catch (err) {
-      if (fetchRequestRef.current !== requestId) return
-      setError(formatApiError(err))
+      if (fetchRequestRef.current === requestId) {
+        setError(formatApiError(err))
+      }
     } finally {
-      if (fetchRequestRef.current !== requestId) return
-      setLoading(false)
+      if (fetchRequestRef.current === requestId) {
+        setLoading(false)
+      }
     }
   }, [search, levelFilter, containerFilter, offset])
 
   useEffect(() => {
+    if (!hasContainer) return
     fetchLogs()
-  }, [fetchLogs])
+  }, [hasContainer, fetchLogs])
 
   const handleExport = async () => {
-    const params: Record<string, string> = {}
+    if (!hasContainer) return
+    const params: LogQueryParams = { container_id: containerFilter.trim() }
     if (search) params.q = search
     if (levelFilter) params.level = levelFilter
-    if (containerFilter) params.container_id = containerFilter
     try {
-      await exportLogs(params as any)
+      await exportLogs(params)
     } catch (err) {
       setError(formatApiError(err))
     }
@@ -68,13 +80,14 @@ export default function LogsPage() {
         <button
           type="button"
           onClick={handleExport}
+          disabled={!hasContainer}
           className="btn btn--ghost btn--sm"
         >
           Export CSV
         </button>
       </div>
 
-      {error ? (
+      {hasContainer && error ? (
         <div className="containers-banner containers-banner--err" role="alert">
           <p className="containers-banner__text">{error}</p>
         </div>
@@ -88,6 +101,8 @@ export default function LogsPage() {
           onChange={(e) => {
             setSearch(e.target.value)
             setOffset(0)
+            setEntries([])
+            setLoading(true)
           }}
         />
         <select
@@ -95,6 +110,8 @@ export default function LogsPage() {
           onChange={(e) => {
             setLevelFilter(e.target.value)
             setOffset(0)
+            setEntries([])
+            setLoading(true)
           }}
           className="settings-form__input"
           aria-label="Filter by level"
@@ -112,13 +129,19 @@ export default function LogsPage() {
           onChange={(e) => {
             setContainerFilter(e.target.value)
             setOffset(0)
+            setEntries([])
+            setLoading(true)
           }}
           className="settings-form__input"
           aria-label="Filter by container"
         />
       </div>
 
-      {loading ? (
+      {!hasContainer ? (
+        <div className="logs-page__empty">
+          Select a container to view logs
+        </div>
+      ) : loading ? (
         <div className="logs-page__skeleton">
           {Array.from({ length: 5 }).map((_, i) => (
             <div key={i} className="logs-page__skeleton-row" />
@@ -161,7 +184,11 @@ export default function LogsPage() {
             {offset > 0 && (
               <button
                 type="button"
-                onClick={() => setOffset(offset - LIMIT)}
+                onClick={() => {
+                  setOffset(offset - LIMIT)
+                  setEntries([])
+                  setLoading(true)
+                }}
                 className="btn btn--ghost btn--sm"
               >
                 Previous
@@ -170,7 +197,11 @@ export default function LogsPage() {
             {offset + LIMIT < total && (
               <button
                 type="button"
-                onClick={() => setOffset(offset + LIMIT)}
+                onClick={() => {
+                  setOffset(offset + LIMIT)
+                  setEntries([])
+                  setLoading(true)
+                }}
                 className="btn btn--ghost btn--sm"
               >
                 Next

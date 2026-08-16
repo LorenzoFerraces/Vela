@@ -25,11 +25,15 @@ test.describe('Logs page', () => {
     ).toBeVisible()
   })
 
-  test('shows empty state when no logs', async ({
+  test('shows error for a container the user does not have', async ({
     authenticatedPage,
   }) => {
     await authenticatedPage.goto('/logs')
-    await authenticatedPage.getByPlaceholder('Container ID...').fill('nonexistent-id')
-    await expect(authenticatedPage.getByText('No logs found')).toBeVisible()
+    await authenticatedPage
+      .getByPlaceholder('Container ID...')
+      .fill('nonexistent-id')
+    await expect(
+      authenticatedPage.getByText(/Container not found/),
+    ).toBeVisible()
   })
 })

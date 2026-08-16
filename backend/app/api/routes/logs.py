@@ -13,7 +13,9 @@ from fastapi import APIRouter, Depends, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_current_user, get_db
+from app.api.deps import get_current_user, get_db, get_orchestrator
+from app.core.containers.orchestrator import ContainerOrchestrator
+from app.core.projects.access import require_container_access
 from app.db.models import ContainerLog, LogLevel, LogSource, User
 
 logger = logging.getLogger(__name__)
@@ -21,50 +23,58 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["logs"])
 
 
+def _like_condition(q: str) -> sa.ColumnElement:
+    # ponytail: LIKE search, not pg_trgm — sufficient for log lookup, avoids Postgres-only dependency
+    escaped = q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    return ContainerLog.message.like(f"%{escaped}%", escape="\\")
+
+
 @router.get("/")
 async def query_logs(
     session: Annotated[AsyncSession, Depends(get_db)],
-    _current_user: Annotated[User, Depends(get_current_user)] = ...,
-    container_id: str | None = Query(None),
-    container_name: str | None = Query(None),
-    level: str | None = Query(None),
-    source: str | None = Query(None),
+    current_user: Annotated[User, Depends(get_current_user)],
+    orchestrator: Annotated[ContainerOrchestrator, Depends(get_orchestrator)],
+    container_id: str = Query(...),
+    level: LogLevel | None = Query(None),
+    source: LogSource | None = Query(None),
     start_time: datetime | None = Query(None),
     end_time: datetime | None = Query(None),
     q: str | None = Query(None, description="Full-text search"),
     limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0),
 ) -> dict:
-    conditions: list[sa.ColumnElement] = []
+    await require_container_access(
+        session, orchestrator, current_user, container_id, action="read"
+    )
 
-    if container_id:
-        conditions.append(ContainerLog.container_id == container_id)
-    if container_name:
-        conditions.append(ContainerLog.container_name == container_name)
-    if level:
-        conditions.append(ContainerLog.level == LogLevel(level))
-    if source:
-        conditions.append(ContainerLog.source == LogSource(source))
+    conditions: list[sa.ColumnElement] = [
+        ContainerLog.container_id == container_id
+    ]
+    if level is not None:
+        conditions.append(ContainerLog.level == level)
+    if source is not None:
+        conditions.append(ContainerLog.source == source)
     if start_time:
         conditions.append(ContainerLog.timestamp >= start_time)
     if end_time:
         conditions.append(ContainerLog.timestamp <= end_time)
     if q:
-        # ponytail: LIKE search, not pg_trgm — sufficient for log lookup, avoids Postgres-only dependency
-        _escaped = q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
-        conditions.append(ContainerLog.message.like(f"%{_escaped}%", escape="\\"))
+        conditions.append(_like_condition(q))
 
-    count_query = sa.select(sa.func.count()).select_from(ContainerLog)
-    if conditions:
-        count_query = count_query.where(sa.and_(*conditions))
+    count_query = (
+        sa.select(sa.func.count())
+        .select_from(ContainerLog)
+        .where(sa.and_(*conditions))
+    )
     total = (await session.execute(count_query)).scalar() or 0
 
-    entries_query = sa.select(ContainerLog).order_by(
-        ContainerLog.timestamp.desc()
+    entries_query = (
+        sa.select(ContainerLog)
+        .where(sa.and_(*conditions))
+        .order_by(ContainerLog.timestamp.desc())
+        .limit(limit)
+        .offset(offset)
     )
-    if conditions:
-        entries_query = entries_query.where(sa.and_(*conditions))
-    entries_query = entries_query.limit(limit).offset(offset)
     rows = (await session.execute(entries_query)).scalars().all()
 
     return {
@@ -86,29 +96,41 @@ async def query_logs(
 @router.get("/export")
 async def export_logs(
     session: Annotated[AsyncSession, Depends(get_db)],
-    _current_user: Annotated[User, Depends(get_current_user)] = ...,
-    container_id: str | None = Query(None),
-    level: str | None = Query(None),
+    current_user: Annotated[User, Depends(get_current_user)],
+    orchestrator: Annotated[ContainerOrchestrator, Depends(get_orchestrator)],
+    container_id: str = Query(...),
+    level: LogLevel | None = Query(None),
+    source: LogSource | None = Query(None),
     start_time: datetime | None = Query(None),
     end_time: datetime | None = Query(None),
+    q: str | None = Query(None, description="Full-text search"),
     limit: int = Query(5000, ge=1, le=50000),
 ) -> StreamingResponse:
-    conditions: list[sa.ColumnElement] = []
-    if container_id:
-        conditions.append(ContainerLog.container_id == container_id)
-    if level:
-        conditions.append(ContainerLog.level == LogLevel(level))
+    # ponytail: materializes up to `limit` rows in memory — accepted ceiling for CSV export
+    await require_container_access(
+        session, orchestrator, current_user, container_id, action="read"
+    )
+
+    conditions: list[sa.ColumnElement] = [
+        ContainerLog.container_id == container_id
+    ]
+    if level is not None:
+        conditions.append(ContainerLog.level == level)
+    if source is not None:
+        conditions.append(ContainerLog.source == source)
     if start_time:
         conditions.append(ContainerLog.timestamp >= start_time)
     if end_time:
         conditions.append(ContainerLog.timestamp <= end_time)
+    if q:
+        conditions.append(_like_condition(q))
 
-    query = sa.select(ContainerLog).order_by(ContainerLog.timestamp.desc()).limit(
-        limit
+    query = (
+        sa.select(ContainerLog)
+        .where(sa.and_(*conditions))
+        .order_by(ContainerLog.timestamp.desc())
+        .limit(limit)
     )
-    if conditions:
-        query = query.where(sa.and_(*conditions))
-
     rows = (await session.execute(query)).scalars().all()
 
     stream = io.StringIO()
@@ -123,6 +145,7 @@ async def export_logs(
             "message",
         ],
     )
+
     def _sanitize(value: str) -> str:
         if value and value[0] in ("=", "+", "-", "@"):
             return f"'{value}"

@@ -1431,7 +1431,6 @@ export type LogQueryResponse = {
 
 export type LogQueryParams = {
   container_id?: string
-  container_name?: string
   level?: string
   source?: string
   start_time?: string

@@ -1,4 +1,5 @@
 import { Fragment, useMemo, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import type { ContainerInfo } from '../../api/client'
 import { containerWriteAllowed } from '../../api/client'
 import { deploySourceImageLabel } from '../../pages/containers/deploySourceDisplay'
@@ -88,6 +89,7 @@ export function WorkloadsTable({
   const [copiedRowId, setCopiedRowId] = useState<string | null>(null)
   const [copyFailedRowId, setCopyFailedRowId] = useState<string | null>(null)
   const [terminalContainerId, setTerminalContainerId] = useState<string | null>(null)
+  const navigate = useNavigate()
 
   const displayGroups = useMemo(
     () =>
@@ -310,6 +312,20 @@ export function WorkloadsTable({
                             {'>'}
                           </button>
                         ) : null}
+                        <button
+                          type="button"
+                          className="btn btn--ghost btn--sm"
+                          style={{ marginLeft: '0.35rem' }}
+                          title="View logs"
+                          aria-label="View logs"
+                          onClick={() =>
+                            navigate(
+                              `/logs?container_id=${encodeURIComponent(containerRow.id)}`,
+                            )
+                          }
+                        >
+                          Logs
+                        </button>
                       </td>
                       <td className="containers-table__actions">
                         <button
