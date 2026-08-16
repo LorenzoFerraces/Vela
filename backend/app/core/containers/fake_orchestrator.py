@@ -325,7 +325,9 @@ class FakeContainerOrchestrator(ContainerOrchestrator):
                         ).result(timeout=0.2)
                         if data_event is None:
                             break
-                        command_buffer += data_event.decode("utf-8", errors="replace")
+                        command_buffer += data_event.decode(
+                            "utf-8", errors="replace"
+                        ).replace("\r", "\n")
                         while "\n" in command_buffer:
                             line, command_buffer = command_buffer.split("\n", 1)
                             command = line.strip()

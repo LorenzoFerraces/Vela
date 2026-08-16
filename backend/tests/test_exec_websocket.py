@@ -33,6 +33,19 @@ def test_exec_ws_sends_input_and_gets_echo(
     assert b"hello" in data
 
 
+def test_exec_ws_sends_carriage_return_and_gets_echo(
+    api_client: TestClient, auth_token: str
+) -> None:
+    with api_client.websocket_connect(
+        f"/api/containers/cid-1/exec/ws?access_token={auth_token}"
+    ) as websocket:
+        websocket.receive_bytes()
+        websocket.send_text("echo vela-e2e-ok\r")
+        time.sleep(0.3)
+        data = websocket.receive_bytes()
+    assert b"echo vela-e2e-ok" in data
+
+
 def test_exec_ws_rejects_unauthenticated(
     anonymous_client: TestClient
 ) -> None:
