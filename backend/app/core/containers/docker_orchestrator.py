@@ -793,11 +793,21 @@ class DockerOrchestrator(ContainerOrchestrator):
                     chunk = exec_runtime.read(4096)
                     if not chunk:
                         break
-                    asyncio.run_coroutine_threadsafe(queue.put(chunk), loop).result(timeout=30)
+                    try:
+                        asyncio.run_coroutine_threadsafe(queue.put(chunk), loop).result(timeout=30)
+                    except (TimeoutError, RuntimeError):
+                        logger.warning(
+                            "exec reader stalled on backpressure for %s; closing reader",
+                            container_id,
+                        )
+                        break
             except Exception as exc:
                 logger.warning("exec reader error for %s: %s", container_id, exc)
             finally:
-                asyncio.run_coroutine_threadsafe(queue.put(None), loop).result(timeout=30)
+                try:
+                    asyncio.run_coroutine_threadsafe(queue.put(None), loop).result(timeout=5)
+                except Exception:
+                    pass
                 exec_runtime.close()
 
         threading.Thread(target=_reader, daemon=True, name="vela-exec-reader").start()

@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import uuid
 from contextlib import suppress
 from typing import Annotated, Callable
@@ -128,6 +129,38 @@ router = APIRouter()
 _MAX_LOG_TAIL_LINES = 2000
 _MAX_EXEC_CONCURRENT = 20
 _exec_semaphore = asyncio.Semaphore(_MAX_EXEC_CONCURRENT)
+_EXEC_SEMAPHORE_ACQUIRE_TIMEOUT = 10.0
+_EXEC_START_FAILURE_MESSAGE = (
+    "Could not start a shell in this container. Make sure it is running and "
+    "a shell (sh) is installed."
+)
+_MAX_TERMINAL_DIMENSION = 500
+
+
+def _exec_max_session_seconds() -> int:
+    try:
+        return max(1, int(os.getenv("VELA_EXEC_MAX_SESSION_SECONDS", "3600")))
+    except ValueError:
+        return 3600
+
+
+def _parse_resize_message(raw: str) -> tuple[int, int] | None:
+    """Return (cols, rows) if ``raw`` is a strict resize control frame, else None."""
+    try:
+        parsed = json.loads(raw)
+    except (json.JSONDecodeError, TypeError):
+        return None
+    if not isinstance(parsed, dict) or set(parsed) != {"resize"}:
+        return None
+    resize = parsed["resize"]
+    if not isinstance(resize, dict) or set(resize) != {"cols", "rows"}:
+        return None
+    cols, rows = resize["cols"], resize["rows"]
+    if type(cols) is not int or type(rows) is not int:
+        return None
+    if not (1 <= cols <= _MAX_TERMINAL_DIMENSION and 1 <= rows <= _MAX_TERMINAL_DIMENSION):
+        return None
+    return cols, rows
 
 
 def _with_owner_label(config: DeployConfig, owner_id: str) -> DeployConfig:
@@ -1124,7 +1157,6 @@ async def container_exec_ws(
     session: Annotated[AsyncSession, Depends(get_db)],
 ) -> None:
     """Bidirectional exec terminal over WebSocket. Authenticate with ``access_token`` query param."""
-    await websocket.accept()
     token = websocket.query_params.get("access_token")
 
     try:
@@ -1135,7 +1167,7 @@ async def container_exec_ws(
         if user is None:
             raise NotAuthenticatedError()
     except NotAuthenticatedError:
-        await websocket.close(code=1008)
+        await websocket.close(code=1008, reason="Unauthorized")
         return
 
     try:
@@ -1143,7 +1175,7 @@ async def container_exec_ws(
             session, orchestrator, user, container_id, action="write"
         )
     except (ContainerNotFoundError, ProjectAccessDeniedError):
-        await websocket.close(code=1008)
+        await websocket.close(code=1008, reason="Unauthorized")
         return
 
     await emit_audit_log(
@@ -1156,77 +1188,116 @@ async def container_exec_ws(
     await session.commit()
     await session.close()
 
-    async with _exec_semaphore:
-        exec_close_fn: Callable[[], None] | None = None
-        try:
-            cols, rows = 80, 24
-            pending_init: str | None = None
-            try:
-                init_raw = await asyncio.wait_for(websocket.receive_text(), timeout=5.0)
-                try:
-                    init_msg = json.loads(init_raw)
-                    if isinstance(init_msg, dict) and ("cols" in init_msg or "rows" in init_msg):
-                        cols = int(init_msg.get("cols", 80))
-                        rows = int(init_msg.get("rows", 24))
-                    else:
-                        pending_init = init_raw
-                except (json.JSONDecodeError, ValueError, TypeError):
-                    pending_init = init_raw
-            except asyncio.TimeoutError:
-                pass
+    try:
+        await websocket.accept()
+    except WebSocketDisconnect:
+        return
 
+    try:
+        await asyncio.wait_for(
+            _exec_semaphore.acquire(), timeout=_EXEC_SEMAPHORE_ACQUIRE_TIMEOUT
+        )
+    except TimeoutError:
+        await websocket.close(
+            code=1013, reason="Too many concurrent terminals, try again shortly"
+        )
+        return
+
+    exec_close_fn: Callable[[], None] | None = None
+    try:
+        cols, rows = 80, 24
+        pending_init: str | None = None
+        try:
+            init_raw = await asyncio.wait_for(websocket.receive_text(), timeout=5.0)
+            try:
+                init_msg = json.loads(init_raw)
+                if isinstance(init_msg, dict) and ("cols" in init_msg or "rows" in init_msg):
+                    cols = int(init_msg.get("cols", 80))
+                    rows = int(init_msg.get("rows", 24))
+                else:
+                    pending_init = init_raw
+            except (json.JSONDecodeError, ValueError, TypeError):
+                pending_init = init_raw
+        except asyncio.TimeoutError:
+            pass
+
+        try:
+            # ponytail: exec_create/exec_start block the loop (3 HTTP calls per
+            # session); making stream_exec async would change the orchestrator
+            # interface for little gain
             stdout_iter, stdin_write, exec_close_fn, exec_id = orchestrator.stream_exec(
                 container_id, cols=cols, rows=rows
             )
+        except Exception as exc:
+            logger.warning("exec start failed for %s: %s", container_id, exc)
+            try:
+                await websocket.send_text(_EXEC_START_FAILURE_MESSAGE)
+                await websocket.close(code=1011)
+            except Exception:
+                pass
+            return
 
-            if pending_init is not None:
-                stdin_write(pending_init.encode("utf-8"))
+        if pending_init is not None:
+            await asyncio.to_thread(stdin_write, pending_init.encode("utf-8"))
 
-            async def _forward_to_client() -> None:
-                try:
-                    async for chunk in stdout_iter:
-                        await websocket.send_bytes(chunk)
-                except WebSocketDisconnect:
-                    pass
-                except Exception:
-                    logger.warning("exec forward error for %s", container_id)
+        async def _forward_to_client() -> None:
+            try:
+                async for chunk in stdout_iter:
+                    await websocket.send_bytes(chunk)
+            except WebSocketDisconnect:
+                pass
+            except Exception:
+                logger.warning("exec forward error for %s", container_id)
 
-            async def _forward_to_container() -> None:
-                try:
-                    while True:
-                        msg = await websocket.receive_text()
-                        try:
-                            parsed = json.loads(msg)
-                            if "resize" in parsed:
-                                orchestrator.resize_exec(
-                                    container_id, exec_id,
-                                    parsed["resize"]["cols"], parsed["resize"]["rows"],
-                                )
-                                continue
-                        except (json.JSONDecodeError, KeyError, TypeError):
-                            pass
-                        stdin_write(msg.encode("utf-8"))
-                except WebSocketDisconnect:
-                    pass
-                except Exception:
-                    logger.warning("exec input error for %s", container_id)
+        async def _forward_to_container() -> None:
+            try:
+                while True:
+                    msg = await websocket.receive_text()
+                    resize = _parse_resize_message(msg)
+                    if resize is not None:
+                        new_cols, new_rows = resize
+                        await asyncio.to_thread(
+                            orchestrator.resize_exec,
+                            container_id, exec_id, new_cols, new_rows,
+                        )
+                        continue
+                    await asyncio.to_thread(stdin_write, msg.encode("utf-8"))
+            except WebSocketDisconnect:
+                pass
+            except Exception:
+                logger.warning("exec input error for %s", container_id)
 
-            task_client = asyncio.create_task(_forward_to_client())
-            task_container = asyncio.create_task(_forward_to_container())
-            done, pending = await asyncio.wait(
-                {task_client, task_container}, return_when=asyncio.FIRST_COMPLETED
+        task_client = asyncio.create_task(_forward_to_client())
+        task_container = asyncio.create_task(_forward_to_container())
+        try:
+            _, pending = await asyncio.wait_for(
+                asyncio.wait(
+                    {task_client, task_container},
+                    return_when=asyncio.FIRST_COMPLETED,
+                ),
+                timeout=_exec_max_session_seconds(),
             )
-            for t in pending:
-                t.cancel()
-                with suppress(asyncio.CancelledError):
-                    await t
-        except WebSocketDisconnect:
-            pass
-        except Exception:
-            logger.error("exec session error for %s", container_id)
-        finally:
-            if exec_close_fn is not None:
-                exec_close_fn()
+        except TimeoutError:
+            pending = {task_client, task_container}
+            try:
+                await asyncio.wait_for(
+                    websocket.send_text("[session expired]"), timeout=5.0
+                )
+                await websocket.close(code=1000, reason="Session timeout")
+            except Exception:
+                pass
+        for t in pending:
+            t.cancel()
+            with suppress(asyncio.CancelledError):
+                await t
+    except WebSocketDisconnect:
+        pass
+    except Exception:
+        logger.error("exec session error for %s", container_id)
+    finally:
+        if exec_close_fn is not None:
+            exec_close_fn()
+        _exec_semaphore.release()
 
 
 @router.get("/{container_id}/stats", response_model=ContainerStats)
