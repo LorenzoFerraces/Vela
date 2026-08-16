@@ -82,42 +82,50 @@ export default function App() {
           element={
             <RequireAuth>
               <LogsPage />
-              path="/stacks"
-              element={
-                <RequireAuth>
-                  <StacksPage />
-                </RequireAuth>
-              }
+            </RequireAuth>
+          }
         />
-              <Route
-                path="/audit"
-                element={
-                  <RequireAuth>
-                    <AuditLogPage />
-                    path="/stacks/new"
-                    element={
-                      <RequireAuth>
-                        <StackBuilderPage />
-                      </RequireAuth>
-                    }
+        <Route
+          path="/audit"
+          element={
+            <RequireAuth>
+              <AuditLogPage />
+            </RequireAuth>
+          }
         />
-                    <Route
-                      path="/stacks/import"
-                      element={
-                        <RequireAuth>
-                          <ComposeImportPage />
-                        </RequireAuth>
-                      }
-                    />
-                    <Route
-                      path="/stacks/:id"
-                      element={
-                        <RequireAuth>
-                          <StackBuilderPage />
-                        </RequireAuth>
-                      }
-                    />
-                  </Route>
+        <Route
+          path="/stacks"
+          element={
+            <RequireAuth>
+              <StacksPage />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/stacks/new"
+          element={
+            <RequireAuth>
+              <StackBuilderPage />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/stacks/import"
+          element={
+            <RequireAuth>
+              <ComposeImportPage />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/stacks/:id"
+          element={
+            <RequireAuth>
+              <StackBuilderPage />
+            </RequireAuth>
+          }
+        />
+      </Route>
     </Routes>
   )
 }
