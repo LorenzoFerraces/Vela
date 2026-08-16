@@ -42,6 +42,7 @@ async def patch_me(
         target_id=str(current_user.id),
         details={"fields": list(updates.keys())},
     )
+    await session.commit()
     return user_public_from_snapshot(snapshot)
 
 
@@ -67,6 +68,7 @@ async def post_avatar(
         target_type="user",
         target_id=str(current_user.id),
     )
+    await session.commit()
     return user_public_from_snapshot(snapshot)
 
 
@@ -89,4 +91,5 @@ async def remove_avatar(
         target_type="user",
         target_id=str(current_user.id),
     )
+    await session.commit()
     return user_public_from_snapshot(snapshot)

@@ -7,6 +7,7 @@ import uuid
 from datetime import datetime, timezone, timedelta
 
 import pytest
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.audit.service import emit_audit_log, list_audit_logs
@@ -238,11 +239,11 @@ def test_emit_with_none_details(
     asyncio.run(run())
 
 
-def test_emit_persists_without_explicit_commit(
+def test_emit_persists_after_caller_commit(
     db_session_factory: async_sessionmaker[AsyncSession],
     user_a: uuid.UUID,
 ) -> None:
-    """emit_audit_log commits internally; entry must survive a fresh session."""
+    """emit_audit_log flushes only; the caller's commit persists the entry."""
     async def run() -> None:
         async with db_session_factory() as session:
             await emit_audit_log(
@@ -252,9 +253,27 @@ def test_emit_persists_without_explicit_commit(
                 target_type="container",
                 target_id="cid-persist",
             )
+            await session.commit()
 
         entries = await _query(db_session_factory)
         assert len(entries) == 1
         assert entries[0].action == "container.deploy"
+
+    asyncio.run(run())
+
+
+def test_emit_failed_flush_reraises(
+    db_session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    async def run() -> None:
+        async with db_session_factory() as session:
+            with pytest.raises(IntegrityError):
+                await emit_audit_log(
+                    session,
+                    user_id=None,
+                    action="container.deploy",
+                    target_type="container",
+                    target_id="cid-bad",
+                )
 
     asyncio.run(run())

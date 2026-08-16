@@ -50,7 +50,7 @@ async def emit_audit_log(
     target_id: str,
     details: dict | None = None,
 ) -> None:
-    """Append a single audit log entry. Fires and forgets on error."""
+    """Append a single audit log entry. Flushes only; the caller's commit persists it."""
     try:
         entry = AuditLog(
             user_id=user_id,
@@ -61,12 +61,11 @@ async def emit_audit_log(
         )
         session.add(entry)
         await session.flush()
-        await session.commit()
     except Exception:
         logger.exception(
             "Failed to emit audit log: action=%s target=%s", action, target_id
         )
-        await session.rollback()
+        raise
 
 
 async def list_audit_logs(

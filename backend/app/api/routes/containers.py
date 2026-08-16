@@ -626,6 +626,7 @@ async def deploy(
         target_id=info.id,
         details={"image": config.image, "container_name": info.name},
     )
+    await session.commit()
     return ContainerDeployResponse(
         container=info,
         route_wired=route_wired,
@@ -761,6 +762,7 @@ async def run_from_user_source(
                 "source_ref": image_ref,
             },
         )
+        await session.commit()
         return RunFromSourceResponse(
             container=info,
             kind="image",
@@ -835,6 +837,7 @@ async def run_from_user_source(
                 "source_ref": template.name,
             },
         )
+        await session.commit()
         return RunFromSourceResponse(
             container=info,
             kind="dockerfile_template",
@@ -915,6 +918,7 @@ async def run_from_user_source(
             "source_ref": _sanitize_url_for_audit(git_url),
         },
     )
+    await session.commit()
     return RunFromSourceResponse(
         container=info,
         kind="git",
@@ -958,6 +962,7 @@ async def start_container(
         target_type="container",
         target_id=container_id,
     )
+    await session.commit()
     return updated.model_copy(update={"access_role": access_info.access_role})
 
 
@@ -982,6 +987,7 @@ async def stop_container(
         target_id=container_id,
         details={"timeout": timeout},
     )
+    await session.commit()
     return updated.model_copy(update={"access_role": access_info.access_role})
 
 
@@ -1006,6 +1012,7 @@ async def restart_container(
         target_id=container_id,
         details={"timeout": timeout},
     )
+    await session.commit()
     return updated.model_copy(update={"access_role": access_info.access_role})
 
 
@@ -1035,6 +1042,7 @@ async def remove_container(
         target_id=container_id,
         details={"force": force},
     )
+    await session.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
@@ -1138,6 +1146,14 @@ async def container_exec_ws(
         await websocket.close(code=1008)
         return
 
+    await emit_audit_log(
+        session,
+        user_id=user.id,
+        action="container.exec",
+        target_type="container",
+        target_id=container_id,
+    )
+    await session.commit()
     await session.close()
 
     async with _exec_semaphore:
