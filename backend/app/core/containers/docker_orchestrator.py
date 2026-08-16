@@ -468,7 +468,7 @@ class DockerOrchestrator(ContainerOrchestrator):
             if config.command is not None:
                 kwargs["command"] = config.command
             if config.memory_limit is not None:
-                kwargs["mem_limit"] = config.memory_limit
+                kwargs["mem_limit"] = config.memory_limit * 1024 * 1024
             if nano_cpus is not None:
                 kwargs["nano_cpus"] = nano_cpus
             if hc is not None:

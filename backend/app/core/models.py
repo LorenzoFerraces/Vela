@@ -98,8 +98,12 @@ class DeployConfig(BaseModel):
             "``container_port`` is used instead."
         ),
     )
-    cpu_limit: float | None = None
-    memory_limit: int | None = None
+    cpu_limit: float | None = Field(
+        default=None, gt=0, description="CPU limit in cores (e.g. 0.5 for half a core)."
+    )
+    memory_limit: int | None = Field(
+        default=None, gt=0, description="Memory limit in MB."
+    )
     restart_policy: RestartPolicy = RestartPolicy.NEVER
     labels: dict[str, str] = Field(default_factory=dict)
     command: list[str] | None = None
