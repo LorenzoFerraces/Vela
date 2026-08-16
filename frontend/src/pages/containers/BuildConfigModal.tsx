@@ -48,13 +48,16 @@ export default function BuildConfigModal({
   const titleId = useId()
   const dialogRef = useRef<HTMLDivElement>(null)
   const [form, setForm] = useState<FormState>(() => formStateFromOverride(initial))
+  const [prevOpen, setPrevOpen] = useState(open)
+  const [prevInitial, setPrevInitial] = useState(initial)
 
-  useEffect(() => {
-    if (!open) {
-      return
+  if (open !== prevOpen || initial !== prevInitial) {
+    setPrevOpen(open)
+    setPrevInitial(initial)
+    if (open) {
+      setForm(formStateFromOverride(initial))
     }
-    setForm(formStateFromOverride(initial))
-  }, [open, initial])
+  }
 
   useEffect(() => {
     if (!open) {

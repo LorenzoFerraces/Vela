@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import csv
 import io
-import logging
 from datetime import datetime
 from typing import Annotated
 
@@ -17,8 +16,6 @@ from app.api.deps import get_current_user, get_db, get_orchestrator
 from app.core.containers.orchestrator import ContainerOrchestrator
 from app.core.projects.access import require_container_access
 from app.db.models import ContainerLog, LogLevel, LogSource, User
-
-logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["logs"])
 

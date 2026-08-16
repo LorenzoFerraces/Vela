@@ -56,6 +56,7 @@ from app.core.build.registry_image_suggestions import (
     fetch_docker_hub_suggestions,
     merge_image_suggestions,
 )
+from app.core.audit.service import emit_audit_log
 from app.core.containers.docker_orchestrator import (
     VELA_OWNER_LABEL,
     VELA_PROJECT_LABEL,
@@ -64,7 +65,6 @@ from app.core.containers.docker_orchestrator import (
     with_deploy_source_labels,
 )
 from app.core.containers.orchestrator import ContainerOrchestrator
-from app.core.audit.service import emit_audit_log
 from app.core.containers.volume_uploads import (
     resolve_volume_upload_path,
     save_volume_upload,

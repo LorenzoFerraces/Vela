@@ -17,8 +17,6 @@ import requests.exceptions
 from docker.types import Healthcheck, Mount
 
 from app.core.containers.orchestrator import ContainerOrchestrator
-
-logger = logging.getLogger(__name__)
 from app.core.enums import ContainerStatus, HealthStatus, RestartPolicy
 from app.core.exceptions import (
     ContainerNotFoundError,
@@ -39,6 +37,8 @@ from app.core.models import (
     VolumeMount,
 )
 from app.core.traffic.public_route_host import build_public_url
+
+logger = logging.getLogger(__name__)
 
 VELA_MANAGED_LABEL = "vela.managed"
 VELA_MANAGED_VALUE = "true"

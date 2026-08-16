@@ -3,7 +3,6 @@ from __future__ import annotations
 import uuid
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator, Callable
-from dataclasses import dataclass
 
 from app.core.enums import ContainerStatus
 from app.core.models import ContainerInfo, ContainerStats, DeployConfig, HealthResult

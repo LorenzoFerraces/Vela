@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from app.core.logging.inference import infer_log_level
 from app.db.models import LogLevel
 
