@@ -5,7 +5,9 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 
+import sqlalchemy as sa
 from sqlalchemy import (
+    BigInteger,
     Boolean,
     DateTime,
     Float,
@@ -501,4 +503,28 @@ class StackComposition(Base):
         Uuid(as_uuid=True),
         ForeignKey("stacks.id", ondelete="CASCADE"),
         nullable=False, primary_key=True,
+    )
+
+
+class ContainerMetric(Base):
+    __tablename__ = "container_metrics"
+    __table_args__ = (
+        sa.Index("ix_container_metrics_container_timestamp", "container_id", "timestamp", postgresql_using="btree"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4,
+    )
+    container_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    timestamp: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utcnow,
+    )
+    cpu_percent: Mapped[float] = mapped_column(Float, nullable=False)
+    memory_usage_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    memory_limit_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    memory_percent: Mapped[float] = mapped_column(Float, nullable=False)
+    network_rx_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    network_tx_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utcnow,
     )
