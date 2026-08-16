@@ -52,6 +52,8 @@ export default function ContainersPage() {
   ])
   const [startCommand, setStartCommand] = useState('')
   const [scalingPolicy, setScalingPolicy] = useState<ScalingPolicyRequest | null>(null)
+  const [cpuLimit, setCpuLimit] = useState('')
+  const [memoryLimit, setMemoryLimit] = useState('')
   const [buildOverride, setBuildOverride] = useState<BuildOverride | null>(null)
   const [buildConfigOpen, setBuildConfigOpen] = useState(false)
   const [buildConfigInitial, setBuildConfigInitial] = useState<BuildOverride | null>(
@@ -102,6 +104,8 @@ export default function ContainersPage() {
     setVolumeRows([createEmptyVolumeMountRow()])
     setStartCommand('')
     setScalingPolicy(null)
+    setCpuLimit('')
+    setMemoryLimit('')
     setBuildOverride(null)
   }
 
@@ -200,6 +204,8 @@ export default function ContainersPage() {
       project_id: deployProjects.selectedProjectId,
       scaling_policy: scalingPolicy,
       build_override: override,
+      cpu_limit: cpuLimit.trim() ? parseFloat(cpuLimit.trim()) : null,
+      memory_limit: memoryLimit.trim() ? parseInt(memoryLimit.trim(), 10) : null,
     }
     switch (selection.kind) {
       case 'image':
@@ -462,6 +468,10 @@ export default function ContainersPage() {
           scalingPolicy={scalingPolicy}
           onScalingPolicyChange={setScalingPolicy}
           scalingValidationError={scalingValidationError}
+          cpuLimit={cpuLimit}
+          onCpuLimitChange={setCpuLimit}
+          memoryLimit={memoryLimit}
+          onMemoryLimitChange={setMemoryLimit}
         />
 
         <div className="containers-form__actions">

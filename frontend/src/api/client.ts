@@ -455,6 +455,8 @@ export interface RunFromSourceRequest {
   volumes?: VolumeMountRequest[]
   scaling_policy?: ScalingPolicyRequest | null
   build_override?: BuildOverride | null
+  cpu_limit?: number | null
+  memory_limit?: number | null
 }
 
 export interface RunFromSourceResponse {
