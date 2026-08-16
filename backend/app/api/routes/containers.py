@@ -266,6 +266,8 @@ def _deploy_config_for_image(
     env_vars: dict[str, str] | None = None,
     command: list[str] | None = None,
     volumes: list[VolumeMount] | None = None,
+    cpu_limit: float | None = None,
+    memory_limit: int | None = None,
 ) -> DeployConfig:
     ports: list[PortMapping] = []
     if host_port is not None:
@@ -278,6 +280,8 @@ def _deploy_config_for_image(
         env_vars=env_vars or {},
         command=command,
         volumes=volumes or [],
+        cpu_limit=cpu_limit,
+        memory_limit=memory_limit,
         health_check=default_listen_port_health_check(container_port),
     )
 
@@ -702,6 +706,8 @@ async def run_from_user_source(
             env_vars=body.env_vars,
             command=body.command,
             volumes=resolved_volumes,
+            cpu_limit=body.cpu_limit,
+            memory_limit=body.memory_limit,
         ).model_copy(update=_route_updates_from_run_body(body))
         cfg = with_deploy_source_labels(cfg, source_kind="image", source_ref=image_ref)
         cfg = _apply_deploy_labels(
@@ -756,6 +762,8 @@ async def run_from_user_source(
             env_vars=body.env_vars,
             command=body.command,
             volumes=resolved_volumes,
+            cpu_limit=body.cpu_limit,
+            memory_limit=body.memory_limit,
         ).model_copy(
             update={
                 "restart_policy": RestartPolicy.UNLESS_STOPPED,
@@ -829,6 +837,8 @@ async def run_from_user_source(
         env_vars=body.env_vars,
         command=body.command,
         volumes=resolved_volumes,
+        cpu_limit=body.cpu_limit,
+        memory_limit=body.memory_limit,
     ).model_copy(
         update={
             "restart_policy": RestartPolicy.UNLESS_STOPPED,

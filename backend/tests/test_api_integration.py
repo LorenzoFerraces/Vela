@@ -217,6 +217,37 @@ def test_run_from_image_with_env_and_command(
     ]
 
 
+def test_run_from_image_with_resource_limits(
+    api_client: TestClient,
+    fake_orchestrator: FakeContainerOrchestrator,
+) -> None:
+    response = api_client.post(
+        "/api/containers/run",
+        json={
+            "source_kind": "image",
+            "image_ref": "nginx:alpine",
+            "cpu_limit": 0.5,
+            "memory_limit": 256,
+        },
+    )
+    assert response.status_code == 200
+    assert fake_orchestrator.last_deploy_config is not None
+    assert fake_orchestrator.last_deploy_config.cpu_limit == 0.5
+    assert fake_orchestrator.last_deploy_config.memory_limit == 256
+
+
+def test_run_from_image_resource_limits_optional(api_client: TestClient) -> None:
+    """Omitting resource limits should still work (fields are optional)."""
+    response = api_client.post(
+        "/api/containers/run",
+        json={
+            "source_kind": "image",
+            "image_ref": "nginx:alpine",
+        },
+    )
+    assert response.status_code == 200
+
+
 def test_run_rejects_empty_env_key(api_client: TestClient) -> None:
     response = api_client.post(
         "/api/containers/run",

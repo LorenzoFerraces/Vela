@@ -169,6 +169,16 @@ class RunFromSourceRequest(BaseModel):
         default=None,
         description="Manual language / build settings when auto-detection is insufficient.",
     )
+    cpu_limit: float | None = Field(
+        default=None,
+        gt=0,
+        description="CPU limit in cores (e.g. 0.5 for half a core).",
+    )
+    memory_limit: int | None = Field(
+        default=None,
+        gt=0,
+        description="Memory limit in MB.",
+    )
 
     @field_validator("env_vars")
     @classmethod
