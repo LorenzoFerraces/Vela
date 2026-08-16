@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { formatApiError, getAuditLog } from '../api/client'
-import type { AuditLogEntry } from '../api/client'
+import type { AuditLogEntry, AuditLogQueryParams } from '../api/client'
 
 const LIMIT = 50
 
@@ -27,32 +27,35 @@ export default function AuditLogPage() {
   const [targetTypeFilter, setTargetTypeFilter] = useState('')
   const [offset, setOffset] = useState(0)
   const [error, setError] = useState<string | null>(null)
-  const [reqSeq, setReqSeq] = useState(0)
+  const requestSeq = useRef(0)
 
-  const fetchAuditLog = useCallback(async () => {
-    const seq = reqSeq + 1
-    setReqSeq(seq)
+  const filterParams = useMemo<AuditLogQueryParams>(() => {
+    const params: AuditLogQueryParams = { limit: LIMIT, offset }
+    if (actionFilter) params.action = actionFilter
+    if (targetTypeFilter) params.target_type = targetTypeFilter
+    return params
+  }, [actionFilter, targetTypeFilter, offset])
+
+  const load = useCallback(async (params: AuditLogQueryParams) => {
+    const seq = ++requestSeq.current
     setLoading(true)
     setError(null)
     try {
-      const params: Record<string, string | number> = { limit: LIMIT, offset }
-      if (actionFilter) params.action = actionFilter
-      if (targetTypeFilter) params.target_type = targetTypeFilter
-      const res = await getAuditLog(params as any)
-      if (seq === reqSeq) {
-        setEntries(res.entries)
-        setTotal(res.total)
+      const data = await getAuditLog(params)
+      if (seq === requestSeq.current) {
+        setEntries(data.entries)
+        setTotal(data.total)
       }
     } catch (err) {
-      if (seq === reqSeq) setError(formatApiError(err))
+      if (seq === requestSeq.current) setError(formatApiError(err))
     } finally {
-      if (seq === reqSeq) setLoading(false)
+      if (seq === requestSeq.current) setLoading(false)
     }
-  }, [actionFilter, targetTypeFilter, offset, reqSeq])
+  }, [])
 
   useEffect(() => {
-    fetchAuditLog()
-  }, [fetchAuditLog])
+    load(filterParams)
+  }, [load, filterParams])
 
   return (
     <section className="audit-log-page">

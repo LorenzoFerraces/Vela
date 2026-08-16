@@ -3,7 +3,6 @@ import { Terminal } from 'xterm'
 import { FitAddon } from 'xterm-addon-fit'
 import 'xterm/css/xterm.css'
 import { openContainerExecWebSocket } from '../../api/client'
-import type { ExecWebSocketHandle } from '../../api/client'
 
 interface ContainerTerminalProps {
   containerId: string
@@ -12,11 +11,10 @@ interface ContainerTerminalProps {
 
 export function ContainerTerminal({ containerId, onClose }: ContainerTerminalProps) {
   const containerRef = useRef<HTMLDivElement>(null)
-  const termRef = useRef<Terminal | null>(null)
-  const fitRef = useRef<FitAddon | null>(null)
-  const wsRef = useRef<ExecWebSocketHandle | null>(null)
 
   useEffect(() => {
+    let disposed = false
+
     const term = new Terminal({
       cursorBlink: true,
       fontSize: 13,
@@ -25,9 +23,6 @@ export function ContainerTerminal({ containerId, onClose }: ContainerTerminalPro
     })
     const fit = new FitAddon()
     term.loadAddon(fit)
-
-    termRef.current = term
-    fitRef.current = fit
 
     if (!containerRef.current) return
     term.open(containerRef.current)
@@ -38,11 +33,10 @@ export function ContainerTerminal({ containerId, onClose }: ContainerTerminalPro
       () => {
         execWs.send(JSON.stringify({ cols: term.cols, rows: term.rows }))
       },
-      (data) => term.write(data),
-      () => term.write('\r\n\x1b[31m[connection closed]\x1b[0m\r\n'),
-      () => term.write('\r\n\x1b[31m[connection error]\x1b[0m\r\n'),
+      (data) => { if (!disposed) term.write(data) },
+      () => { if (!disposed) term.write('\r\n\x1b[31m[connection closed]\x1b[0m\r\n') },
+      () => { if (!disposed) term.write('\r\n\x1b[31m[connection error]\x1b[0m\r\n') },
     )
-    wsRef.current = execWs
 
     term.onData((inputData) => execWs.send(inputData))
 
@@ -53,9 +47,11 @@ export function ContainerTerminal({ containerId, onClose }: ContainerTerminalPro
     resizeObserver.observe(containerRef.current)
 
     return () => {
-      execWs.dispose()
+      disposed = true
       resizeObserver.disconnect()
       term.dispose()
+      fit.dispose()
+      execWs.dispose()
     }
   }, [containerId])
 

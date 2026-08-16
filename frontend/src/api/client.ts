@@ -679,9 +679,10 @@ export function openContainerExecWebSocket(
 
   ws.onopen = () => onOpen()
   ws.onmessage = (event) => {
-    const data = event.data instanceof ArrayBuffer
-      ? new Uint8Array(event.data)
-      : new Uint8Array(event.data)
+    const data =
+      typeof event.data === 'string'
+        ? new TextEncoder().encode(event.data)
+        : new Uint8Array(event.data)
     onMessage(data)
   }
   ws.onclose = () => onClose()
