@@ -189,6 +189,8 @@ def create_app() -> FastAPI:
         audit.router,
         prefix=f"{API_PREFIX}/audit",
         tags=["audit"],
+    )
+    application.include_router(
         stacks.router,
         prefix=f"{API_PREFIX}/stacks",
         tags=["stacks"],

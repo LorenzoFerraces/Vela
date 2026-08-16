@@ -487,6 +487,15 @@ class ContainerLog(Base):
             "container_id",
             "timestamp",
         ),
+        Index(
+            "ix_container_logs_fts",
+            "message",
+            postgresql_using="gin",
+            postgresql_ops={"message": "gin_trgm_ops"},
+        ),
+    )
+
+
 # ---------------------------------------------------------------------------
 # Stacks
 # ---------------------------------------------------------------------------
