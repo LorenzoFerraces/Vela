@@ -69,8 +69,13 @@ class ContainerOrchestrator(ABC):
         """List managed containers, optionally filtered by status, owner, or project access."""
 
     @abstractmethod
-    async def logs(self, container_id: str, *, tail: int = 100) -> str:
-        """Return the most recent log lines for a container."""
+    async def logs(self, container_id: str, *, tail: int | None = 100, since: float | None = None) -> str:
+        """Return the most recent log lines for a container.
+
+        Args:
+            tail: Number of most recent lines to include; None for all lines.
+            since: Unix timestamp in seconds; only lines logged at or after it are returned.
+        """
 
     @abstractmethod
     async def stream_logs(

@@ -63,8 +63,16 @@ async def _lifespan(_application: FastAPI):
 
     log_collector: LogCollector | None = None
     if COLLECTOR_ENABLED:
-        log_collector = LogCollector(get_orchestrator())
-        await log_collector.start()
+        try:
+            log_orchestrator = get_orchestrator()
+        except ProviderConnectionError as exc:
+            logger.warning(
+                "Log collector unavailable at startup (%s); log collection will not run.",
+                exc,
+            )
+        else:
+            log_collector = LogCollector(log_orchestrator)
+            await log_collector.start()
 
     try:
         yield

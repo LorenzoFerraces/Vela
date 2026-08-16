@@ -669,14 +669,14 @@ class DockerOrchestrator(ContainerOrchestrator):
         except docker.errors.DockerException as e:
             raise ProviderConnectionError(str(e)) from e
 
-    async def logs(self, container_id: str, *, tail: int = 100) -> str:
+    async def logs(self, container_id: str, *, tail: int | None = 100, since: float | None = None) -> str:
         def sync() -> str:
             try:
                 c = self._client.containers.get(container_id)
             except docker.errors.NotFound as e:
                 raise ContainerNotFoundError(container_id) from e
             self._assert_managed_labels(c.labels or {}, container_id)
-            raw = c.logs(tail=tail, stdout=True, stderr=True)
+            raw = c.logs(tail=tail, since=since, stdout=True, stderr=True)
             if isinstance(raw, bytes):
                 return raw.decode(errors="replace")
             return str(raw)

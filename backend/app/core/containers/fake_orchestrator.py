@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import threading
+import time
 import uuid
 from collections.abc import AsyncIterator, Callable
 from datetime import datetime, timezone
@@ -50,6 +51,7 @@ class FakeContainerOrchestrator(ContainerOrchestrator):
             last_deploy_config (DeployConfig | None): The most recent deploy config passed to deploy, or None.
             verify_calls (list[str]): Ordered list of image refs passed to verify_image_reference_available.
             _verify_handlers (dict[str, Callable[[], None]]): Optional per-image handlers invoked during verification.
+            _log_lines (dict[str, list[tuple[float, str]]]): Per-container fake log buffers of (timestamp, line) pairs.
         """
         self._containers: dict[str, ContainerInfo] = {}
         self._images: set[str] = {"nginx:alpine", "python:3.12-slim"}
@@ -60,6 +62,7 @@ class FakeContainerOrchestrator(ContainerOrchestrator):
         self._verify_handlers: dict[str, Callable[[], None]] = {}
         self._networks: set[str] = set()
         self._deploy_fail_images: set[str] = set()
+        self._log_lines: dict[str, list[tuple[float, str]]] = {}
 
     def fail_deploy_for_image(self, image_ref: str) -> None:
         """Cause future deploy() calls for this image to raise RuntimeError."""
@@ -257,20 +260,28 @@ class FakeContainerOrchestrator(ContainerOrchestrator):
             rows = [row for row in rows if row.status == status]
         return rows
 
-    async def logs(self, container_id: str, *, tail: int = 100) -> str:
-        """
-        Retrieve the logs for the specified container.
-
-        Parameters:
-                container_id (str): ID of the container whose logs are requested.
-                tail (int): Number of most-recent lines to include; ignored by this fake orchestrator.
-
-        Returns:
-                logs (str): The container logs as a string (for the fake orchestrator this is the fixed value "log line\n").
-        """
-        _ = tail
+    def add_log_line(self, container_id: str, line: str) -> None:
+        """Append a timestamped line to the container's fake log buffer."""
         self._require_container(container_id)
-        return "log line\n"
+        self._log_lines.setdefault(container_id, []).append((time.time(), line))
+
+    def _fake_log_text(
+        self, container_id: str, *, tail: int | None, since: float | None
+    ) -> str:
+        lines = self._log_lines.setdefault(container_id, [])
+        if not lines:
+            lines.append((time.time(), "log line 1"))
+        visible = [text for ts, text in lines if since is None or ts >= since]
+        if tail is not None:
+            visible = visible[-tail:]
+        return "".join(f"{text}\n" for text in visible)
+
+    async def logs(
+        self, container_id: str, *, tail: int | None = 100, since: float | None = None
+    ) -> str:
+        """Return fake log lines: one per call for a fresh container, honoring `tail` and `since`."""
+        self._require_container(container_id)
+        return self._fake_log_text(container_id, tail=tail, since=since)
 
     async def stream_logs(
         self,
@@ -279,21 +290,10 @@ class FakeContainerOrchestrator(ContainerOrchestrator):
         tail: int | None = 100,
         follow: bool = True,
     ) -> AsyncIterator[bytes]:
-        """
-        Yield a single chunk of fake raw log data for the specified container.
-
-        Ensures the container exists, then yields one bytes chunk containing "log line\n".
-        Parameters:
-            container_id (str): Identifier of the container whose logs are requested.
-            tail (int | None): Ignored; kept for API compatibility.
-            follow (bool): Ignored; kept for API compatibility.
-
-        Returns:
-            AsyncIterator[bytes]: An async iterator that yields one bytes chunk (b"log line\n").
-        """
-        _ = tail, follow
+        """Yield the container's current fake log buffer as one bytes chunk."""
+        _ = follow
         self._require_container(container_id)
-        yield b"log line\n"
+        yield self._fake_log_text(container_id, tail=tail, since=None).encode()
 
     def stream_exec(
         self,
