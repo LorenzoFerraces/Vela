@@ -13,6 +13,20 @@ function safeNextPath(rawNext: string | null): string {
   }
 }
 
+interface ClerkSession {
+  getToken: () => Promise<string>
+}
+
+interface ClerkGlobal {
+  load: () => Promise<void>
+  session?: ClerkSession | null
+  redirectToSignIn: (options: { afterSignInUrl: string }) => void
+}
+
+function getClerk(): ClerkGlobal | undefined {
+  return (window as Window & { Clerk?: ClerkGlobal }).Clerk
+}
+
 export default function LoginPage() {
   const { login, clerkLogin, status } = useAuth()
   const navigate = useNavigate()
@@ -92,7 +106,7 @@ export default function LoginPage() {
     let cancelled = false
     loadClerk().then(async () => {
       if (cancelled) return
-      const clerk = (window as any).Clerk
+      const clerk = getClerk()
       if (!clerk) return
       await clerk.load()
       if (cancelled) return
@@ -140,7 +154,7 @@ export default function LoginPage() {
   }
 
   function onClerkClick() {
-    const clerk = (window as any).Clerk
+    const clerk = getClerk()
     if (clerk) {
       clerk.redirectToSignIn({
         afterSignInUrl: `${window.location.origin}/login${location.search}`,

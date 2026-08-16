@@ -13,6 +13,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.errors import register_exception_handlers
 from app.api.routes import (
+    audit,
     auth,
     builder,
     containers,
@@ -20,6 +21,7 @@ from app.api.routes import (
     dockerfile_templates,
     github,
     images,
+    logs,
     projects,
     scaling,
     settings,
@@ -37,6 +39,7 @@ async def _lifespan(_application: FastAPI):
     """Startup/shutdown lifecycle: initialise DB, start background monitoring and scaling loops."""
     from app.api.deps import get_orchestrator, get_traffic_router
     from app.core.exceptions import ProviderConnectionError, TrafficRouterError
+    from app.core.logging.collector import LogCollector, COLLECTOR_ENABLED
     from app.core.notifications.container_monitor import run_monitoring_loop
     from app.core.scaling.scaling_engine import run_scaling_loop
     from app.e2e_support import ensure_e2e_database
@@ -58,12 +61,27 @@ async def _lifespan(_application: FastAPI):
             run_scaling_loop(orchestrator, traffic_router)
         )
 
+    log_collector: LogCollector | None = None
+    if COLLECTOR_ENABLED:
+        try:
+            log_orchestrator = get_orchestrator()
+        except ProviderConnectionError as exc:
+            logger.warning(
+                "Log collector unavailable at startup (%s); log collection will not run.",
+                exc,
+            )
+        else:
+            log_collector = LogCollector(log_orchestrator)
+            await log_collector.start()
+
     try:
         yield
     finally:
         monitor_task.cancel()
         if scaling_task is not None:
             scaling_task.cancel()
+        if log_collector is not None:
+            await log_collector.stop()
         with suppress(asyncio.CancelledError):
             await monitor_task
         if scaling_task is not None:
@@ -169,6 +187,16 @@ def create_app() -> FastAPI:
         scaling.router,
         prefix=f"{API_PREFIX}/scaling",
         tags=["scaling"],
+    )
+    application.include_router(
+        logs.router,
+        prefix=f"{API_PREFIX}/logs",
+        tags=["logs"],
+    )
+    application.include_router(
+        audit.router,
+        prefix=f"{API_PREFIX}/audit",
+        tags=["audit"],
     )
     application.include_router(
         stacks.router,

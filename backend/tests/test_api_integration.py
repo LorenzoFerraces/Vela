@@ -526,7 +526,7 @@ def test_start_stop_restart_remove(api_client: TestClient) -> None:
 
 
 def test_container_logs_stats_health(api_client: TestClient) -> None:
-    assert api_client.get("/api/containers/cid-1/logs").json()["logs"] == "log line\n"
+    assert api_client.get("/api/containers/cid-1/logs").json()["logs"].startswith("log line")
 
 
 def test_container_logs_tail_validation(api_client: TestClient) -> None:
@@ -569,7 +569,7 @@ def test_logs_stream_authenticated(
         f"/api/containers/cid-1/logs/stream?access_token={auth_token}&follow=false"
     ) as websocket:
         data = websocket.receive_bytes()
-    assert data == b"log line\n"
+    assert data.startswith(b"log line")
 
 
 def test_logs_stream_requires_token(anonymous_client: TestClient) -> None:

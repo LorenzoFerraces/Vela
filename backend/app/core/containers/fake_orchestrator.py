@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
+import logging
+import threading
+import time
 import uuid
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from datetime import datetime, timezone
-from typing import Callable
 
 from app.core.containers.docker_orchestrator import (
     VELA_MANAGED_LABEL,
@@ -28,6 +31,8 @@ from app.core.exceptions import (
 from app.core.models import ContainerInfo, ContainerStats, DeployConfig, HealthResult
 from app.core.containers.orchestrator import ContainerOrchestrator
 
+logger = logging.getLogger(__name__)
+
 
 class FakeContainerOrchestrator(ContainerOrchestrator):
     """Process-local fake that tracks containers and images without Docker."""
@@ -46,6 +51,7 @@ class FakeContainerOrchestrator(ContainerOrchestrator):
             last_deploy_config (DeployConfig | None): The most recent deploy config passed to deploy, or None.
             verify_calls (list[str]): Ordered list of image refs passed to verify_image_reference_available.
             _verify_handlers (dict[str, Callable[[], None]]): Optional per-image handlers invoked during verification.
+            _log_lines (dict[str, list[tuple[float, str]]]): Per-container fake log buffers of (timestamp, line) pairs.
         """
         self._containers: dict[str, ContainerInfo] = {}
         self._images: set[str] = {"nginx:alpine", "python:3.12-slim"}
@@ -56,6 +62,7 @@ class FakeContainerOrchestrator(ContainerOrchestrator):
         self._verify_handlers: dict[str, Callable[[], None]] = {}
         self._networks: set[str] = set()
         self._deploy_fail_images: set[str] = set()
+        self._log_lines: dict[str, list[tuple[float, str]]] = {}
 
     def fail_deploy_for_image(self, image_ref: str) -> None:
         """Cause future deploy() calls for this image to raise RuntimeError."""
@@ -253,20 +260,28 @@ class FakeContainerOrchestrator(ContainerOrchestrator):
             rows = [row for row in rows if row.status == status]
         return rows
 
-    async def logs(self, container_id: str, *, tail: int = 100) -> str:
-        """
-        Retrieve the logs for the specified container.
-
-        Parameters:
-                container_id (str): ID of the container whose logs are requested.
-                tail (int): Number of most-recent lines to include; ignored by this fake orchestrator.
-
-        Returns:
-                logs (str): The container logs as a string (for the fake orchestrator this is the fixed value "log line\n").
-        """
-        _ = tail
+    def add_log_line(self, container_id: str, line: str) -> None:
+        """Append a timestamped line to the container's fake log buffer."""
         self._require_container(container_id)
-        return "log line\n"
+        self._log_lines.setdefault(container_id, []).append((time.time(), line))
+
+    def _fake_log_text(
+        self, container_id: str, *, tail: int | None, since: float | None
+    ) -> str:
+        lines = self._log_lines.setdefault(container_id, [])
+        if not lines:
+            lines.append((time.time(), "log line 1"))
+        visible = [text for ts, text in lines if since is None or ts >= since]
+        if tail is not None:
+            visible = visible[-tail:]
+        return "".join(f"{text}\n" for text in visible)
+
+    async def logs(
+        self, container_id: str, *, tail: int | None = 100, since: float | None = None
+    ) -> str:
+        """Return fake log lines: one per call for a fresh container, honoring `tail` and `since`."""
+        self._require_container(container_id)
+        return self._fake_log_text(container_id, tail=tail, since=since)
 
     async def stream_logs(
         self,
@@ -275,21 +290,102 @@ class FakeContainerOrchestrator(ContainerOrchestrator):
         tail: int | None = 100,
         follow: bool = True,
     ) -> AsyncIterator[bytes]:
-        """
-        Yield a single chunk of fake raw log data for the specified container.
-
-        Ensures the container exists, then yields one bytes chunk containing "log line\n".
-        Parameters:
-            container_id (str): Identifier of the container whose logs are requested.
-            tail (int | None): Ignored; kept for API compatibility.
-            follow (bool): Ignored; kept for API compatibility.
-
-        Returns:
-            AsyncIterator[bytes]: An async iterator that yields one bytes chunk (b"log line\n").
-        """
-        _ = tail, follow
+        """Yield the container's current fake log buffer as one bytes chunk."""
+        _ = follow
         self._require_container(container_id)
-        yield b"log line\n"
+        yield self._fake_log_text(container_id, tail=tail, since=None).encode()
+
+    def stream_exec(
+        self,
+        container_id: str,
+        cols: int = 80,
+        rows: int = 24,
+    ) -> tuple[AsyncIterator[bytes], Callable[[bytes], None], Callable[[], None], str]:
+        """Echo shell fake exec session."""
+        _ = cols, rows
+        self._require_container(container_id)
+        exec_id = f"fake-{uuid.uuid4().hex[:12]}"
+        stdin_queue: asyncio.Queue[bytes | None] = asyncio.Queue()
+        stdout_queue: asyncio.Queue[bytes | None] = asyncio.Queue()
+        loop = asyncio.get_running_loop()
+        closed = threading.Event()
+
+        def _shell_worker() -> None:
+            try:
+                asyncio.run_coroutine_threadsafe(
+                    stdout_queue.put(f"root@{container_id[:12]}:~# ".encode()),
+                    loop,
+                ).result(timeout=10)
+                command_buffer = ""
+                while not closed.is_set():
+                    try:
+                        data_event = asyncio.run_coroutine_threadsafe(
+                            asyncio.wait_for(stdin_queue.get(), timeout=0.1),
+                            loop,
+                        ).result(timeout=0.2)
+                        if data_event is None:
+                            break
+                        command_buffer += data_event.decode(
+                            "utf-8", errors="replace"
+                        ).replace("\r", "\n")
+                        while "\n" in command_buffer:
+                            line, command_buffer = command_buffer.split("\n", 1)
+                            command = line.strip()
+                            if command == "exit":
+                                asyncio.run_coroutine_threadsafe(
+                                    stdout_queue.put(None), loop
+                                ).result(timeout=10)
+                                return
+                            if command:
+                                asyncio.run_coroutine_threadsafe(
+                                    stdout_queue.put(
+                                        f"{line}\nroot@{container_id[:12]}:~# ".encode()
+                                    ),
+                                    loop,
+                                ).result(timeout=10)
+                            else:
+                                asyncio.run_coroutine_threadsafe(
+                                    stdout_queue.put(
+                                        f"root@{container_id[:12]}:~# ".encode()
+                                    ),
+                                    loop,
+                                ).result(timeout=10)
+                    except asyncio.TimeoutError:
+                        continue
+                    except Exception:
+                        logger.warning("fake exec stdin error for %s", container_id)
+                        break
+            except Exception:
+                logger.exception("fake exec worker failed for %s", container_id)
+            finally:
+                asyncio.run_coroutine_threadsafe(stdout_queue.put(None), loop).result(timeout=10)
+
+        threading.Thread(target=_shell_worker, daemon=True, name="vela-fake-exec").start()
+
+        def _write(data: bytes) -> None:
+            if not closed.is_set():
+                asyncio.run_coroutine_threadsafe(stdin_queue.put(data), loop)
+
+        def _close() -> None:
+            if not closed.is_set():
+                closed.set()
+                asyncio.run_coroutine_threadsafe(stdin_queue.put(None), loop)
+
+        async def _stdout_iterator() -> AsyncIterator[bytes]:
+            try:
+                while True:
+                    item = await stdout_queue.get()
+                    if item is None:
+                        break
+                    yield item
+            except asyncio.CancelledError:
+                _close()
+                raise
+
+        return _stdout_iterator(), _write, _close, exec_id
+
+    def resize_exec(self, container_id: str, exec_id: str, cols: int, rows: int) -> None:
+        pass
 
     async def get_stats(self, container_id: str) -> ContainerStats:
         """

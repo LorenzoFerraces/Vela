@@ -1,4 +1,5 @@
 import { Fragment, useMemo, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import type { ContainerInfo } from '../../api/client'
 import { containerWriteAllowed } from '../../api/client'
 import { deploySourceImageLabel } from '../../pages/containers/deploySourceDisplay'
@@ -6,6 +7,7 @@ import type { WorkloadGroup } from '../../pages/containers/workloadGrouping'
 import { workloadInstances } from '../../pages/containers/workloadGrouping'
 import { ContainerLogPanel } from './ContainerLogPanel'
 import { ContainerStatsPanel } from './ContainerStatsPanel'
+import { ContainerTerminal } from './ContainerTerminal'
 import { ReplicaInstancesPanel } from './ReplicaInstancesPanel'
 
 const VIEWER_ACTION_DISABLED_TITLE =
@@ -86,6 +88,8 @@ export function WorkloadsTable({
   >({})
   const [copiedRowId, setCopiedRowId] = useState<string | null>(null)
   const [copyFailedRowId, setCopyFailedRowId] = useState<string | null>(null)
+  const [terminalContainerId, setTerminalContainerId] = useState<string | null>(null)
+  const navigate = useNavigate()
 
   const displayGroups = useMemo(
     () =>
@@ -288,6 +292,40 @@ export function WorkloadsTable({
                         >
                           {isLogExpanded ? 'Hide' : 'Show'}
                         </button>
+                        {containerRow.status === 'running' && canModify ? (
+                          <button
+                            type="button"
+                            className="btn btn--ghost btn--sm"
+                            style={{ marginLeft: '0.35rem' }}
+                            title="Open terminal"
+                            aria-label="Open terminal"
+                            aria-expanded={terminalContainerId === containerRow.id}
+                            aria-controls={`workloads-terminal-${containerRow.id}`}
+                            onClick={() =>
+                              setTerminalContainerId(
+                                terminalContainerId === containerRow.id
+                                  ? null
+                                  : containerRow.id,
+                              )
+                            }
+                          >
+                            {'>'}
+                          </button>
+                        ) : null}
+                        <button
+                          type="button"
+                          className="btn btn--ghost btn--sm"
+                          style={{ marginLeft: '0.35rem' }}
+                          title="View logs"
+                          aria-label="View logs"
+                          onClick={() =>
+                            navigate(
+                              `/logs?container_id=${encodeURIComponent(containerRow.id)}`,
+                            )
+                          }
+                        >
+                          Logs
+                        </button>
                       </td>
                       <td className="containers-table__actions">
                         <button
@@ -403,6 +441,21 @@ export function WorkloadsTable({
                               containerId={containerRow.id}
                               isActive={isLogExpanded}
                               workloadStatus={containerRow.status}
+                            />
+                          </div>
+                        </td>
+                      </tr>
+                    ) : null}
+                    {terminalContainerId === containerRow.id ? (
+                      <tr className="workloads-table__expand-row">
+                        <td colSpan={columnCount}>
+                          <div
+                            id={`workloads-terminal-${containerRow.id}`}
+                            className="workloads-table__expand-inner"
+                          >
+                            <ContainerTerminal
+                              containerId={containerRow.id}
+                              onClose={() => setTerminalContainerId(null)}
                             />
                           </div>
                         </td>
