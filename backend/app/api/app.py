@@ -34,26 +34,28 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def _lifespan(_application: FastAPI):
-    """Startup/shutdown lifecycle: initialise DB, start background monitoring and scaling loops."""
     from app.api.deps import get_orchestrator, get_traffic_router
     from app.core.exceptions import ProviderConnectionError, TrafficRouterError
     from app.core.notifications.container_monitor import run_monitoring_loop
+    from app.core.monitoring.metrics_collector import run_metrics_collector
     from app.core.scaling.scaling_engine import run_scaling_loop
     from app.e2e_support import ensure_e2e_database
 
     await ensure_e2e_database()
 
     monitor_task = asyncio.create_task(run_monitoring_loop())
+    metrics_task: asyncio.Task[None] | None = None
     scaling_task: asyncio.Task[None] | None = None
     try:
         orchestrator = get_orchestrator()
         traffic_router = get_traffic_router()
     except (ProviderConnectionError, TrafficRouterError) as exc:
         logger.warning(
-            "Scaling dependencies unavailable at startup (%s); auto-scaling loop will not run.",
+            "Container provider unavailable at startup (%s); metrics and scaling loops will not run.",
             exc,
         )
     else:
+        metrics_task = asyncio.create_task(run_metrics_collector(orchestrator))
         scaling_task = asyncio.create_task(
             run_scaling_loop(orchestrator, traffic_router)
         )
@@ -62,10 +64,15 @@ async def _lifespan(_application: FastAPI):
         yield
     finally:
         monitor_task.cancel()
+        if metrics_task is not None:
+            metrics_task.cancel()
         if scaling_task is not None:
             scaling_task.cancel()
         with suppress(asyncio.CancelledError):
             await monitor_task
+        if metrics_task is not None:
+            with suppress(asyncio.CancelledError):
+                await metrics_task
         if scaling_task is not None:
             with suppress(asyncio.CancelledError):
                 await scaling_task
