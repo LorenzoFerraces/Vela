@@ -794,3 +794,70 @@ class ComposeParseRequest(BaseModel):
 class ComposeParseResponse(BaseModel):
     services: list[StackServiceCreate]
     warnings: list[str] = []
+
+
+# ---------------------------------------------------------------------------
+# Metrics
+# ---------------------------------------------------------------------------
+
+
+class MetricPoint(BaseModel):
+    """Single stored metric row returned to the client."""
+
+    timestamp: datetime
+    cpu_percent: float
+    memory_usage_bytes: int
+    memory_limit_bytes: int
+    memory_percent: float
+    network_rx_bytes: int
+    network_tx_bytes: int
+
+
+class MetricSummary(BaseModel):
+    """Aggregated stats for a time bucket."""
+
+    bucket_start: datetime
+    cpu_avg: float
+    cpu_max: float
+    cpu_min: float
+    memory_usage_avg: int
+    memory_usage_max: int
+    memory_limit_avg: int
+    memory_percent_avg: float
+    memory_percent_max: float
+    network_rx_total: int
+    network_tx_total: int
+
+
+class ContainerUsageEntry(BaseModel):
+    """One container's latest stored usage snapshot (None usage = not running)."""
+
+    container_id: str
+    name: str
+    status: str
+    project_id: uuid.UUID | None
+    project_name: str | None
+    team_name: str | None
+    cpu_percent: float | None
+    memory_usage_bytes: int | None
+    memory_percent: float | None
+
+
+class ProjectUsage(BaseModel):
+    """Latest usage across one project's containers (team or personal)."""
+
+    project_id: uuid.UUID | None
+    project_name: str | None
+    team_name: str | None
+    cpu_percent_total: float
+    memory_usage_bytes_total: int
+    containers: list[ContainerUsageEntry]
+
+
+class UsageSummary(BaseModel):
+    """Latest resource usage for every container the caller can access."""
+
+    projects: list[ProjectUsage]
+    total_cpu_percent: float
+    total_memory_usage_bytes: int
+    running_containers: int

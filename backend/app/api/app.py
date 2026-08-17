@@ -20,6 +20,7 @@ from app.api.routes import (
     dockerfile_templates,
     github,
     images,
+    metrics,
     projects,
     scaling,
     settings,
@@ -181,6 +182,11 @@ def create_app() -> FastAPI:
         stacks.router,
         prefix=f"{API_PREFIX}/stacks",
         tags=["stacks"],
+    )
+    application.include_router(
+        metrics.router,
+        prefix=f"{API_PREFIX}/metrics",
+        tags=["metrics"],
     )
 
     @application.get(f"{API_PREFIX}/health", tags=["health"])
