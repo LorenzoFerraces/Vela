@@ -18,6 +18,8 @@ type WorkloadsTableProps = {
   onStart: (containerId: string) => void
   onStop: (containerId: string) => void
   onRemove: (containerId: string) => void
+  /** Open the per-container resource dashboard. */
+  onViewResources?: (containerId: string) => void
   /** When true, show containers that need attention first (dashboard). */
   prioritizeProblemWorkloads?: boolean
   /** When true, show a stats column with per-instance dropdown (dashboard). */
@@ -71,6 +73,7 @@ export function WorkloadsTable({
   onStart,
   onStop,
   onRemove,
+  onViewResources,
   prioritizeProblemWorkloads = false,
   showStatsColumn = false,
 }: WorkloadsTableProps) {
@@ -290,6 +293,17 @@ export function WorkloadsTable({
                         </button>
                       </td>
                       <td className="containers-table__actions">
+                        {onViewResources ? (
+                          <button
+                            type="button"
+                            className="btn btn--sm btn--ghost"
+                            onClick={() =>
+                              onViewResources(containerRow.id)
+                            }
+                          >
+                            Resources
+                          </button>
+                        ) : null}
                         <button
                           type="button"
                           className="btn btn--sm btn--ghost"

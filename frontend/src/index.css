@@ -2428,6 +2428,11 @@ body {
   height: 0.9rem;
 }
 
+.skeleton--metrics-chart {
+  width: 100%;
+  height: 240px;
+}
+
 @media (min-width: 641px) {
   .skeleton--invite-role {
     width: 8rem;

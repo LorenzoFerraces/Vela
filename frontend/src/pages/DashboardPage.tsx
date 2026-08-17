@@ -1,4 +1,5 @@
 import { useCallback, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import {
   formatApiError,
   removeContainer,
@@ -8,8 +9,10 @@ import {
 import { WorkloadsTable } from '../components/workloads/WorkloadsTable'
 import { useWorkloadGroups } from './containers/useWorkloadGroups'
 import { DeploymentHistorySection } from './containers/DeploymentHistorySection'
+import { ResourceUsagePanel } from './containers/ResourceUsagePanel'
 
 export default function DashboardPage() {
+  const navigate = useNavigate()
   const [banner, setBanner] = useState<{ tone: 'err'; text: string } | null>(
     null,
   )
@@ -21,6 +24,10 @@ export default function DashboardPage() {
   }, [])
 
   const { groups, listLoading, refresh } = useWorkloadGroups(reportListLoadError)
+
+  const onViewResources = useCallback((containerId: string) => {
+    navigate(`/containers/${containerId}/resources`)
+  }, [navigate])
 
   async function onStart(containerId: string) {
     setRowBusy(containerId)
@@ -88,10 +95,12 @@ export default function DashboardPage() {
         onStart={onStart}
         onStop={onStop}
         onRemove={onRemove}
+        onViewResources={onViewResources}
         prioritizeProblemWorkloads
         showStatsColumn
       />
 
+      <ResourceUsagePanel />
       <DeploymentHistorySection refreshSignal={historyRefreshSignal} />
 
       <div className="dashboard-page__actions">

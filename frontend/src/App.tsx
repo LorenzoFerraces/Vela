@@ -13,6 +13,7 @@ import ImagesPage from './pages/ImagesPage'
 import StacksPage from './pages/StacksPage'
 import StackBuilderPage from './pages/stacks/StackBuilderPage'
 import ComposeImportPage from './pages/stacks/ComposeImportPage'
+import ResourceDashboardPage from './pages/ResourceDashboardPage'
 /**
  * Defines the application's client-side routes and layout.
  *
@@ -32,6 +33,14 @@ export default function App() {
           element={
             <RequireAuth>
               <DashboardPage />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/containers/:containerId/resources"
+          element={
+            <RequireAuth>
+              <ResourceDashboardPage />
             </RequireAuth>
           }
         />
