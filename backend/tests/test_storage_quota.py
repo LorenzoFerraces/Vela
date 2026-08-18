@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import (
 )
 from sqlalchemy.pool import StaticPool
 
+from app.core.containers.docker_orchestrator import _inspect_to_container_info
 from app.db.base import Base
 from app.db.models import AlertHistory, Organization, Project, User
 
@@ -75,3 +76,22 @@ async def test_alert_history_container_id_nullable(quota_db: AsyncSession) -> No
         )
     ).scalar_one()
     assert loaded.container_id is None
+
+
+_INSPECT_BASE = {
+    "Id": "abc123",
+    "Name": "/vela-app",
+    "State": {"Status": "running"},
+    "Config": {"Image": "nginx:alpine", "Labels": {}},
+    "Created": "2026-04-01T12:00:00Z",
+}
+
+
+def test_inspect_mapping_reads_size_rw() -> None:
+    info = _inspect_to_container_info({**_INSPECT_BASE, "SizeRw": 4096})
+    assert info.disk_bytes == 4096
+
+
+def test_inspect_mapping_defaults_disk_bytes_to_zero() -> None:
+    info = _inspect_to_container_info(_INSPECT_BASE)
+    assert info.disk_bytes == 0

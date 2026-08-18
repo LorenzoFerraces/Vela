@@ -153,6 +153,10 @@ class ContainerInfo(BaseModel):
     created_at: datetime
     ports: list[PortMapping] = Field(default_factory=list)
     volumes: list[VolumeMount] = Field(default_factory=list)
+    disk_bytes: int = Field(
+        default=0,
+        description="Writable-layer size in bytes from container inspect (SizeRw).",
+    )
     labels: dict[str, str] = Field(default_factory=dict)
     health: HealthStatus = HealthStatus.NONE
     access_url: str | None = Field(

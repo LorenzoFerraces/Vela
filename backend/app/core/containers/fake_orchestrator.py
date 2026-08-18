@@ -81,6 +81,13 @@ class FakeContainerOrchestrator(ContainerOrchestrator):
         """
         self._containers[info.id] = info
 
+    def set_disk_bytes(self, container_id: str, size_bytes: int) -> None:
+        """Set the recorded writable-layer size for a seeded container."""
+        info = self._containers[container_id]
+        self._containers[container_id] = info.model_copy(
+            update={"disk_bytes": size_bytes}
+        )
+
     def set_verify_error(self, image_ref: str, error: Exception) -> None:
         """
         Register a verification handler that causes future verification of the given image reference to raise the provided exception.

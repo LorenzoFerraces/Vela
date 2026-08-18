@@ -257,6 +257,7 @@ def _inspect_to_container_info(data: dict[str, Any]) -> ContainerInfo:
         created_at=_parse_created(data.get("Created", "")),
         ports=_ports_from_inspect(data),
         volumes=_volumes_from_inspect(data),
+        disk_bytes=int(data.get("SizeRw") or 0),
         labels=labels,
         health=health,
         access_url=_access_url_from_route_labels(labels),
