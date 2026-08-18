@@ -176,6 +176,9 @@ class Project(Base):
         index=True,
     )
     name: Mapped[str] = mapped_column(String(255), nullable=False)
+    storage_quota_bytes: Mapped[int | None] = mapped_column(
+        BigInteger, nullable=True
+    )
     is_personal: Mapped[bool] = mapped_column(nullable=False, default=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=_utcnow
@@ -403,7 +406,9 @@ class AlertHistory(Base):
         nullable=False,
         index=True,
     )
-    container_id: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    container_id: Mapped[str | None] = mapped_column(
+        String(128), nullable=True, index=True
+    )
     event_type: Mapped[str] = mapped_column(String(32), nullable=False)
     alert_hash: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     sent_at: Mapped[datetime] = mapped_column(
