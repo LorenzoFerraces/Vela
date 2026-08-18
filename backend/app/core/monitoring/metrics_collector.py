@@ -17,12 +17,21 @@ from app.db.models import ContainerMetric
 
 logger = logging.getLogger(__name__)
 
-METRICS_INTERVAL_SECONDS = int(
-    os.environ.get("VELA_METRICS_INTERVAL_SECONDS", "30").strip()
-)
-METRICS_RETENTION_DAYS = int(
-    os.environ.get("VELA_METRICS_RETENTION_DAYS", "30").strip()
-)
+def _positive_int_setting(setting_name: str, default_value: str) -> int:
+    raw_value = os.environ.get(setting_name)
+    if raw_value is None:
+        return int(default_value)
+    try:
+        value = int(raw_value.strip())
+    except ValueError as exc:
+        raise ValueError(f"{setting_name} must be a positive integer, got {raw_value!r}") from exc
+    if value <= 0:
+        raise ValueError(f"{setting_name} must be a positive integer, got {raw_value!r}")
+    return value
+
+
+METRICS_INTERVAL_SECONDS = _positive_int_setting("VELA_METRICS_INTERVAL_SECONDS", "30")
+METRICS_RETENTION_DAYS = _positive_int_setting("VELA_METRICS_RETENTION_DAYS", "30")
 
 
 async def collect_and_store_once(

@@ -302,8 +302,7 @@ export function ContainersRunAdvancedFields({
             id="cpu-limit-input"
             className="containers-form__input"
             type="number"
-            step="0.1"
-            min="0.1"
+            step="any"
             placeholder="e.g. 0.5"
             value={cpuLimit}
             onChange={(event) => onCpuLimitChange(event.target.value)}

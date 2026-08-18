@@ -17,4 +17,25 @@ test.describe('teams page', () => {
       authenticatedPage.getByRole('button', { name: 'Save' }),
     ).toBeVisible()
   })
+
+  test('saves the project storage quota', async ({ authenticatedPage }) => {
+    await authenticatedPage.goto(`${baseURL}/teams`)
+    const limitInput = authenticatedPage.getByLabel('Limit (GiB)')
+    await expect(limitInput).toBeVisible()
+    await limitInput.fill('2')
+    await authenticatedPage
+      .getByRole('button', { name: 'Save' })
+      .click()
+    await expect(
+      authenticatedPage.getByText('Storage quota updated.'),
+    ).toBeVisible()
+    await expect(
+      authenticatedPage.getByText(/of 2\.0 GiB used/),
+    ).toBeVisible()
+    await authenticatedPage.reload()
+    await expect(limitInput).toHaveValue('2')
+    await expect(
+      authenticatedPage.getByText(/of 2\.0 GiB used/),
+    ).toBeVisible()
+  })
 })

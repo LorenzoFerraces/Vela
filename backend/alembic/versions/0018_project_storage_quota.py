@@ -7,7 +7,7 @@ Create Date: 2026-08-16
 """
 from __future__ import annotations
 
-from typing import Sequence
+from collections.abc import Sequence
 
 from alembic import op
 import sqlalchemy as sa
@@ -33,6 +33,9 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    # Storage alerts persist NULL container_id; delete them so the NOT NULL
+    # restore below succeeds.
+    op.execute("DELETE FROM alert_history WHERE container_id IS NULL")
     with op.batch_alter_table("alert_history") as batch_op:
         batch_op.alter_column(
             "container_id",

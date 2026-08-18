@@ -652,6 +652,34 @@ def test_run_rejects_empty_source(api_client: TestClient) -> None:
     assert response.status_code == 422
 
 
+def test_run_rejects_non_finite_cpu_limit(
+    api_client: TestClient, db_session_factory
+) -> None:
+    import asyncio
+
+    from sqlalchemy import select
+
+    from app.db.models import DeploymentRecord
+
+    # ponytail: httpx can't encode float("inf") via json=; the raw Infinity token still reaches the server validator
+    response = api_client.post(
+        "/api/containers/run",
+        content='{"source_kind": "image", "image_ref": "nginx:alpine", "cpu_limit": Infinity}',
+        headers={"Content-Type": "application/json"},
+    )
+    assert response.status_code == 422
+    assert "Value must be a finite number" in response.text
+
+    async def count_deployments() -> int:
+        async with db_session_factory() as session:
+            rows = (
+                (await session.execute(select(DeploymentRecord))).scalars().all()
+            )
+        return len(rows)
+
+    assert asyncio.run(count_deployments()) == 0
+
+
 def test_run_from_github_uses_stored_token(
     api_client: TestClient,
     db_session_factory,

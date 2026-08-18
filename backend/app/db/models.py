@@ -331,7 +331,8 @@ class EmailPreference(Base):
     email: Mapped[str] = mapped_column(String(320), nullable=False)
     alerts_enabled: Mapped[bool] = mapped_column(nullable=False, default=True)
     alert_types: Mapped[list] = mapped_column(
-        JSON, nullable=False, default=lambda: ["stop", "failure", "unhealthy"]
+        JSON, nullable=False,
+        default=lambda: ["stop", "failure", "unhealthy", "storage"],
     )
     alert_frequency: Mapped[str] = mapped_column(
         String(32), nullable=False, default="immediate"
@@ -597,7 +598,7 @@ class StackComposition(Base):
 class ContainerMetric(Base):
     __tablename__ = "container_metrics"
     __table_args__ = (
-        sa.Index("ix_container_metrics_container_timestamp", "container_id", "timestamp", postgresql_using="btree"),
+        sa.Index("ix_container_metrics_container_timestamp", "container_id", "timestamp"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(

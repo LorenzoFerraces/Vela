@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import uuid
 from datetime import datetime
 
@@ -82,6 +83,13 @@ def default_listen_port_health_check(listen_port: int) -> HealthCheckConfig:
     )
 
 
+def validate_finite_number(value: float | None) -> float | None:
+    """Reject NaN/inf (``gt=0`` already rejects NaN but not infinities)."""
+    if value is not None and not math.isfinite(value):
+        raise ValueError("Value must be a finite number")
+    return value
+
+
 class DeployConfig(BaseModel):
     image: str
     name: str | None = None
@@ -143,6 +151,11 @@ class DeployConfig(BaseModel):
             msg = "route_path_prefix must start with '/'"
             raise ValueError(msg)
         return value
+
+    @field_validator("cpu_limit")
+    @classmethod
+    def cpu_limit_must_be_finite(cls, value: float | None) -> float | None:
+        return validate_finite_number(value)
 
 
 class ContainerInfo(BaseModel):

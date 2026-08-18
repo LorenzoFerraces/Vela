@@ -18,6 +18,7 @@ export default function DashboardPage() {
   )
   const [rowBusy, setRowBusy] = useState<string | null>(null)
   const [historyRefreshSignal, setHistoryRefreshSignal] = useState(0)
+  const [usageRefreshSignal, setUsageRefreshSignal] = useState(0)
 
   const reportListLoadError = useCallback((detail: string) => {
     setBanner({ tone: 'err', text: detail })
@@ -35,6 +36,7 @@ export default function DashboardPage() {
     try {
       await startContainer(containerId)
       await refresh()
+      setUsageRefreshSignal((signal) => signal + 1)
     } catch (error) {
       setBanner({ tone: 'err', text: formatApiError(error) })
     } finally {
@@ -48,6 +50,7 @@ export default function DashboardPage() {
     try {
       await stopContainer(containerId)
       await refresh()
+      setUsageRefreshSignal((signal) => signal + 1)
     } catch (error) {
       setBanner({ tone: 'err', text: formatApiError(error) })
     } finally {
@@ -62,6 +65,7 @@ export default function DashboardPage() {
     try {
       await removeContainer(containerId, true)
       await refresh()
+      setUsageRefreshSignal((signal) => signal + 1)
     } catch (error) {
       setBanner({ tone: 'err', text: formatApiError(error) })
     } finally {
@@ -100,7 +104,7 @@ export default function DashboardPage() {
         showStatsColumn
       />
 
-      <ResourceUsagePanel />
+      <ResourceUsagePanel refreshSignal={usageRefreshSignal} />
       <DeploymentHistorySection refreshSignal={historyRefreshSignal} />
 
       <div className="dashboard-page__actions">
@@ -111,6 +115,7 @@ export default function DashboardPage() {
             setBanner(null)
             void refresh()
             setHistoryRefreshSignal((signal) => signal + 1)
+            setUsageRefreshSignal((signal) => signal + 1)
           }}
           disabled={listLoading}
         >

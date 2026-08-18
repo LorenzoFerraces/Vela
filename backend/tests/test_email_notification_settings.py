@@ -12,7 +12,7 @@ def test_email_notifications_get_defaults(api_client: TestClient) -> None:
     assert response.status_code == 200
     body = response.json()
     assert body["alerts_enabled"] is True
-    assert set(body["alert_types"]) == {"stop", "failure", "unhealthy"}
+    assert set(body["alert_types"]) == {"stop", "failure", "unhealthy", "storage"}
     assert body["alert_frequency"] == "immediate"
     assert body["email"] == "user@example.com"
 

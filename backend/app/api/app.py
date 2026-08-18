@@ -52,17 +52,24 @@ async def _lifespan(_application: FastAPI):
     scaling_task: asyncio.Task[None] | None = None
     try:
         orchestrator = get_orchestrator()
-        traffic_router = get_traffic_router()
-    except (ProviderConnectionError, TrafficRouterError) as exc:
+    except ProviderConnectionError as exc:
         logger.warning(
             "Container provider unavailable at startup (%s); metrics and scaling loops will not run.",
             exc,
         )
     else:
         metrics_task = asyncio.create_task(run_metrics_collector(orchestrator))
-        scaling_task = asyncio.create_task(
-            run_scaling_loop(orchestrator, traffic_router)
-        )
+        try:
+            traffic_router = get_traffic_router()
+        except (ProviderConnectionError, TrafficRouterError) as exc:
+            logger.warning(
+                "Traffic router unavailable at startup (%s); scaling loop will not run.",
+                exc,
+            )
+        else:
+            scaling_task = asyncio.create_task(
+                run_scaling_loop(orchestrator, traffic_router)
+            )
 
     log_collector: LogCollector | None = None
     if COLLECTOR_ENABLED:

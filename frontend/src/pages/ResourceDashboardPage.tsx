@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import {
   formatApiError,
@@ -29,8 +29,12 @@ export default function ResourceDashboardPage() {
 
   const hours = TIME_RANGE_HOURS[timeRange]
 
+  const requestSequence = useRef(0)
+
   const fetchMetrics = useCallback(async () => {
     if (!containerId) return
+    const sequence = requestSequence.current + 1
+    requestSequence.current = sequence
     setLoading(true)
     setError(null)
     try {
@@ -38,12 +42,14 @@ export default function ResourceDashboardPage() {
         getMetricPoints(containerId, { hours }),
         listContainers(),
       ])
+      if (requestSequence.current !== sequence) return
       setMetrics(points)
       setContainerName(containers.find((c) => c.id === containerId)?.name ?? '')
     } catch (err) {
+      if (requestSequence.current !== sequence) return
       setError(formatApiError(err))
     } finally {
-      setLoading(false)
+      if (requestSequence.current === sequence) setLoading(false)
     }
   }, [containerId, hours])
 

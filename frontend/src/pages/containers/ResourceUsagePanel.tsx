@@ -9,10 +9,12 @@ import { formatBytes } from '../../utils/formatBytes'
 import { Skeleton } from '../../components/Skeleton'
 
 function formatGib(bytes: number): string {
-  return `${(bytes / 1024 ** 3).toFixed(1)} GB`
+  return `${(bytes / 1024 ** 3).toFixed(1)} GiB`
 }
 
-export function ResourceUsagePanel() {
+type ResourceUsagePanelProps = { refreshSignal?: number }
+
+export function ResourceUsagePanel({ refreshSignal = 0 }: ResourceUsagePanelProps) {
   const navigate = useNavigate()
   const [summary, setSummary] = useState<UsageSummary | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -29,7 +31,7 @@ export function ResourceUsagePanel() {
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [refreshSignal])
 
   if (error) {
     return (

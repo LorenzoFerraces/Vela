@@ -15,12 +15,13 @@ from sqlalchemy import and_, desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.notifications.email_provider import EmailAlert, EmailProvider
+from app.core.quotas.storage_quota import format_gib
 from app.db.models import AlertHistory, EmailPreference, User
 
 logger = logging.getLogger(__name__)
 
 DEDUP_WINDOW_MINUTES = 10
-DEFAULT_ALERT_TYPES: list[str] = ["stop", "failure", "unhealthy"]
+DEFAULT_ALERT_TYPES: list[str] = ["stop", "failure", "unhealthy", "storage"]
 DEFAULT_ALERT_FREQUENCY = "immediate"
 
 
@@ -172,6 +173,9 @@ class AlertService:
             if effective is None or not effective.alerts_enabled:
                 logger.debug("Alerts disabled for user %s", user_id)
                 return False
+            if "storage" not in effective.alert_types:
+                logger.debug("Storage alerts disabled for user %s", user_id)
+                return False
             if effective.alert_frequency != DEFAULT_ALERT_FREQUENCY:
                 logger.debug(
                     "Skipping storage alert for user %s: frequency %r is not "
@@ -192,8 +196,7 @@ class AlertService:
                 timestamp=datetime.now(timezone.utc),
                 details=(
                     f"Team {project_name} is over its storage quota: "
-                    f"{used_bytes / (1024 ** 3):.1f} GB used of "
-                    f"{quota_bytes / (1024 ** 3):.1f} GB. "
+                    f"{format_gib(used_bytes)} used of {format_gib(quota_bytes)}. "
                     "Stop or remove containers, or free uploaded folders."
                 ),
             )

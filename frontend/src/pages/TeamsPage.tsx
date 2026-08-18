@@ -33,7 +33,7 @@ function formatRoleLabel(role: string): string {
 }
 
 function formatGib(bytes: number): string {
-  return `${(bytes / 1024 ** 3).toFixed(1)} GB`
+  return `${(bytes / 1024 ** 3).toFixed(1)} GiB`
 }
 
 export default function TeamsPage() {
@@ -49,6 +49,7 @@ export default function TeamsPage() {
     null,
   )
   const [quotaInput, setQuotaInput] = useState('')
+  const [quotaError, setQuotaError] = useState<string | null>(null)
   const [pendingInvitations, setPendingInvitations] = useState<ProjectInvitation[]>(
     []
   )
@@ -88,21 +89,31 @@ export default function TeamsPage() {
     const requestId = detailRequestRef.current + 1
     detailRequestRef.current = requestId
     setDetailLoading(true)
+    setQuotaError(null)
+    void getProjectStorageQuota(project.id)
+      .then((quotaRow) => {
+        if (detailRequestRef.current !== requestId) {
+          return
+        }
+        setStorageQuota(quotaRow)
+        setQuotaInput(
+          quotaRow.source === 'team' && quotaRow.quota_bytes !== null
+            ? String(quotaRow.quota_bytes / 1024 ** 3)
+            : '',
+        )
+      })
+      .catch((error) => {
+        if (detailRequestRef.current !== requestId) {
+          return
+        }
+        setQuotaError(formatApiError(error))
+      })
     try {
-      const [memberRows, quotaRow] = await Promise.all([
-        listProjectMembers(project.id),
-        getProjectStorageQuota(project.id),
-      ])
+      const memberRows = await listProjectMembers(project.id)
       if (detailRequestRef.current !== requestId) {
         return
       }
       setMembers(memberRows)
-      setStorageQuota(quotaRow)
-      setQuotaInput(
-        quotaRow.source === 'team' && quotaRow.quota_bytes !== null
-          ? String(quotaRow.quota_bytes / 1024 ** 3)
-          : '',
-      )
       if (project.role === 'owner') {
         const invitationRows = await listProjectInvitations(project.id)
         if (detailRequestRef.current !== requestId) {
@@ -257,7 +268,7 @@ export default function TeamsPage() {
       if (!Number.isFinite(gib) || gib < 1) {
         setBanner({
           tone: 'err',
-          text: 'Enter a limit of at least 1 GB, or clear the field for the platform default.',
+          text: 'Enter a limit of at least 1 GiB, or clear the field for the platform default.',
         })
         return
       }
@@ -546,7 +557,15 @@ export default function TeamsPage() {
                   <section className="teams-page__section">
                     <h3 className="teams-page__section-title">Storage</h3>
                     {storageQuota === null ? (
-                      <p className="teams-page__muted">Loading storage…</p>
+                      quotaError ? (
+                        <p className="teams-page__hint teams-page__hint--err">
+                          {quotaError}
+                        </p>
+                      ) : (
+                        <p className="teams-page__muted">
+                          Loading storage…
+                        </p>
+                      )
                     ) : storageQuota.quota_bytes === null ? (
                       <p className="teams-page__muted">
                         {formatGib(storageQuota.used_bytes)} used · No limit
@@ -588,10 +607,10 @@ export default function TeamsPage() {
                         onSubmit={onSaveQuota}
                       >
                         <label className="teams-page__field">
-                          Limit (GB)
+                          Limit (GiB)
                           <input
                             type="number"
-                            min="0"
+                            min="1"
                             step="0.1"
                             className="teams-page__input"
                             value={quotaInput}

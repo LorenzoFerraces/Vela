@@ -17,6 +17,7 @@ from app.core.containers.fake_orchestrator import FakeContainerOrchestrator
 from app.core.enums import ContainerStatus, HealthStatus
 from app.core.models import ContainerInfo
 from app.core.monitoring.metrics_collector import (
+    _positive_int_setting,
     collect_and_store_once,
     cleanup_expired_metrics,
 )
@@ -96,7 +97,7 @@ async def test_collect_and_store_once_skips_non_vela_containers(
 
 
 async def test_cleanup_expired_metrics_removes_old_rows(
-    db_session_factory, seeded_orchestrator: FakeContainerOrchestrator
+    db_session_factory,
 ) -> None:
     async with db_session_factory() as session:
         old_ts = datetime.now(timezone.utc) - timedelta(days=60)
@@ -141,3 +142,22 @@ async def test_cleanup_expired_metrics_removes_old_rows(
             )
         )
         assert len(result.scalars().all()) == 1
+
+
+def test_positive_int_setting(monkeypatch: pytest.MonkeyPatch) -> None:
+    setting_name = "VELA_TEST_METRIC_SETTING"
+
+    monkeypatch.setenv(setting_name, "not-an-int")
+    with pytest.raises(ValueError, match=setting_name):
+        _positive_int_setting(setting_name, "30")
+
+    for bad_value in ("0", " 0 ", "-30"):
+        monkeypatch.setenv(setting_name, bad_value)
+        with pytest.raises(ValueError, match=setting_name):
+            _positive_int_setting(setting_name, "30")
+
+    monkeypatch.setenv(setting_name, " 5 ")
+    assert _positive_int_setting(setting_name, "30") == 5
+
+    monkeypatch.delenv(setting_name, raising=False)
+    assert _positive_int_setting(setting_name, "30") == 30

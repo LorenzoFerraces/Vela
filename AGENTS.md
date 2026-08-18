@@ -10,6 +10,7 @@ Conventions for tooling, dependencies, naming, and Python style. Follow this fil
 
 - **Prefer subagents for exploratory tasks** — codebase discovery, impact analysis, broad searches, full test runs, anything with large file reads or output. Keep the main session's context lean: dispatch, then read only short summaries or small report files, never large raw output (file dumps, full test logs, long diffs).
 - Multi-task plans are executed with **subagent-driven-development**: one implementer subagent per task plus a task reviewer after each. Hand artifacts (briefs, reports, review diffs) over as **file paths**, never pasted into the main conversation.
+- **One subagent per task, strictly sequential.** Dispatch a single subagent, wait for its result, then dispatch the next. Never run implementing subagents in parallel — they may touch overlapping files and can't see each other's in-flight edits. Keep the todo list current in the main session (mark the active task `in_progress`, mark it `completed` as soon as the subagent's result is verified).
 
 ## Package management (pnpm / npm)
 

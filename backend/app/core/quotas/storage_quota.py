@@ -18,7 +18,6 @@ from app.core.containers.orchestrator import ContainerOrchestrator
 from app.core.containers.volume_uploads import user_uploads_total_bytes
 from app.core.exceptions import TeamStorageQuotaExceededError
 from app.core.models import ContainerInfo
-from app.core.notifications.alert_service import AlertService
 from app.core.notifications.email_provider import EmailProvider
 from app.db.models import Project, ProjectMembership, User
 
@@ -30,7 +29,7 @@ _over_quota_project_ids: set[uuid.UUID] = set()
 
 
 def format_gib(total_bytes: int) -> str:
-    return f"{total_bytes / GIB:.1f} GB"
+    return f"{total_bytes / GIB:.1f} GiB"
 
 
 def environment_quota_bytes() -> int | None:
@@ -205,6 +204,8 @@ async def check_team_storage_quotas(
     State resets on API restart: a team already over quota re-alarms once
     after a restart (same reset behavior as container state-change alerts).
     """
+    from app.core.notifications.alert_service import AlertService
+
     try:
         containers = await orchestrator.list()
     except Exception:

@@ -339,6 +339,13 @@ class DockerOrchestrator(ContainerOrchestrator):
     async def _to_thread(self, fn: Callable[[], T]) -> T:
         return await asyncio.to_thread(fn)
 
+    def _inspect_container_with_size(self, container_id: str) -> dict:
+        # docker-py's high-level inspect omits SizeRw; the raw endpoint supports ?size=1.
+        api = self._client.api
+        url = api._url("/containers/{0}/json", container_id)
+        response = api._get(url, params={"size": 1})
+        return api._result(response, True)
+
     def _assert_managed_labels(self, labels: dict[str, Any], container_id: str) -> None:
         if labels.get(VELA_MANAGED_LABEL) != VELA_MANAGED_VALUE:
             raise ContainerNotFoundError(container_id)
@@ -495,8 +502,7 @@ class DockerOrchestrator(ContainerOrchestrator):
             try:
                 container = self._client.containers.create(config.image, **kwargs)
                 container.start()
-                container.reload()
-                data = container.attrs
+                data = self._inspect_container_with_size(container.id)
             except docker.errors.ImageNotFound as e:
                 raise ImageNotFoundError(
                     config.image, registry_message=_docker_registry_error_text(e)
@@ -531,8 +537,8 @@ class DockerOrchestrator(ContainerOrchestrator):
                     pass
                 else:
                     raise
-            c.reload()
-            return _inspect_to_container_info(c.attrs)
+            data = self._inspect_container_with_size(container_id)
+            return _inspect_to_container_info(data)
 
         try:
             return await self._to_thread(sync)
@@ -559,8 +565,8 @@ class DockerOrchestrator(ContainerOrchestrator):
                 if "is not running" in str(e).lower():
                     raise ContainerNotRunningError(container_id) from e
                 raise
-            c.reload()
-            return _inspect_to_container_info(c.attrs)
+            data = self._inspect_container_with_size(container_id)
+            return _inspect_to_container_info(data)
 
         try:
             return await self._to_thread(sync)
@@ -579,8 +585,8 @@ class DockerOrchestrator(ContainerOrchestrator):
                 raise ContainerNotFoundError(container_id) from e
             self._assert_managed_labels(c.labels or {}, container_id)
             c.restart(timeout=timeout)
-            c.reload()
-            return _inspect_to_container_info(c.attrs)
+            data = self._inspect_container_with_size(container_id)
+            return _inspect_to_container_info(data)
 
         try:
             return await self._to_thread(sync)
@@ -616,7 +622,8 @@ class DockerOrchestrator(ContainerOrchestrator):
             except docker.errors.NotFound as e:
                 raise ContainerNotFoundError(container_id) from e
             self._assert_managed_labels(c.labels or {}, container_id)
-            return _inspect_to_container_info(c.attrs)
+            data = self._inspect_container_with_size(container_id)
+            return _inspect_to_container_info(data)
 
         try:
             return await self._to_thread(sync)
@@ -657,8 +664,8 @@ class DockerOrchestrator(ContainerOrchestrator):
                             continue
                     elif labels.get(VELA_OWNER_LABEL) != str(user_id):
                         continue
-                container.reload()
-                info = _inspect_to_container_info(container.attrs)
+                data = self._inspect_container_with_size(container.id)
+                info = _inspect_to_container_info(data)
                 if status is None or info.status == status:
                     out.append(info)
             return out
@@ -1063,8 +1070,8 @@ class DockerOrchestrator(ContainerOrchestrator):
             )
             out: list[ContainerInfo] = []
             for container in containers:
-                container.reload()
-                out.append(_inspect_to_container_info(container.attrs))
+                data = self._inspect_container_with_size(container.id)
+                out.append(_inspect_to_container_info(data))
             return out
 
         try:

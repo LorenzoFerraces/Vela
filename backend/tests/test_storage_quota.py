@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import uuid
+from collections.abc import Iterator
 from datetime import datetime, timezone
 from typing import Any
 
@@ -145,7 +146,9 @@ def _make_info(
 
 
 @pytest.fixture(autouse=True)
-def _reset_over_quota_state() -> None:
+def _reset_over_quota_state() -> Iterator[None]:
+    storage_quota.reset_over_quota_state()
+    yield
     storage_quota.reset_over_quota_state()
 
 
@@ -560,7 +563,7 @@ async def test_project_storage_alert_sent_and_deduplicated(
             user_id=user.id,
             email="storage-alert@example.com",
             alerts_enabled=True,
-            alert_types=[],
+            alert_types=["storage"],
             alert_frequency="immediate",
         )
     )
@@ -596,6 +599,46 @@ async def test_project_storage_alert_sent_and_deduplicated(
     assert len(rows) == 1
     assert rows[0].container_id is None
     assert rows[0].email_sent_to == "storage-alert@example.com"
+
+
+@pytest.mark.asyncio
+async def test_project_storage_alert_requires_storage_alert_type(
+    quota_db: AsyncSession,
+) -> None:
+    from app.core.notifications.alert_service import AlertService
+    from app.core.notifications.email_provider import ConsoleProvider
+
+    user = User(id=uuid.uuid4(), email="no-storage-alert@example.com")
+    quota_db.add(user)
+    await quota_db.flush()
+    quota_db.add(
+        EmailPreference(
+            user_id=user.id,
+            email="no-storage-alert@example.com",
+            alerts_enabled=True,
+            alert_types=["stop"],
+            alert_frequency="immediate",
+        )
+    )
+    await quota_db.commit()
+
+    service = AlertService(ConsoleProvider(), quota_db)
+    assert (
+        await service.send_project_storage_alert(
+            user_id=user.id,
+            project_id=uuid.uuid4(),
+            project_name="Noisy team",
+            used_bytes=500,
+            quota_bytes=400,
+        )
+        is False
+    )
+    rows = (
+        await quota_db.execute(
+            select(AlertHistory).where(AlertHistory.event_type == "storage")
+        )
+    ).scalars().all()
+    assert rows == []
 
 
 @pytest.mark.asyncio

@@ -1,8 +1,11 @@
 """Map domain exceptions to HTTP responses."""
 
+import json
 import logging
 
 from fastapi import Request, status
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
 logger = logging.getLogger(__name__)
@@ -68,6 +71,18 @@ def _project_error_payload(exc: ProjectError, error_code: str) -> dict[str, str]
     return {"error": error_code, "detail": str(exc)}
 
 
+class _validation_error_response(JSONResponse):
+    # ponytail: pydantic echoes non-finite inputs (inf/nan) into 422 details; starlette's renderer rejects them
+    def render(self, content) -> bytes:
+        return json.dumps(
+            content,
+            ensure_ascii=False,
+            allow_nan=True,
+            indent=None,
+            separators=(",", ":"),
+        ).encode("utf-8")
+
+
 def register_exception_handlers(app) -> None:
     """
     Register exception handlers on a FastAPI application that translate Vela domain errors into JSON HTTP responses.
@@ -77,6 +92,15 @@ def register_exception_handlers(app) -> None:
     Parameters:
         app (FastAPI): The FastAPI application on which to register the exception handlers.
     """
+
+    @app.exception_handler(RequestValidationError)
+    async def request_validation_error_handler(
+        _request: Request, exc: RequestValidationError
+    ) -> JSONResponse:
+        return _validation_error_response(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            content={"detail": jsonable_encoder(exc.errors())},
+        )
 
     @app.exception_handler(ImageNotFoundError)
     async def image_not_found_handler(

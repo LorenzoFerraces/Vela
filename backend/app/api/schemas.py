@@ -25,6 +25,7 @@ from app.core.models import (
     ProjectSource,
     ScalingPolicyConfig,
     ScalingPolicyInfo,
+    validate_finite_number,
 )
 
 
@@ -234,6 +235,11 @@ class RunFromSourceRequest(BaseModel):
             msg = "route_path_prefix must start with '/'"
             raise ValueError(msg)
         return value
+
+    @field_validator("cpu_limit")
+    @classmethod
+    def cpu_limit_must_be_finite(cls, value: float | None) -> float | None:
+        return validate_finite_number(value)
 
     @model_validator(mode="after")
     def validate_source_fields(self) -> RunFromSourceRequest:
@@ -520,7 +526,9 @@ class ProjectStorageQuotaPublic(BaseModel):
 
 
 class ProjectStorageQuotaUpdate(BaseModel):
-    storage_quota_bytes: int | None = Field(default=None, ge=1)
+    storage_quota_bytes: int | None = Field(
+        ..., ge=1, description="Bytes, or null to fall back to the platform default."
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -685,8 +693,8 @@ class EmailNotificationPreferences(BaseModel):
     user_id: uuid.UUID
     email: EmailStr
     alerts_enabled: bool
-    alert_types: list[Literal["stop", "failure", "unhealthy"]] = Field(
-        default=["stop", "failure", "unhealthy"]
+    alert_types: list[Literal["stop", "failure", "unhealthy", "storage"]] = Field(
+        default=["stop", "failure", "unhealthy", "storage"]
     )
     alert_frequency: Literal["immediate", "daily_digest", "weekly_summary"] = Field(
         default="immediate"
@@ -700,7 +708,7 @@ class EmailNotificationPreferencesUpdate(BaseModel):
 
     email: EmailStr | None = None
     alerts_enabled: bool | None = None
-    alert_types: list[Literal["stop", "failure", "unhealthy"]] | None = None
+    alert_types: list[Literal["stop", "failure", "unhealthy", "storage"]] | None = None
     alert_frequency: Literal["immediate", "daily_digest", "weekly_summary"] | None = (
         None
     )
