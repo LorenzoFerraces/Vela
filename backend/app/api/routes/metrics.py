@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import logging
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Annotated
@@ -39,8 +38,6 @@ from app.db.models import (
     Project,
     User,
 )
-
-logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
