@@ -861,6 +861,7 @@ export type Project = {
   is_personal: boolean
   role: ProjectRole
   owner_email: string
+  storage_quota_bytes: number | null
 }
 
 export type ProjectMember = {
@@ -887,8 +888,35 @@ export type IncomingProjectInvitation = {
   created_at: string
 }
 
+export type ProjectStorageQuota = {
+  quota_bytes: number | null
+  used_bytes: number
+  container_disk_bytes: number
+  uploads_bytes: number
+  over_quota: boolean
+  source: 'team' | 'platform' | 'unlimited'
+}
+
 export async function listProjects(): Promise<Project[]> {
   return apiGet<Project[]>('/api/projects/')
+}
+
+export async function getProjectStorageQuota(
+  projectId: string,
+): Promise<ProjectStorageQuota> {
+  return apiGet<ProjectStorageQuota>(
+    `/api/projects/${encodeURIComponent(projectId)}/storage-quota`,
+  )
+}
+
+export async function updateProjectStorageQuota(
+  projectId: string,
+  storageQuotaBytes: number | null,
+): Promise<ProjectStorageQuota> {
+  return apiPatch<ProjectStorageQuota, { storage_quota_bytes: number | null }>(
+    `/api/projects/${encodeURIComponent(projectId)}/storage-quota`,
+    { storage_quota_bytes: storageQuotaBytes },
+  )
 }
 
 export async function createProject(name: string): Promise<Project> {

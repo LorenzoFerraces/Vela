@@ -6,6 +6,7 @@ import {
   createProject,
   createProjectInvitation,
   formatApiError,
+  getProjectStorageQuota,
   leaveProject,
   listIncomingInvitations,
   listProjectInvitations,
@@ -15,9 +16,11 @@ import {
   type Project,
   type ProjectInvitation,
   type ProjectMember,
+  type ProjectStorageQuota,
   rejectProjectInvitation,
   removeProjectMember,
   updateProjectMemberRole,
+  updateProjectStorageQuota,
 } from '../api/client'
 import { TeamDetailSkeleton, TeamsPageSkeleton } from '../components/Skeleton'
 
@@ -29,6 +32,10 @@ function formatRoleLabel(role: string): string {
   return role.charAt(0).toUpperCase() + role.slice(1)
 }
 
+function formatGib(bytes: number): string {
+  return `${(bytes / 1024 ** 3).toFixed(1)} GB`
+}
+
 export default function TeamsPage() {
   const { projectId: routeProjectId } = useParams<{ projectId?: string }>()
   const navigate = useNavigate()
@@ -38,6 +45,10 @@ export default function TeamsPage() {
     IncomingProjectInvitation[]
   >([])
   const [members, setMembers] = useState<ProjectMember[]>([])
+  const [storageQuota, setStorageQuota] = useState<ProjectStorageQuota | null>(
+    null,
+  )
+  const [quotaInput, setQuotaInput] = useState('')
   const [pendingInvitations, setPendingInvitations] = useState<ProjectInvitation[]>(
     []
   )
@@ -78,11 +89,20 @@ export default function TeamsPage() {
     detailRequestRef.current = requestId
     setDetailLoading(true)
     try {
-      const memberRows = await listProjectMembers(project.id)
+      const [memberRows, quotaRow] = await Promise.all([
+        listProjectMembers(project.id),
+        getProjectStorageQuota(project.id),
+      ])
       if (detailRequestRef.current !== requestId) {
         return
       }
       setMembers(memberRows)
+      setStorageQuota(quotaRow)
+      setQuotaInput(
+        quotaRow.source === 'team' && quotaRow.quota_bytes !== null
+          ? String(quotaRow.quota_bytes / 1024 ** 3)
+          : '',
+      )
       if (project.role === 'owner') {
         const invitationRows = await listProjectInvitations(project.id)
         if (detailRequestRef.current !== requestId) {
@@ -215,6 +235,30 @@ export default function TeamsPage() {
         text: 'Invitation sent — they must accept it on the Teams page.',
       })
       await refreshSelectedTeamDetail()
+    } catch (error) {
+      setBanner({ tone: 'err', text: formatApiError(error) })
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function onSaveQuota(event: React.FormEvent) {
+    event.preventDefault()
+    if (!selectedProject) {
+      return
+    }
+    setBusy(true)
+    setBanner(null)
+    try {
+      const trimmed = quotaInput.trim()
+      const bytes =
+        trimmed === '' ? null : Math.round(parseFloat(trimmed) * 1024 ** 3)
+      const updated = await updateProjectStorageQuota(
+        selectedProject.id,
+        bytes,
+      )
+      setStorageQuota(updated)
+      setBanner({ tone: 'ok', text: 'Storage quota updated.' })
     } catch (error) {
       setBanner({ tone: 'err', text: formatApiError(error) })
     } finally {
@@ -487,6 +531,75 @@ export default function TeamsPage() {
                 <TeamDetailSkeleton showInviteSection={isSelectedOwner} />
               ) : (
                 <>
+                  <section className="teams-page__section">
+                    <h3 className="teams-page__section-title">Storage</h3>
+                    {storageQuota === null ? (
+                      <p className="teams-page__muted">Loading storage…</p>
+                    ) : storageQuota.quota_bytes === null ? (
+                      <p className="teams-page__muted">
+                        {formatGib(storageQuota.used_bytes)} used · No limit
+                      </p>
+                    ) : (
+                      <>
+                        <p className="teams-page__muted">
+                          {formatGib(storageQuota.used_bytes)} of{' '}
+                          {formatGib(storageQuota.quota_bytes)} used
+                        </p>
+                        <div className="teams-page__storage-bar">
+                          <div
+                            className={
+                              storageQuota.over_quota
+                                ? 'teams-page__storage-bar-fill teams-page__storage-bar-fill--over'
+                                : 'teams-page__storage-bar-fill'
+                            }
+                            style={{
+                              width: `${Math.min(
+                                100,
+                                (storageQuota.used_bytes /
+                                  storageQuota.quota_bytes) *
+                                  100,
+                              )}%`,
+                            }}
+                          />
+                        </div>
+                        {storageQuota.over_quota ? (
+                          <p className="teams-page__hint teams-page__hint--err">
+                            Over quota — new deployments are blocked until
+                            storage drops below the limit.
+                          </p>
+                        ) : null}
+                      </>
+                    )}
+                    {isSelectedOwner ? (
+                      <form
+                        className="teams-page__quota-form"
+                        onSubmit={onSaveQuota}
+                      >
+                        <label className="teams-page__field">
+                          Limit (GB)
+                          <input
+                            type="number"
+                            min="0"
+                            step="0.1"
+                            className="teams-page__input"
+                            value={quotaInput}
+                            disabled={busy}
+                            onChange={(event) =>
+                              setQuotaInput(event.target.value)
+                            }
+                            placeholder="Platform default"
+                          />
+                        </label>
+                        <button
+                          type="submit"
+                          className="btn btn--primary"
+                          disabled={busy}
+                        >
+                          Save
+                        </button>
+                      </form>
+                    ) : null}
+                  </section>
                   <section className="teams-page__section">
                     <h3 className="teams-page__section-title">Members</h3>
                     {members.length === 0 ? (
