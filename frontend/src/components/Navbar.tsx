@@ -10,6 +10,8 @@ const navItems = [
   { to: '/stacks', label: 'Stacks' },
   { to: '/builder', label: 'Builder' },
   { to: '/teams', label: 'Teams' },
+  { to: '/logs', label: 'Logs' },
+  { to: '/audit', label: 'Audit Log' },
   { to: '/settings', label: 'Settings' },
 ] as const
 

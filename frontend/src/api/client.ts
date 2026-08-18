@@ -513,11 +513,11 @@ export interface ImageSuggestion {
 export type DeploySourceSuggestion =
   | { kind: 'image'; ref: string; label: string }
   | {
-      kind: 'git'
-      url: string
-      name: string
-      default_branch: string
-    }
+    kind: 'git'
+    url: string
+    name: string
+    default_branch: string
+  }
   | { kind: 'dockerfile_template'; id: string; name: string }
 
 /**
@@ -669,6 +669,46 @@ export function openContainerLogWebSocket(
   }
   const path = `/api/containers/${encodeURIComponent(containerId)}/logs/stream?${params.toString()}`
   return new WebSocket(getApiWebSocketUrl(path))
+}
+
+export interface ExecWebSocketHandle {
+  send: (data: string | Uint8Array) => void
+  dispose: () => void
+}
+
+export function openContainerExecWebSocket(
+  containerId: string,
+  onOpen: () => void,
+  onMessage: (data: Uint8Array) => void,
+  onClose: () => void,
+  onError: () => void,
+): ExecWebSocketHandle {
+  const token = getAccessToken()
+  if (!token) {
+    throw new Error('Sign in to open a terminal.')
+  }
+  const params = new URLSearchParams({ access_token: token })
+  const path = `/api/containers/${encodeURIComponent(containerId)}/exec/ws?${params.toString()}`
+  const ws = new WebSocket(getApiWebSocketUrl(path))
+  ws.binaryType = 'arraybuffer'
+
+  ws.onopen = () => onOpen()
+  ws.onmessage = (event) => {
+    const data =
+      typeof event.data === 'string'
+        ? new TextEncoder().encode(event.data)
+        : new Uint8Array(event.data)
+    onMessage(data)
+  }
+  ws.onclose = () => onClose()
+  ws.onerror = () => onError()
+
+  return {
+    send: (data) => {
+      if (ws.readyState === WebSocket.OPEN) ws.send(data)
+    },
+    dispose: () => ws.close(),
+  }
 }
 
 export async function fetchContainerLogs(
@@ -1417,6 +1457,117 @@ export async function listGithubRepoBranches(
   return apiGet<GithubBranch[]>(`/api/github/repos/${owner}/${repo}/branches`)
 }
 
+// --- Log aggregation ---
+
+export type LogEntry = {
+  container_id: string
+  container_name: string | null
+  timestamp: string
+  source: 'stdout' | 'stderr'
+  level: 'info' | 'warn' | 'error' | 'debug'
+  message: string
+}
+
+export type LogQueryResponse = {
+  entries: LogEntry[]
+  total: number
+}
+
+export type LogQueryParams = {
+  container_id?: string
+  level?: string
+  source?: string
+  start_time?: string
+  end_time?: string
+  q?: string
+  limit?: number
+  offset?: number
+}
+
+export async function getLogs(
+  params: LogQueryParams = {}
+): Promise<LogQueryResponse> {
+  const searchParams = new URLSearchParams()
+  for (const [key, value] of Object.entries(params)) {
+    if (value !== undefined && value !== null) {
+      searchParams.set(key, String(value))
+    }
+  }
+  const query = searchParams.toString()
+  return apiGet<LogQueryResponse>(
+    query ? `/api/logs/?${query}` : '/api/logs/'
+  )
+}
+
+export async function exportLogs(params: Partial<LogQueryParams> = {}) {
+  const searchParams = new URLSearchParams()
+  for (const [key, value] of Object.entries(params)) {
+    if (value !== undefined && value !== null) {
+      searchParams.set(key, String(value))
+    }
+  }
+  const url = `${getApiBaseUrl()}/api/logs/export?${searchParams.toString()}`
+  const headers = new Headers({ Accept: 'text/csv' })
+  const token = getAccessToken()
+  if (token) {
+    headers.set('Authorization', `Bearer ${token}`)
+  }
+  const response = await fetch(url, { headers })
+  if (!response.ok) {
+    throw new ApiError(
+      `Export failed: ${response.status} ${response.statusText}`,
+      response.status,
+      await response.text()
+    )
+  }
+  const blob = await response.blob()
+  const link = document.createElement('a')
+  link.href = URL.createObjectURL(blob)
+  link.download = 'container-logs.csv'
+  link.click()
+  URL.revokeObjectURL(link.href)
+}
+
+// --- Audit log ---
+
+export type AuditLogEntry = {
+  id: string
+  user_id: string
+  action: string
+  target_type: string
+  target_id: string
+  details: Record<string, unknown> | null
+  created_at: string
+}
+
+export type AuditLogResponse = {
+  entries: AuditLogEntry[]
+  total: number
+}
+
+export type AuditLogQueryParams = {
+  action?: string
+  target_type?: string
+  from_date?: string
+  to_date?: string
+  limit?: number
+  offset?: number
+}
+
+export async function getAuditLog(
+  params: AuditLogQueryParams = {}
+): Promise<AuditLogResponse> {
+  const searchParams = new URLSearchParams()
+  for (const [key, value] of Object.entries(params)) {
+    if (value !== undefined && value !== null) {
+      searchParams.set(key, String(value))
+    }
+  }
+  const query = searchParams.toString()
+  return apiGet<AuditLogResponse>(
+    query ? `/api/audit/log?${query}` : '/api/audit/log'
+  )
+}
 // ---------------------------------------------------------------------------
 // Stacks
 // ---------------------------------------------------------------------------

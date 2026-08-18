@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import re
 import sys
@@ -36,6 +37,8 @@ from app.core.models import (
     VolumeMount,
 )
 from app.core.traffic.public_route_host import build_public_url
+
+logger = logging.getLogger(__name__)
 
 VELA_MANAGED_LABEL = "vela.managed"
 VELA_MANAGED_VALUE = "true"
@@ -667,14 +670,14 @@ class DockerOrchestrator(ContainerOrchestrator):
         except docker.errors.DockerException as e:
             raise ProviderConnectionError(str(e)) from e
 
-    async def logs(self, container_id: str, *, tail: int = 100) -> str:
+    async def logs(self, container_id: str, *, tail: int | None = 100, since: float | None = None) -> str:
         def sync() -> str:
             try:
                 c = self._client.containers.get(container_id)
             except docker.errors.NotFound as e:
                 raise ContainerNotFoundError(container_id) from e
             self._assert_managed_labels(c.labels or {}, container_id)
-            raw = c.logs(tail=tail, stdout=True, stderr=True)
+            raw = c.logs(tail=tail, since=since, stdout=True, stderr=True)
             if isinstance(raw, bytes):
                 return raw.decode(errors="replace")
             return str(raw)
@@ -760,6 +763,86 @@ class DockerOrchestrator(ContainerOrchestrator):
                     raise exc
         finally:
             self._log_stream_semaphore.release()
+
+    def stream_exec(
+        self,
+        container_id: str,
+        cols: int = 80,
+        rows: int = 24,
+    ) -> tuple[AsyncIterator[bytes], Callable[[bytes], None], Callable[[], None], str]:
+        container = self._client.containers.get(container_id)
+        self._assert_managed_labels(container.labels or {}, container_id)
+        exec_id = self._client.api.exec_create(
+            container_id,
+            cmd=["sh"],
+            stdin=True,
+            stdout=True,
+            stderr=True,
+            tty=True,
+            workdir="/",
+            environment=["TERM=xterm-256color", f"COLUMNS={cols}", f"LINES={rows}"],
+        )["Id"]
+        exec_runtime = self._client.api.exec_start(exec_id, socket=True, tty=True, demux=True)
+
+        loop = asyncio.get_running_loop()
+        queue: asyncio.Queue[bytes | None] = asyncio.Queue(maxsize=64)
+        closed = threading.Event()
+
+        def _reader() -> None:
+            try:
+                while not closed.is_set():
+                    chunk = exec_runtime.read(4096)
+                    if not chunk:
+                        break
+                    try:
+                        asyncio.run_coroutine_threadsafe(queue.put(chunk), loop).result(timeout=30)
+                    except (TimeoutError, RuntimeError):
+                        logger.warning(
+                            "exec reader stalled on backpressure for %s; closing reader",
+                            container_id,
+                        )
+                        break
+            except Exception as exc:
+                logger.warning("exec reader error for %s: %s", container_id, exc)
+            finally:
+                try:
+                    asyncio.run_coroutine_threadsafe(queue.put(None), loop).result(timeout=5)
+                except Exception:
+                    pass
+                exec_runtime.close()
+
+        threading.Thread(target=_reader, daemon=True, name="vela-exec-reader").start()
+
+        def _write(data: bytes) -> None:
+            if not closed.is_set():
+                try:
+                    exec_runtime.write(data)
+                except Exception as exc:
+                    logger.warning("exec write error for %s: %s", container_id, exc)
+
+        def _close() -> None:
+            if not closed.is_set():
+                closed.set()
+                exec_runtime.close()
+
+        async def _stdout_iterator() -> AsyncIterator[bytes]:
+            try:
+                while True:
+                    item = await queue.get()
+                    if item is None:
+                        break
+                    yield item
+            except asyncio.CancelledError:
+                _close()
+                raise
+
+        return _stdout_iterator(), _write, _close, exec_id
+
+    def resize_exec(self, container_id: str, exec_id: str, cols: int, rows: int) -> None:
+        try:
+            self._client.api.exec_resize(exec_id, height=rows, width=cols)
+        except Exception as exc:
+            logger.warning("exec resize error for %s: %s", container_id, exc)
 
     async def get_stats(self, container_id: str) -> ContainerStats:
         def sync() -> ContainerStats:

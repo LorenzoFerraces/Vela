@@ -91,6 +91,10 @@ Create `backend/.env` as needed. Common variables:
 | `VELA_LOG_LEVEL` | App + uvicorn log level: `DEBUG`, `INFO`, `WARNING`, `ERROR` (default `INFO`) |
 | `VELA_CONTAINER_MONITOR_INTERVAL_SECONDS` | Container alert poll interval in seconds (default `15`) |
 | `VELA_TEAM_STORAGE_QUOTA_BYTES` | Per-team storage quota in bytes (unset = unlimited; a team setting can only restrict it) |
+| `VELA_LOG_COLLECTOR_ENABLED` | Background log collector; set `0` to disable (default: enabled) |
+| `VELA_LOG_COLLECTOR_INTERVAL_SECONDS` | Log collector poll interval in seconds (default `5`) |
+| `VELA_LOG_MAX_LINES_PER_POLL` | Max log lines pulled per container per poll (default `2000`) |
+| `VELA_EXEC_MAX_SESSION_SECONDS` | Max live exec terminal session length in seconds (default `3600`) |
 
 ```powershell
 python run.py

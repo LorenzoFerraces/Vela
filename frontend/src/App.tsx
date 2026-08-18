@@ -10,6 +10,8 @@ import SettingsPage from './pages/SettingsPage'
 import TeamsPage from './pages/TeamsPage'
 import BuilderPage from './pages/BuilderPage'
 import ImagesPage from './pages/ImagesPage'
+import LogsPage from './pages/LogsPage'
+import AuditLogPage from './pages/AuditLogPage'
 import StacksPage from './pages/StacksPage'
 import StackBuilderPage from './pages/stacks/StackBuilderPage'
 import ComposeImportPage from './pages/stacks/ComposeImportPage'
@@ -81,6 +83,22 @@ export default function App() {
           element={
             <RequireAuth>
               <SettingsPage />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/logs"
+          element={
+            <RequireAuth>
+              <LogsPage />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/audit"
+          element={
+            <RequireAuth>
+              <AuditLogPage />
             </RequireAuth>
           }
         />
