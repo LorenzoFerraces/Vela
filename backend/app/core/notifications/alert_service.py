@@ -158,6 +158,68 @@ class AlertService:
             logger.exception("Error sending alert for user %s", user_id)
             return False
 
+    async def send_project_storage_alert(
+        self,
+        user_id: uuid.UUID,
+        project_id: uuid.UUID,
+        project_name: str,
+        used_bytes: int,
+        quota_bytes: int,
+    ) -> bool:
+        """Send a team storage over-quota alert if notifications are enabled."""
+        try:
+            effective = await self._resolve_effective_preferences(user_id)
+            if effective is None or not effective.alerts_enabled:
+                logger.debug("Alerts disabled for user %s", user_id)
+                return False
+            if effective.alert_frequency != DEFAULT_ALERT_FREQUENCY:
+                logger.debug(
+                    "Skipping storage alert for user %s: frequency %r is not "
+                    "supported yet",
+                    user_id,
+                    effective.alert_frequency,
+                )
+                return False
+
+            event_key = f"project:{project_id}"
+            if not await self._should_send_alert(user_id, event_key, "storage"):
+                return False
+
+            alert = EmailAlert(
+                to=effective.email,
+                container_name=project_name,
+                event_type="storage",
+                timestamp=datetime.now(timezone.utc),
+                details=(
+                    f"Team {project_name} is over its storage quota: "
+                    f"{used_bytes / (1024 ** 3):.1f} GB used of "
+                    f"{quota_bytes / (1024 ** 3):.1f} GB. "
+                    "Stop or remove containers, or free uploaded folders."
+                ),
+            )
+            success = await self.email_provider.send_alert(alert)
+            if not success:
+                return False
+
+            self.session.add(
+                AlertHistory(
+                    user_id=user_id,
+                    container_id=None,
+                    event_type="storage",
+                    alert_hash=self._hash_event(user_id, event_key, "storage"),
+                    sent_at=datetime.now(timezone.utc),
+                    email_sent_to=effective.email,
+                    status="sent",
+                )
+            )
+            await self.session.commit()
+            return True
+        except Exception:
+            logger.exception(
+                "Error sending project storage alert for user %s", user_id
+            )
+            return False
+
     async def get_recent_alerts(
         self, user_id: uuid.UUID, container_id: str | None = None, limit: int = 10
     ) -> list[AlertHistory]:

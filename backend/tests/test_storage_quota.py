@@ -471,3 +471,168 @@ def test_patch_storage_quota_forbidden_for_non_owner(db_app: Any) -> None:
             json={"storage_quota_bytes": _GB},
         )
         assert response.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_check_team_storage_quotas_alerts_rising_edge_once(
+    quota_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app.core.notifications.alert_service import AlertService
+    from app.core.notifications.email_provider import ConsoleProvider
+
+    organization = Organization(name="alert org")
+    quota_db.add(organization)
+    await quota_db.flush()
+    project = Project(
+        organization_id=organization.id,
+        name="Alert team",
+        storage_quota_bytes=400,
+    )
+    quota_db.add(project)
+    await quota_db.flush()
+    member = User(id=uuid.uuid4(), email="alert-member@example.com")
+    quota_db.add(member)
+    await quota_db.flush()
+    quota_db.add(
+        ProjectMembership(project_id=project.id, user_id=member.id, role="owner")
+    )
+    await quota_db.commit()
+    monkeypatch.setattr(storage_quota, "user_uploads_total_bytes", lambda user_id: 0)
+
+    orchestrator = FakeContainerOrchestrator()
+    container = _make_info(project.id, 100, member.id)
+    orchestrator.seed_container(container)
+    orchestrator.set_disk_bytes(container.id, 500)
+
+    # Patch AlertService so the test asserts on dispatch decisions, not email I/O.
+    dispatched: list[tuple[uuid.UUID, uuid.UUID]] = []
+
+    async def fake_send(
+        self: AlertService,
+        user_id: uuid.UUID,
+        project_id: uuid.UUID,
+        project_name: str,
+        used_bytes: int,
+        quota_bytes: int,
+    ) -> bool:
+        dispatched.append((user_id, project_id))
+        return True
+
+    monkeypatch.setattr(
+        AlertService, "send_project_storage_alert", fake_send, raising=True
+    )
+
+    await storage_quota.check_team_storage_quotas(
+        quota_db, orchestrator, ConsoleProvider()
+    )
+    assert storage_quota.currently_over_quota_projects() == frozenset(
+        {project.id}
+    )
+    assert dispatched == [(member.id, project.id)]
+
+    # Second pass while still over: no duplicate dispatch.
+    await storage_quota.check_team_storage_quotas(
+        quota_db, orchestrator, ConsoleProvider()
+    )
+    assert dispatched == [(member.id, project.id)]
+
+    # Back under the limit clears the over-quota state.
+    orchestrator.set_disk_bytes(container.id, 100)
+    await storage_quota.check_team_storage_quotas(
+        quota_db, orchestrator, ConsoleProvider()
+    )
+    assert project.id not in storage_quota.currently_over_quota_projects()
+
+
+@pytest.mark.asyncio
+async def test_project_storage_alert_sent_and_deduplicated(
+    quota_db: AsyncSession,
+) -> None:
+    from app.core.notifications.email_provider import ConsoleProvider
+
+    from app.core.notifications.alert_service import AlertService
+
+    user = User(id=uuid.uuid4(), email="storage-alert@example.com")
+    quota_db.add(user)
+    await quota_db.flush()
+    quota_db.add(
+        EmailPreference(
+            user_id=user.id,
+            email="storage-alert@example.com",
+            alerts_enabled=True,
+            alert_types=[],
+            alert_frequency="immediate",
+        )
+    )
+    await quota_db.commit()
+
+    service = AlertService(ConsoleProvider(), quota_db)
+    project_id = uuid.uuid4()
+    assert (
+        await service.send_project_storage_alert(
+            user_id=user.id,
+            project_id=project_id,
+            project_name="Alert team",
+            used_bytes=500,
+            quota_bytes=400,
+        )
+        is True
+    )
+    assert (
+        await service.send_project_storage_alert(
+            user_id=user.id,
+            project_id=project_id,
+            project_name="Alert team",
+            used_bytes=500,
+            quota_bytes=400,
+        )
+        is False
+    )
+    rows = (
+        await quota_db.execute(
+            select(AlertHistory).where(AlertHistory.event_type == "storage")
+        )
+    ).scalars().all()
+    assert len(rows) == 1
+    assert rows[0].container_id is None
+    assert rows[0].email_sent_to == "storage-alert@example.com"
+
+
+@pytest.mark.asyncio
+async def test_project_storage_alert_respects_disabled_notifications(
+    quota_db: AsyncSession,
+) -> None:
+    from app.core.notifications.alert_service import AlertService
+    from app.core.notifications.email_provider import ConsoleProvider
+
+    user = User(id=uuid.uuid4(), email="quiet@example.com")
+    quota_db.add(user)
+    await quota_db.flush()
+    quota_db.add(
+        EmailPreference(
+            user_id=user.id,
+            email="quiet@example.com",
+            alerts_enabled=False,
+            alert_types=["stop"],
+            alert_frequency="immediate",
+        )
+    )
+    await quota_db.commit()
+
+    service = AlertService(ConsoleProvider(), quota_db)
+    assert (
+        await service.send_project_storage_alert(
+            user_id=user.id,
+            project_id=uuid.uuid4(),
+            project_name="Quiet team",
+            used_bytes=500,
+            quota_bytes=400,
+        )
+        is False
+    )
+    rows = (
+        await quota_db.execute(
+            select(AlertHistory).where(AlertHistory.event_type == "storage")
+        )
+    ).scalars().all()
+    assert rows == []
