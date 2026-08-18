@@ -336,3 +336,28 @@ def test_disabled_does_nothing() -> None:
     asyncio.run(collector.poll_once())
     assert _log_rows(factory) == []
     assert orchestrator.log_calls == []
+
+
+def test_default_session_factory_inserts_logs(
+    db_session_factory: async_sessionmaker[AsyncSession],
+    monkeypatch,
+) -> None:
+    """Production wiring passes no session_factory; the collector must resolve
+    the module-level factory itself (regression: async_sessionmaker was used
+    as an async context manager, TypeError on every poll)."""
+    factory = db_session_factory
+    monkeypatch.setattr(
+        "app.core.logging.collector.get_session_factory", lambda: factory
+    )
+    clock = _StubClock()
+    orchestrator = StubOrchestrator(clock)
+    orchestrator.add("c1", "l1")
+    collector = LogCollector(orchestrator, poll_interval=0, clock=clock)
+
+    async def run() -> None:
+        await collector.poll_once()
+        orchestrator.add("c1", "l2")
+        await collector.poll_once()
+
+    asyncio.run(run())
+    assert [row.message for row in _log_rows(factory)] == ["l2"]

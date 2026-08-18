@@ -78,7 +78,7 @@ class LogCollector:
         clock: Callable[[], float] | None = None,
     ) -> None:
         self._orchestrator = orchestrator
-        self._session_factory = session_factory or get_session_factory
+        self._session_factory = session_factory or get_session_factory()
         self._enabled = enabled
         self._poll_interval = float(
             COLLECT_INTERVAL if poll_interval is None else poll_interval
