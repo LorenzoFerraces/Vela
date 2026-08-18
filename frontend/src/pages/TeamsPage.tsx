@@ -247,12 +247,24 @@ export default function TeamsPage() {
     if (!selectedProject) {
       return
     }
-    setBusy(true)
     setBanner(null)
+    const trimmed = quotaInput.trim()
+    let bytes: number | null
+    if (trimmed === '') {
+      bytes = null
+    } else {
+      const gib = Number(trimmed)
+      if (!Number.isFinite(gib) || gib < 1) {
+        setBanner({
+          tone: 'err',
+          text: 'Enter a limit of at least 1 GB, or clear the field for the platform default.',
+        })
+        return
+      }
+      bytes = Math.round(gib * 1024 ** 3)
+    }
+    setBusy(true)
     try {
-      const trimmed = quotaInput.trim()
-      const bytes =
-        trimmed === '' ? null : Math.round(parseFloat(trimmed) * 1024 ** 3)
       const updated = await updateProjectStorageQuota(
         selectedProject.id,
         bytes,

@@ -118,10 +118,23 @@ export function formatApiError(
   }
   try {
     const parsed = JSON.parse(error.body) as {
-      detail?: string
+      detail?: string | Array<string | { msg?: string; message?: string }>
       build_log?: string
     }
-    const detail = parsed.detail ?? error.message
+    let detail: string
+    if (typeof parsed.detail === 'string') {
+      detail = parsed.detail
+    } else if (Array.isArray(parsed.detail)) {
+      detail =
+        parsed.detail
+          .map((item) =>
+            typeof item === 'string' ? item : item.msg ?? item.message ?? '',
+          )
+          .filter(Boolean)
+          .join('; ') || error.message
+    } else {
+      detail = error.message
+    }
     if (parsed.build_log) {
       return `${detail}\n\n${parsed.build_log.slice(-2000)}`
     }
