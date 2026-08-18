@@ -88,6 +88,7 @@ from app.core.exceptions import (
     ProjectAccessDeniedError,
     ProviderConnectionError,
     RegistryAccessDeniedError,
+    TeamStorageQuotaExceededError,
     VolumeUploadQuotaExceededError,
     VolumeUploadTooLargeError,
 )
@@ -102,6 +103,12 @@ from app.core.models import (
     VolumeMount,
 )
 from app.core.oauth import decrypt_identity_token, get_github_identity
+from app.core.quotas import (
+    effective_quota_bytes,
+    enforce_team_storage_capacity,
+    format_gib,
+    team_storage_usage,
+)
 from app.core.projects.access import (
     list_accessible_project_ids,
     membership_role_for_container,
@@ -115,7 +122,7 @@ from app.core.traffic.public_route_host import (
     read_public_route_settings,
 )
 from app.core.traffic.traffic_router import TrafficRouter
-from app.db.models import User
+from app.db.models import Project, User
 
 logger = logging.getLogger(__name__)
 
@@ -597,6 +604,7 @@ async def deploy(
     project_id = await _resolve_deploy_project_id_for_config(
         session, current_user, config.project_id
     )
+    await enforce_team_storage_capacity(session, orchestrator, project_id)
     config = _apply_deploy_labels(
         config,
         owner_id=str(current_user.id),
@@ -616,7 +624,9 @@ async def deploy(
 @router.post("/volume-uploads", response_model=VolumeUploadResponse)
 async def upload_volume_folder(
     files: Annotated[list[UploadFile], File(...)],
+    orchestrator: Annotated[ContainerOrchestrator, Depends(get_orchestrator)],
     current_user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[AsyncSession, Depends(get_db)],
 ) -> VolumeUploadResponse:
     """Upload a local folder for read-only volume mounts (max 100 MB per folder)."""
     if not files:
@@ -652,6 +662,25 @@ async def upload_volume_folder(
                 "Use a smaller folder or remove unused uploads."
             )
         payloads.append((relative_path, content))
+
+    personal_project_id = await get_personal_project_id(session, current_user)
+    personal_project = await session.get(Project, personal_project_id)
+    team_quota = (
+        effective_quota_bytes(personal_project)
+        if personal_project is not None
+        else None
+    )
+    if team_quota is not None:
+        disk_bytes, uploads_bytes = await team_storage_usage(
+            session, orchestrator, personal_project_id
+        )
+        used_bytes = disk_bytes + uploads_bytes
+        if used_bytes + total_bytes > team_quota:
+            raise TeamStorageQuotaExceededError(
+                f"Upload would exceed the team's {format_gib(team_quota)} "
+                f"storage quota ({format_gib(used_bytes)} used). "
+                "Use a smaller folder or remove unused uploads."
+            )
 
     upload_id, folder_name, saved_bytes, file_count = save_volume_upload(
         current_user.id,
@@ -694,6 +723,7 @@ async def run_from_user_source(
         raise ValueError("source_kind must be set after request validation.")
 
     project_id = await _resolve_deploy_project_id(session, current_user, body)
+    await enforce_team_storage_capacity(session, orchestrator, project_id)
     resolved_volumes = _resolve_deploy_volumes(current_user.id, body.volumes)
 
     if source_kind == "image":

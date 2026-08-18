@@ -265,3 +265,78 @@ async def test_enforce_team_storage_capacity(
     await storage_quota.enforce_team_storage_capacity(
         quota_db, orchestrator, unlimited.id
     )
+
+
+def test_run_blocked_when_team_quota_exceeded(
+    api_client: TestClient,
+    fake_orchestrator: FakeContainerOrchestrator,
+    seeded_user: User,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("VELA_TEAM_STORAGE_QUOTA_BYTES", "1024")
+    # cid-1 carries the seeded user's owner label and no project label, so it
+    # counts for their personal project.
+    fake_orchestrator.set_disk_bytes("cid-1", 2048)
+    assert seeded_user.personal_project_id is not None
+    response = api_client.post(
+        "/api/containers/run",
+        json={"source_kind": "image", "image_ref": "nginx:alpine"},
+    )
+    assert response.status_code == 400
+    assert "storage quota" in response.json()["detail"]
+
+
+def test_run_allowed_under_team_quota(
+    api_client: TestClient,
+    fake_orchestrator: FakeContainerOrchestrator,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("VELA_TEAM_STORAGE_QUOTA_BYTES", str(10 * _GB))
+    fake_orchestrator.set_disk_bytes("cid-1", 2048)
+    response = api_client.post(
+        "/api/containers/run",
+        json={"source_kind": "image", "image_ref": "nginx:alpine"},
+    )
+    assert response.status_code == 200
+
+
+def test_deploy_blocked_when_team_quota_exceeded(
+    api_client: TestClient,
+    fake_orchestrator: FakeContainerOrchestrator,
+    seeded_user: User,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("VELA_TEAM_STORAGE_QUOTA_BYTES", "1024")
+    fake_orchestrator.set_disk_bytes("cid-1", 2048)
+    response = api_client.post(
+        "/api/containers/deploy",
+        json={
+            "image": "nginx:alpine",
+            "project_id": str(seeded_user.personal_project_id),
+        },
+    )
+    assert response.status_code == 400
+    assert "storage quota" in response.json()["detail"]
+
+
+def test_upload_blocked_when_team_storage_quota_exceeded(
+    api_client: TestClient,
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("VELA_VOLUME_UPLOADS_DIR", str(tmp_path / "uploads"))
+    monkeypatch.setenv("VELA_VOLUME_UPLOAD_USER_QUOTA_BYTES", str(150 * 1024**2))
+    monkeypatch.setenv("VELA_TEAM_STORAGE_QUOTA_BYTES", str(1024 * 1024))
+
+    first = api_client.post(
+        "/api/containers/volume-uploads",
+        files=[("files", ("folder/a.bin", b"x" * (1024 * 1024)))],
+    )
+    assert first.status_code == 200, first.text
+
+    second = api_client.post(
+        "/api/containers/volume-uploads",
+        files=[("files", ("folder/b.bin", b"x" * (1024 * 1024 + 8)))],
+    )
+    assert second.status_code == 400
+    assert "storage quota" in second.json()["detail"]
