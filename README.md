@@ -90,6 +90,7 @@ Create `backend/.env` as needed. Common variables:
 | `BREVO_SENDER_NAME` | Optional From name (default `Vela`) |
 | `VELA_LOG_LEVEL` | App + uvicorn log level: `DEBUG`, `INFO`, `WARNING`, `ERROR` (default `INFO`) |
 | `VELA_CONTAINER_MONITOR_INTERVAL_SECONDS` | Container alert poll interval in seconds (default `15`) |
+| `VELA_TEAM_STORAGE_QUOTA_BYTES` | Per-team storage quota in bytes (unset = unlimited; a team setting can only restrict it) |
 
 ```powershell
 python run.py
