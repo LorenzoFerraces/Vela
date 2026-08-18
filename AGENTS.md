@@ -6,6 +6,11 @@ Conventions for tooling, dependencies, naming, and Python style. Follow this fil
 
 - **Keep the readme concise** when adding or updating the readme file.
 
+## Subagent usage
+
+- **Prefer subagents for exploratory tasks** — codebase discovery, impact analysis, broad searches, full test runs, anything with large file reads or output. Keep the main session's context lean: dispatch, then read only short summaries or small report files, never large raw output (file dumps, full test logs, long diffs).
+- Multi-task plans are executed with **subagent-driven-development**: one implementer subagent per task plus a task reviewer after each. Hand artifacts (briefs, reports, review diffs) over as **file paths**, never pasted into the main conversation.
+
 ## Package management (pnpm / npm)
 
 - **Exact versions only** in `package.json` — no `^` or `~`. `frontend/.npmrc` sets `save-exact=true`. After adding a dependency, verify the entry has no range prefix.

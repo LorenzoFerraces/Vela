@@ -2,17 +2,30 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Time-series charts of CPU, memory, and network usage per container. Background collector polls Docker stats and stores in Postgres.
+**Goal:** Time-series charts of CPU, memory, and network usage per container, plus per-user/team usage totals. Background collector polls Docker stats and stores in Postgres.
 
-**Architecture:** Background worker polls container stats at 30s intervals, stores in `container_metrics` table. API provides raw points and aggregated summaries. Frontend renders charts with recharts.
+**Architecture:** Background worker polls container stats at 30s intervals, stores in `container_metrics` table. API provides raw points, hourly summaries, and a per-user/team usage rollup. Frontend renders charts with recharts and a dashboard usage section.
 
-**Tech Stack:** SQLAlchemy 2.x, Alembic, PostgreSQL, FastAPI, React, recharts, TypeScript
+**Tech Stack:** SQLAlchemy 2.x, Alembic, PostgreSQL (SQLite in tests), FastAPI, React, recharts, TypeScript
+
+## Corrections (2026-08-16 review)
+
+1. **Migration:** `0015_stack_service_git_branch` already exists and head is `0016_build_override`. The new migration is `0017_container_metrics` with `down_revision = "0016_build_override"`.
+2. **SQLite:** tests run on in-memory SQLite. `func.date_trunc()` is Postgres-only and `func.now() - timedelta` is unreliable there → `since` is computed in Python and summary buckets are built in Python (window ≤ 168 h ≈ 20k rows at 30 s).
+3. **Column widths:** byte counters overflow 32-bit `Integer` at 2 GiB → `BigInteger` for the four byte columns.
+4. **Index:** the standalone `container_id` index is redundant with the composite `(container_id, timestamp)` index.
+5. **Imports:** `require_container_access` lives in `app.core.projects.access` (not `app.core.db.access_control`; `routes/containers.py` only re-imports it).
+6. **Collector DI:** `run_metrics_collector(orchestrator)` takes the orchestrator as a parameter (scaling-loop pattern) instead of calling `get_orchestrator()` inside the loop.
+7. **Tests:** drop the dead `metrics_orchestrator`/`test_user_id` fixtures in `test_metrics_api.py` — `api_client`'s shared fake already seeds `cid-1` owned by the seeded user, which is what the tests query.
+8. **Skeleton:** the component takes `className` only, not `height` — wrap skeleton placeholders in a fixed-height div.
+9. **Navigation:** no global "Resources" navbar item (the page is per-container) — the entry point is a "Resources" button in each `WorkloadsTable` row.
+10. **User/team rollup (new: `get_usage` route in Task 3 + panel in Task 6.6):** `GET /api/metrics/usage` groups the caller's accessible containers by project/team with totals, backed by each container's latest stored metric. Hard quota enforcement at deploy time remains out of scope (product decision pending).
 
 ## Global Constraints
 
 - Python 3.12+, TypeScript, exact npm versions (no ^ or ~)
 - Backend MVC: core/ (domain), schemas.py (views), routes/ (controllers)
-- Domain packages under `app/core/<domain>/` when 3+ modules
+- Domain packages under `app/core/<domain>/` when 3+ modules (small 2-file packages exist already — `security/` — so `monitoring/` with one module follows that precedent)
 - TDD: write failing test first, then minimal implementation
 - Metrics collector runs as background asyncio.Task (like container_monitor)
 - Configurable retention to prevent unbounded growth
@@ -24,8 +37,10 @@
 
 **Files:**
 - Create: `backend/app/db/models.py` (append `ContainerMetric` class)
-- Create: `backend/alembic/versions/0015_container_metrics.py`
-- Modify: `backend/tests/conftest.py` (no change needed — `Base.metadata.create_all` auto-picks up new models)
+- Create: `backend/alembic/versions/0017_container_metrics.py`
+
+No conftest change is needed for this task — the test engine already runs
+`Base.metadata.create_all`, which picks up the new model automatically.
 
 **Interfaces:**
 - Produces: `ContainerMetric` ORM model on `Base.metadata`
@@ -33,6 +48,9 @@
 ### 1.1 Add `ContainerMetric` ORM model
 
 - [ ] Append the following class to `backend/app/db/models.py` (after `StackComposition`, before EOF):
+
+(`BigInteger` for the byte counters — 32-bit `Integer` overflows at 2 GiB.
+Composite index alone; a standalone `container_id` index is redundant with its prefix.)
 
 ```python
 class ContainerMetric(Base):
@@ -44,35 +62,33 @@ class ContainerMetric(Base):
     id: Mapped[uuid.UUID] = mapped_column(
         Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4,
     )
-    container_id: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    container_id: Mapped[str] = mapped_column(String(128), nullable=False)
     timestamp: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=_utcnow,
     )
     cpu_percent: Mapped[float] = mapped_column(Float, nullable=False)
-    memory_usage_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
-    memory_limit_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
+    memory_usage_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    memory_limit_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False)
     memory_percent: Mapped[float] = mapped_column(Float, nullable=False)
-    network_rx_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
-    network_tx_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
+    network_rx_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    network_tx_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=_utcnow,
     )
 ```
 
-- [ ] Add `import sqlalchemy as sa` at top of `backend/app/db/models.py` if not present (the `sa.Index` needs it). Check existing imports — if `sa` is not aliased, add `import sqlalchemy as sa` alongside existing `from sqlalchemy import ...`.
+- [ ] Extend the existing `from sqlalchemy import (...)` in `backend/app/db/models.py` with `BigInteger` and make the aliased `import sqlalchemy as sa` present (needed for `sa.Index`); `_utcnow`, `Uuid`, `String`, `DateTime`, `Float` are already imported there.
 
 ### 1.2 Create Alembic migration
 
-- [ ] Run: `cd backend && alembic revision -m "container_metrics"` to generate the migration file. The file should be named `0015_container_metrics.py` (rename if alembic auto-generated a different prefix).
-
-- [ ] Write `backend/alembic/versions/0015_container_metrics.py`:
+- [ ] Write `backend/alembic/versions/0017_container_metrics.py` (head is `0016_build_override`; `0015` is taken by `0015_stack_service_git_branch`):
 
 ```python
 """Add container_metrics table for time-series resource data.
 
-Revision ID: 0015_container_metrics
-Revises: 0014_stacks
-Create Date: 2026-08-03
+Revision ID: 0017_container_metrics
+Revises: 0016_build_override
+Create Date: 2026-08-16
 """
 from __future__ import annotations
 
@@ -81,8 +97,8 @@ from collections.abc import Sequence
 import sqlalchemy as sa
 from alembic import op
 
-revision: str = "0015_container_metrics"
-down_revision: str | Sequence[str] | None = "0014_stacks"
+revision: str = "0017_container_metrics"
+down_revision: str | Sequence[str] | None = "0016_build_override"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
@@ -94,19 +110,13 @@ def upgrade() -> None:
         sa.Column("container_id", sa.String(128), nullable=False),
         sa.Column("timestamp", sa.DateTime(timezone=True), nullable=False),
         sa.Column("cpu_percent", sa.Float(), nullable=False),
-        sa.Column("memory_usage_bytes", sa.Integer(), nullable=False),
-        sa.Column("memory_limit_bytes", sa.Integer(), nullable=False),
+        sa.Column("memory_usage_bytes", sa.BigInteger(), nullable=False),
+        sa.Column("memory_limit_bytes", sa.BigInteger(), nullable=False),
         sa.Column("memory_percent", sa.Float(), nullable=False),
-        sa.Column("network_rx_bytes", sa.Integer(), nullable=False),
-        sa.Column("network_tx_bytes", sa.Integer(), nullable=False),
+        sa.Column("network_rx_bytes", sa.BigInteger(), nullable=False),
+        sa.Column("network_tx_bytes", sa.BigInteger(), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.PrimaryKeyConstraint("id"),
-    )
-    op.create_index(
-        op.f("ix_container_metrics_container_id"),
-        "container_metrics",
-        ["container_id"],
-        unique=False,
     )
     op.create_index(
         "ix_container_metrics_container_timestamp",
@@ -119,9 +129,6 @@ def upgrade() -> None:
 def downgrade() -> None:
     op.drop_index(
         "ix_container_metrics_container_timestamp", table_name="container_metrics"
-    )
-    op.drop_index(
-        op.f("ix_container_metrics_container_id"), table_name="container_metrics"
     )
     op.drop_table("container_metrics")
 ```
@@ -140,10 +147,11 @@ def downgrade() -> None:
 - Create: `backend/app/core/monitoring/metrics_collector.py`
 - Create: `backend/tests/test_metrics_collector.py`
 - Modify: `backend/app/api/app.py` (start collector in `_lifespan`)
+- Modify: `backend/tests/conftest.py` (force collector interval, Step 2.4)
 
 **Interfaces:**
 - Consumes: `ContainerOrchestrator.get_stats()`, `get_session_factory()`, `ContainerMetric` ORM model
-- Produces: `run_metrics_collector()` — async loop, started as `asyncio.Task`
+- Produces: `run_metrics_collector(orchestrator)` — async loop started as `asyncio.Task` (takes the orchestrator as a parameter, same pattern as `run_scaling_loop`, so test DI overrides apply)
 
 ### 2.1 Create `app/core/monitoring/__init__.py`
 
@@ -170,6 +178,7 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.containers.docker_orchestrator import VELA_MANAGED_LABEL
 from app.core.containers.orchestrator import ContainerOrchestrator
 from app.core.exceptions import ProviderConnectionError
 from app.db.models import ContainerMetric
@@ -195,7 +204,7 @@ async def collect_and_store_once(
         return
 
     vela_containers = [
-        c for c in containers if "vela.managed" in (c.labels or {})
+        c for c in containers if VELA_MANAGED_LABEL in (c.labels or {})
     ]
 
     rows: list[ContainerMetric] = []
@@ -243,9 +252,16 @@ async def cleanup_expired_metrics(session: AsyncSession) -> None:
         logger.info("Cleaned up %d expired metric rows", result.rowcount)
 
 
-async def run_metrics_collector() -> None:
+Append this to the **same file** (`metrics_collector.py`):
+
+`run_metrics_collector` takes the orchestrator as a parameter (resolved once in the
+lifespan, like `run_scaling_loop`) so DI overrides in tests apply and the loop
+does not re-resolve dependencies every cycle. `collect_and_store_once` already
+swallows `ProviderConnectionError`, so the loop only needs the generic catch:
+
+```python
+async def run_metrics_collector(orchestrator: ContainerOrchestrator) -> None:
     """Continuous collection loop for the lifetime of the application."""
-    from app.api.deps import get_orchestrator
     from app.db.engine import get_session_factory
 
     logger.info(
@@ -259,7 +275,6 @@ async def run_metrics_collector() -> None:
 
     while True:
         try:
-            orchestrator = get_orchestrator()
             async with session_factory() as session:
                 await collect_and_store_once(orchestrator, session)
 
@@ -271,8 +286,6 @@ async def run_metrics_collector() -> None:
         except asyncio.CancelledError:
             logger.info("Metrics collector stopped")
             break
-        except ProviderConnectionError:
-            logger.debug("Docker unavailable; skipping metrics collection pass")
         except Exception:
             logger.exception("Unexpected error in metrics collector loop")
 
@@ -283,34 +296,35 @@ async def run_metrics_collector() -> None:
 
 - [ ] Create `backend/tests/test_metrics_collector.py`:
 
+(The module-level env constants in `metrics_collector` are read at import time;
+these tests exercise `collect_and_store_once`/`cleanup_expired_metrics` directly
+and never touch the interval, so no env setup is needed. `pyproject.toml` sets
+`asyncio_mode = "auto"`, so the bare `async def` tests run as-is.)
+
 ```python
 """Unit tests for metrics collector logic."""
 
 from __future__ import annotations
 
-import os
 import uuid
 from datetime import datetime, timedelta, timezone
 
 import pytest
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.containers.docker_orchestrator import (
+    VELA_MANAGED_LABEL,
+    VELA_MANAGED_VALUE,
+    VELA_OWNER_LABEL,
+)
 from app.core.containers.fake_orchestrator import FakeContainerOrchestrator
+from app.core.enums import ContainerStatus, HealthStatus
 from app.core.models import ContainerInfo
 from app.core.monitoring.metrics_collector import (
     collect_and_store_once,
     cleanup_expired_metrics,
 )
 from app.db.models import ContainerMetric
-from app.core.enums import ContainerStatus, HealthStatus
-from app.core.containers.docker_orchestrator import (
-    VELA_MANAGED_LABEL,
-    VELA_MANAGED_VALUE,
-    VELA_OWNER_LABEL,
-)
-
-os.environ.setdefault("VELA_METRICS_INTERVAL_SECONDS", "1")
 
 
 @pytest.fixture
@@ -437,29 +451,7 @@ async def test_cleanup_expired_metrics_removes_old_rows(
 
 ### 2.4 Wire collector into app lifespan
 
-- [ ] Modify `backend/app/api/app.py` — add import and task in `_lifespan`:
-
-```python
-# Add to imports inside _lifespan:
-from app.core.monitoring.metrics_collector import run_metrics_collector
-```
-
-- [ ] In `_lifespan`, after the `monitor_task` line, add:
-
-```python
-metrics_task = asyncio.create_task(run_metrics_collector())
-```
-
-- [ ] In the `finally` block, add cleanup:
-
-```python
-metrics_task.cancel()
-# ... existing cleanup ...
-with suppress(asyncio.CancelledError):
-    await metrics_task
-```
-
-The full `_lifespan` should look like:
+- [ ] Modify `backend/app/api/app.py` `_lifespan` as below. The metrics task must be created **after** `get_orchestrator()` succeeds (it needs the instance as an argument), and skipped when the provider is unavailable — exactly like the scaling task:
 
 ```python
 @asynccontextmanager
@@ -467,24 +459,25 @@ async def _lifespan(_application: FastAPI):
     from app.api.deps import get_orchestrator, get_traffic_router
     from app.core.exceptions import ProviderConnectionError, TrafficRouterError
     from app.core.notifications.container_monitor import run_monitoring_loop
-    from app.core.scaling.scaling_engine import run_scaling_loop
     from app.core.monitoring.metrics_collector import run_metrics_collector
+    from app.core.scaling.scaling_engine import run_scaling_loop
     from app.e2e_support import ensure_e2e_database
 
     await ensure_e2e_database()
 
     monitor_task = asyncio.create_task(run_monitoring_loop())
-    metrics_task = asyncio.create_task(run_metrics_collector())
+    metrics_task: asyncio.Task[None] | None = None
     scaling_task: asyncio.Task[None] | None = None
     try:
         orchestrator = get_orchestrator()
         traffic_router = get_traffic_router()
     except (ProviderConnectionError, TrafficRouterError) as exc:
         logger.warning(
-            "Scaling dependencies unavailable at startup (%s); auto-scaling loop will not run.",
+            "Container provider unavailable at startup (%s); metrics and scaling loops will not run.",
             exc,
         )
     else:
+        metrics_task = asyncio.create_task(run_metrics_collector(orchestrator))
         scaling_task = asyncio.create_task(
             run_scaling_loop(orchestrator, traffic_router)
         )
@@ -493,17 +486,32 @@ async def _lifespan(_application: FastAPI):
         yield
     finally:
         monitor_task.cancel()
-        metrics_task.cancel()
+        if metrics_task is not None:
+            metrics_task.cancel()
         if scaling_task is not None:
             scaling_task.cancel()
         with suppress(asyncio.CancelledError):
             await monitor_task
-        with suppress(asyncio.CancelledError):
-            await metrics_task
+        if metrics_task is not None:
+            with suppress(asyncio.CancelledError):
+                await metrics_task
         if scaling_task is not None:
             with suppress(asyncio.CancelledError):
                 await scaling_task
 ```
+
+- [ ] In `backend/tests/conftest.py`, force the interval like the existing monitor
+  constant (a developer `.env` must not change module-level collector constants
+  in tests):
+
+```python
+os.environ["VELA_METRICS_INTERVAL_SECONDS"] = "3600"
+```
+
+Known test behavior (accepted, same as the monitor/scaling loops): the
+lifespan starts the collector in every `TestClient`, and the first collection
+pass hits the env-var `:memory:` engine which has no schema, logging one
+exception line. Subsequent cycles are suppressed by the forced interval.
 
 ---
 
@@ -522,7 +530,7 @@ async def _lifespan(_application: FastAPI):
 
 ### 3.1 Add API schemas
 
-- [ ] Append to `backend/app/api/schemas.py`:
+- [ ] Append to `backend/app/api/schemas.py` (`uuid` and `datetime` are already imported there):
 
 ```python
 # ---------------------------------------------------------------------------
@@ -556,11 +564,50 @@ class MetricSummary(BaseModel):
     memory_percent_max: float
     network_rx_total: int
     network_tx_total: int
+
+
+class ContainerUsageEntry(BaseModel):
+    """One container's latest stored usage snapshot (None usage = not running)."""
+
+    container_id: str
+    name: str
+    status: str
+    project_id: uuid.UUID | None
+    project_name: str | None
+    team_name: str | None
+    cpu_percent: float | None
+    memory_usage_bytes: int | None
+    memory_percent: float | None
+
+
+class ProjectUsage(BaseModel):
+    """Latest usage across one project's containers (team or personal)."""
+
+    project_id: uuid.UUID | None
+    project_name: str | None
+    team_name: str | None
+    cpu_percent_total: float
+    memory_usage_bytes_total: int
+    containers: list[ContainerUsageEntry]
+
+
+class UsageSummary(BaseModel):
+    """Latest resource usage for every container the caller can access."""
+
+    projects: list[ProjectUsage]
+    total_cpu_percent: float
+    total_memory_usage_bytes: int
+    running_containers: int
 ```
 
 ### 3.2 Create metrics route module
 
 - [ ] Create `backend/app/api/routes/metrics.py`:
+
+`since` is computed in Python and summary buckets are built in Python: the test
+suite runs on in-memory SQLite, where `date_trunc()` does not exist and
+`now() - timedelta` is dialect-unreliable. A 168 h window at 30 s resolution is
+~20k rows — trivial to aggregate in-process.
 
 ```python
 """Metrics time-series API."""
@@ -568,24 +615,74 @@ class MetricSummary(BaseModel):
 from __future__ import annotations
 
 import logging
-from datetime import timedelta
+import uuid
+from datetime import datetime, timedelta, timezone
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_current_user, get_db
-from app.api.schemas import MetricPoint, MetricSummary
-from app.core.containers.docker_orchestrator import VELA_OWNER_LABEL
+from app.api.deps import get_current_user, get_db, get_orchestrator
+from app.api.schemas import (
+    ContainerUsageEntry,
+    MetricPoint,
+    MetricSummary,
+    ProjectUsage,
+    UsageSummary,
+)
+from app.core.containers.docker_orchestrator import (
+    VELA_PROJECT_LABEL,
+)
 from app.core.containers.orchestrator import ContainerOrchestrator
-from app.core.db.access_control import require_container_access
-from app.db.models import ContainerMetric, User
-from app.api.deps import get_orchestrator
+from app.core.enums import ContainerStatus
+from app.core.projects.access import (
+    list_accessible_project_ids,
+    require_container_access,
+)
+from app.core.models import ContainerInfo
+from app.db.models import (
+    ContainerMetric,
+    Organization,
+    Project,
+    User,
+)
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+def _metric_point(row: ContainerMetric) -> MetricPoint:
+    return MetricPoint(
+        timestamp=row.timestamp,
+        cpu_percent=row.cpu_percent,
+        memory_usage_bytes=row.memory_usage_bytes,
+        memory_limit_bytes=row.memory_limit_bytes,
+        memory_percent=row.memory_percent,
+        network_rx_bytes=row.network_rx_bytes,
+        network_tx_bytes=row.network_tx_bytes,
+    )
+
+
+def _aware(ts: datetime) -> datetime:
+    # SQLite reads back naive UTC; Postgres returns aware datetimes.
+    return ts if ts.tzinfo is not None else ts.replace(tzinfo=timezone.utc)
+
+
+async def _rows_since(
+    session: AsyncSession, container_id: str, hours: int
+) -> list[ContainerMetric]:
+    since = datetime.now(timezone.utc) - timedelta(hours=hours)
+    stmt = (
+        select(ContainerMetric)
+        .where(
+            ContainerMetric.container_id == container_id,
+            ContainerMetric.timestamp >= since,
+        )
+        .order_by(ContainerMetric.timestamp.asc())
+    )
+    return list((await session.execute(stmt)).scalars().all())
 
 
 @router.get("")
@@ -597,36 +694,13 @@ async def get_metrics(
     session: Annotated[AsyncSession, Depends(get_db)],
     orchestrator: Annotated[ContainerOrchestrator, Depends(get_orchestrator)],
 ) -> list[MetricPoint]:
-    """Return recent metric points for a container."""
+    """Return the newest stored metric points for a container, in time order."""
     await require_container_access(
         session, orchestrator, current_user, container_id, action="read"
     )
-
-    since = func.now() - timedelta(hours=hours)
-    stmt = (
-        select(ContainerMetric)
-        .where(
-            ContainerMetric.container_id == container_id,
-            ContainerMetric.timestamp >= since,
-        )
-        .order_by(ContainerMetric.timestamp.desc())
-        .limit(limit)
-    )
-    result = await session.execute(stmt)
-    rows = result.scalars().all()
-
-    return [
-        MetricPoint(
-            timestamp=row.timestamp,
-            cpu_percent=row.cpu_percent,
-            memory_usage_bytes=row.memory_usage_bytes,
-            memory_limit_bytes=row.memory_limit_bytes,
-            memory_percent=row.memory_percent,
-            network_rx_bytes=row.network_rx_bytes,
-            network_tx_bytes=row.network_tx_bytes,
-        )
-        for row in rows
-    ]
+    rows = await _rows_since(session, container_id, hours)
+    newest_first = list(reversed(rows))[:limit]
+    return [_metric_point(row) for row in reversed(newest_first)]
 
 
 @router.get("/summary")
@@ -641,61 +715,175 @@ async def get_metrics_summary(
     await require_container_access(
         session, orchestrator, current_user, container_id, action="read"
     )
+    rows = await _rows_since(session, container_id, hours)
 
-    since = func.now() - timedelta(hours=hours)
-    stmt = (
-        select(
-            func.date_trunc("hour", ContainerMetric.timestamp).label("bucket_start"),
-            func.avg(ContainerMetric.cpu_percent).label("cpu_avg"),
-            func.max(ContainerMetric.cpu_percent).label("cpu_max"),
-            func.min(ContainerMetric.cpu_percent).label("cpu_min"),
-            func.avg(ContainerMetric.memory_usage_bytes).label("memory_usage_avg"),
-            func.max(ContainerMetric.memory_usage_bytes).label("memory_usage_max"),
-            func.avg(ContainerMetric.memory_limit_bytes).label("memory_limit_avg"),
-            func.avg(ContainerMetric.memory_percent).label("memory_percent_avg"),
-            func.max(ContainerMetric.memory_percent).label("memory_percent_max"),
-            func.sum(ContainerMetric.network_rx_bytes).label("network_rx_total"),
-            func.sum(ContainerMetric.network_tx_bytes).label("network_tx_total"),
-        )
-        .where(
-            ContainerMetric.container_id == container_id,
-            ContainerMetric.timestamp >= since,
-        )
-        .group_by(func.date_trunc("hour", ContainerMetric.timestamp))
-        .order_by(func.date_trunc("hour", ContainerMetric.timestamp).asc())
-    )
-    result = await session.execute(stmt)
-    rows = result.mappings().all()
+    buckets: dict[datetime, list[ContainerMetric]] = {}
+    for row in rows:
+        bucket_start = _aware(row.timestamp).replace(minute=0, second=0, microsecond=0)
+        buckets.setdefault(bucket_start, []).append(row)
 
     return [
         MetricSummary(
-            bucket_start=row["bucket_start"],
-            cpu_avg=round(float(row["cpu_avg"]), 2) if row["cpu_avg"] else 0.0,
-            cpu_max=round(float(row["cpu_max"]), 2) if row["cpu_max"] else 0.0,
-            cpu_min=round(float(row["cpu_min"]), 2) if row["cpu_min"] else 0.0,
-            memory_usage_avg=int(row["memory_usage_avg"]) if row["memory_usage_avg"] else 0,
-            memory_usage_max=int(row["memory_usage_max"]) if row["memory_usage_max"] else 0,
-            memory_limit_avg=int(row["memory_limit_avg"]) if row["memory_limit_avg"] else 0,
-            memory_percent_avg=round(float(row["memory_percent_avg"]), 2) if row["memory_percent_avg"] else 0.0,
-            memory_percent_max=round(float(row["memory_percent_max"]), 2) if row["memory_percent_max"] else 0.0,
-            network_rx_total=int(row["network_rx_total"]) if row["network_rx_total"] else 0,
-            network_tx_total=int(row["network_tx_total"]) if row["network_tx_total"] else 0,
+            bucket_start=bucket_start,
+            cpu_avg=round(sum(r.cpu_percent for r in bucket) / len(bucket), 2),
+            cpu_max=round(max(r.cpu_percent for r in bucket), 2),
+            cpu_min=round(min(r.cpu_percent for r in bucket), 2),
+            memory_usage_avg=int(sum(r.memory_usage_bytes for r in bucket) / len(bucket)),
+            memory_usage_max=max(r.memory_usage_bytes for r in bucket),
+            memory_limit_avg=int(sum(r.memory_limit_bytes for r in bucket) / len(bucket)),
+            memory_percent_avg=round(sum(r.memory_percent for r in bucket) / len(bucket), 2),
+            memory_percent_max=round(max(r.memory_percent for r in bucket), 2),
+            network_rx_total=sum(r.network_rx_bytes for r in bucket),
+            network_tx_total=sum(r.network_tx_bytes for r in bucket),
         )
-        for row in rows
+        for bucket_start, bucket in sorted(buckets.items())
     ]
+
+
+@router.get("/usage", response_model=UsageSummary)
+async def get_usage(
+    current_user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[AsyncSession, Depends(get_db)],
+    orchestrator: Annotated[ContainerOrchestrator, Depends(get_orchestrator)],
+) -> UsageSummary:
+    """Latest resource usage for every container the caller can access.
+
+    Grouped by project (team or personal) so users and team members can see
+    what each team's workloads consume. Only running containers report usage;
+    their stored rows for stopped containers would be stale.
+    """
+    project_ids = await list_accessible_project_ids(session, current_user.id)
+    containers = await orchestrator.list(
+        project_ids=project_ids, user_id=current_user.id
+    )
+    if not containers:
+        return UsageSummary(
+            projects=[],
+            total_cpu_percent=0.0,
+            total_memory_usage_bytes=0,
+            running_containers=0,
+        )
+
+    latest = await latest_metric_by_container(session, [c.id for c in containers])
+    projects = (
+        (await session.execute(select(Project).where(Project.id.in_(project_ids))))
+        .scalars()
+        .all()
+    )
+    project_by_id = {p.id: p for p in projects}
+    orgs = (
+        (
+            await session.execute(
+                select(Organization).where(
+                    Organization.id.in_({p.organization_id for p in projects})
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    org_by_id = {o.id: o for o in orgs}
+
+    grouped: dict[uuid.UUID | None, list[ContainerInfo]] = {}
+    for info in containers:
+        raw_project_id = info.labels.get(VELA_PROJECT_LABEL)
+        try:
+            project_id: uuid.UUID | None = (
+                uuid.UUID(raw_project_id) if raw_project_id else None
+            )
+        except ValueError:
+            project_id = None
+        grouped.setdefault(project_id, []).append(info)
+
+    project_usages: list[ProjectUsage] = []
+    total_cpu = 0.0
+    total_memory = 0
+    running = 0
+    for project_id, members in grouped.items():
+        project = project_by_id.get(project_id) if project_id else None
+        entries: list[ContainerUsageEntry] = []
+        for info in members:
+            is_running = info.status == ContainerStatus.RUNNING
+            row = latest.get(info.id) if is_running else None
+            if row is not None:
+                total_cpu += row.cpu_percent
+                total_memory += row.memory_usage_bytes
+            if is_running:
+                running += 1
+            entries.append(
+                ContainerUsageEntry(
+                    container_id=info.id,
+                    name=info.name,
+                    status=info.status.value,
+                    project_id=project_id,
+                    project_name=project.name if project else None,
+                    team_name=(
+                        org_by_id[project.organization_id].name
+                        if project is not None and project.organization_id in org_by_id
+                        else None
+                    ),
+                    cpu_percent=row.cpu_percent if row else None,
+                    memory_usage_bytes=row.memory_usage_bytes if row else None,
+                    memory_percent=row.memory_percent if row else None,
+                )
+            )
+        project_usages.append(
+            ProjectUsage(
+                project_id=project_id,
+                project_name=project.name if project else None,
+                team_name=(
+                    org_by_id[project.organization_id].name
+                    if project is not None and project.organization_id in org_by_id
+                    else None
+                ),
+                cpu_percent_total=round(
+                    sum(e.cpu_percent or 0.0 for e in entries), 2
+                ),
+                memory_usage_bytes_total=sum(
+                    e.memory_usage_bytes or 0 for e in entries
+                ),
+                containers=entries,
+            )
+        )
+    project_usages.sort(key=lambda p: p.memory_usage_bytes_total, reverse=True)
+
+    return UsageSummary(
+        projects=project_usages,
+        total_cpu_percent=round(total_cpu, 2),
+        total_memory_usage_bytes=total_memory,
+        running_containers=running,
+    )
+
+
+async def latest_metric_by_container(
+    session: AsyncSession, container_ids: list[str]
+) -> dict[str, ContainerMetric]:
+    """Latest stored row per container (empty dict-safe, dialect-safe)."""
+    if not container_ids:
+        return {}
+    subq = (
+        select(
+            ContainerMetric.container_id,
+            func.max(ContainerMetric.timestamp).label("latest_ts"),
+        )
+        .where(ContainerMetric.container_id.in_(container_ids))
+        .group_by(ContainerMetric.container_id)
+        .subquery()
+    )
+    stmt = select(ContainerMetric).join(
+        subq,
+        (ContainerMetric.container_id == subq.c.container_id)
+        & (ContainerMetric.timestamp == subq.c.latest_ts),
+    )
+    rows = (await session.execute(stmt)).scalars().all()
+    return {row.container_id: row for row in rows}
 ```
 
-- [ ] Note: The import `require_container_access` lives in `backend/app/api/routes/containers.py`. To avoid circular imports, import it inline inside each handler, or extract it to `app/core/db/access_control.py`. Since the containers route already imports it, check if it's defined in containers.py or a separate module. If it's in containers.py, use:
-
-```python
-from app.api.routes.containers import require_container_access
-```
-
-If `require_container_access` is not importable from another module, add the import at the top of `metrics.py`:
-
-```python
-from app.api.routes.containers import require_container_access
-```
+(import check: `require_container_access` and `list_accessible_project_ids` are
+both defined in `app/core/projects/access.py` — `routes/containers.py` only
+re-imports them. `/usage` intentionally performs no per-container
+`require_container_access` check: the orchestrator list is already filtered by
+the caller's memberships.)
 
 ### 3.3 Register metrics router
 
@@ -732,6 +920,11 @@ application.include_router(
 
 ### 3.4 Write API integration tests
 
+Wiring notes: no local fixtures needed — tests use conftest's `api_client`,
+`fake_orchestrator` (its app uses that same instance via DI override, and it
+already seeds `cid-1` owned by `test_user_id` with no project label),
+`anonymous_client`, `db_session_factory`, and `test_user_id`.
+
 - [ ] Create `backend/tests/test_metrics_api.py`:
 
 ```python
@@ -739,58 +932,32 @@ application.include_router(
 
 from __future__ import annotations
 
+import asyncio
 import uuid
 from datetime import datetime, timedelta, timezone
 
-import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.containers.fake_orchestrator import FakeContainerOrchestrator
-from app.core.models import ContainerInfo
-from app.db.models import ContainerMetric
-from app.core.enums import ContainerStatus, HealthStatus
 from app.core.containers.docker_orchestrator import (
     VELA_MANAGED_LABEL,
     VELA_MANAGED_VALUE,
     VELA_OWNER_LABEL,
+    VELA_PROJECT_LABEL,
 )
-
-
-@pytest.fixture
-def test_user_id() -> uuid.UUID:
-    return uuid.UUID("11111111-1111-1111-1111-111111111111")
-
-
-@pytest.fixture
-def metrics_orchestrator(test_user_id: uuid.UUID) -> FakeContainerOrchestrator:
-    orch = FakeContainerOrchestrator()
-    labels = {
-        VELA_MANAGED_LABEL: VELA_MANAGED_VALUE,
-        VELA_OWNER_LABEL: str(test_user_id),
-    }
-    orch.seed_container(
-        ContainerInfo(
-            id="cid-metrics",
-            name="metrics-test",
-            image="nginx:alpine",
-            status=ContainerStatus.RUNNING,
-            created_at=datetime(2026, 4, 1, tzinfo=timezone.utc),
-            ports=[],
-            labels=labels,
-            health=HealthStatus.NONE,
-        )
-    )
-    orch.register_image("nginx:alpine")
-    return orch
+from app.core.containers.fake_orchestrator import FakeContainerOrchestrator
+from app.core.enums import ContainerStatus, HealthStatus
+from app.core.models import ContainerInfo
+from app.db.models import (
+    ContainerMetric,
+    Organization,
+    Project,
+    ProjectMembership,
+)
 
 
 def _seed_metrics(
     db_session_factory, container_id: str, count: int = 10
 ) -> None:
-    import asyncio
-
     async def _run() -> None:
         async with db_session_factory() as session:
             now = datetime.now(timezone.utc)
@@ -809,8 +976,62 @@ def _seed_metrics(
                 )
             await session.commit()
 
-    import asyncio as aio
-    aio.run(_run())
+    asyncio.run(_run())
+
+
+def _seed_container(
+    fake_orchestrator: FakeContainerOrchestrator,
+    container_id: str,
+    name: str,
+    test_user_id: uuid.UUID,
+    project_id: uuid.UUID | None = None,
+    status: ContainerStatus = ContainerStatus.RUNNING,
+) -> None:
+    labels = {
+        VELA_MANAGED_LABEL: VELA_MANAGED_VALUE,
+        VELA_OWNER_LABEL: str(test_user_id),
+    }
+    if project_id is not None:
+        labels[VELA_PROJECT_LABEL] = str(project_id)
+    fake_orchestrator.seed_container(
+        ContainerInfo(
+            id=container_id,
+            name=name,
+            image="nginx:alpine",
+            status=status,
+            created_at=datetime(2026, 4, 1, tzinfo=timezone.utc),
+            ports=[],
+            labels=labels,
+            health=HealthStatus.NONE,
+        )
+    )
+    fake_orchestrator.register_image("nginx:alpine")
+
+
+def _make_team_project(
+    db_session_factory, user_id: uuid.UUID
+) -> uuid.UUID:
+    """Create organization + shared project + owner membership at the DB level."""
+
+    async def _run() -> uuid.UUID:
+        async with db_session_factory() as session:
+            org = Organization(name="Widgets Inc")
+            session.add(org)
+            await session.flush()
+            project = Project(
+                organization_id=org.id, name="web-frontend", is_personal=False
+            )
+            session.add(project)
+            await session.flush()
+            session.add(
+                ProjectMembership(
+                    project_id=project.id, user_id=user_id, role="owner"
+                )
+            )
+            await session.commit()
+            return project.id
+
+    return asyncio.run(_run())
 
 
 def test_get_metrics_returns_points(
@@ -877,9 +1098,81 @@ def test_get_metrics_summary_returns_buckets(
     assert "cpu_avg" in data[0]
     assert "cpu_max" in data[0]
     assert "memory_usage_avg" in data[0]
+
+
+def test_get_usage_groups_by_project(
+    api_client: TestClient,
+    db_session_factory,
+    fake_orchestrator: FakeContainerOrchestrator,
+    test_user_id: uuid.UUID,
+) -> None:
+    project_id = _make_team_project(db_session_factory, test_user_id)
+    _seed_container(
+        fake_orchestrator, "cid-team", "team-web", test_user_id,
+        project_id=project_id,
+    )
+    _seed_metrics(db_session_factory, "cid-1", count=2)
+    _seed_metrics(db_session_factory, "cid-team", count=2)
+
+    resp = api_client.get("/api/metrics/usage")
+    assert resp.status_code == 200
+    data = resp.json()
+
+    # cid-1 (no project label) -> personal group; cid-team -> team project group
+    assert len(data["projects"]) == 2
+    team = next(
+        p for p in data["projects"] if p["project_name"] == "web-frontend"
+    )
+    assert team["project_id"] == str(project_id)
+    assert team["team_name"] == "Widgets Inc"
+    # latest row is i=0 (newest timestamp): cpu 10.0, memory 1000
+    assert team["cpu_percent_total"] == 10.0
+    assert team["memory_usage_bytes_total"] == 1000
+    personal = next(p for p in data["projects"] if p["project_id"] is None)
+    assert personal["cpu_percent_total"] == 10.0
+    assert personal["memory_usage_bytes_total"] == 1000
+    assert data["total_cpu_percent"] == 20.0
+    assert data["total_memory_usage_bytes"] == 2000
+    assert data["running_containers"] == 2
+
+
+def test_get_usage_stopped_container_reports_no_usage(
+    api_client: TestClient,
+    db_session_factory,
+    fake_orchestrator: FakeContainerOrchestrator,
+    test_user_id: uuid.UUID,
+) -> None:
+    _seed_container(
+        fake_orchestrator, "cid-stopped", "stopped-app", test_user_id,
+        status=ContainerStatus.STOPPED,
+    )
+    _seed_metrics(db_session_factory, "cid-stopped", count=1)  # stale row
+
+    resp = api_client.get("/api/metrics/usage")
+    assert resp.status_code == 200
+    data = resp.json()
+    entry = next(
+        e
+        for p in data["projects"]
+        for e in p["containers"]
+        if e["container_id"] == "cid-stopped"
+    )
+    assert entry["cpu_percent"] is None
+    assert entry["memory_usage_bytes"] is None
+    assert entry["memory_percent"] is None
+    # only the fixture's cid-1 is running
+    assert data["running_containers"] == 1
+    assert data["total_memory_usage_bytes"] == 0
+
+
+def test_get_usage_unauthorized(
+    anonymous_client: TestClient,
+) -> None:
+    resp = anonymous_client.get("/api/metrics/usage")
+    assert resp.status_code == 401
 ```
 
-- [ ] Run: `cd backend && python -m pytest tests/test_metrics_api.py -q` — ensure all 5 tests pass
+- [ ] Run: `cd backend && python -m pytest tests/test_metrics_api.py -q` — ensure all 8 tests pass
 
 ---
 
@@ -890,8 +1183,10 @@ def test_get_metrics_summary_returns_buckets(
 
 ### 4.1 Add recharts
 
-- [ ] Run: `cd frontend && npm install --save-exact recharts@2.15.1`
-- [ ] Verify `frontend/package.json` has `"recharts": "2.15.1"` (no `^` or `~`)
+- [ ] Run: `cd frontend && npm install --save-exact recharts` (installs the
+  current stable; do not pin an older hardcoded version)
+- [ ] Verify `frontend/package.json` has `"recharts": "<exact>"` (no `^` or `~`)
+  and `package-lock.json` was updated
 
 ---
 
@@ -953,6 +1248,38 @@ export async function getMetricSummary(
   })
   return apiGet<MetricSummary[]>(`/api/metrics/summary?${params.toString()}`)
 }
+
+export interface ContainerUsageEntry {
+  container_id: string
+  name: string
+  status: string
+  project_id: string | null
+  project_name: string | null
+  team_name: string | null
+  cpu_percent: number | null
+  memory_usage_bytes: number | null
+  memory_percent: number | null
+}
+
+export interface ProjectUsage {
+  project_id: string | null
+  project_name: string | null
+  team_name: string | null
+  cpu_percent_total: number
+  memory_usage_bytes_total: number
+  containers: ContainerUsageEntry[]
+}
+
+export interface UsageSummary {
+  projects: ProjectUsage[]
+  total_cpu_percent: number
+  total_memory_usage_bytes: number
+  running_containers: number
+}
+
+export async function getUsageSummary(): Promise<UsageSummary> {
+  return apiGet<UsageSummary>('/api/metrics/usage')
+}
 ```
 
 ---
@@ -962,8 +1289,11 @@ export async function getMetricSummary(
 **Files:**
 - Create: `frontend/src/pages/ResourceDashboardPage.tsx`
 - Create: `frontend/src/components/charts/MetricChart.tsx`
+- Create: `frontend/src/pages/containers/ResourceUsagePanel.tsx`
 - Modify: `frontend/src/App.tsx` (add route)
-- Modify: `frontend/src/components/Navbar.tsx` (add nav link)
+- Modify: `frontend/src/pages/DashboardPage.tsx` (usage panel + Resources button wiring)
+- Modify: `frontend/src/components/workloads/WorkloadsTable.tsx` (`onViewResources` prop)
+- Modify: `frontend/src/index.css` (`.skeleton--metrics-chart`)
 
 ### 6.1 Create MetricChart component
 
@@ -1106,13 +1436,19 @@ export default function ResourceDashboardPage() {
 
   const hours = TIME_RANGE_HOURS[timeRange]
 
+  // Backend returns points in ascending time order — recharts-ready as-is.
+  // Container name is loaded in the same request cycle (one effect).
   const fetchMetrics = useCallback(async () => {
     if (!containerId) return
     setLoading(true)
     setError(null)
     try {
-      const points = await getMetricPoints(containerId, { hours })
-      setMetrics(points.reverse())
+      const [points, containers] = await Promise.all([
+        getMetricPoints(containerId, { hours }),
+        listContainers(),
+      ])
+      setMetrics(points)
+      setContainerName(containers.find((c) => c.id === containerId)?.name ?? '')
     } catch (err) {
       setError(formatApiError(err))
     } finally {
@@ -1123,19 +1459,6 @@ export default function ResourceDashboardPage() {
   useEffect(() => {
     void fetchMetrics()
   }, [fetchMetrics])
-
-  useEffect(() => {
-    const loadName = async () => {
-      try {
-        const containers = await listContainers()
-        const matched = containers.find((c) => c.id === containerId)
-        if (matched) setContainerName(matched.name)
-      } catch {
-        // non-critical
-      }
-    }
-    if (containerId) void loadName()
-  }, [containerId])
 
   const chartData = useMemo(() => {
     return metrics.map((m) => ({
@@ -1190,7 +1513,7 @@ export default function ResourceDashboardPage() {
       {loading ? (
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
           {[1, 2, 3, 4].map((i) => (
-            <Skeleton key={i} height={240} />
+            <Skeleton key={i} className="skeleton--metrics-chart" />
           ))}
         </div>
       ) : metrics.length === 0 ? (
@@ -1284,10 +1607,12 @@ import ResourceDashboardPage from './pages/ResourceDashboardPage'
 />
 ```
 
-### 6.4 Add nav link in Navbar
+### 6.4 Entry points (skip global nav link)
 
-- [ ] Read `frontend/src/components/Navbar.tsx` to find the nav links section
-- [ ] Add a "Resources" link that navigates to `/containers/${containerId}/resources`. The link should appear in the container detail context. For now, add it as a link from the DashboardPage — each workload row can have a "Resources" button.
+No "Resources" item in `Navbar.tsx`: the app has no container-level context
+in the top nav, so a global link would be a no-op. Entry points to the
+resource dashboard are the per-row Resources button (6.5) and per-container
+rows in the usage section (6.6).
 
 ### 6.5 Add "Resources" button to WorkloadsTable
 
@@ -1309,6 +1634,168 @@ const onViewResources = useCallback((containerId: string) => {
 
 - [ ] Pass `onViewResources={onViewResources}` to `<WorkloadsTable>`
 
+### 6.6 Team/user usage rollup panel
+
+The per-container dashboard answers "how much does *this* container use".
+The goal is managing resources consumed by **users/teams**, so the dashboard
+page also surfaces a per-project (team) rollup of what is running right now.
+This is backed by `GET /api/metrics/usage` (Task 3).
+
+- [ ] Create `frontend/src/pages/containers/ResourceUsagePanel.tsx` (same folder as
+  `DeploymentHistorySection`):
+
+```typescript
+import { useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
+import {
+  formatApiError,
+  getUsageSummary,
+  type UsageSummary,
+} from '../../api/client'
+import { formatBytes } from '../../utils/formatBytes'
+import { Skeleton } from '../Skeleton'
+
+export function ResourceUsagePanel() {
+  const navigate = useNavigate()
+  const [summary, setSummary] = useState<UsageSummary | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    getUsageSummary()
+      .then((data) => {
+        if (!cancelled) setSummary(data)
+      })
+      .catch((err) => {
+        if (!cancelled) setError(formatApiError(err))
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  if (error) {
+    return (
+      <section className="dashboard-page__section">
+        <p className="containers-banner containers-banner--err">{error}</p>
+      </section>
+    )
+  }
+
+  if (!summary) {
+    return (
+      <section className="dashboard-page__section" aria-busy="true">
+        <Skeleton className="skeleton--detail-title" />
+      </section>
+    )
+  }
+
+  const { projects } = summary
+  if (projects.length === 0) {
+    return (
+      <section className="dashboard-page__section">
+        <p style={{ color: '#6b7280', fontSize: 14 }}>
+          No running workloads to report usage for.
+        </p>
+      </section>
+    )
+  }
+
+  return (
+    <section className="dashboard-page__section">
+      <h2 className="dashboard-page__subtitle">Resource usage by team</h2>
+      <p style={{ color: '#6b7280', fontSize: 14, marginBottom: 12 }}>
+        {summary.running_containers} running ·{' '}
+        {formatBytes(summary.total_memory_usage_bytes)} memory ·{' '}
+        {summary.total_cpu_percent.toFixed(1)}% CPU in total
+      </p>
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))',
+          gap: 12,
+        }}
+      >
+        {projects.map((project, index) => (
+          <div
+            key={project.project_id ?? `personal-${index}`}
+            style={{
+              border: '1px solid #e5e7eb',
+              borderRadius: 8,
+              padding: 16,
+            }}
+          >
+            <h3 style={{ margin: 0, fontSize: 14, color: '#374151' }}>
+              {project.team_name ?? project.project_name ?? 'Personal'}
+            </h3>
+            <p style={{ margin: '4px 0 12px', fontSize: 13, color: '#6b7280' }}>
+              {project.memory_usage_bytes_total
+                ? formatBytes(project.memory_usage_bytes_total)
+                : '0 B'}{' '}
+              · {project.cpu_percent_total.toFixed(1)}% CPU
+            </p>
+            <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
+              {project.containers.map((container) => (
+                <li
+                  key={container.container_id}
+                  style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    fontSize: 13,
+                    padding: '2px 0',
+                  }}
+                >
+                  <button
+                    type="button"
+                    className="btn btn--ghost btn--sm"
+                    style={{ color: '#3b82f6' }}
+                    onClick={() =>
+                      navigate(
+                        `/containers/${container.container_id}/resources`,
+                      )
+                    }
+                  >
+                    {container.name}
+                  </button>
+                  <span style={{ color: '#6b7280' }}>
+                    {container.memory_usage_bytes != null
+                      ? formatBytes(container.memory_usage_bytes)
+                      : 'stopped'}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ))}
+      </div>
+    </section>
+  )
+}
+```
+
+- [ ] In `DashboardPage.tsx`, import `ResourceUsagePanel` and render it above
+  `<DeploymentHistorySection>`:
+
+```typescript
+import { ResourceUsagePanel } from './containers/ResourceUsagePanel'
+
+// inside the returned JSX, before <DeploymentHistorySection>:
+      <ResourceUsagePanel />
+```
+
+### 6.7 CSS
+
+- [ ] Add to `frontend/src/index.css` next to the other `.skeleton--*`
+  rules (`.skeleton` base sets the shimmer; size variants only set
+  width/height):
+
+```css
+.skeleton--metrics-chart {
+  width: 100%;
+  height: 240px;
+}
+```
+
 ---
 
 ## Task 7: Verification
@@ -1317,11 +1804,24 @@ const onViewResources = useCallback((containerId: string) => {
 
 - [ ] Run: `cd backend && python -m pytest tests -q` — all existing tests + new tests pass
 
-### 7.2 Frontend build
+### 7.2 Migration round-trip (needs the dev Postgres from docker compose)
+
+- [ ] Run from `backend/`: `alembic upgrade head`
+- [ ] Run: `alembic downgrade -1`
+- [ ] Run: `alembic upgrade head`
+- [ ] Verify the `container_metrics` table exists after the final upgrade
+
+### 7.3 Frontend build and lint
 
 - [ ] Run: `cd frontend && npm run build` — clean build with no TypeScript errors
+- [ ] Run: `cd frontend && npm run lint` — no new findings
 
-### 7.3 Manual smoke test
+### 7.4 E2E suite
+
+- [ ] Run: `cd frontend && npm run test:e2e` — the live-SPA E2E suite passes
+  (stop any dev server on ports 8000/5173 first; `reuseExistingServer` is off)
+
+### 7.5 Manual smoke test
 
 - [ ] Start backend: `cd backend && python run.py`
 - [ ] Start frontend: `cd frontend && npm run dev`
@@ -1333,11 +1833,12 @@ const onViewResources = useCallback((containerId: string) => {
 
 ## Self-Review Checklist
 
-- [ ] **Spec coverage**: DB model (Task 1), migration (Task 1), background collector (Task 2), API raw points (Task 3), API summary (Task 3), frontend charts (Task 6), time range selector (Task 6), recharts (Task 4)
+- [ ] **Spec coverage**: DB model + migration (Task 1), background collector (Task 2), API raw points / summary / user-team usage rollup (Task 3), frontend charts (Task 6), time range selector (Task 6), team usage panel (Task 6), recharts (Task 4)
 - [ ] **Placeholder scan**: No "TBD", "TODO", "add validation", or "write tests" strings remain — every step has concrete code
-- [ ] **Type consistency**: `ContainerMetric` ORM uses `Float`/`Integer` matching `ContainerStats` pydantic model; frontend `MetricPoint`/`MetricSummary` types match API schemas
+- [ ] **Type consistency**: `ContainerMetric` ORM uses `Float`/`BigInteger` (bytes overflow 2 GiB in `Integer`); frontend `MetricPoint`/`MetricSummary`/`UsageSummary` types match API schemas
 - [ ] **Naming**: `VELA_METRICS_INTERVAL_SECONDS`, `VELA_METRICS_RETENTION_DAYS` follow existing `VELA_*` convention
 - [ ] **MVC compliance**: Domain logic in `app/core/monitoring/`, schemas in `app/api/schemas.py`, routes in `app/api/routes/metrics.py`
-- [ ] **Index on (container_id, timestamp desc)**: Composite index `ix_container_metrics_container_timestamp` created in migration and ORM model
-- [ ] **Cleanup cron**: Runs every 10 collection cycles in `run_metrics_collector()`, deletes rows older than `METRICS_RETENTION_DAYS`
-- [ ] **Exact npm versions**: `recharts@2.15.1` with `--save-exact`, no `^` or `~`
+- [ ] **Index on (container_id, timestamp)**: Composite `ix_container_metrics_container_timestamp` created in migration and ORM model; no redundant single-column index
+- [ ] **Cleanup**: Runs every 10 collection cycles in `run_metrics_collector(orchestrator)`, deletes rows older than `METRICS_RETENTION_DAYS`
+- [ ] **Dialect safety**: No `date_trunc`/`func.now()` — `since` computed and hourly buckets built in Python (test suite runs on SQLite)
+- [ ] **Exact npm versions**: `recharts` pinned with `--save-exact`, no `^` or `~`
