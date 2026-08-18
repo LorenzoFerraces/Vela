@@ -465,6 +465,7 @@ class ProjectPublic(BaseModel):
     is_personal: bool
     role: ProjectRoleLiteral
     owner_email: str
+    storage_quota_bytes: int | None = None
 
 
 class ProjectCreate(BaseModel):
@@ -507,6 +508,19 @@ class IncomingProjectInvitationPublic(BaseModel):
 class MyProjectRolePublic(BaseModel):
     project_id: uuid.UUID
     role: ProjectRoleLiteral
+
+
+class ProjectStorageQuotaPublic(BaseModel):
+    quota_bytes: int | None
+    used_bytes: int
+    container_disk_bytes: int
+    uploads_bytes: int
+    over_quota: bool
+    source: str
+
+
+class ProjectStorageQuotaUpdate(BaseModel):
+    storage_quota_bytes: int | None = Field(default=None, ge=1)
 
 
 # ---------------------------------------------------------------------------

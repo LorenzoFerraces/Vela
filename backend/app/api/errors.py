@@ -55,6 +55,7 @@ from app.core.exceptions import (
     RouteNotFoundError,
     StackCompositionCycleError,
     StackNotFoundError,
+    TeamStorageQuotaError,
     TrafficRouterError,
     UnsupportedLanguageError,
     VelaError,
@@ -197,6 +198,15 @@ def register_exception_handlers(app) -> None:
     @app.exception_handler(UnsupportedProjectError)
     async def unsupported_project_handler(
         _request: Request, exc: UnsupportedProjectError
+    ) -> JSONResponse:
+        return JSONResponse(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            content={"detail": str(exc)},
+        )
+
+    @app.exception_handler(TeamStorageQuotaError)
+    async def team_storage_quota_error_handler(
+        _request: Request, exc: TeamStorageQuotaError
     ) -> JSONResponse:
         return JSONResponse(
             status_code=status.HTTP_400_BAD_REQUEST,

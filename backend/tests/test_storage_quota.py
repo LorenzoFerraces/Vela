@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime, timezone
+from typing import Any
 
 import pytest
 import pytest_asyncio
@@ -340,3 +341,133 @@ def test_upload_blocked_when_team_storage_quota_exceeded(
     )
     assert second.status_code == 400
     assert "storage quota" in second.json()["detail"]
+
+
+def _register(client: TestClient, email: str) -> None:
+    response = client.post(
+        "/api/auth/register",
+        json={"email": email, "password": "password-min-8-chars"},
+    )
+    assert response.status_code == 201, response.text
+    client.headers["Authorization"] = f"Bearer {response.json()['access_token']}"
+
+
+def _personal_project_id(client: TestClient) -> str:
+    return next(
+        project["id"]
+        for project in client.get("/api/projects/").json()
+        if project["is_personal"]
+    )
+
+
+def test_storage_quota_get_for_member(
+    api_client: TestClient,
+    fake_orchestrator: FakeContainerOrchestrator,
+    seeded_user: User,
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Isolate the upload-scan directory so local dev uploads can't skew the total.
+    monkeypatch.setenv("VELA_VOLUME_UPLOADS_DIR", str(tmp_path / "uploads"))
+    monkeypatch.setenv("VELA_TEAM_STORAGE_QUOTA_BYTES", str(1024 * 1024))
+    fake_orchestrator.set_disk_bytes("cid-1", 10 * 1024)
+    project_id = seeded_user.personal_project_id
+    assert project_id is not None
+
+    response = api_client.get(f"/api/projects/{project_id}/storage-quota")
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["quota_bytes"] == 1024 * 1024
+    assert body["container_disk_bytes"] == 10 * 1024
+    assert body["uploads_bytes"] == 0
+    assert body["used_bytes"] == 10 * 1024
+    assert body["over_quota"] is False
+    assert body["source"] == "platform"
+
+
+def test_storage_quota_requires_membership(
+    db_app: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("VELA_TEAM_STORAGE_QUOTA_BYTES", str(_GB))
+    with TestClient(db_app) as owner_client, TestClient(db_app) as stranger_client:
+        _register(owner_client, "quota-owner@example.com")
+        owner_project_id = _personal_project_id(owner_client)
+
+        _register(stranger_client, "quota-stranger@example.com")
+        response = stranger_client.get(
+            f"/api/projects/{owner_project_id}/storage-quota"
+        )
+        assert response.status_code == 403
+
+
+def test_patch_storage_quota_rejects_above_platform_limit(
+    db_app: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("VELA_TEAM_STORAGE_QUOTA_BYTES", str(10 * 1024 * 1024))
+    with TestClient(db_app) as client:
+        _register(client, "quota-patch@example.com")
+        project_id = _personal_project_id(client)
+        response = client.patch(
+            f"/api/projects/{project_id}/storage-quota",
+            json={"storage_quota_bytes": 20 * 1024 * 1024},
+        )
+        assert response.status_code == 400
+        assert "platform limit" in response.json()["detail"]
+
+
+def test_patch_storage_quota_owner_sets_and_clears(
+    db_app: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("VELA_TEAM_STORAGE_QUOTA_BYTES", str(10 * _GB))
+    with TestClient(db_app) as client:
+        _register(client, "quota-set@example.com")
+        project_id = _personal_project_id(client)
+
+        response = client.patch(
+            f"/api/projects/{project_id}/storage-quota",
+            json={"storage_quota_bytes": 5 * _GB},
+        )
+        assert response.status_code == 200, response.text
+        assert response.json()["quota_bytes"] == 5 * _GB
+        assert response.json()["source"] == "team"
+
+        listed = client.get("/api/projects/").json()
+        assert next(
+            project for project in listed if project["id"] == project_id
+        )["storage_quota_bytes"] == 5 * _GB
+
+        response = client.patch(
+            f"/api/projects/{project_id}/storage-quota",
+            json={"storage_quota_bytes": None},
+        )
+        assert response.status_code == 200
+        assert response.json()["quota_bytes"] == 10 * _GB
+        assert response.json()["source"] == "platform"
+
+
+def test_patch_storage_quota_forbidden_for_non_owner(db_app: Any) -> None:
+    with TestClient(db_app) as owner_client, TestClient(db_app) as member_client:
+        _register(owner_client, "quota-team-owner@example.com")
+        create_response = owner_client.post(
+            "/api/projects/", json={"name": "Quota team"}
+        )
+        assert create_response.status_code == 201, create_response.text
+        team_id = create_response.json()["id"]
+
+        _register(member_client, "quota-team-member@example.com")
+        invitation = owner_client.post(
+            f"/api/projects/{team_id}/invitations",
+            json={"email": "quota-team-member@example.com", "role": "viewer"},
+        )
+        assert invitation.status_code == 201, invitation.text
+        incoming = member_client.get("/api/projects/invitations/incoming").json()
+        accept = member_client.post(
+            f"/api/projects/invitations/{incoming[0]['id']}/accept"
+        )
+        assert accept.status_code == 200, accept.text
+
+        response = member_client.patch(
+            f"/api/projects/{team_id}/storage-quota",
+            json={"storage_quota_bytes": _GB},
+        )
+        assert response.status_code == 403
