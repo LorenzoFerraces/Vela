@@ -1581,6 +1581,9 @@ export interface ProjectUsage {
   team_name: string | null
   cpu_percent_total: number
   memory_usage_bytes_total: number
+  storage_quota_bytes: number | null
+  storage_used_bytes: number
+  storage_over_quota: boolean
   containers: ContainerUsageEntry[]
 }
 

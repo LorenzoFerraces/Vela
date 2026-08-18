@@ -1293,6 +1293,12 @@ body {
   margin-top: 1.25rem;
 }
 
+.resource-usage__quota {
+  margin: 0 0 0.65rem;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
 .stacks-page__actions {
   display: flex;
   flex-wrap: wrap;

@@ -8,6 +8,10 @@ import {
 import { formatBytes } from '../../utils/formatBytes'
 import { Skeleton } from '../../components/Skeleton'
 
+function formatGib(bytes: number): string {
+  return `${(bytes / 1024 ** 3).toFixed(1)} GB`
+}
+
 export function ResourceUsagePanel() {
   const navigate = useNavigate()
   const [summary, setSummary] = useState<UsageSummary | null>(null)
@@ -87,6 +91,17 @@ export function ResourceUsagePanel() {
                 : '0 B'}{' '}
               · {project.cpu_percent_total.toFixed(1)}% CPU
             </p>
+            {project.storage_quota_bytes !== null ? (
+              <p className="resource-usage__quota">
+                {formatGib(project.storage_used_bytes)} of{' '}
+                {formatGib(project.storage_quota_bytes)}
+                {project.storage_over_quota ? ' (over quota)' : ''}
+              </p>
+            ) : (
+              <p className="resource-usage__quota">
+                {formatGib(project.storage_used_bytes)} used
+              </p>
+            )}
             <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
               {project.containers.map((container) => (
                 <li
