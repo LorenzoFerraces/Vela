@@ -636,3 +636,23 @@ async def test_project_storage_alert_respects_disabled_notifications(
         )
     ).scalars().all()
     assert rows == []
+
+
+def test_usage_endpoint_includes_storage_fields(
+    api_client: TestClient,
+    fake_orchestrator: FakeContainerOrchestrator,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("VELA_TEAM_STORAGE_QUOTA_BYTES", str(2 * _GB))
+    fake_orchestrator.set_disk_bytes("cid-1", _GB)
+    response = api_client.get("/api/metrics/usage")
+    assert response.status_code == 200, response.text
+    # The caller's unlabeled containers group under a null project id.
+    personal = next(
+        project
+        for project in response.json()["projects"]
+        if project["project_id"] is None
+    )
+    assert personal["storage_quota_bytes"] == 2 * _GB
+    assert personal["storage_used_bytes"] == _GB
+    assert personal["storage_over_quota"] is False

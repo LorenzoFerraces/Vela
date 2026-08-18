@@ -28,6 +28,10 @@ from app.core.projects.access import (
     list_accessible_project_ids,
     require_container_access,
 )
+from app.core.quotas import (
+    effective_quota_bytes,
+    usage_from_containers,
+)
 from app.core.models import ContainerInfo
 from app.db.models import (
     ContainerMetric,
@@ -189,6 +193,15 @@ async def get_usage(
     running = 0
     for project_id, members in grouped.items():
         project = project_by_id.get(project_id) if project_id else None
+        # Unlabeled containers are the caller's own; quota checks attribute
+        # their storage to the caller's personal project.
+        storage_project = project
+        if storage_project is None:
+            storage_project = (
+                project_by_id.get(current_user.personal_project_id)
+                if current_user.personal_project_id is not None
+                else None
+            )
         entries: list[ContainerUsageEntry] = []
         for info in members:
             is_running = info.status == ContainerStatus.RUNNING
@@ -215,6 +228,15 @@ async def get_usage(
                     memory_percent=row.memory_percent if row else None,
                 )
             )
+        if storage_project is not None:
+            disk_bytes, uploads_bytes = await usage_from_containers(
+                session, containers, storage_project.id
+            )
+            storage_used_bytes = disk_bytes + uploads_bytes
+            storage_quota_bytes = effective_quota_bytes(storage_project)
+        else:
+            storage_used_bytes = 0
+            storage_quota_bytes = None
         project_usages.append(
             ProjectUsage(
                 project_id=project_id,
@@ -229,6 +251,12 @@ async def get_usage(
                 ),
                 memory_usage_bytes_total=sum(
                     e.memory_usage_bytes or 0 for e in entries
+                ),
+                storage_quota_bytes=storage_quota_bytes,
+                storage_used_bytes=storage_used_bytes,
+                storage_over_quota=(
+                    storage_quota_bytes is not None
+                    and storage_used_bytes >= storage_quota_bytes
                 ),
                 containers=entries,
             )

@@ -865,6 +865,9 @@ class ProjectUsage(BaseModel):
     team_name: str | None
     cpu_percent_total: float
     memory_usage_bytes_total: int
+    storage_quota_bytes: int | None = None
+    storage_used_bytes: int = 0
+    storage_over_quota: bool = False
     containers: list[ContainerUsageEntry]
 
 
