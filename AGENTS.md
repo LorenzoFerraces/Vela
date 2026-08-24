@@ -85,24 +85,6 @@ E2E user credentials in `frontend/e2e/constants.ts` must stay in sync with `back
 
 - Idiomatic Python: explicit, typed where helpful, `match`/`case` for exhaustiveness on unions. Match surrounding modules for layout and error handling.
 
-## TypeScript / React
-
-- **Avoid `instanceof`** — prefer discriminated unions, `typeof`/`in`, type predicates, or Zod parsing.
-- **Split large files** — extract subviews, hooks, shared UI when a file is hard to scan.
-- **Reuse** — extract shared components when the same UI appears in 2+ places.
-- **`useEffect`** — derive state during render or in event handlers when possible. Reserve effects for real side effects.
-
-## UI and forms
-
-- **Skeleton placeholders** over "Loading…" text. **Optimistic UI** when safe.
-- **Short, concise** form labels and helper text. Split long forms into multi-step flows or modals.
-- **Containers page**: run form uses `public_route: true`, user-selected container port (default 80), no host port mapping. Git branch shown only when source has `git@` / `http(s)://` / `ssh://` prefix.
-
-## Errors shown to users
-
-- **Frontend**: show short, actionable messages from API `detail`. No stack traces or generic "Something went wrong".
-- **Backend**: structured HTTP errors from domain exceptions. Map unexpected failures to a safe generic message.
-
 ## Cleaning AI-generated changes (deslop)
 
 After substantive agent-generated edits on a branch, run the **deslop** Cursor skill on the diff: remove unnecessary comments, abnormal defensive `try`/`except` on trusted paths, `any` casts used only to silence types, and deeply nested structure that does not match surrounding code — **without changing behavior** except for clear bugs. Prefer small, focused cleanups over broad rewrites.
@@ -125,6 +107,21 @@ After substantive agent-generated edits on a branch, run the **deslop** Cursor s
 - **Avoid long explanations** inline on the form; if something needs detail, link to docs or a collapsible help pattern rather than wall-of-text above fields.
 - **Long forms are fine to split**: use **multi-step flows** or **modals** (and related patterns) so users are not overwhelmed by a single scrolling page of inputs.
 - **Containers** (`frontend/src/pages/ContainersPage.tsx`): the run form always uses **public routes** (`public_route: true`), a user-selected **container port** (defaults to 80; Git analysis may pre-fill when enabled in settings), no host port mapping, and shows **Git branch** only when the source looks like a Git URL (same `git@` / `http(s)://` / `ssh://` prefix rules as `POST /api/containers/run` on the server).
+
+## UI standards (frontend)
+
+Verified against the ui-ux-pro-max skill; the codebase already follows these — keep it that way.
+
+- **Design tokens**: `frontend/src/index.css` `:root` is the single source of color truth (dark-only theme, `color-scheme: dark`). No raw hex/rgba in components or inline styles — the only exceptions are library props that cannot consume CSS variables (xyflow in `StackVisualizer.tsx`, xterm theme in `ContainerTerminal.tsx`, log-level colors in `LogsPage.tsx`).
+- **Contrast**: body text ≥ 4.5:1 against its background. Current tokens pass; check any new token before use.
+- **Focus**: never remove a focus outline without a visible replacement. Inputs use `outline: none` + accent border + `box-shadow` ring; buttons/links use `:focus-visible` with a 2px `--accent` outline.
+- **Icons** (Phosphor): decorative icons beside visible text get `aria-hidden="true"`; icon-only buttons get an `aria-label` (plus `aria-expanded`/`aria-pressed` where stateful).
+- **Status feedback**: errors use `role="alert"`; non-urgent updates use `role="status"` / `aria-live="polite"`; banners use the existing `*-banner--err` / `--ok` classes.
+- **Modals**: `role="dialog"` + `aria-labelledby`, close on Escape, restore focus to the trigger (pattern in `BuildConfigModal.tsx`).
+- **Forms**: every field has a visible `<label htmlFor>`; errors appear near the field, not only in a top banner.
+- **Motion**: keep animations inside/compatible with the existing `prefers-reduced-motion: reduce` block in `index.css`.
+- **CSS organization**: global styles live in `index.css` (already 3000+ lines). Put new page-specific styles in a separate CSS file imported by that page — do not grow `index.css`.
+- **Design/UX decisions**: consult the ui-ux-pro-max skill (searchable local guidance) before choosing styles, colors, or interaction patterns.
 
 ## Errors shown to users (frontend and API)
 

@@ -11,6 +11,7 @@ import {
   type ScalingPolicyRequest,
   type StackServiceCreate,
 } from '../../api/client'
+import ConfirmDialog from '../../components/ConfirmDialog'
 import BuildConfigModal from '../containers/BuildConfigModal'
 import {
   buildOverrideFromAnalysis,
@@ -44,9 +45,12 @@ import {
 
 type Banner = { tone: 'ok' | 'err'; text: string } | null
 
+type ServiceFieldErrors = { name: string | null; source: string | null }
+
 function ServiceEditForm({
   service,
   index,
+  fieldErrors,
   onUpdate,
   onPatch,
   onRemove,
@@ -56,6 +60,7 @@ function ServiceEditForm({
 }: {
   service: StackServiceCreate
   index: number
+  fieldErrors: ServiceFieldErrors | null
   onUpdate: (index: number, field: keyof StackServiceCreate, value: unknown) => void
   onPatch: (index: number, patch: Partial<StackServiceCreate>) => void
   onRemove: (index: number) => void
@@ -107,6 +112,7 @@ function ServiceEditForm({
     tryCommitPastedGithubRepo,
     onInputChange,
     onInputFocus,
+    setListOpen,
   } = useDeploySourceSelection()
 
   const { imageRefCheck, runImageRefAvailabilityCheck } = useImageRefAvailability(
@@ -338,10 +344,16 @@ function ServiceEditForm({
           <input
             id={`svc-${index}-name`}
             className="containers-form__input"
+            autoComplete="off"
             value={service.service_name || ''}
             onChange={(e) => onUpdate(index, 'service_name', e.target.value)}
             placeholder={`service-${index + 1}`}
           />
+          {fieldErrors?.name ? (
+            <p className="settings-banner settings-banner--err" role="alert">
+              {fieldErrors.name}
+            </p>
+          ) : null}
         </div>
 
         <div className="containers-form__stack">
@@ -355,6 +367,7 @@ function ServiceEditForm({
             id={`svc-${index}-port`}
             type="number"
             className="containers-form__input"
+            autoComplete="off"
             value={service.container_port ?? 80}
             onChange={(e) =>
               onUpdate(index, 'container_port', parseInt(e.target.value, 10))
@@ -366,7 +379,9 @@ function ServiceEditForm({
       </div>
 
       <div className="containers-form__stack">
-        <label className="containers-form__label">Source</label>
+        <label className="containers-form__label" htmlFor="deploy-source-input">
+          Deploy source
+        </label>
         <DeploySourceCombobox
           listboxId={listboxId}
           rootRef={rootRef}
@@ -408,13 +423,19 @@ function ServiceEditForm({
                       defaultBranch: committed.default_branch,
                     }
                   : {
-                      kind: 'dockerfile_template',
-                      templateId: committed.id,
-                      name: committed.name,
+                       kind: 'dockerfile_template',
+                       templateId: committed.id,
+                       name: committed.name,
                     }
-            )
-          }}
+              )
+            }}
+            onListClose={() => setListOpen(false)}
         />
+        {fieldErrors?.source ? (
+          <p className="settings-banner settings-banner--err" role="alert">
+            {fieldErrors.source}
+          </p>
+        ) : null}
       </div>
 
       {selectionShowsGitBranch(selection) ? (
@@ -429,6 +450,7 @@ function ServiceEditForm({
             id={`svc-${index}-branch`}
             className="containers-form__input"
             type="text"
+            autoComplete="off"
             value={service.git_branch || 'main'}
             onChange={(e) => onUpdate(index, 'git_branch', e.target.value)}
             placeholder="main"
@@ -532,7 +554,7 @@ function ServiceEditForm({
           aria-expanded={advancedOpen}
           onClick={() => setAdvancedOpen((open) => !open)}
         >
-          <span>Advanced options</span>
+          <span>Advanced Options</span>
           <span className="containers-form__advanced-chevron" aria-hidden="true">›</span>
         </button>
         {advancedOpen ? (
@@ -548,6 +570,7 @@ function ServiceEditForm({
                       <input
                         className="containers-form__input"
                         type="text"
+                        autoComplete="off"
                         placeholder="KEY"
                         aria-label={`Environment variable name ${rowIndex + 1}`}
                         value={row.key}
@@ -556,6 +579,7 @@ function ServiceEditForm({
                       <input
                         className="containers-form__input"
                         type="text"
+                        autoComplete="off"
                         placeholder="value"
                         aria-label={`Environment variable value ${rowIndex + 1}`}
                         value={row.value}
@@ -571,7 +595,7 @@ function ServiceEditForm({
                       </button>
                     </div>
                     {matches.length > 0 ? (
-                      <p className="stacks-env-link-preview" aria-label="Service references in value">
+                      <p className="stacks-env-link-preview">
                         {previewParts.map((part) =>
                           part.highlighted ? (
                             <span key={part.key} className="stacks-env-link-preview__hit">
@@ -633,6 +657,7 @@ function ServiceEditForm({
               id={`svc-${index}-command`}
               className="containers-form__input"
               type="text"
+              autoComplete="off"
               placeholder="Optional CMD override"
               value={commandStr}
               onChange={(e) => handleCommandChange(e.target.value)}
@@ -666,6 +691,7 @@ function ServiceEditForm({
                     <input
                       className="containers-form__input"
                       type="text"
+                      autoComplete="off"
                       placeholder="/path/in/container"
                       aria-label={`Volume target ${rowIndex + 1}`}
                       value={row.target}
@@ -727,6 +753,9 @@ export default function StackBuilderPage() {
   const [listLoading, setListLoading] = useState(!!editId)
   const [banner, setBanner] = useState<Banner>(null)
   const [stackName, setStackName] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [serviceErrors, setServiceErrors] = useState<(ServiceFieldErrors | null)[]>([])
+  const [removalPendingIndex, setRemovalPendingIndex] = useState<number | null>(null)
   const importSeedApplied = useRef(false)
 
   useEffect(() => {
@@ -781,6 +810,25 @@ export default function StackBuilderPage() {
       setServices((prev) =>
         prev.map((s, i) => (i === index ? { ...s, [field]: value } : s))
       )
+      if (field === 'service_name' || field === 'source_ref') {
+        setServiceErrors((prev) => {
+          const entry = prev[index]
+          const hasError =
+            entry && (field === 'service_name' ? entry.name : entry.source)
+          if (!hasError) {
+            return prev
+          }
+          return prev.map((item, i) => {
+            if (i !== index || !item) {
+              return item
+            }
+            if (field === 'service_name') {
+              return { ...item, name: null }
+            }
+            return { ...item, source: null }
+          })
+        })
+      }
     },
     []
   )
@@ -790,6 +838,20 @@ export default function StackBuilderPage() {
       setServices((prev) =>
         prev.map((s, i) => (i === index ? { ...s, ...patch } : s))
       )
+      if (patch.source_ref !== undefined) {
+        setServiceErrors((prev) => {
+          const entry = prev[index]
+          if (!entry || !entry.source) {
+            return prev
+          }
+          return prev.map((item, i) => {
+            if (i !== index || !item) {
+              return item
+            }
+            return { ...item, source: null }
+          })
+        })
+      }
     },
     []
   )
@@ -797,6 +859,7 @@ export default function StackBuilderPage() {
   const removeService = useCallback(
     (index: number) => {
       setServices((prev) => prev.filter((_, i) => i !== index))
+      setServiceErrors((prev) => prev.filter((_, i) => i !== index))
       setSelectedIndex((prev) => {
         if (prev === index) return null
         if (prev !== null && prev > index) return prev - 1
@@ -824,6 +887,7 @@ export default function StackBuilderPage() {
       setTimeout(() => setHighlightIndex(null), 2000)
       return next
     })
+    setServiceErrors((prev) => [...prev, null])
   }
 
   async function handleSave() {
@@ -831,18 +895,34 @@ export default function StackBuilderPage() {
       setBanner({ tone: 'err', text: 'Stack must have at least one service.' })
       return
     }
-    if (
-      services.some(
-        (service) =>
-          !service.service_name.trim() || !service.source_ref.trim(),
-      )
-    ) {
+    const errors = services.map(
+      (service): ServiceFieldErrors => ({
+        name: service.service_name.trim() ? null : 'Enter a service name.',
+        source: service.source_ref.trim() ? null : 'Choose a deploy source.',
+      }),
+    )
+    const firstInvalidIndex = errors.findIndex(
+      (entry) => entry.name || entry.source,
+    )
+    if (firstInvalidIndex !== -1) {
+      setServiceErrors(errors)
       setBanner({
         tone: 'err',
         text: 'Each service needs a name and deploy source.',
       })
+      const firstInvalid = errors[firstInvalidIndex]
+      if (firstInvalidIndex === selectedIndex) {
+        const elementId = firstInvalid.name
+          ? `svc-${firstInvalidIndex}-name`
+          : 'deploy-source-input'
+        document.getElementById(elementId)?.focus()
+      } else {
+        setSelectedIndex(firstInvalidIndex)
+      }
       return
     }
+    setServiceErrors(services.map(() => null))
+    setSaving(true)
     try {
       if (editId) {
         await updateStack(editId, {
@@ -858,8 +938,20 @@ export default function StackBuilderPage() {
       navigate('/stacks')
     } catch (err) {
       setBanner({ tone: 'err', text: formatApiError(err) })
+    } finally {
+      setSaving(false)
     }
   }
+
+  const removalPending =
+    removalPendingIndex !== null
+      ? {
+          index: removalPendingIndex,
+          name:
+            services[removalPendingIndex]?.service_name ||
+            `service-${removalPendingIndex + 1}`,
+        }
+      : null
 
   const selectedService =
     selectedIndex !== null ? services[selectedIndex] : null
@@ -883,6 +975,7 @@ export default function StackBuilderPage() {
         <input
           id="stack-name-input"
           className="containers-form__input"
+          autoComplete="off"
           placeholder="my-stack"
           value={stackName}
           onChange={(e) => setStackName(e.target.value)}
@@ -896,7 +989,7 @@ export default function StackBuilderPage() {
               ? 'containers-banner containers-banner--ok'
               : 'containers-banner containers-banner--err'
           }
-          role={banner.tone === 'err' ? 'alert' : undefined}
+          role={banner.tone === 'err' ? 'alert' : 'status'}
         >
           <p className="containers-banner__text">{banner.text}</p>
         </div>
@@ -919,8 +1012,9 @@ export default function StackBuilderPage() {
                   {services.map((service, index) => {
                     if (selectedIndex === index) return null
                     return (
-                      <li
+                      <button
                         key={index}
+                        type="button"
                         className={[
                           'stacks-builder__list-item',
                           highlightIndex === index
@@ -929,22 +1023,12 @@ export default function StackBuilderPage() {
                         ]
                           .filter(Boolean)
                           .join(' ')}
-                        role="button"
-                        tabIndex={0}
                         onClick={() =>
                           setSelectedIndex((prev) => (prev === index ? null : index))
                         }
-                        onKeyDown={(event) => {
-                          if (event.key === 'Enter' || event.key === ' ') {
-                            event.preventDefault()
-                            setSelectedIndex((prev) =>
-                              prev === index ? null : index,
-                            )
-                          }
-                        }}
                       >
                         {service.service_name || `service-${index + 1}`}
-                      </li>
+                      </button>
                     )
                   })}
                 </ul>
@@ -954,9 +1038,10 @@ export default function StackBuilderPage() {
                     key={selectedIndex}
                     service={selectedService}
                     index={selectedIndex!}
+                    fieldErrors={serviceErrors[selectedIndex!] ?? null}
                     onUpdate={updateService}
                     onPatch={patchService}
-                    onRemove={removeService}
+                    onRemove={(index) => setRemovalPendingIndex(index)}
                     onClose={() => setSelectedIndex(null)}
                     siblingNames={services
                       .filter((_, i) => i !== selectedIndex)
@@ -988,8 +1073,9 @@ export default function StackBuilderPage() {
                 type="button"
                 className="btn btn--primary"
                 onClick={handleSave}
+                disabled={saving}
               >
-                Save Stack
+                {saving ? 'Saving…' : 'Save Stack'}
               </button>
               <button
                 type="button"
@@ -1024,6 +1110,24 @@ export default function StackBuilderPage() {
           </div>
         </div>
       )}
+
+      <ConfirmDialog
+        open={removalPending !== null}
+        title="Remove service?"
+        message={
+          removalPending
+            ? `“${removalPending.name}” and its env vars, volumes, and uploads will be removed.`
+            : ''
+        }
+        confirmLabel="Remove"
+        onConfirm={() => {
+          if (removalPending) {
+            removeService(removalPending.index)
+          }
+          setRemovalPendingIndex(null)
+        }}
+        onClose={() => setRemovalPendingIndex(null)}
+      />
     </section>
   )
 }

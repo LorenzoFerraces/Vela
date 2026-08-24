@@ -6,6 +6,7 @@ type ContainersRunFormFieldsProps = {
   onContainerNameChange: (value: string) => void
   containerPort: string
   onContainerPortChange: (value: string) => void
+  portError?: string | null
   gitBranch: string
   onGitBranchChange: (value: string) => void
   gitAnalysisLoading?: boolean
@@ -40,6 +41,7 @@ export function ContainersRunFormFields({
   onContainerNameChange,
   containerPort,
   onContainerPortChange,
+  portError,
   gitBranch,
   onGitBranchChange,
   gitAnalysisLoading = false,
@@ -60,6 +62,7 @@ export function ContainersRunFormFields({
             value={containerName}
             onChange={(event) => onContainerNameChange(event.target.value)}
             placeholder="my-service"
+            autoComplete="off"
           />
           <GitAnalysisButton
             loading={gitAnalysisLoading}
@@ -74,6 +77,7 @@ export function ContainersRunFormFields({
           value={containerName}
           onChange={(event) => onContainerNameChange(event.target.value)}
           placeholder="my-service"
+          autoComplete="off"
         />
       )}
 
@@ -92,7 +96,19 @@ export function ContainersRunFormFields({
         value={containerPort}
         onChange={(event) => onContainerPortChange(event.target.value)}
         placeholder={showGitBranch ? '5173' : '80'}
+        autoComplete="off"
+        aria-invalid={portError ? true : undefined}
+        aria-describedby={portError ? 'container-port-error' : undefined}
       />
+      {portError ? (
+        <p
+          id="container-port-error"
+          className="containers-source-check containers-source-check--err"
+          role="alert"
+        >
+          {portError}
+        </p>
+      ) : null}
 
       {showGitBranch ? (
         <>
@@ -106,6 +122,7 @@ export function ContainersRunFormFields({
             value={gitBranch}
             onChange={(event) => onGitBranchChange(event.target.value)}
             placeholder="main"
+            autoComplete="off"
           />
         </>
       ) : null}

@@ -15,13 +15,13 @@ test.describe('Logs page', () => {
       authenticatedPage.getByRole('button', { name: 'Export CSV' }),
     ).toBeVisible()
     await expect(
-      authenticatedPage.getByPlaceholder('Search logs...'),
+      authenticatedPage.getByPlaceholder('Search logs…'),
     ).toBeVisible()
     await expect(
       authenticatedPage.getByRole('combobox'),
     ).toBeVisible()
     await expect(
-      authenticatedPage.getByPlaceholder('Container ID...'),
+      authenticatedPage.getByPlaceholder('Container ID…'),
     ).toBeVisible()
   })
 
@@ -30,7 +30,7 @@ test.describe('Logs page', () => {
   }) => {
     await authenticatedPage.goto('/logs')
     await authenticatedPage
-      .getByPlaceholder('Container ID...')
+      .getByPlaceholder('Container ID…')
       .fill('nonexistent-id')
     await expect(
       authenticatedPage.getByText(/Container not found/),

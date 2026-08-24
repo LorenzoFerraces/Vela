@@ -5,6 +5,7 @@ import {
   parseCompose,
   type StackServiceCreate,
 } from '../../api/client'
+import ConfirmDialog from '../../components/ConfirmDialog'
 import ComposeImportReviewModal from './ComposeImportReviewModal'
 import type { ImportedStackState } from './importTypes'
 
@@ -20,6 +21,7 @@ export default function ComposeImportPage() {
   const [reviewOpen, setReviewOpen] = useState(false)
   const [parsedServices, setParsedServices] = useState<StackServiceCreate[]>([])
   const [warnings, setWarnings] = useState<string[]>([])
+  const [discardOpen, setDiscardOpen] = useState(false)
 
   async function handleParse() {
     if (!yaml.trim()) {
@@ -60,6 +62,14 @@ export default function ComposeImportPage() {
     reader.readAsText(file)
   }
 
+  function handleCancel() {
+    if (name.trim() || yaml.trim()) {
+      setDiscardOpen(true)
+      return
+    }
+    navigate('/stacks')
+  }
+
   function handleContinue() {
     const stackName = name.trim() || 'imported-stack'
     const state: ImportedStackState = {
@@ -83,6 +93,7 @@ export default function ComposeImportPage() {
         <input
           id="import-name-input"
           className="containers-form__input"
+          autoComplete="off"
           value={name}
           onChange={(e) => setName(e.target.value)}
           placeholder="my-stack"
@@ -94,6 +105,7 @@ export default function ComposeImportPage() {
         <textarea
           id="import-yaml-input"
           className="containers-form__input stacks-import-page__yaml"
+          autoComplete="off"
           value={yaml}
           onChange={(e) => setYaml(e.target.value)}
           placeholder={`version: "3"\nservices:\n  web:\n    image: nginx:alpine`}
@@ -128,7 +140,7 @@ export default function ComposeImportPage() {
           <button
             type="button"
             className="btn btn--ghost"
-            onClick={() => navigate('/stacks')}
+            onClick={() => handleCancel()}
           >
             Cancel
           </button>
@@ -142,7 +154,7 @@ export default function ComposeImportPage() {
               ? 'containers-banner containers-banner--ok'
               : 'containers-banner containers-banner--err'
           }
-          role={banner.tone === 'err' ? 'alert' : undefined}
+          role={banner.tone === 'err' ? 'alert' : 'status'}
         >
           <p className="containers-banner__text">{banner.text}</p>
         </div>
@@ -158,6 +170,18 @@ export default function ComposeImportPage() {
           onContinue={handleContinue}
         />
       ) : null}
+
+      <ConfirmDialog
+        open={discardOpen}
+        title="Discard changes?"
+        message="The stack name and compose content will be discarded."
+        confirmLabel="Discard"
+        onConfirm={() => {
+          setDiscardOpen(false)
+          navigate('/stacks')
+        }}
+        onClose={() => setDiscardOpen(false)}
+      />
     </section>
   )
 }

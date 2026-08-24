@@ -19,6 +19,7 @@ import {
   removeProjectMember,
   updateProjectMemberRole,
 } from '../api/client'
+import ConfirmDialog from '../components/ConfirmDialog'
 import { TeamDetailSkeleton, TeamsPageSkeleton } from '../components/Skeleton'
 
 type Banner = { tone: 'ok' | 'err'; text: string } | null
@@ -49,6 +50,14 @@ export default function TeamsPage() {
   const [newTeamName, setNewTeamName] = useState('')
   const [inviteEmail, setInviteEmail] = useState('')
   const [inviteRole, setInviteRole] = useState<'viewer' | 'operator'>('viewer')
+  const [cancelInvitationTarget, setCancelInvitationTarget] = useState<
+    ProjectInvitation | null
+  >(null)
+  const [pendingAction, setPendingAction] = useState<
+    | { kind: 'remove-member'; userId: string; email: string }
+    | { kind: 'leave-team'; teamLabel: string }
+    | null
+  >(null)
   const detailRequestRef = useRef(0)
 
   const selectedProject = useMemo(() => {
@@ -187,7 +196,7 @@ export default function TeamsPage() {
       const created = await createProject(trimmedName)
       setNewTeamName('')
       setShowCreateForm(false)
-      setBanner({ tone: 'ok', text: `Team "${created.name}" created.` })
+      setBanner({ tone: 'ok', text: `Team “${created.name}” created.` })
       setProjects((current) => [...current, created])
       navigate(`/teams/${created.id}`)
     } catch (error) {
@@ -263,6 +272,7 @@ export default function TeamsPage() {
       setBanner({ tone: 'err', text: formatApiError(error) })
     } finally {
       setBusy(false)
+      setCancelInvitationTarget(null)
     }
   }
 
@@ -282,35 +292,44 @@ export default function TeamsPage() {
     }
   }
 
-  async function onRemoveMember(userId: string, email: string) {
+  function onRemoveMember(userId: string, email: string) {
     if (!selectedProject) {
       return
     }
-    if (!window.confirm(`Remove ${email} from this team?`)) {
+    setPendingAction({ kind: 'remove-member', userId, email })
+  }
+
+  async function onConfirmRemoveMember() {
+    const action = pendingAction
+    if (!selectedProject || action?.kind !== 'remove-member') {
       return
     }
     setBusy(true)
     setBanner(null)
     try {
-      await removeProjectMember(selectedProject.id, userId)
+      await removeProjectMember(selectedProject.id, action.userId)
       await refreshSelectedTeamDetail()
     } catch (error) {
       setBanner({ tone: 'err', text: formatApiError(error) })
     } finally {
       setBusy(false)
+      setPendingAction(null)
     }
   }
 
-  async function onLeaveTeam() {
+  function onLeaveTeam() {
     if (!selectedProject || selectedProject.role === 'owner') {
       return
     }
-    const teamLabel = teamDisplayName(selectedProject)
-    if (
-      !window.confirm(
-        `Leave "${teamLabel}"? You will lose access to its workloads.`,
-      )
-    ) {
+    setPendingAction({
+      kind: 'leave-team',
+      teamLabel: teamDisplayName(selectedProject),
+    })
+  }
+
+  async function onConfirmLeaveTeam() {
+    const action = pendingAction
+    if (!selectedProject || action?.kind !== 'leave-team') {
       return
     }
     setBusy(true)
@@ -330,6 +349,7 @@ export default function TeamsPage() {
       setBanner({ tone: 'err', text: formatApiError(error) })
     } finally {
       setBusy(false)
+      setPendingAction(null)
     }
   }
 
@@ -360,7 +380,7 @@ export default function TeamsPage() {
               ? 'settings-banner settings-banner--ok'
               : 'settings-banner settings-banner--err'
           }
-          role={banner.tone === 'err' ? 'alert' : undefined}
+          role={banner.tone === 'err' ? 'alert' : 'status'}
         >
           {banner.text}
         </p>
@@ -376,10 +396,9 @@ export default function TeamsPage() {
               value={newTeamName}
               disabled={busy}
               onChange={(event) => setNewTeamName(event.target.value)}
-              placeholder="My team"
+              placeholder="My team…"
               maxLength={255}
               required
-              autoFocus
             />
           </label>
           <button type="submit" className="btn btn--primary" disabled={busy}>
@@ -504,6 +523,7 @@ export default function TeamsPage() {
                               <div className="teams-page__member-controls">
                                 <select
                                   className="teams-page__input teams-page__select teams-page__select--inline"
+                                  aria-label={`Role for ${member.email}`}
                                   value={member.role}
                                   disabled={busy}
                                   onChange={(event) =>
@@ -551,10 +571,12 @@ export default function TeamsPage() {
                             <input
                               type="email"
                               className="teams-page__input"
+                              autoComplete="off"
+                              spellCheck={false}
                               value={inviteEmail}
                               disabled={busy}
                               onChange={(event) => setInviteEmail(event.target.value)}
-                              placeholder="teammate@example.com"
+                              placeholder="teammate@example.com…"
                               required
                             />
                           </label>
@@ -607,7 +629,7 @@ export default function TeamsPage() {
                                   className="btn btn--ghost btn--sm"
                                   disabled={busy}
                                   onClick={() =>
-                                    void onCancelInvitation(invitation.id)
+                                    setCancelInvitationTarget(invitation)
                                   }
                                 >
                                   Cancel
@@ -630,6 +652,58 @@ export default function TeamsPage() {
           ) : null}
         </div>
       )}
+
+      <ConfirmDialog
+        open={cancelInvitationTarget !== null}
+        title="Cancel invitation?"
+        message={
+          cancelInvitationTarget
+            ? `The invitation for ${cancelInvitationTarget.email} will be revoked.`
+            : ''
+        }
+        confirmLabel={busy ? 'Cancelling…' : 'Cancel invite'}
+        busy={busy}
+        onConfirm={() => {
+          if (cancelInvitationTarget) {
+            void onCancelInvitation(cancelInvitationTarget.id)
+          }
+        }}
+        onClose={() => setCancelInvitationTarget(null)}
+      />
+
+      <ConfirmDialog
+        open={pendingAction !== null}
+        title={
+          pendingAction?.kind === 'leave-team'
+            ? `Leave “${pendingAction.teamLabel}”?`
+            : 'Remove member?'
+        }
+        message={
+          pendingAction?.kind === 'leave-team'
+            ? 'You will lose access to its workloads.'
+            : pendingAction
+              ? `${pendingAction.email} will be removed from this team.`
+              : ''
+        }
+        confirmLabel={
+          pendingAction?.kind === 'leave-team'
+            ? busy
+              ? 'Leaving…'
+              : 'Leave'
+            : busy
+              ? 'Removing…'
+              : 'Remove'
+        }
+        busy={busy && pendingAction !== null}
+        onConfirm={() => {
+          if (pendingAction?.kind === 'leave-team') {
+            void onConfirmLeaveTeam()
+          } else if (pendingAction) {
+            void onConfirmRemoveMember()
+          }
+        }}
+        onClose={() => setPendingAction(null)}
+      />
     </section>
   )
 }

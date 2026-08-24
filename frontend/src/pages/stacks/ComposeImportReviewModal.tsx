@@ -99,6 +99,7 @@ export default function ComposeImportReviewModal({
                     <input
                       id={`import-svc-${index}-name`}
                       className="containers-form__input"
+                      autoComplete="off"
                       value={service.service_name}
                       onChange={(event) =>
                         onChangeServices(

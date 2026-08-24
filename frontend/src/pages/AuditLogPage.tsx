@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { formatApiError, getAuditLog } from '../api/client'
 import type { AuditLogEntry, AuditLogQueryParams } from '../api/client'
 
@@ -23,11 +24,35 @@ export default function AuditLogPage() {
   const [entries, setEntries] = useState<AuditLogEntry[]>([])
   const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(true)
-  const [actionFilter, setActionFilter] = useState('')
-  const [targetTypeFilter, setTargetTypeFilter] = useState('')
-  const [offset, setOffset] = useState(0)
+  const [searchParams, setSearchParams] = useSearchParams()
   const [error, setError] = useState<string | null>(null)
   const requestSeq = useRef(0)
+
+  const actionFilter = searchParams.get('action') ?? ''
+  const targetTypeFilter = searchParams.get('target') ?? ''
+  const offsetParam = Number.parseInt(searchParams.get('offset') ?? '0', 10)
+  const offset = Number.isNaN(offsetParam) ? 0 : offsetParam
+
+  function setFilterParam(name: string, value: string) {
+    const next = new URLSearchParams(searchParams)
+    if (value) {
+      next.set(name, value)
+    } else {
+      next.delete(name)
+    }
+    next.delete('offset')
+    setSearchParams(next, { replace: true })
+  }
+
+  function setOffsetParam(value: number) {
+    const next = new URLSearchParams(searchParams)
+    if (value > 0) {
+      next.set('offset', String(value))
+    } else {
+      next.delete('offset')
+    }
+    setSearchParams(next, { replace: true })
+  }
 
   const filterParams = useMemo<AuditLogQueryParams>(() => {
     const params: AuditLogQueryParams = { limit: LIMIT, offset }
@@ -73,10 +98,7 @@ export default function AuditLogPage() {
       <div className="audit-log-page__filters">
         <select
           value={actionFilter}
-          onChange={(e) => {
-            setActionFilter(e.target.value)
-            setOffset(0)
-          }}
+          onChange={(e) => setFilterParam('action', e.target.value)}
           className="settings-form__input"
           aria-label="Filter by action"
         >
@@ -87,10 +109,7 @@ export default function AuditLogPage() {
         </select>
         <select
           value={targetTypeFilter}
-          onChange={(e) => {
-            setTargetTypeFilter(e.target.value)
-            setOffset(0)
-          }}
+          onChange={(e) => setFilterParam('target', e.target.value)}
           className="settings-form__input"
           aria-label="Filter by target type"
         >
@@ -132,7 +151,7 @@ export default function AuditLogPage() {
               <button
                 type="button"
                 className="btn btn--ghost btn--sm"
-                onClick={() => setOffset(offset - LIMIT)}
+                onClick={() => setOffsetParam(offset - LIMIT)}
               >
                 Previous
               </button>
@@ -141,7 +160,7 @@ export default function AuditLogPage() {
               <button
                 type="button"
                 className="btn btn--ghost btn--sm"
-                onClick={() => setOffset(offset + LIMIT)}
+                onClick={() => setOffsetParam(offset + LIMIT)}
               >
                 Next
               </button>

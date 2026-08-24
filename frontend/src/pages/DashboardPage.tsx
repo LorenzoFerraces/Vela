@@ -5,6 +5,7 @@ import {
   startContainer,
   stopContainer,
 } from '../api/client'
+import ConfirmDialog from '../components/ConfirmDialog'
 import { WorkloadsTable } from '../components/workloads/WorkloadsTable'
 import { useWorkloadGroups } from './containers/useWorkloadGroups'
 import { DeploymentHistorySection } from './containers/DeploymentHistorySection'
@@ -14,6 +15,7 @@ export default function DashboardPage() {
     null,
   )
   const [rowBusy, setRowBusy] = useState<string | null>(null)
+  const [pendingRemoveId, setPendingRemoveId] = useState<string | null>(null)
   const [historyRefreshSignal, setHistoryRefreshSignal] = useState(0)
 
   const reportListLoadError = useCallback((detail: string) => {
@@ -48,8 +50,13 @@ export default function DashboardPage() {
     }
   }
 
-  async function onRemove(containerId: string) {
-    if (!window.confirm('Remove this container?')) return
+  function onRemove(containerId: string) {
+    setPendingRemoveId(containerId)
+  }
+
+  async function onConfirmRemove() {
+    if (pendingRemoveId === null) return
+    const containerId = pendingRemoveId
     setRowBusy(containerId)
     setBanner(null)
     try {
@@ -59,6 +66,7 @@ export default function DashboardPage() {
       setBanner({ tone: 'err', text: formatApiError(error) })
     } finally {
       setRowBusy(null)
+      setPendingRemoveId(null)
     }
   }
 
@@ -108,6 +116,16 @@ export default function DashboardPage() {
           Refresh
         </button>
       </div>
+
+      <ConfirmDialog
+        open={pendingRemoveId !== null}
+        title="Remove container?"
+        message={`${pendingRemoveId ?? ''} will be removed.`}
+        confirmLabel={rowBusy === pendingRemoveId ? 'Removing…' : 'Remove'}
+        busy={rowBusy === pendingRemoveId}
+        onConfirm={() => void onConfirmRemove()}
+        onClose={() => setPendingRemoveId(null)}
+      />
     </section>
   )
 }

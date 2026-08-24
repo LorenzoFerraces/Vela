@@ -126,7 +126,7 @@ test.describe('Images page (UI + mocked API)', () => {
       .getByRole('button', { name: 'Save reference' })
       .click()
     await expect(
-      authenticatedPage.getByRole('alert').filter({ hasText: 'Saved redis:7' }),
+      authenticatedPage.getByRole('status').filter({ hasText: 'Saved redis:7' }),
     ).toBeVisible()
   })
 
@@ -142,7 +142,7 @@ test.describe('Images page (UI + mocked API)', () => {
       .click()
     await expect(
       authenticatedPage
-        .getByRole('alert')
+        .getByRole('status')
         .filter({ hasText: 'Dockerfile template saved' }),
     ).toBeVisible()
   })

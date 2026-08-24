@@ -136,8 +136,11 @@ export function EmailNotificationSettingsCard() {
                   </p>
                 </div>
 
-                <div className="settings-form__group">
-                  <span className="settings-form__label">Alert types</span>
+                <fieldset
+                  className="settings-form__group"
+                  style={{ border: '0', margin: '0', padding: '0' }}
+                >
+                  <legend className="settings-form__label">Alert types</legend>
                   <ul className="settings-form__checkbox-list">
                     {(Object.keys(alertTypeLabels) as Array<'stop' | 'failure' | 'unhealthy'>).map(
                       (type) => (
@@ -155,7 +158,7 @@ export function EmailNotificationSettingsCard() {
                       ),
                     )}
                   </ul>
-                </div>
+                </fieldset>
 
                 <p className="settings-form__hint">
                   Alerts are sent immediately when an issue is detected.

@@ -13,20 +13,41 @@ const LEVEL_STYLES: Record<string, { bg: string; text: string }> = {
 const LIMIT = 100
 
 export default function LogsPage() {
-  const [searchParams] = useSearchParams()
+  const [searchParams, setSearchParams] = useSearchParams()
   const [entries, setEntries] = useState<LogEntry[]>([])
   const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(true)
-  const [search, setSearch] = useState('')
-  const [levelFilter, setLevelFilter] = useState('')
-  const [containerFilter, setContainerFilter] = useState(
-    () => searchParams.get('container_id') ?? ''
-  )
-  const [offset, setOffset] = useState(0)
   const [error, setError] = useState<string | null>(null)
   const fetchRequestRef = useRef(0)
 
+  const search = searchParams.get('q') ?? ''
+  const levelFilter = searchParams.get('level') ?? ''
+  const containerFilter = searchParams.get('container_id') ?? ''
+  const offsetParam = Number.parseInt(searchParams.get('offset') ?? '0', 10)
+  const offset = Number.isNaN(offsetParam) ? 0 : offsetParam
+
   const hasContainer = containerFilter.trim().length > 0
+
+  function setFilterParam(name: string, value: string) {
+    const next = new URLSearchParams(searchParams)
+    if (value) {
+      next.set(name, value)
+    } else {
+      next.delete(name)
+    }
+    next.delete('offset')
+    setSearchParams(next, { replace: true })
+  }
+
+  function setOffsetParam(value: number) {
+    const next = new URLSearchParams(searchParams)
+    if (value > 0) {
+      next.set('offset', String(value))
+    } else {
+      next.delete('offset')
+    }
+    setSearchParams(next, { replace: true })
+  }
 
   const fetchLogs = useCallback(async () => {
     const requestId = fetchRequestRef.current + 1
@@ -96,20 +117,22 @@ export default function LogsPage() {
       <div className="logs-page__filters">
         <input
           type="text"
-          placeholder="Search logs..."
+          name="q"
+          autoComplete="off"
+          aria-label="Search logs"
+          placeholder="Search logs…"
           value={search}
           onChange={(e) => {
-            setSearch(e.target.value)
-            setOffset(0)
+            setFilterParam('q', e.target.value)
             setEntries([])
             setLoading(true)
           }}
         />
         <select
+          name="level"
           value={levelFilter}
           onChange={(e) => {
-            setLevelFilter(e.target.value)
-            setOffset(0)
+            setFilterParam('level', e.target.value)
             setEntries([])
             setLoading(true)
           }}
@@ -124,11 +147,12 @@ export default function LogsPage() {
         </select>
         <input
           type="text"
-          placeholder="Container ID..."
+          name="container_id"
+          autoComplete="off"
+          placeholder="Container ID…"
           value={containerFilter}
           onChange={(e) => {
-            setContainerFilter(e.target.value)
-            setOffset(0)
+            setFilterParam('container_id', e.target.value)
             setEntries([])
             setLoading(true)
           }}
@@ -185,7 +209,7 @@ export default function LogsPage() {
               <button
                 type="button"
                 onClick={() => {
-                  setOffset(offset - LIMIT)
+                  setOffsetParam(offset - LIMIT)
                   setEntries([])
                   setLoading(true)
                 }}
@@ -198,7 +222,7 @@ export default function LogsPage() {
               <button
                 type="button"
                 onClick={() => {
-                  setOffset(offset + LIMIT)
+                  setOffsetParam(offset + LIMIT)
                   setEntries([])
                   setLoading(true)
                 }}

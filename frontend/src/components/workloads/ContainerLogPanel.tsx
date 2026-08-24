@@ -8,6 +8,7 @@ import {
 
 const ERROR_LINE_PATTERN = /\b(error|exception|fatal|traceback)\b/i
 const MAX_LOG_BUFFER_CHARS = 256_000
+const RENDERED_LINE_LIMIT = 1500
 
 function appendWithLimit(previous: string, piece: string): string {
   const next = previous + piece
@@ -117,7 +118,16 @@ export function ContainerLogPanel({
     }
   }, [containerId, isActive, isRunning])
 
-  const lines = useMemo(() => logText.split('\n'), [logText])
+  const { visibleLines, hasHiddenLines } = useMemo(() => {
+    const all = logText.split('\n')
+    if (all.length <= RENDERED_LINE_LIMIT) {
+      return { visibleLines: all, hasHiddenLines: false }
+    }
+    return {
+      visibleLines: all.slice(all.length - RENDERED_LINE_LIMIT),
+      hasHiddenLines: true,
+    }
+  }, [logText])
 
   return (
     <div className="workloads-log-panel">
@@ -159,7 +169,12 @@ export function ContainerLogPanel({
         tabIndex={0}
         aria-label="Container log output"
       >
-        {lines.map((line, index) => {
+        {hasHiddenLines ? (
+          <span className="workloads-log-panel__line">
+            Showing last {RENDERED_LINE_LIMIT} lines…
+          </span>
+        ) : null}
+        {visibleLines.map((line, index) => {
           const key = `${index}-${line.slice(0, 24)}`
           if (highlightErrors && ERROR_LINE_PATTERN.test(line)) {
             return (

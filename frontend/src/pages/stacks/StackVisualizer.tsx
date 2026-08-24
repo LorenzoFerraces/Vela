@@ -17,6 +17,10 @@ import {
 import '@xyflow/react/dist/style.css'
 import type { StackServiceCreate } from '../../api/client'
 
+const prefersReducedMotion = window.matchMedia(
+  '(prefers-reduced-motion: reduce)',
+).matches
+
 type DepEdgeData = { onRemove: () => void }
 type ServiceNodeData = { label: string; isHighlighted?: boolean; isSel?: boolean }
 
@@ -44,6 +48,7 @@ function DependencyEdge(props: EdgeProps<Edge<DepEdgeData>>) {
           <button
             type="button"
             className="stacks-visualizer__edge-remove"
+            aria-label="Remove dependency"
             onClick={(e) => {
               e.stopPropagation()
               data?.onRemove()
@@ -196,7 +201,7 @@ export default function StackVisualizer({
             source: sourceId,
             target: dep,
             type: 'dependency',
-            animated: true,
+            animated: !prefersReducedMotion,
             data: {
               onRemove: () => {
                 const handler = onDependencyChangeRef.current

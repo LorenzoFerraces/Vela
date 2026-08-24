@@ -25,6 +25,7 @@ type ContainersRunAdvancedFieldsProps = {
   scalingPolicy: ScalingPolicyRequest | null
   onScalingPolicyChange: (policy: ScalingPolicyRequest | null) => void
   scalingValidationError?: string | null
+  volumeError?: string | null
 }
 
 export function ContainersRunAdvancedFields({
@@ -37,10 +38,12 @@ export function ContainersRunAdvancedFields({
   scalingPolicy,
   onScalingPolicyChange,
   scalingValidationError = null,
+  volumeError = null,
 }: ContainersRunAdvancedFieldsProps) {
   const [expanded, setExpanded] = useState(false)
   const folderInputRef = useRef<HTMLInputElement>(null)
   const [pickingRowIndex, setPickingRowIndex] = useState<number | null>(null)
+  const advancedOpen = expanded || volumeError !== null
 
   function updateEnvRow(index: number, patch: Partial<EnvVarRow>) {
     onEnvRowsChange(
@@ -150,10 +153,10 @@ export function ContainersRunAdvancedFields({
       <button
         type="button"
         className="btn btn--ghost containers-form__advanced-toggle"
-        aria-expanded={expanded}
+        aria-expanded={advancedOpen}
         onClick={() => setExpanded((open) => !open)}
       >
-        <span>Advanced options</span>
+        <span>Advanced Options</span>
         <span
           className="containers-form__advanced-chevron"
           aria-hidden="true"
@@ -161,7 +164,7 @@ export function ContainersRunAdvancedFields({
           ›
         </span>
       </button>
-      {expanded ? (
+      {advancedOpen ? (
         <div className="containers-form__advanced-body">
           <p className="containers-form__label">Environment variables</p>
           <ul className="containers-env-list">
@@ -176,6 +179,7 @@ export function ContainersRunAdvancedFields({
                   onChange={(event) =>
                     updateEnvRow(index, { key: event.target.value })
                   }
+                  autoComplete="off"
                 />
                 <input
                   className="containers-form__input"
@@ -186,6 +190,7 @@ export function ContainersRunAdvancedFields({
                   onChange={(event) =>
                     updateEnvRow(index, { value: event.target.value })
                   }
+                  autoComplete="off"
                 />
                 <button
                   type="button"
@@ -209,9 +214,9 @@ export function ContainersRunAdvancedFields({
           <p className="containers-form__label">Volumes (read-only)</p>
           <p className="containers-muted containers-form__hint">
             Choose a folder from your computer (up to{' '}
-            {volumeUploadLimitMegabytes(VOLUME_UPLOAD_MAX_BYTES)} MB per folder,{' '}
-            {volumeUploadLimitMegabytes(VOLUME_UPLOAD_USER_QUOTA_BYTES)} MB total per
-            account). Mounts are read-only inside the container.
+            {volumeUploadLimitMegabytes(VOLUME_UPLOAD_MAX_BYTES)}\u00a0MB per folder,{' '}
+            {volumeUploadLimitMegabytes(VOLUME_UPLOAD_USER_QUOTA_BYTES)}\u00a0MB total
+            per account). Mounts are read-only inside the container.
           </p>
           <ul className="containers-env-list">
             {volumeRows.map((row, index) => (
@@ -219,6 +224,7 @@ export function ContainersRunAdvancedFields({
                 <div className="containers-volume-row">
                   <button
                     type="button"
+                    id={`volume-folder-${index + 1}`}
                     className="btn btn--ghost btn--compact"
                     disabled={row.uploading}
                     onClick={() => openFolderPicker(index)}
@@ -238,6 +244,7 @@ export function ContainersRunAdvancedFields({
                     </span>
                   ) : null}
                   <input
+                    id={`volume-target-${index + 1}`}
                     className="containers-form__input"
                     type="text"
                     placeholder="/path/in/container"
@@ -246,6 +253,7 @@ export function ContainersRunAdvancedFields({
                     onChange={(event) =>
                       updateVolumeRow(index, { target: event.target.value })
                     }
+                    autoComplete="off"
                   />
                   <button
                     type="button"
@@ -271,6 +279,15 @@ export function ContainersRunAdvancedFields({
           >
             Add volume
           </button>
+          {volumeError ? (
+            <p
+              id="volume-error"
+              className="settings-banner settings-banner--err"
+              role="alert"
+            >
+              {volumeError}
+            </p>
+          ) : null}
 
           <label className="containers-form__label" htmlFor="start-command-input">
             Start command
