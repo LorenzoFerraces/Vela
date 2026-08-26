@@ -71,6 +71,7 @@ export default function ComposeImportPage() {
   }
 
   function handleContinue() {
+    setReviewOpen(false)
     const stackName = name.trim() || 'imported-stack'
     const state: ImportedStackState = {
       importedStack: { name: stackName, services: parsedServices },

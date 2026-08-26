@@ -9,6 +9,7 @@ import {
 const ERROR_LINE_PATTERN = /\b(error|exception|fatal|traceback)\b/i
 const MAX_LOG_BUFFER_CHARS = 256_000
 const RENDERED_LINE_LIMIT = 1500
+const textEncoder = new TextEncoder()
 
 function appendWithLimit(previous: string, piece: string): string {
   const next = previous + piece
@@ -90,7 +91,7 @@ export function ContainerLogPanel({
         payload instanceof ArrayBuffer
           ? new Uint8Array(payload)
           : typeof payload === 'string'
-            ? new TextEncoder().encode(payload)
+             ? textEncoder.encode(payload)
             : new Uint8Array()
       if (chunk.length === 0) {
         return

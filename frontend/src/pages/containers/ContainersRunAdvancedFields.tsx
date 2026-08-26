@@ -11,7 +11,11 @@ import {
   volumeUploadLimitMegabytes,
 } from '../../constants/volumeUploadLimits'
 import type { EnvVarRow, VolumeMountRow } from './runFormAdvanced'
-import { createEmptyVolumeMountRow, folderTotalBytes } from './runFormAdvanced'
+import {
+  createEmptyEnvRow,
+  createEmptyVolumeMountRow,
+  folderTotalBytes,
+} from './runFormAdvanced'
 import { ContainersRunScalingFields } from './ContainersRunScalingFields'
 import { formatBytes } from '../../utils/formatBytes'
 
@@ -54,12 +58,12 @@ export function ContainersRunAdvancedFields({
   }
 
   function addEnvRow() {
-    onEnvRowsChange([...envRows, { key: '', value: '' }])
+    onEnvRowsChange([...envRows, createEmptyEnvRow()])
   }
 
   function removeEnvRow(index: number) {
     const next = envRows.filter((_, rowIndex) => rowIndex !== index)
-    onEnvRowsChange(next.length > 0 ? next : [{ key: '', value: '' }])
+    onEnvRowsChange(next.length > 0 ? next : [createEmptyEnvRow()])
   }
 
   function updateVolumeRow(index: number, patch: Partial<VolumeMountRow>) {
@@ -169,7 +173,7 @@ export function ContainersRunAdvancedFields({
           <p className="containers-form__label">Environment variables</p>
           <ul className="containers-env-list">
             {envRows.map((row, index) => (
-              <li key={index} className="containers-env-list__row">
+              <li key={row.id} className="containers-env-list__row">
                 <input
                   className="containers-form__input"
                   type="text"
@@ -220,7 +224,7 @@ export function ContainersRunAdvancedFields({
           </p>
           <ul className="containers-env-list">
             {volumeRows.map((row, index) => (
-              <li key={index} className="containers-env-list__row containers-env-list__row--volume">
+              <li key={row.id} className="containers-env-list__row containers-env-list__row--volume">
                 <div className="containers-volume-row">
                   <button
                     type="button"

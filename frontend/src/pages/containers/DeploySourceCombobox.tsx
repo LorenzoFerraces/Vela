@@ -179,13 +179,20 @@ export function DeploySourceCombobox({
   onListClose,
 }: DeploySourceComboboxProps) {
   const registryCheckEnabled = selectionNeedsRegistryCheck(selection)
-  const options = useMemo(
-    () =>
-      GROUPED_KINDS.flatMap((kind) =>
-        suggestions.filter((row) => row.kind === kind),
-      ),
-    [suggestions],
-  )
+  const options = useMemo(() => {
+    const rowsByKind: Record<
+      DeploySourceSuggestion['kind'],
+      DeploySourceSuggestion[]
+    > = {
+      image: [],
+      git: [],
+      dockerfile_template: [],
+    }
+    for (const row of suggestions) {
+      rowsByKind[row.kind].push(row)
+    }
+    return GROUPED_KINDS.flatMap((kind) => rowsByKind[kind])
+  }, [suggestions])
   const [activeIndex, setActiveIndex] = useState(-1)
   const activeOptionIndex =
     activeIndex >= 0 ? Math.min(activeIndex, options.length - 1) : -1

@@ -6,35 +6,15 @@ import {
   listDockerfileTemplates,
   updateDockerfileTemplate,
   type DockerfileTemplate,
-} from '../../api/client'
-import type { BuilderBanner } from './types'
+} from '../api/client'
 
-/**
- * Manage CRUD UI state and actions for Dockerfile templates.
- *
- * Provides state for the template list, loading/busy flags, current selection and editable fields,
- * and functions to refresh, select/clear, create, save, and remove templates. Banners for success or
- * error messages are reported via the provided callback.
- *
- * @param reportBanner - Callback used to show a banner (pass a `BuilderBanner`) or clear it by passing `null`
- * @returns An object exposing:
- *   - `rows`: current list of `DockerfileTemplate` items
- *   - `listLoading`: whether the template list is being fetched
- *   - `busy`: whether a create/update/delete operation is in progress
- *   - `selectedId`: id of the currently selected template, or `null`
- *   - `editName`: editable name for the selected template
- *   - `editContents`: editable contents for the selected template
- *   - `setEditName`: setter for `editName`
- *   - `setEditContents`: setter for `editContents`
- *   - `refresh`: reload the template list
- *   - `selectTemplate`: select a template and populate edit fields
- *   - `clearSelection`: clear the current selection and edit fields
- *   - `createTemplate`: create a new template (returns `true` on success, `false` on validation or error)
- *   - `saveSelected`: save changes to the currently selected template
- *   - `removeTemplate`: delete a template by id
- */
+export type DockerfileTemplateBanner = {
+  tone: 'ok' | 'err'
+  text: string
+} | null
+
 export function useDockerfileTemplates(
-  reportBanner: (banner: BuilderBanner) => void
+  reportBanner: (banner: DockerfileTemplateBanner) => void
 ) {
   const [rows, setRows] = useState<DockerfileTemplate[]>([])
   const [listLoading, setListLoading] = useState(true)

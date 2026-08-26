@@ -9,6 +9,12 @@ import {
   getAlertHistory,
 } from '../api/client'
 
+const alertTypeLabels: Record<'stop' | 'failure' | 'unhealthy', string> = {
+  stop: 'Container stopped',
+  failure: 'Container failed',
+  unhealthy: 'Container unhealthy',
+}
+
 export function EmailNotificationSettingsCard() {
   const [preferences, setPreferences] = useState<EmailNotificationPreferences | null>(null)
   const [alertHistory, setAlertHistory] = useState<AlertHistoryEntry[]>([])
@@ -76,12 +82,6 @@ export function EmailNotificationSettingsCard() {
     if (!showHistory) {
       void loadHistory()
     }
-  }
-
-  const alertTypeLabels: Record<'stop' | 'failure' | 'unhealthy', string> = {
-    stop: 'Container stopped',
-    failure: 'Container failed',
-    unhealthy: 'Container unhealthy',
   }
 
   return (

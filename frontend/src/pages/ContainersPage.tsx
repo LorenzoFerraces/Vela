@@ -18,7 +18,10 @@ import {
 } from './containers/buildOverride'
 import { ContainersFormMessageBanner } from './containers/ContainersFormMessageBanner'
 import { ContainersRunAdvancedFields } from './containers/ContainersRunAdvancedFields'
-import { ContainersRunFormFields } from './containers/ContainersRunFormFields'
+import {
+  ContainersRunFormFields,
+  ContainersRunGitFields,
+} from './containers/ContainersRunFormFields'
 import { validateScalingPolicy } from './containers/scalingPolicyUtils'
 import { DeployProjectSelect } from './containers/DeployProjectSelect'
 import { DeploySourceCombobox } from './containers/DeploySourceCombobox'
@@ -32,6 +35,7 @@ import { useDeployProjects } from './containers/useDeployProjects'
 import { useGitSourceAnalysis } from './containers/useGitSourceAnalysis'
 import { useImageRefAvailability } from './containers/useImageRefAvailability'
 import {
+  createEmptyEnvRow,
   createEmptyVolumeMountRow,
   parseStartCommand,
   recordFromEnvRows,
@@ -44,7 +48,7 @@ export default function ContainersPage() {
   const [containerName, setContainerName] = useState('')
   const [gitBranch, setGitBranch] = useState('main')
   const [containerPort, setContainerPort] = useState('80')
-  const [envRows, setEnvRows] = useState<EnvVarRow[]>([{ key: '', value: '' }])
+  const [envRows, setEnvRows] = useState<EnvVarRow[]>([createEmptyEnvRow()])
   const [volumeRows, setVolumeRows] = useState<VolumeMountRow[]>([
     createEmptyVolumeMountRow(),
   ])
@@ -105,7 +109,7 @@ export default function ContainersPage() {
   )
 
   function resetAdvancedFields() {
-    setEnvRows([{ key: '', value: '' }])
+    setEnvRows([createEmptyEnvRow()])
     setVolumeRows([createEmptyVolumeMountRow()])
     setStartCommand('')
     setScalingPolicy(null)
@@ -502,19 +506,28 @@ export default function ContainersPage() {
           loading={deployProjects.loading}
           error={deployProjects.error}
         />
-        <ContainersRunFormFields
-          showGitBranch={showGitBranch}
-          containerName={containerName}
-          onContainerNameChange={setContainerName}
-          containerPort={containerPort}
-          onContainerPortChange={handleContainerPortChange}
-          portError={portError}
-          gitBranch={gitBranch}
-          onGitBranchChange={setGitBranch}
-          gitAnalysisLoading={gitAnalysis.analysisLoading}
-          gitAnalysisError={gitAnalysis.analysisError}
-          onAnalyzeGit={showGitBranch ? () => void onAnalyzeGitSource() : undefined}
-        />
+        {showGitBranch ? (
+          <ContainersRunGitFields
+            containerName={containerName}
+            onContainerNameChange={setContainerName}
+            containerPort={containerPort}
+            onContainerPortChange={handleContainerPortChange}
+            portError={portError}
+            gitBranch={gitBranch}
+            onGitBranchChange={setGitBranch}
+            gitAnalysisLoading={gitAnalysis.analysisLoading}
+            gitAnalysisError={gitAnalysis.analysisError}
+            onAnalyzeGit={() => void onAnalyzeGitSource()}
+          />
+        ) : (
+          <ContainersRunFormFields
+            containerName={containerName}
+            onContainerNameChange={setContainerName}
+            containerPort={containerPort}
+            onContainerPortChange={handleContainerPortChange}
+            portError={portError}
+          />
+        )}
         <ContainersRunAdvancedFields
           envRows={envRows}
           onEnvRowsChange={setEnvRows}

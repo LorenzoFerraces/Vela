@@ -27,6 +27,7 @@ import {
 } from '../containers/deploySourceTypes'
 import type { EnvVarRow, VolumeMountRow } from '../containers/runFormAdvanced'
 import {
+  createEmptyEnvRow,
   createEmptyVolumeMountRow,
   envRowsFromRecord,
   formatStartCommand,
@@ -46,6 +47,8 @@ import {
 type Banner = { tone: 'ok' | 'err'; text: string } | null
 
 type ServiceFieldErrors = { name: string | null; source: string | null }
+
+type StackServiceRow = StackServiceCreate & { uid: string }
 
 function ServiceEditForm({
   service,
@@ -234,13 +237,13 @@ function ServiceEditForm({
   }
 
   const addEnvRow = () => {
-    const next = [...envRows, { key: '', value: '' }]
+    const next = [...envRows, createEmptyEnvRow()]
     onUpdate(index, 'env_vars', recordFromEnvRows(next))
   }
 
   const removeEnvRow = (rowIndex: number) => {
     const next = envRows.filter((_, i) => i !== rowIndex)
-    const cleaned = next.length > 0 ? next : [{ key: '', value: '' }]
+    const cleaned = next.length > 0 ? next : [createEmptyEnvRow()]
     onUpdate(index, 'env_vars', recordFromEnvRows(cleaned))
   }
 
@@ -747,7 +750,7 @@ export default function StackBuilderPage() {
   const { id: editId } = useParams<{ id?: string }>()
   const navigate = useNavigate()
   const location = useLocation()
-  const [services, setServices] = useState<StackServiceCreate[]>([])
+  const [services, setServices] = useState<StackServiceRow[]>([])
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null)
   const [highlightIndex, setHighlightIndex] = useState<number | null>(null)
   const [listLoading, setListLoading] = useState(!!editId)
@@ -764,7 +767,9 @@ export default function StackBuilderPage() {
     if (!state?.importedStack?.services?.length) return
     importSeedApplied.current = true
     setStackName(state.importedStack.name || '')
-    setServices(state.importedStack.services)
+    setServices(
+      state.importedStack.services.map((s) => ({ ...s, uid: crypto.randomUUID() })),
+    )
     setSelectedIndex(0)
     if (state.composeWarnings?.length) {
       setBanner({
@@ -795,6 +800,7 @@ export default function StackBuilderPage() {
             volumes: s.volumes,
             scaling_policy: s.scaling_policy,
             build_override: s.build_override ?? null,
+            uid: crypto.randomUUID(),
           }))
         )
       } catch (err) {
@@ -870,7 +876,7 @@ export default function StackBuilderPage() {
   )
 
   function addService() {
-    const newService: StackServiceCreate = {
+    const newService: StackServiceRow = {
       service_name: '',
       source_kind: 'image',
       source_ref: '',
@@ -878,15 +884,13 @@ export default function StackBuilderPage() {
       container_port: 80,
       public_route: false,
       build_override: null,
+      uid: crypto.randomUUID(),
     }
-    setServices((prev) => {
-      const next = [...prev, newService]
-      const newIndex = next.length - 1
-      setSelectedIndex(newIndex)
-      setHighlightIndex(newIndex)
-      setTimeout(() => setHighlightIndex(null), 2000)
-      return next
-    })
+    const newIndex = services.length
+    setServices((prev) => [...prev, newService])
+    setSelectedIndex(newIndex)
+    setHighlightIndex(newIndex)
+    setTimeout(() => setHighlightIndex(null), 2000)
     setServiceErrors((prev) => [...prev, null])
   }
 
@@ -923,16 +927,30 @@ export default function StackBuilderPage() {
     }
     setServiceErrors(services.map(() => null))
     setSaving(true)
+    const servicePayload = services.map((service): StackServiceCreate => ({
+      service_name: service.service_name,
+      source_kind: service.source_kind,
+      source_ref: service.source_ref,
+      git_branch: service.git_branch,
+      container_port: service.container_port,
+      env_vars: service.env_vars,
+      command: service.command,
+      public_route: service.public_route,
+      depends_on: service.depends_on,
+      volumes: service.volumes,
+      scaling_policy: service.scaling_policy,
+      build_override: service.build_override,
+    }))
     try {
       if (editId) {
         await updateStack(editId, {
           name: stackName || 'untitled-stack',
-          services: services,
+          services: servicePayload,
         })
       } else {
         await createStack({
           name: stackName || 'untitled-stack',
-          services: services,
+          services: servicePayload,
         })
       }
       navigate('/stacks')
@@ -1013,7 +1031,7 @@ export default function StackBuilderPage() {
                     if (selectedIndex === index) return null
                     return (
                       <button
-                        key={index}
+                        key={service.uid}
                         type="button"
                         className={[
                           'stacks-builder__list-item',

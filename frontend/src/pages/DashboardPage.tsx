@@ -6,7 +6,7 @@ import {
   stopContainer,
 } from '../api/client'
 import ConfirmDialog from '../components/ConfirmDialog'
-import { WorkloadsTable } from '../components/workloads/WorkloadsTable'
+import { DashboardWorkloadsTable } from '../components/workloads/WorkloadsTable'
 import { useWorkloadGroups } from './containers/useWorkloadGroups'
 import { DeploymentHistorySection } from './containers/DeploymentHistorySection'
 
@@ -89,15 +89,13 @@ export default function DashboardPage() {
       ) : null}
 
       <h2 className="dashboard-page__subtitle">Running workloads</h2>
-      <WorkloadsTable
+      <DashboardWorkloadsTable
         listLoading={listLoading}
         groups={groups}
         rowBusyId={rowBusy}
         onStart={onStart}
         onStop={onStop}
         onRemove={onRemove}
-        prioritizeProblemWorkloads
-        showStatsColumn
       />
 
       <DeploymentHistorySection refreshSignal={historyRefreshSignal} />

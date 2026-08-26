@@ -20,7 +20,12 @@ import {
   updateProjectMemberRole,
 } from '../api/client'
 import ConfirmDialog from '../components/ConfirmDialog'
-import { TeamDetailSkeleton, TeamsPageSkeleton } from '../components/Skeleton'
+import {
+  TeamDetailSkeleton,
+  TeamHintSectionSkeleton,
+  TeamInviteSectionSkeleton,
+  TeamsPageSkeleton,
+} from '../components/Skeleton'
 
 type Banner = { tone: 'ok' | 'err'; text: string } | null
 
@@ -59,6 +64,7 @@ export default function TeamsPage() {
     | null
   >(null)
   const detailRequestRef = useRef(0)
+  const detailLoadedForRef = useRef<string | null>(null)
 
   const selectedProject = useMemo(() => {
     if (projects.length === 0) {
@@ -87,16 +93,20 @@ export default function TeamsPage() {
     detailRequestRef.current = requestId
     setDetailLoading(true)
     try {
-      const memberRows = await listProjectMembers(project.id)
+      const memberPromise = listProjectMembers(project.id)
+      const invitationPromise =
+        project.role === 'owner'
+          ? listProjectInvitations(project.id)
+          : Promise.resolve(null)
+      const [memberRows, invitationRows] = await Promise.all([
+        memberPromise,
+        invitationPromise,
+      ])
       if (detailRequestRef.current !== requestId) {
         return
       }
       setMembers(memberRows)
-      if (project.role === 'owner') {
-        const invitationRows = await listProjectInvitations(project.id)
-        if (detailRequestRef.current !== requestId) {
-          return
-        }
+      if (invitationRows) {
         setPendingInvitations(invitationRows)
       } else {
         setPendingInvitations([])
@@ -167,6 +177,10 @@ export default function TeamsPage() {
     if (!project) {
       return
     }
+    if (detailLoadedForRef.current === routeProjectId) {
+      return
+    }
+    detailLoadedForRef.current = routeProjectId
     void loadTeamDetail(project)
   }, [loading, routeProjectId, projects, loadTeamDetail])
 
@@ -503,7 +517,13 @@ export default function TeamsPage() {
               </div>
 
               {detailLoading ? (
-                <TeamDetailSkeleton showInviteSection={isSelectedOwner} />
+                <TeamDetailSkeleton>
+                  {isSelectedOwner ? (
+                    <TeamInviteSectionSkeleton />
+                  ) : (
+                    <TeamHintSectionSkeleton />
+                  )}
+                </TeamDetailSkeleton>
               ) : (
                 <>
                   <section className="teams-page__section">

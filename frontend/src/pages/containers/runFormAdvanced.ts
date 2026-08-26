@@ -1,9 +1,11 @@
 export type EnvVarRow = {
+  id: string
   key: string
   value: string
 }
 
 export type VolumeMountRow = {
+  id: string
   uploadId: string | null
   folderName: string | null
   totalBytes: number | null
@@ -12,8 +14,13 @@ export type VolumeMountRow = {
   error: string | null
 }
 
+export function createEmptyEnvRow(): EnvVarRow {
+  return { id: crypto.randomUUID(), key: '', value: '' }
+}
+
 export function createEmptyVolumeMountRow(): VolumeMountRow {
   return {
+    id: crypto.randomUUID(),
     uploadId: null,
     folderName: null,
     totalBytes: null,
@@ -28,9 +35,13 @@ export function envRowsFromRecord(
 ): EnvVarRow[] {
   const entries = Object.entries(envVars)
   if (entries.length === 0) {
-    return [{ key: '', value: '' }]
+    return [createEmptyEnvRow()]
   }
-  return entries.map(([key, value]) => ({ key, value }))
+  return entries.map(([key, value]) => ({
+    id: crypto.randomUUID(),
+    key,
+    value,
+  }))
 }
 
 export function recordFromEnvRows(rows: EnvVarRow[]): Record<string, string> {

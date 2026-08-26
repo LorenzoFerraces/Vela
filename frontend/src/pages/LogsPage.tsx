@@ -1,13 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import type { CSSProperties } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { exportLogs, formatApiError, getLogs } from '../api/client'
 import type { LogEntry, LogQueryParams } from '../api/client'
 
-const LEVEL_STYLES: Record<string, { bg: string; text: string }> = {
-  info: { bg: 'rgba(107, 114, 128, 0.12)', text: '#9aa5b4' },
-  warn: { bg: 'rgba(232, 184, 74, 0.12)', text: '#e8b84a' },
-  error: { bg: 'rgba(224, 112, 110, 0.12)', text: '#e0706e' },
-  debug: { bg: 'rgba(122, 134, 153, 0.12)', text: '#7a8699' },
+const LEVEL_STYLES: Record<string, CSSProperties> = {
+  info: { backgroundColor: 'rgba(107, 114, 128, 0.12)', color: '#9aa5b4' },
+  warn: { backgroundColor: 'rgba(232, 184, 74, 0.12)', color: '#e8b84a' },
+  error: { backgroundColor: 'rgba(224, 112, 110, 0.12)', color: '#e0706e' },
+  debug: { backgroundColor: 'rgba(122, 134, 153, 0.12)', color: '#7a8699' },
 }
 
 const LIMIT = 100
@@ -178,15 +179,11 @@ export default function LogsPage() {
           </div>
           <div className="logs-page__table-wrap">
             {entries.map((entry, index) => {
-              const style = LEVEL_STYLES[entry.level] ?? LEVEL_STYLES.info
               return (
-                <div key={index} className="logs-page__row">
+                <div key={`${entry.timestamp}-${index}`} className="logs-page__row">
                   <span
                     className="logs-page__level"
-                    style={{
-                      backgroundColor: style.bg,
-                      color: style.text,
-                    }}
+                    style={LEVEL_STYLES[entry.level] ?? LEVEL_STYLES.info}
                   >
                     {entry.level}
                   </span>

@@ -36,7 +36,7 @@ function DependencyEdge(props: EdgeProps<Edge<DepEdgeData>>) {
   })
   return (
     <>
-      <BaseEdge id={id} path={edgePath} style={{ stroke: selected ? '#3b82f6' : '#3b82f6', strokeWidth: 2 }} />
+      <BaseEdge id={id} path={edgePath} style={{ stroke: selected ? '#3b82f6' : '#33415c', strokeWidth: 2 }} />
       <EdgeLabelRenderer>
         <div
           style={{
@@ -181,15 +181,36 @@ export default function StackVisualizer({
     onNodeClickRef.current = onNodeClick
   }, [onNodeClick])
 
-  const [nodes, setNodes] = useState<Node[]>(() =>
-    buildNodesFromServices(services, highlightedIndex, selectedIndex, !!onNodeClick, []),
+  const [baseNodes, setBaseNodes] = useState<Node[]>(() =>
+    buildNodesFromServices(services, null, null, !!onNodeClick, []),
   )
 
   useEffect(() => {
-    setNodes((previous) =>
-      buildNodesFromServices(services, highlightedIndex, selectedIndex, !!onNodeClickRef.current, previous),
+    setBaseNodes((previous) =>
+      buildNodesFromServices(services, null, null, !!onNodeClickRef.current, previous),
     )
-  }, [services, highlightedIndex, selectedIndex])
+  }, [services])
+
+  const nodes = useMemo<Node[]>(
+    () =>
+      baseNodes.map((node, index) => {
+        const isHighlighted = highlightedIndex === index
+        const isSel = selectedIndex === index
+        return {
+          ...node,
+          data: { ...node.data, isHighlighted, isSel },
+          style: {
+            ...node.style,
+            border: isHighlighted
+              ? '2px solid #f59e0b'
+              : isSel
+                ? '2px solid #3b82f6'
+                : '1px solid #1e2836',
+          },
+        }
+      }),
+    [baseNodes, highlightedIndex, selectedIndex],
+  )
 
   const edges = useMemo<Edge[]>(
     () =>
@@ -219,7 +240,7 @@ export default function StackVisualizer({
   )
 
   const onNodesChange = useCallback((changes: NodeChange[]) => {
-    setNodes((current) => applyNodeChanges(changes, current))
+    setBaseNodes((current) => applyNodeChanges(changes, current))
   }, [])
 
   const onEdgesChange = useCallback(() => {}, [])

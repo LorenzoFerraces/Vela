@@ -15,6 +15,19 @@ function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
+const patternCache = new Map<string, RegExp>()
+
+function serviceNamePattern(serviceName: string): RegExp {
+  const cached = patternCache.get(serviceName)
+  if (cached) return cached
+  const pattern = new RegExp(
+    `(?<![A-Za-z0-9_-])${escapeRegExp(serviceName)}(?![A-Za-z0-9_-])`,
+    'g',
+  )
+  patternCache.set(serviceName, pattern)
+  return pattern
+}
+
 /** Find sibling service names used as hostnames inside an env value. */
 export function findServiceNameMatches(
   value: string,
@@ -28,10 +41,7 @@ export function findServiceNameMatches(
 
   const matches: ServiceLinkMatch[] = []
   for (const serviceName of sortedNames) {
-    const pattern = new RegExp(
-      `(?<![A-Za-z0-9_-])${escapeRegExp(serviceName)}(?![A-Za-z0-9_-])`,
-      'g',
-    )
+    const pattern = serviceNamePattern(serviceName)
     for (const match of value.matchAll(pattern)) {
       const start = match.index ?? 0
       const end = start + serviceName.length

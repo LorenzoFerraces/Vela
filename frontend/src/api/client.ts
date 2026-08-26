@@ -1218,7 +1218,7 @@ export async function disconnectGithub(): Promise<void> {
 }
 
 export interface ListGithubReposParams {
-  /** Server-side filter (GitHub search API). Prefer client-side filtering after fetchAllGithubRepos when browsing. */
+  /** Server-side filter (GitHub search API). */
   query?: string
   page?: number
   perPage?: number
@@ -1238,70 +1238,6 @@ export async function listGithubRepos(
     searchParams.set('q', trimmedQuery)
   }
   return apiGet<GithubRepo[]>(`/api/github/repos?${searchParams.toString()}`)
-}
-
-const GITHUB_REPOS_FULL_FETCH_PAGE_SIZE = 100
-const GITHUB_REPOS_FULL_FETCH_MAX_PAGES = 100
-
-/** Load every repo page from ``GET /api/github/repos`` (no search query) for client-side filtering. */
-export async function fetchAllGithubRepos(): Promise<GithubRepo[]> {
-  const all: GithubRepo[] = []
-  const seen = new Set<string>()
-  for (let page = 1; page <= GITHUB_REPOS_FULL_FETCH_MAX_PAGES; page++) {
-    const batch = await listGithubRepos({
-      page,
-      perPage: GITHUB_REPOS_FULL_FETCH_PAGE_SIZE,
-    })
-    for (const repo of batch) {
-      if (repo.full_name && !seen.has(repo.full_name)) {
-        seen.add(repo.full_name)
-        all.push(repo)
-      }
-    }
-    if (batch.length < GITHUB_REPOS_FULL_FETCH_PAGE_SIZE) {
-      break
-    }
-  }
-  return all
-}
-
-/**
- * Filter a list of GitHub repositories by a search query.
- *
- * The function trims `query` and, if non-empty, attempts a case-insensitive
- * `RegExp` match against each repo's `full_name` and `description`. If the
- * regex is invalid, it falls back to a case-insensitive substring search.
- * An empty or whitespace-only `query` returns the original `repos` array.
- *
- * @param repos - Array of repositories to filter
- * @param query - Search string or regular-expression pattern
- * @returns The repositories whose `full_name` or `description` match `query`
- */
-export function filterGithubReposByQuery(
-  repos: GithubRepo[],
-  query: string
-): GithubRepo[] {
-  const trimmed = query.trim()
-  if (!trimmed) {
-    return repos
-  }
-  try {
-    const pattern = new RegExp(trimmed, 'i')
-    return repos.filter(
-      (repo) =>
-        pattern.test(repo.full_name) ||
-        (repo.description !== null &&
-          repo.description !== undefined &&
-          pattern.test(repo.description))
-    )
-  } catch {
-    const needle = trimmed.toLowerCase()
-    return repos.filter(
-      (repo) =>
-        repo.full_name.toLowerCase().includes(needle) ||
-        (repo.description?.toLowerCase().includes(needle) ?? false)
-    )
-  }
 }
 
 // --- User library (saved image references) ---

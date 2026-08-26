@@ -1,4 +1,5 @@
 import { Fragment, useMemo, useState } from 'react'
+import type { ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import type { ContainerInfo } from '../../api/client'
 import { containerWriteAllowed } from '../../api/client'
@@ -13,6 +14,15 @@ import { ReplicaInstancesPanel } from './ReplicaInstancesPanel'
 const VIEWER_ACTION_DISABLED_TITLE =
   'Insufficient permissions to modify this workload (viewer role).'
 
+type WorkloadStatsCellProps = {
+  group: WorkloadGroup
+  instances: ContainerInfo[]
+  statsContainerId: string
+  statsExpanded: boolean
+  onToggleStats: () => void
+  onSelectStatsContainer: (containerId: string) => void
+}
+
 type WorkloadsTableProps = {
   listLoading: boolean
   groups: WorkloadGroup[]
@@ -20,10 +30,7 @@ type WorkloadsTableProps = {
   onStart: (containerId: string) => void
   onStop: (containerId: string) => void
   onRemove: (containerId: string) => void
-  /** When true, show containers that need attention first (dashboard). */
-  prioritizeProblemWorkloads?: boolean
-  /** When true, show a stats column with per-instance dropdown (dashboard). */
-  showStatsColumn?: boolean
+  statsCell?: (row: WorkloadStatsCellProps) => ReactNode
 }
 
 function workloadConcernRank(row: ContainerInfo): number {
@@ -55,8 +62,7 @@ function showsInstanceSummary(group: WorkloadGroup): boolean {
   return group.replicas.length > 0 || group.scalingEnabled
 }
 
-function aggregateStatus(group: WorkloadGroup): string {
-  const instances = workloadInstances(group)
+function aggregateStatus(group: WorkloadGroup, instances: ContainerInfo[]): string {
   const runningCount = instances.filter(
     (instance) => instance.status === 'running',
   ).length
@@ -66,6 +72,42 @@ function aggregateStatus(group: WorkloadGroup): string {
   return group.base.status
 }
 
+function WorkloadStatsCell({
+  group,
+  instances,
+  statsContainerId,
+  statsExpanded,
+  onToggleStats,
+  onSelectStatsContainer,
+}: WorkloadStatsCellProps) {
+  const containerRow = group.base
+  return (
+    <>
+      <select
+        className="containers-form__input workloads-table__stats-select"
+        aria-label={`Stats instance for ${containerRow.name}`}
+        value={statsContainerId}
+        onChange={(event) => onSelectStatsContainer(event.target.value)}
+      >
+        {instances.map((instance, index) => (
+          <option key={instance.id} value={instance.id}>
+            {index === 0 ? `${instance.name} (primary)` : instance.name}
+          </option>
+        ))}
+      </select>
+      <button
+        type="button"
+        className="btn btn--ghost btn--sm"
+        aria-expanded={statsExpanded}
+        aria-controls={`workloads-stats-${containerRow.id}`}
+        onClick={onToggleStats}
+      >
+        {statsExpanded ? 'Hide' : 'View'}
+      </button>
+    </>
+  )
+}
+
 export function WorkloadsTable({
   listLoading,
   groups,
@@ -73,8 +115,7 @@ export function WorkloadsTable({
   onStart,
   onStop,
   onRemove,
-  prioritizeProblemWorkloads = false,
-  showStatsColumn = false,
+  statsCell,
 }: WorkloadsTableProps) {
   const [expandedLogId, setExpandedLogId] = useState<string | null>(null)
   const [expandedReplicaGroupId, setExpandedReplicaGroupId] = useState<
@@ -90,13 +131,7 @@ export function WorkloadsTable({
   const [copyFailedRowId, setCopyFailedRowId] = useState<string | null>(null)
   const [terminalContainerId, setTerminalContainerId] = useState<string | null>(null)
 
-  const displayGroups = useMemo(
-    () =>
-      prioritizeProblemWorkloads ? sortGroupsForDashboard(groups) : groups,
-    [prioritizeProblemWorkloads, groups],
-  )
-
-  const columnCount = showStatsColumn ? 9 : 8
+  const columnCount = statsCell ? 9 : 8
 
   function toggleLogRow(containerId: string) {
     setExpandedLogId((current) =>
@@ -168,14 +203,14 @@ export function WorkloadsTable({
                 <th>Status</th>
                 <th>Ports</th>
                 <th>Access URL</th>
-                {showStatsColumn ? <th>Stats</th> : null}
+                {statsCell ? <th>Stats</th> : null}
                 <th>Logs</th>
                 <th />
                 <th className="workloads-table__expand-col" aria-label="Instances" />
               </tr>
             </thead>
             <tbody>
-              {displayGroups.map((group) => {
+              {groups.map((group) => {
                 const containerRow = group.base
                 const isLogExpanded = expandedLogId === containerRow.id
                 const isReplicaExpanded = expandedReplicaGroupId === containerRow.id
@@ -211,7 +246,7 @@ export function WorkloadsTable({
                       </td>
                       <td>
                         <span className="containers-status">
-                          {aggregateStatus(group)}
+                          {aggregateStatus(group, instances)}
                         </span>
                       </td>
                       <td className="containers-table__ports">
@@ -248,37 +283,20 @@ export function WorkloadsTable({
                           </span>
                         )}
                       </td>
-                      {showStatsColumn ? (
+                      {statsCell ? (
                         <td className="workloads-table__stats-cell">
-                          <select
-                            className="containers-form__input workloads-table__stats-select"
-                            aria-label={`Stats instance for ${containerRow.name}`}
-                            value={statsContainerId}
-                            onChange={(event) => {
-                              setStatsContainerForGroup(
-                                group,
-                                event.target.value,
-                              )
+                          {statsCell({
+                            group,
+                            instances,
+                            statsContainerId,
+                            statsExpanded: isStatsExpanded,
+                            onToggleStats: () =>
+                              toggleStatsGroup(containerRow.id),
+                            onSelectStatsContainer: (containerId) => {
+                              setStatsContainerForGroup(group, containerId)
                               setExpandedStatsGroupId(containerRow.id)
-                            }}
-                          >
-                            {instances.map((instance, index) => (
-                              <option key={instance.id} value={instance.id}>
-                                {index === 0
-                                  ? `${instance.name} (primary)`
-                                  : instance.name}
-                              </option>
-                            ))}
-                          </select>
-                          <button
-                            type="button"
-                            className="btn btn--ghost btn--sm"
-                            aria-expanded={isStatsExpanded}
-                            aria-controls={`workloads-stats-${containerRow.id}`}
-                            onClick={() => toggleStatsGroup(containerRow.id)}
-                          >
-                            {isStatsExpanded ? 'Hide' : 'View'}
-                          </button>
+                            },
+                          })}
                         </td>
                       ) : null}
                       <td>
@@ -409,7 +427,7 @@ export function WorkloadsTable({
                         </td>
                       </tr>
                     ) : null}
-                    {showStatsColumn && isStatsExpanded ? (
+                    {statsCell && isStatsExpanded ? (
                       <tr className="workloads-table__expand-row">
                         <td colSpan={columnCount}>
                           <div
@@ -463,5 +481,29 @@ export function WorkloadsTable({
         </div>
       )}
     </div>
+  )
+}
+
+type DashboardWorkloadsTableProps = Omit<WorkloadsTableProps, 'statsCell'>
+
+export function DashboardWorkloadsTable({
+  listLoading,
+  groups,
+  rowBusyId,
+  onStart,
+  onStop,
+  onRemove,
+}: DashboardWorkloadsTableProps) {
+  const displayGroups = useMemo(() => sortGroupsForDashboard(groups), [groups])
+  return (
+    <WorkloadsTable
+      listLoading={listLoading}
+      groups={displayGroups}
+      rowBusyId={rowBusyId}
+      onStart={onStart}
+      onStop={onStop}
+      onRemove={onRemove}
+      statsCell={(row) => <WorkloadStatsCell {...row} />}
+    />
   )
 }
