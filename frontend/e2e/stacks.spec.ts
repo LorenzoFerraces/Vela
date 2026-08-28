@@ -20,7 +20,7 @@ test.describe('Stacks page', () => {
     await authenticatedPage.getByRole('button', { name: 'New Stack' }).click()
     const dialog = authenticatedPage.getByRole('dialog', { name: 'New Stack' })
     await expect(dialog).toBeVisible()
-    await dialog.getByRole('radio', { name: 'Manual' }).click()
+    await dialog.getByRole('button', { name: 'Manual' }).click()
     await expect(authenticatedPage).toHaveURL(/\/stacks\/new/)
     await expect(
       authenticatedPage.getByRole('heading', { name: 'New Stack', level: 1 }),
@@ -42,9 +42,8 @@ test.describe('Stacks page', () => {
 
     await authenticatedPage.getByRole('button', { name: 'Save Stack' }).click()
     await expect(authenticatedPage).toHaveURL(/\/stacks$/, { timeout: 15_000 })
-    await expect(authenticatedPage.getByText(stackName)).toBeVisible()
-
     const card = authenticatedPage.locator('.stacks-card').filter({ hasText: stackName })
+    await expect(card).toBeVisible()
     await card.getByRole('button', { name: 'Deploy' }).click()
     await expect(
       authenticatedPage.getByText('Stack deployed.'),
@@ -70,7 +69,7 @@ test.describe('Stacks page', () => {
     await authenticatedPage.getByRole('button', { name: 'New Stack' }).click()
     const dialog = authenticatedPage.getByRole('dialog', { name: 'New Stack' })
     await expect(dialog).toBeVisible()
-    await dialog.getByRole('radio', { name: /From a file/i }).click()
+    await dialog.getByRole('button', { name: /From a file/i }).click()
     await dialog.getByLabel('Stack name').fill(stackName)
     await dialog.getByLabel(/manifest content/i).fill(`
  services:
@@ -80,7 +79,6 @@ test.describe('Stacks page', () => {
     await dialog.getByRole('button', { name: 'Parse' }).click()
     await expect(dialog.getByText(/From .*compose/i)).toBeVisible()
     await dialog.getByRole('button', { name: 'Create stack' }).click()
-    await expect(authenticatedPage.getByText(stackName)).toBeVisible()
     await expect(
       authenticatedPage.locator('.stacks-card').filter({ hasText: stackName }),
     ).toBeVisible()

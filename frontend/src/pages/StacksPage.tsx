@@ -328,11 +328,11 @@ export default function StacksPage() {
             className="btn btn--primary"
             onClick={() => setNewStackOpen(true)}
           >
-
             New Stack
           </button>
         </div>
       ) : (
+
         <div className="stacks-cards">
           {stacks.map((stack) => (
             <StackCard

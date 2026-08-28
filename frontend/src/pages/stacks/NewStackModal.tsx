@@ -20,23 +20,19 @@ export type NewStackModalProps = {
 }
 
 type Step = 'source' | 'file' | 'repo' | 'review'
-type SourceKind = 'file' | 'repo'
 
 type SourceOptionProps = {
   icon: typeof FileText
   label: string
   description: string
-  checked: boolean
   onClick: () => void
 }
 
-function SourceOption({ icon: Icon, label, description, checked, onClick }: SourceOptionProps) {
+function SourceOption({ icon: Icon, label, description, onClick }: SourceOptionProps) {
   return (
     <button
       type="button"
-      className={`new-stack-modal__source-card${checked ? ' new-stack-modal__source-card--selected' : ''}`}
-      role="radio"
-      aria-checked={checked}
+      className="new-stack-modal__source-card"
       onClick={onClick}
     >
       <Icon size={28} weight="duotone" aria-hidden="true" />
@@ -66,7 +62,6 @@ export default function NewStackModal({ open, onClose, onCreated }: NewStackModa
   const onCloseRef = useRef(onClose)
   const requestCloseRef = useRef(() => {})
   const [step, setStep] = useState<Step>('source')
-  const [sourceKind, setSourceKind] = useState<SourceKind | null>(null)
   const [stackName, setStackName] = useState('')
   const [manifestContent, setManifestContent] = useState('')
   const [fileName, setFileName] = useState('')
@@ -87,7 +82,6 @@ export default function NewStackModal({ open, onClose, onCreated }: NewStackModa
       return
     }
     setStep('source')
-    setSourceKind(null)
     setStackName('')
     setManifestContent('')
     setFileName('')
@@ -149,8 +143,7 @@ export default function NewStackModal({ open, onClose, onCreated }: NewStackModa
     navigate('/stacks/new')
   }
 
-  function selectSource(kind: SourceKind) {
-    setSourceKind(kind)
+  function selectSource(kind: 'file' | 'repo') {
     setStep(kind)
     setError(null)
   }
@@ -237,7 +230,6 @@ export default function NewStackModal({ open, onClose, onCreated }: NewStackModa
       return
     }
     setStep('source')
-    setSourceKind(null)
     setError(null)
   }
 
@@ -293,27 +285,30 @@ export default function NewStackModal({ open, onClose, onCreated }: NewStackModa
 
           {step === 'source' ? (
             <div className="stacks-modal__body">
-              <p className="stacks-modal__lead">How would you like to start?</p>
-              <div className="new-stack-modal__source-options" role="radiogroup" aria-label="Stack source">
+              <p id="new-stack-source-label" className="stacks-modal__lead">
+                Create a new stack from
+              </p>
+              <div
+                className="new-stack-modal__source-options"
+                role="group"
+                aria-labelledby="new-stack-source-label"
+              >
                 <SourceOption
                   icon={FileText}
                   label="From a file"
                   description="Import a Compose or Kubernetes manifest."
-                  checked={sourceKind === 'file'}
                   onClick={() => selectSource('file')}
                 />
                 <SourceOption
                   icon={GitBranch}
                   label="From a repo"
                   description="Analyze a Git repository for services."
-                  checked={sourceKind === 'repo'}
                   onClick={() => selectSource('repo')}
                 />
                 <SourceOption
                   icon={SlidersHorizontal}
                   label="Manual"
                   description="Build a stack service by service."
-                  checked={false}
                   onClick={closeAndOpenBuilder}
                 />
               </div>
@@ -385,7 +380,8 @@ export default function NewStackModal({ open, onClose, onCreated }: NewStackModa
                 <input
                   id="new-stack-repo-url"
                   className="containers-form__input"
-                  type="url"
+                  type="text"
+                  inputMode="url"
                   autoComplete="url"
                   placeholder="https://github.com/org/repo"
                   value={repoUrl}
