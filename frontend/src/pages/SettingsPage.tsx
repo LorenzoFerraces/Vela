@@ -311,7 +311,7 @@ function AiPrefillSettingsCard() {
         ) : null}
         {geminiConfigured === false ? (
           <p className="settings-card__muted">
-            AI analysis is unavailable until the server sets VELA_GEMINI_API_KEY.
+            AI analysis is not configured on this server.
             Deterministic fallbacks may still apply when analyzing repos.
           </p>
         ) : null}

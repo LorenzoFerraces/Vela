@@ -2864,12 +2864,6 @@ input[type="radio"] {
   margin-top: 1rem;
 }
 
-.stacks-import-page__yaml {
-  min-height: 14rem;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 0.8125rem;
-}
-
 .stacks-modal-backdrop {
   position: fixed;
   inset: 0;

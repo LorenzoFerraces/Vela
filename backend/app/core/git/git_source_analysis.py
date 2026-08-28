@@ -292,9 +292,7 @@ async def _call_gemini(context: str, git_url: str, git_branch: str) -> GitSource
     try:
         parsed = await generate_json(prompt=prompt, schema=_analysis_json_schema())
     except LlmNotConfiguredError as exc:
-        raise GitSourceAnalysisError(
-            "AI analysis is not configured on this server (missing VELA_GEMINI_API_KEY)."
-        ) from exc
+        raise GitSourceAnalysisError("AI analysis is not configured on this server.") from exc
     except LlmCallError as exc:
         if str(exc) == "Could not complete AI analysis. Try again later.":
             raise GitSourceAnalysisError(
