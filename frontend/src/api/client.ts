@@ -1529,21 +1529,35 @@ export async function updateStack(id: string, body: {
   return apiPut<Stack>(`/api/stacks/${encodeURIComponent(id)}`, body)
 }
 
-export async function importCompose(body: {
-  name: string
-  project_id?: string
-  yaml_content: string
-}): Promise<{ stack: Stack; warnings: string[] }> {
-  return apiPost<{ stack: Stack; warnings: string[] }>('/api/stacks/import-compose', body)
+export type ManifestKind = 'compose' | 'k8s'
+
+export type RepoManifestKind = 'compose' | 'k8s' | 'llm'
+
+export interface ManifestParseResult {
+  services: StackServiceCreate[]
+  warnings: string[]
+  manifest_kind: ManifestKind
 }
 
-export async function parseCompose(body: {
+export interface RepoAnalysisResult {
+  services: StackServiceCreate[]
+  warnings: string[]
+  manifest_kind: RepoManifestKind
+  manifest_path: string | null
+  summary_hint: string | null
+}
+
+export async function parseManifest(body: {
   yaml_content: string
-}): Promise<{ services: StackServiceCreate[]; warnings: string[] }> {
-  return apiPost<{ services: StackServiceCreate[]; warnings: string[] }>(
-    '/api/stacks/parse-compose',
-    body,
-  )
+}): Promise<ManifestParseResult> {
+  return apiPost<ManifestParseResult>('/api/stacks/parse-manifest', body)
+}
+
+export async function analyzeRepo(body: {
+  git_url: string
+  git_branch: string
+}): Promise<RepoAnalysisResult> {
+  return apiPost<RepoAnalysisResult>('/api/stacks/analyze-repo', body)
 }
 
 export async function getStack(id: string): Promise<Stack> {

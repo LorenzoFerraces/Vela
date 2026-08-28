@@ -16,7 +16,6 @@ const LogsPage = lazy(() => import('./pages/LogsPage'))
 const AuditLogPage = lazy(() => import('./pages/AuditLogPage'))
 const StacksPage = lazy(() => import('./pages/StacksPage'))
 const StackBuilderPage = lazy(() => import('./pages/stacks/StackBuilderPage'))
-const ComposeImportPage = lazy(() => import('./pages/stacks/ComposeImportPage'))
 /**
  * Defines the application's client-side routes and layout.
  *
@@ -109,14 +108,6 @@ export default function App() {
             element={
               <RequireAuth>
                 <StackBuilderPage />
-              </RequireAuth>
-            }
-          />
-          <Route
-            path="/stacks/import"
-            element={
-              <RequireAuth>
-                <ComposeImportPage />
               </RequireAuth>
             }
           />
