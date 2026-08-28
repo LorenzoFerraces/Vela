@@ -84,4 +84,32 @@ test.describe('Stacks page', () => {
     ).toBeVisible()
   })
 
+  test('creates a stack from the e2e repo fixture in the modal', async ({
+    authenticatedPage,
+  }) => {
+    const stackName = `e2e-repo-${Date.now()}`
+    await authenticatedPage.goto('/stacks')
+    await authenticatedPage.getByRole('button', { name: 'New Stack' }).click()
+    const dialog = authenticatedPage.getByRole('dialog', { name: 'New Stack' })
+    await expect(dialog).toBeVisible()
+    await dialog.getByRole('button', { name: /From a repo/i }).click()
+    await dialog
+      .getByLabel('Git repository URL')
+      .fill('https://github.com/org/repo.git')
+    await dialog.getByRole('button', { name: 'Analyze repo' }).click()
+    await expect(
+      dialog.getByText('AI-generated — review carefully'),
+    ).toBeVisible({ timeout: 30_000 })
+    await expect(dialog.locator('.stacks-modal__service')).toHaveCount(2)
+    await dialog.getByLabel('Stack name').fill(stackName)
+    await dialog.getByRole('button', { name: 'Create stack' }).click()
+    const card = authenticatedPage
+      .locator('.stacks-card')
+      .filter({ hasText: stackName })
+    await expect(card).toBeVisible()
+    await expect(card.getByText('2 services')).toBeVisible()
+    await expect(
+      authenticatedPage.getByText(`Stack '${stackName}' created.`),
+    ).toBeVisible()
+  })
 })
