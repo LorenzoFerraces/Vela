@@ -1,0 +1,96 @@
+.stacks-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 1rem;
+}
+
+.stacks-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  min-height: 132px;
+  padding: 1rem 1.1rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-elevated);
+  transition: border-color 0.15s ease;
+}
+
+.stacks-card:hover {
+  border-color: var(--accent);
+}
+
+.stacks-card__top {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.stacks-card__name {
+  color: var(--text-heading);
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.stacks-card__network,
+.stacks-card__meta {
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  overflow-wrap: anywhere;
+}
+
+.stacks-card__network {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.75rem;
+}
+
+.stacks-card__actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: auto;
+}
+
+.stacks-card--skeleton {
+  pointer-events: none;
+}
+
+.stacks-card__skeleton-line {
+  height: 1.05rem;
+}
+
+.stacks-card__skeleton-line--name {
+  width: 55%;
+}
+
+.stacks-card__skeleton-line--network {
+  width: 75%;
+  height: 0.8rem;
+}
+
+.stacks-card__skeleton-line--meta {
+  width: 40%;
+  height: 0.8rem;
+}
+
+.stacks-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 2rem 1.5rem;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+  color: var(--text-muted);
+  text-align: center;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .stacks-card {
+    transition: none;
+  }
+
+  .stacks-card--skeleton .skeleton::after {
+    animation: none;
+  }
+}
