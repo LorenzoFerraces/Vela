@@ -1,13 +1,16 @@
-import { useEffect, useId, useRef } from 'react'
 import type { StackServiceCreate } from '../../api/client'
 
-type ComposeImportReviewModalProps = {
+export type ServiceReviewStepProps = {
   stackName: string
   services: StackServiceCreate[]
   warnings: string[]
+  originLabel: string
+  creating: boolean
+  error: string | null
+  onChangeStackName: (stackName: string) => void
   onChangeServices: (services: StackServiceCreate[]) => void
   onBack: () => void
-  onContinue: () => void
+  onCreate: () => void
 }
 
 function updateServiceAt(
@@ -24,67 +27,52 @@ function envEntries(envVars: Record<string, string> | undefined): [string, strin
   return Object.entries(envVars || {})
 }
 
-export default function ComposeImportReviewModal({
+export default function ServiceReviewStep({
   stackName,
   services,
   warnings,
+  originLabel,
+  creating,
+  error,
+  onChangeStackName,
   onChangeServices,
   onBack,
-  onContinue,
-}: ComposeImportReviewModalProps) {
-  const titleId = useId()
-  const dialogRef = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    const previouslyFocused = document.activeElement as HTMLElement | null
-    dialogRef.current?.focus()
-    function onKeyDown(event: KeyboardEvent) {
-      if (event.key === 'Escape') {
-        event.preventDefault()
-        onBack()
-      }
-    }
-    window.addEventListener('keydown', onKeyDown)
-    return () => {
-      window.removeEventListener('keydown', onKeyDown)
-      previouslyFocused?.focus()
-    }
-  }, [onBack])
-
+  onCreate,
+}: ServiceReviewStepProps) {
   return (
-    <div className="stacks-modal-backdrop" role="presentation" onClick={onBack}>
-      <div
-        ref={dialogRef}
-        className="stacks-modal"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby={titleId}
-        tabIndex={-1}
-        onClick={(event) => event.stopPropagation()}
-      >
-        <header className="stacks-modal__header">
-          <h2 id={titleId} className="stacks-modal__title">
-            Review imported services
-          </h2>
-          <p className="stacks-modal__lead">
-            Stack <strong>{stackName || 'imported-stack'}</strong> — edit before opening the
-            builder.
-          </p>
-        </header>
+    <>
+      {warnings.length > 0 ? (
+        <div className="containers-banner containers-banner--ok stacks-modal__warnings">
+          <p className="containers-banner__text">Parse warnings:</p>
+          <ul className="containers-banner__list">
+            {warnings.map((warning) => (
+              <li key={warning}>{warning}</li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
 
-        {warnings.length > 0 ? (
-          <div className="containers-banner containers-banner--ok stacks-modal__warnings">
-            <p className="containers-banner__text">Parse warnings:</p>
-            <ul className="containers-banner__list">
-              {warnings.map((warning) => (
-                <li key={warning}>{warning}</li>
-              ))}
-            </ul>
-          </div>
-        ) : null}
+      <p className="new-stack-review__origin">{originLabel}</p>
 
-        <div className="stacks-modal__body">
-          {services.map((service, index) => {
+      <div className="stacks-modal__body">
+        <div className="containers-form__stack">
+          <label className="containers-form__label" htmlFor="new-stack-review-name">
+            Stack name
+          </label>
+          <input
+            id="new-stack-review-name"
+            className="containers-form__input"
+            autoComplete="off"
+            placeholder="my-stack"
+            value={stackName}
+            onChange={(event) => onChangeStackName(event.target.value)}
+          />
+        </div>
+
+        {services.length === 0 ? (
+          <p className="containers-muted">No services to review.</p>
+        ) : (
+          services.map((service, index) => {
             const entries = envEntries(service.env_vars)
             return (
               <article key={`${service.service_name}-${index}`} className="stacks-modal__service">
@@ -92,12 +80,12 @@ export default function ComposeImportReviewModal({
                   <div className="containers-form__stack">
                     <label
                       className="containers-form__label"
-                      htmlFor={`import-svc-${index}-name`}
+                      htmlFor={`review-svc-${index}-name`}
                     >
                       Service name
                     </label>
                     <input
-                      id={`import-svc-${index}-name`}
+                      id={`review-svc-${index}-name`}
                       className="containers-form__input"
                       autoComplete="off"
                       value={service.service_name}
@@ -113,12 +101,12 @@ export default function ComposeImportReviewModal({
                   <div className="containers-form__stack">
                     <label
                       className="containers-form__label"
-                      htmlFor={`import-svc-${index}-port`}
+                      htmlFor={`review-svc-${index}-port`}
                     >
                       Container port
                     </label>
                     <input
-                      id={`import-svc-${index}-port`}
+                      id={`review-svc-${index}-port`}
                       type="number"
                       className="containers-form__input"
                       min={1}
@@ -138,12 +126,12 @@ export default function ComposeImportReviewModal({
                 <div className="containers-form__stack">
                   <label
                     className="containers-form__label"
-                    htmlFor={`import-svc-${index}-source`}
+                    htmlFor={`review-svc-${index}-source`}
                   >
                     Source ({service.source_kind})
                   </label>
                   <input
-                    id={`import-svc-${index}-source`}
+                    id={`review-svc-${index}-source`}
                     className="containers-form__input"
                     value={service.source_ref}
                     onChange={(event) =>
@@ -160,12 +148,12 @@ export default function ComposeImportReviewModal({
                   <div className="containers-form__stack">
                     <label
                       className="containers-form__label"
-                      htmlFor={`import-svc-${index}-branch`}
+                      htmlFor={`review-svc-${index}-branch`}
                     >
                       Git branch
                     </label>
                     <input
-                      id={`import-svc-${index}-branch`}
+                      id={`review-svc-${index}-branch`}
                       className="containers-form__input"
                       type="text"
                       value={service.git_branch || 'main'}
@@ -254,18 +242,29 @@ export default function ComposeImportReviewModal({
                 ) : null}
               </article>
             )
-          })}
-        </div>
-
-        <footer className="stacks-modal__footer">
-          <button type="button" className="btn btn--ghost" onClick={onBack}>
-            Back
-          </button>
-          <button type="button" className="btn btn--primary" onClick={onContinue}>
-            Continue to builder
-          </button>
-        </footer>
+          })
+        )}
       </div>
-    </div>
+
+      {error ? (
+        <p className="settings-banner settings-banner--err new-stack-review__error" role="alert">
+          {error}
+        </p>
+      ) : null}
+
+      <footer className="stacks-modal__footer">
+        <button type="button" className="btn btn--ghost" onClick={onBack} disabled={creating}>
+          Back
+        </button>
+        <button
+          type="button"
+          className="btn btn--primary"
+          onClick={onCreate}
+          disabled={creating}
+        >
+          {creating ? 'Creating…' : 'Create stack'}
+        </button>
+      </footer>
+    </>
   )
 }

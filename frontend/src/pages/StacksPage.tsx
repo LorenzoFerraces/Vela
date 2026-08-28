@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link } from 'react-router-dom'
 import {
   deleteStack,
   deployStack,
@@ -17,6 +17,7 @@ import {
   isNeedsBuildOverrideError,
   parseFailedServiceNameFromError,
 } from './containers/buildOverride'
+import NewStackModal from './stacks/NewStackModal'
 import './stacks/stacks.css'
 
 type Banner = { tone: 'ok' | 'err'; text: string } | null
@@ -129,12 +130,12 @@ function StackCardSkeleton() {
 }
 
 export default function StacksPage() {
-  const navigate = useNavigate()
   const [stacks, setStacks] = useState<Stack[]>([])
   const [listLoading, setListLoading] = useState(true)
   const [busy, setBusy] = useState(false)
   const [banner, setBanner] = useState<Banner>(null)
   const [pendingDelete, setPendingDelete] = useState<string | null>(null)
+  const [newStackOpen, setNewStackOpen] = useState(false)
   const [buildConfigOpen, setBuildConfigOpen] = useState(false)
   const [buildConfigInitial, setBuildConfigInitial] = useState<BuildOverride | null>(
     null,
@@ -292,16 +293,9 @@ export default function StacksPage() {
         <button
           type="button"
           className="btn btn--primary"
-          onClick={() => navigate('/stacks/new')}
+          onClick={() => setNewStackOpen(true)}
         >
           New Stack
-        </button>
-        <button
-          type="button"
-          className="btn btn--ghost"
-          onClick={() => navigate('/stacks/import')}
-        >
-          Import Compose
         </button>
       </div>
 
@@ -332,8 +326,9 @@ export default function StacksPage() {
           <button
             type="button"
             className="btn btn--primary"
-            onClick={() => navigate('/stacks/new')}
+            onClick={() => setNewStackOpen(true)}
           >
+
             New Stack
           </button>
         </div>
@@ -365,6 +360,15 @@ export default function StacksPage() {
           Refresh
         </button>
       </div>
+
+      <NewStackModal
+        open={newStackOpen}
+        onClose={() => setNewStackOpen(false)}
+        onCreated={(stackName) => {
+          setBanner({ tone: 'ok', text: `Stack '${stackName}' created.` })
+          void loadStacks()
+        }}
+      />
 
       <BuildConfigModal
         open={buildConfigOpen}

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useLocation, useNavigate, useParams } from 'react-router-dom'
+import { useNavigate, useParams } from 'react-router-dom'
 import {
   analyzeGitSource,
   createStack,
@@ -36,7 +36,6 @@ import {
   volumesFromRows,
 } from '../containers/runFormAdvanced'
 import { ContainersRunScalingFields } from '../containers/ContainersRunScalingFields'
-import type { ImportedStackState } from './importTypes'
 import StackVisualizer from './StackVisualizer'
 import {
   detectServiceLinks,
@@ -749,7 +748,6 @@ function ServiceEditForm({
 export default function StackBuilderPage() {
   const { id: editId } = useParams<{ id?: string }>()
   const navigate = useNavigate()
-  const location = useLocation()
   const [services, setServices] = useState<StackServiceRow[]>([])
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null)
   const [highlightIndex, setHighlightIndex] = useState<number | null>(null)
@@ -759,27 +757,6 @@ export default function StackBuilderPage() {
   const [saving, setSaving] = useState(false)
   const [serviceErrors, setServiceErrors] = useState<(ServiceFieldErrors | null)[]>([])
   const [removalPendingIndex, setRemovalPendingIndex] = useState<number | null>(null)
-  const importSeedApplied = useRef(false)
-
-  useEffect(() => {
-    if (editId || importSeedApplied.current) return
-    const state = location.state as ImportedStackState | null
-    if (!state?.importedStack?.services?.length) return
-    importSeedApplied.current = true
-    setStackName(state.importedStack.name || '')
-    setServices(
-      state.importedStack.services.map((s) => ({ ...s, uid: crypto.randomUUID() })),
-    )
-    setSelectedIndex(0)
-    if (state.composeWarnings?.length) {
-      setBanner({
-        tone: 'ok',
-        text: `Imported with warnings: ${state.composeWarnings.join(' · ')}`,
-      })
-    }
-    navigate('.', { replace: true, state: null })
-  }, [editId, location.state, navigate])
-
   useEffect(() => {
     if (!editId) return
     ;(async () => {
