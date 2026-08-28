@@ -79,13 +79,15 @@ function StackCard({
         <Link className="stacks-card__name" to={`/stacks/${stack.id}`}>
           {stack.name}
         </Link>
-        <span className="stacks-card__meta">
-          {stack.services.length} {stack.services.length === 1 ? 'service' : 'services'}
-        </span>
       </div>
       <div className="stacks-card__network">{stack.network_name}</div>
       <div className="stacks-card__meta">
-        Created {new Date(stack.created_at).toLocaleDateString()}
+        {stack.services.length}{' '}
+        {stack.services.length === 1 ? 'service' : 'services'} ·{' '}
+        {new Date(stack.created_at).toLocaleDateString(undefined, {
+          month: 'short',
+          day: 'numeric',
+        })}
       </div>
       <div className="stacks-card__actions">
         <button
@@ -319,7 +321,7 @@ export default function StacksPage() {
       <h2 className="containers-page__subtitle">Your stacks</h2>
 
       {listLoading && stacks.length === 0 ? (
-        <div className="stacks-cards" aria-label="Loading stacks">
+        <div className="stacks-cards">
           {Array.from({ length: 4 }, (_, index) => (
             <StackCardSkeleton key={index} />
           ))}

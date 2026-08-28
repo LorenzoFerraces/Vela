@@ -89,8 +89,4 @@
   .stacks-card {
     transition: none;
   }
-
-  .stacks-card--skeleton .skeleton::after {
-    animation: none;
-  }
 }
