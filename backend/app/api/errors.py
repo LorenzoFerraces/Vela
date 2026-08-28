@@ -15,7 +15,6 @@ from app.core.exceptions import (
     CloneError,
     ClerkAccountAlreadyLinkedError,
     ClerkTokenError,
-    ComposeImportError,
     ManifestParseError,
     GitSourceAnalysisError,
     NeedsBuildOverrideError,
@@ -416,15 +415,6 @@ def register_exception_handlers(app) -> None:
     ) -> JSONResponse:
         return JSONResponse(
             status_code=status.HTTP_400_BAD_REQUEST, content={"detail": str(exc)}
-        )
-
-    @app.exception_handler(ComposeImportError)
-    async def handle_compose_import(
-        _request: Request, exc: ComposeImportError
-    ) -> JSONResponse:
-        return JSONResponse(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            content={"detail": str(exc), "warnings": exc.warnings},
         )
 
     @app.exception_handler(VelaError)

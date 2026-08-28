@@ -332,7 +332,6 @@ export default function StacksPage() {
           </button>
         </div>
       ) : (
-
         <div className="stacks-cards">
           {stacks.map((stack) => (
             <StackCard
