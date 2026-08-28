@@ -18,10 +18,11 @@ from app.core.oauth.identity import GITHUB_PROVIDER
 from app.core.security.secrets import encrypt_secret
 from app.db.base import Base
 from app.db.engine import get_engine
-from app.db.models import User, UserOAuthIdentity
+from app.db.models import StackService, User, UserOAuthIdentity
 
 if TYPE_CHECKING:
     from app.api.schemas import GitSourceAnalysis
+    from app.core.stacks.repo_analysis import RepoStackAnalysis
 
 E2E_NEEDS_MANUAL_BRANCH = "needs-manual"
 
@@ -208,6 +209,49 @@ def e2e_git_source_analysis_if_enabled(
         build_strategy="generated_dockerfile",
         summary_hint="E2E fixture: Vite dev server on port 5173.",
         needs_manual_build_config=False,
+    )
+
+
+def e2e_stack_repo_analysis_if_enabled(
+    git_url: str,
+    git_branch: str,
+) -> RepoStackAnalysis | None:
+    if not e2e_mode_enabled():
+        return None
+    from app.core.stacks.repo_analysis import RepoStackAnalysis
+
+    _ = git_url, git_branch
+    return RepoStackAnalysis(
+        services=[
+            StackService(
+                service_name="web",
+                source_kind="image",
+                source_ref="nginx:alpine",
+                git_branch=None,
+                container_port=80,
+                env_vars={},
+                command=None,
+                public_route=True,
+                depends_on=None,
+                volumes=[],
+            ),
+            StackService(
+                service_name="redis",
+                source_kind="image",
+                source_ref="redis:7",
+                git_branch=None,
+                container_port=6379,
+                env_vars={},
+                command=None,
+                public_route=False,
+                depends_on=None,
+                volumes=[],
+            ),
+        ],
+        warnings=[],
+        manifest_kind="llm",
+        manifest_path=None,
+        summary_hint="E2E fixture: web application with Redis.",
     )
 
 

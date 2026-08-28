@@ -19,6 +19,8 @@ from app.api.deps import (
     get_traffic_router,
 )
 from app.api.schemas import (
+    AnalyzeRepoRequest,
+    AnalyzeRepoResponse,
     ManifestParseRequest,
     ManifestParseResponse,
     StackCreate,
@@ -28,10 +30,11 @@ from app.api.schemas import (
 )
 from app.core.build.default_image_builder import DefaultImageBuilder
 from app.core.containers.orchestrator import ContainerOrchestrator
-from app.core.exceptions import ProjectAccessDeniedError, StackNotFoundError
+from app.core.exceptions import ProjectAccessDeniedError
 from app.core.projects.enums import can_write
 from app.core.projects.repository import get_personal_project_id, require_membership
 from app.core.stacks.manifest_parser import parse_manifest
+from app.core.stacks.repo_analysis import analyze_repo_stack
 from app.core.stacks.deploy import deploy_stack
 from app.core.stacks.repository import (
     create_stack,
@@ -125,6 +128,31 @@ async def parse_manifest_route(
         services=[_orm_service_to_create(service) for service in services],
         warnings=warnings,
         manifest_kind=manifest_kind,
+    )
+
+
+@router.post("/analyze-repo", response_model=AnalyzeRepoResponse)
+async def analyze_repo_route(
+    body: AnalyzeRepoRequest,
+    current_user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[AsyncSession, Depends(get_db)],
+    image_builder: Annotated[DefaultImageBuilder, Depends(get_image_builder)],
+) -> AnalyzeRepoResponse:
+    from app.api.routes.containers import _github_token_for_url
+
+    access_token = await _github_token_for_url(session, current_user, body.git_url)
+    analysis = await analyze_repo_stack(
+        image_builder,
+        git_url=body.git_url,
+        git_branch=body.git_branch,
+        access_token=access_token,
+    )
+    return AnalyzeRepoResponse(
+        services=[_orm_service_to_create(service) for service in analysis.services],
+        warnings=analysis.warnings,
+        manifest_kind=analysis.manifest_kind,
+        manifest_path=analysis.manifest_path,
+        summary_hint=analysis.summary_hint,
     )
 
 
