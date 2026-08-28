@@ -145,6 +145,14 @@ class GitSourceAnalysisError(BuilderError):
     """Gemini or repository analysis for deploy pre-fill failed."""
 
 
+class LlmNotConfiguredError(VelaError):
+    """No supported LLM provider is configured."""
+
+
+class LlmCallError(VelaError):
+    """An LLM provider request or response failed."""
+
+
 class DockerfileGenerationError(BuilderError):
     def __init__(self, language: str, message: str) -> None:
         self.language = language

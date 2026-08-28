@@ -37,6 +37,8 @@ from app.core.exceptions import (
     IntegrationConfigurationError,
     IntegrationError,
     InvalidCredentialsError,
+    LlmCallError,
+    LlmNotConfiguredError,
     NotAuthenticatedError,
     ObjectStorageError,
     AlreadyProjectMemberError,
@@ -345,8 +347,10 @@ def register_exception_handlers(app) -> None:
         )
 
     @app.exception_handler(GitSourceAnalysisError)
-    async def git_source_analysis_handler(
-        _request: Request, exc: GitSourceAnalysisError
+    @app.exception_handler(LlmCallError)
+    @app.exception_handler(LlmNotConfiguredError)
+    async def llm_analysis_handler(
+        _request: Request, exc: VelaError
     ) -> JSONResponse:
         return JSONResponse(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
