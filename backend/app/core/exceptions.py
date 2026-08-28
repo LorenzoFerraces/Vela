@@ -398,6 +398,10 @@ class StackCompositionCycleError(StackError):
         super().__init__(f"Cycle detected in stack composition: {' → '.join(stack_names)}")
 
 
+class ManifestParseError(StackError):
+    """Uploaded/checked-in manifest could not be recognized or parsed."""
+
+
 class ComposeImportError(StackError):
     def __init__(self, message: str, *, warnings: list[str] | None = None) -> None:
         self.warnings = warnings or []

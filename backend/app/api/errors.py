@@ -16,6 +16,7 @@ from app.core.exceptions import (
     ClerkAccountAlreadyLinkedError,
     ClerkTokenError,
     ComposeImportError,
+    ManifestParseError,
     GitSourceAnalysisError,
     NeedsBuildOverrideError,
     UnsupportedProjectError,
@@ -403,6 +404,14 @@ def register_exception_handlers(app) -> None:
         return JSONResponse(
             status_code=status.HTTP_409_CONFLICT,
             content={"detail": str(exc), "stack_names": exc.stack_names},
+        )
+
+    @app.exception_handler(ManifestParseError)
+    async def manifest_parse_handler(
+        _request: Request, exc: ManifestParseError
+    ) -> JSONResponse:
+        return JSONResponse(
+            status_code=status.HTTP_400_BAD_REQUEST, content={"detail": str(exc)}
         )
 
     @app.exception_handler(ComposeImportError)

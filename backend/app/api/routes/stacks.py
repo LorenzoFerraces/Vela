@@ -19,10 +19,8 @@ from app.api.deps import (
     get_traffic_router,
 )
 from app.api.schemas import (
-    ComposeImportRequest,
-    ComposeImportResponse,
-    ComposeParseRequest,
-    ComposeParseResponse,
+    ManifestParseRequest,
+    ManifestParseResponse,
     StackCreate,
     StackPublic,
     StackServiceCreate,
@@ -33,7 +31,7 @@ from app.core.containers.orchestrator import ContainerOrchestrator
 from app.core.exceptions import ProjectAccessDeniedError, StackNotFoundError
 from app.core.projects.enums import can_write
 from app.core.projects.repository import get_personal_project_id, require_membership
-from app.core.stacks.compose_parser import parse_compose
+from app.core.stacks.manifest_parser import parse_manifest
 from app.core.stacks.deploy import deploy_stack
 from app.core.stacks.repository import (
     create_stack,
@@ -111,49 +109,23 @@ async def create_user_stack(
     return result
 
 
-@router.post("/parse-compose", response_model=ComposeParseResponse)
-async def parse_compose_yaml(
-    body: ComposeParseRequest,
+@router.post("/parse-manifest", response_model=ManifestParseResponse)
+async def parse_manifest_route(
+    body: ManifestParseRequest,
     current_user: Annotated[User, Depends(get_current_user)],
-) -> ComposeParseResponse:
+) -> ManifestParseResponse:
     _ = current_user
-    services, warnings = parse_compose(body.yaml_content)
+    services, warnings, manifest_kind = parse_manifest(body.yaml_content)
     if not services:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Compose file contains no valid services.",
+            detail="Manifest contains no valid services.",
         )
-    return ComposeParseResponse(
+    return ManifestParseResponse(
         services=[_orm_service_to_create(service) for service in services],
         warnings=warnings,
+        manifest_kind=manifest_kind,
     )
-
-
-@router.post("/import-compose", response_model=ComposeImportResponse, status_code=status.HTTP_201_CREATED)
-async def import_compose(
-    body: ComposeImportRequest,
-    current_user: Annotated[User, Depends(get_current_user)],
-    session: Annotated[AsyncSession, Depends(get_db)],
-) -> ComposeImportResponse:
-    services, warnings = parse_compose(body.yaml_content)
-    if not services:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Compose file contains no valid services.",
-        )
-
-    project_id = body.project_id or await get_personal_project_id(session, current_user)
-    await _require_stack_write_access(
-        session,
-        project_id=project_id,
-        user_id=current_user.id,
-        action="import",
-    )
-
-    stack = await create_stack(session, project_id, body.name, services, [])
-    result = ComposeImportResponse(stack=_stack_to_public(stack, []), warnings=warnings)
-    await session.commit()
-    return result
 
 
 @router.get("/{stack_id}", response_model=StackPublic)
