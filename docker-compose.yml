@@ -1,0 +1,99 @@
+# Vela full stack: API + SPA + Postgres + Traefik.
+#
+#   cp .env.example .env   # then fill in the required values
+#   docker compose up -d --build
+#
+# The API drives the HOST Docker daemon through a bind-mounted socket, so
+# workload containers run on the host engine and join the `vela-workloads`
+# network. Traefik is attached to that same network, which is what lets public
+# routes reach workloads. If you run this from Windows (not WSL2) and the
+# socket mount fails, run compose from a WSL2 distro instead.
+
+name: vela
+
+services:
+  postgres:
+    image: postgres:16
+    container_name: vela-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-vela}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-vela}
+      POSTGRES_DB: ${POSTGRES_DB:-Vela}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-vela} -d ${POSTGRES_DB:-Vela}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build: ./backend
+    container_name: vela-api
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      VELA_DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-vela}:${POSTGRES_PASSWORD:-vela}@postgres:5432/${POSTGRES_DB:-Vela}
+      VELA_TRAEFIK_DYNAMIC_FILE: /etc/traefik/dynamic/traefik-http.json
+      VELA_TRAEFIK_RELOAD_CONTAINER: vela-traefik
+      VELA_DOCKER_NETWORK: vela-workloads
+      VELA_VOLUME_UPLOADS_DIR: ${VELA_VOLUME_UPLOADS_DIR:-/data/volume-uploads}
+    volumes:
+      - ${DOCKER_SOCKET_PATH:-/var/run/docker.sock}:/var/run/docker.sock
+      - uploads_data:/data
+      - traefik_dynamic:/etc/traefik/dynamic
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+
+  web:
+    build:
+      context: ./frontend
+      args:
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost}
+    container_name: vela-web
+    restart: unless-stopped
+    ports:
+      - "${VELA_WEB_PORT:-8081}:80"
+    depends_on:
+      api:
+        condition: service_healthy
+
+  traefik:
+    image: traefik:v3.2
+    container_name: vela-traefik
+    restart: unless-stopped
+    command:
+      - --providers.file.filename=/etc/traefik/dynamic/traefik-http.json
+      - --providers.file.watch=true
+      - --providers.file.directory=/etc/traefik/static
+      - --entrypoints.web.address=:80
+      - --api.dashboard=true
+      - --api.insecure=true
+    ports:
+      - "80:80"
+      - "8080:8080"
+    volumes:
+      - traefik_dynamic:/etc/traefik/dynamic
+      - ./traefik/static:/etc/traefik/static:ro
+    networks:
+      - default
+      - workloads
+    depends_on:
+      - web
+
+volumes:
+  postgres_data:
+  uploads_data:
+  traefik_dynamic:
+
+networks:
+  workloads:
+    name: vela-workloads
