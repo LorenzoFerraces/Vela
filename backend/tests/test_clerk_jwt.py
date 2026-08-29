@@ -164,11 +164,11 @@ async def test_verify_clerk_token_email_fetched_from_clerk_api(monkeypatch: Any)
                 "email_addresses": [
                     {
                         "email_address": "backup@example.com",
-                        "verification_status": "unverified",
+                        "verification": {"status": "unverified"},
                     },
                     {
                         "email_address": "ClerkUser@Example.COM",
-                        "verification_status": "verified",
+                        "verification": {"status": "verified"},
                     },
                 ],
             },
@@ -187,9 +187,9 @@ async def test_verify_clerk_token_email_fetched_from_clerk_api(monkeypatch: Any)
         return _jwks_for(kid, private_key)
 
     with patch.object(clerk_mod, "_fetch_jwks", new=fake_fetch):
-        out = await verify_clerk_token(token)
+        claims = await verify_clerk_token(token)
 
-    assert out == ClerkClaims(email="clerkuser@example.com", external_id="user_1")
+    assert claims == ClerkClaims(email="clerkuser@example.com", external_id="user_1")
     assert len(captured) == 1
     assert captured[0].url.path == "/v1/users/user_1"
     assert captured[0].headers["Authorization"] == "Bearer sk_test_secret"
@@ -312,9 +312,9 @@ async def test_verify_clerk_token_allowed_azp_accepted(monkeypatch: Any) -> None
         return _jwks_for(kid, private_key)
 
     with patch.object(clerk_mod, "_fetch_jwks", new=fake_fetch):
-        out = await verify_clerk_token(token)
+        claims = await verify_clerk_token(token)
 
-    assert out == ClerkClaims(email="u@x.com", external_id="user_1")
+    assert claims == ClerkClaims(email="u@x.com", external_id="user_1")
 
 
 @pytest.mark.asyncio
@@ -329,9 +329,9 @@ async def test_verify_clerk_token_without_aud_accepted(monkeypatch: Any) -> None
         return _jwks_for(kid, private_key)
 
     with patch.object(clerk_mod, "_fetch_jwks", new=fake_fetch):
-        out = await verify_clerk_token(token)
+        claims = await verify_clerk_token(token)
 
-    assert out == ClerkClaims(email="u@x.com", external_id="user_1")
+    assert claims == ClerkClaims(email="u@x.com", external_id="user_1")
 
 
 @pytest.mark.asyncio
@@ -349,6 +349,6 @@ async def test_verify_clerk_token_azp_skipped_when_allowlist_empty(
         return _jwks_for(kid, private_key)
 
     with patch.object(clerk_mod, "_fetch_jwks", new=fake_fetch):
-        out = await verify_clerk_token(token)
+        claims = await verify_clerk_token(token)
 
-    assert out == ClerkClaims(email="u@x.com", external_id="user_1")
+    assert claims == ClerkClaims(email="u@x.com", external_id="user_1")

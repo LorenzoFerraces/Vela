@@ -133,7 +133,12 @@ async def _fetch_clerk_email(external_id: str) -> str:
     body = resp.json()
     user = body.get("data") if isinstance(body.get("data"), dict) else body
     addresses = [a for a in (user.get("email_addresses") or []) if isinstance(a, dict)]
-    verified = [a for a in addresses if a.get("verification_status") == "verified"]
+    verified = [
+        a
+        for a in addresses
+        if isinstance(a.get("verification"), dict)
+        and a["verification"].get("status") == "verified"
+    ]
     chosen = verified or addresses
     email = chosen[0].get("email_address") if chosen else None
     if not isinstance(email, str) or not email:

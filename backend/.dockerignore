@@ -5,8 +5,7 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 vela.egg-info/
-.env
-.env.example
+.env*
 *.db
 data/
 tests/

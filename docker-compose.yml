@@ -28,8 +28,28 @@ services:
       timeout: 5s
       retries: 10
 
+  migrate:
+    build:
+      context: ./backend
+      args:
+        DOCKER_GROUP_ID: ${DOCKER_GROUP_ID:-999}
+    image: vela/api
+    command: ["alembic", "upgrade", "head"]
+    container_name: vela-migrate
+    env_file: .env
+    environment:
+      VELA_DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-vela}:${POSTGRES_PASSWORD:-vela}@postgres:5432/${POSTGRES_DB:-Vela}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
   api:
-    build: ./backend
+    build:
+      context: ./backend
+      args:
+        DOCKER_GROUP_ID: ${DOCKER_GROUP_ID:-999}
+    image: vela/api
     container_name: vela-api
     restart: unless-stopped
     env_file: .env
@@ -46,6 +66,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=3)"]
       interval: 10s
@@ -57,11 +79,11 @@ services:
     build:
       context: ./frontend
       args:
-        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost}
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-}
     container_name: vela-web
     restart: unless-stopped
     ports:
-      - "${VELA_WEB_PORT:-8081}:80"
+      - "${VELA_WEB_PORT:-8081}:8080"
     depends_on:
       api:
         condition: service_healthy
