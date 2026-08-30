@@ -27,6 +27,18 @@ FastAPI backend, Vite/React frontend, optional Traefik as an edge proxy, and Pos
 | `backend/alembic/` | Database migrations (Alembic) |
 | `frontend/` | UI (`npm run dev`) |
 | `docker-compose.dev.yml` | Optional local Postgres for development |
+| `docker-compose.yml` + `.env.example` | Full stack (API, SPA, Postgres, Traefik) in Docker |
+
+## Docker (full stack)
+
+```powershell
+cp .env.example .env   # fill in VELA_AUTH_SECRET and VELA_TOKEN_ENCRYPTION_KEY
+docker compose up -d --build
+```
+
+- **http://localhost** — SPA + public routes (Traefik, port 80); port **8081** reaches the SPA directly; Traefik dashboard at http://127.0.0.1:8080 (dev only).
+- The API drives the **host** Docker daemon via a bind-mounted socket, so workload containers run on the host engine. If the socket mount fails (some Windows setups), run compose from a WSL2 distro.
+- All configuration lives in `.env` — see `.env.example` for the full annotated variable list.
 
 ## Backend
 
