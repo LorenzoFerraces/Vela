@@ -9,4 +9,4 @@ http:
     vela-spa-svc:
       loadBalancer:
         servers:
-          - url: "http://web:80"
+          - url: "http://web:8080"
