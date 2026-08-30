@@ -3,6 +3,9 @@ import { useAuth } from '../auth/AuthContext'
 import UserAvatar from './UserAvatar'
 import { getUserDisplayLabel } from '../utils/userDisplay'
 import { VelaMarkIcon } from './VelaMarkIcon'
+import { MoonIcon } from '@phosphor-icons/react/Moon'
+import { SunIcon } from '@phosphor-icons/react/Sun'
+import { useTheme } from '../hooks/useTheme'
 
 const navItems = [
   { to: '/dashboard', label: 'Dashboard' },
@@ -18,6 +21,7 @@ const navItems = [
 export default function Navbar() {
   const { status, user, logout } = useAuth()
   const navigate = useNavigate()
+  const { theme, toggle } = useTheme()
 
   const isAuthenticated = status === 'authenticated'
 
@@ -54,6 +58,19 @@ export default function Navbar() {
       ) : (
         <span className="navbar__spacer" aria-hidden />
       )}
+      <button
+        type="button"
+        className="icon-btn"
+        onClick={toggle}
+        aria-label="Toggle color theme"
+        aria-pressed={theme === 'light'}
+      >
+        {theme === 'light' ? (
+          <MoonIcon size={14} weight="bold" aria-hidden />
+        ) : (
+          <SunIcon size={14} weight="bold" aria-hidden />
+        )}
+      </button>
       <div className="navbar__user">
         {isAuthenticated && user ? (
           <>

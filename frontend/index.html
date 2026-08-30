@@ -12,6 +12,15 @@
       rel="stylesheet"
     />
     <title>VELA</title>
+    <script>
+      try {
+        var t = localStorage.getItem('vela.theme')
+        if (t !== 'dark' && t !== 'light') {
+          t = matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark'
+        }
+        if (t === 'light') document.documentElement.dataset.theme = 'light'
+      } catch {}
+    </script>
   </head>
   <body>
     <div id="root"></div>
