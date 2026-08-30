@@ -3067,7 +3067,7 @@ input[type="radio"] {
 /* --- Container terminal --- */
 
 .workloads-terminal {
-  background: #1e1e2e;
+  background: var(--bg-deep);
   overflow: hidden;
   margin-top: 8px;
 }
@@ -3077,8 +3077,8 @@ input[type="radio"] {
   justify-content: space-between;
   align-items: center;
   padding: 6px 12px;
-  background: #181825;
-  color: #cdd6f4;
+  background: var(--bg-elevated);
+  color: var(--text);
   font-size: 13px;
 }
 
