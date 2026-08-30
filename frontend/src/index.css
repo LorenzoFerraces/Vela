@@ -77,6 +77,48 @@ body::after {
   );
 }
 
+/* --- Light theme (Swiss print, violet) --- */
+
+[data-theme='light'] {
+  --bg-deep: #eae9ed;
+  --bg-elevated: #d2c6e4;
+  --bg-nav: #eae9ed;
+  --border: #ad98cd;
+  --text: #312654;
+  --text-muted: #665c88;
+  --text-heading: #312654;
+  --accent: #9f36bf;
+  --accent-soft: rgba(153, 69, 217, 0.12);
+  --accent-line: #9945d9;
+  --accent-fill: #9945d9;
+  --on-accent: #ffffff;
+  --warn: #b45309;
+  --error: #b91c1c;
+  --ok: #166534;
+  --status-live: #166534;
+  color-scheme: light;
+}
+
+/* halftone dot grain instead of CRT scanlines */
+[data-theme='light'] body::after {
+  background: radial-gradient(circle, rgba(76, 29, 149, 0.1) 1px, transparent 1px);
+  background-size: 5px 5px;
+  opacity: 0.5;
+}
+
+/* paper surfaces inside lavender components */
+[data-theme='light'] .containers-table-wrap {
+  background: var(--bg-deep);
+}
+
+[data-theme='light'] .containers-table th {
+  background: var(--bg-elevated);
+}
+
+[data-theme='light'] .hero__status {
+  background: var(--bg-deep);
+}
+
 #root {
   min-height: 100vh;
 }
