@@ -1,19 +1,27 @@
 :root {
-  --bg-deep: #0a0a0a;
-  --bg-elevated: #121212;
-  --bg-nav: #0a0a0a;
-  --border: #242424;
-  --text: #eaeaea;
-  --text-muted: #8f8f8f;
-  --text-heading: #f4f4f4;
-  --accent: #e61919;
-  --accent-soft: rgba(230, 25, 25, 0.12);
-  --accent-glow: rgba(230, 25, 25, 0.35);
-  --warn: #e8b84a;
-  --error: #e61919;
+  --bg-deep: #120e1e;
+  --bg-elevated: #312654;
+  --bg-nav: #120e1e;
+  --border: #5a4b7a;
+  --text: #e9e4f2;
+  --text-muted: #9a8fb8;
+  --text-heading: #f1edf9;
+  --accent: #bc7fed;
+  --accent-soft: rgba(153, 69, 217, 0.22);
+  --accent-line: #9945d9;
+  --accent-fill: #9945d9;
+  --on-accent: #ffffff;
+  --warn: #fbbf24;
+  --error: #ef4444;
   --danger: var(--error);
-  --ok: #5cb88a;
+  --ok: #4ade80;
   --status-live: #4af626;
+  --error-line: color-mix(in srgb, var(--error) 45%, transparent);
+  --error-soft: color-mix(in srgb, var(--error) 10%, transparent);
+  --ok-line: color-mix(in srgb, var(--ok) 45%, transparent);
+  --ok-soft: color-mix(in srgb, var(--ok) 10%, transparent);
+  --warn-line: color-mix(in srgb, var(--warn) 45%, transparent);
+  --warn-soft: color-mix(in srgb, var(--warn) 10%, transparent);
   --border-subtle: color-mix(in srgb, var(--border) 65%, transparent);
   --font: 'JetBrains Mono', ui-monospace, 'Cascadia Code', Menlo, Consolas, monospace;
   --font-display: 'Archivo Black', 'Arial Black', sans-serif;
@@ -506,9 +514,9 @@ input[type="radio"] {
 }
 
 .btn--primary {
-  color: var(--bg-deep);
-  background: var(--accent);
-  border-color: var(--accent);
+  color: var(--on-accent);
+  background: var(--accent-fill);
+  border-color: var(--accent-fill);
 }
 
 .btn--primary:hover:not(:disabled) {
@@ -537,12 +545,12 @@ input[type="radio"] {
 
 .btn--danger {
   color: var(--error);
-  border-color: rgba(224, 112, 110, 0.45);
+  border-color: var(--error-line);
   background: transparent;
 }
 
 .btn--danger:hover:not(:disabled) {
-  background: rgba(224, 112, 110, 0.12);
+  background: var(--error-soft);
 }
 
 .btn--sm {
@@ -576,14 +584,14 @@ input[type="radio"] {
 }
 
 .containers-banner--ok {
-  border: 1px solid rgba(92, 184, 138, 0.45);
-  background: rgba(92, 184, 138, 0.1);
+  border: 1px solid var(--ok-line);
+  background: var(--ok-soft);
   color: var(--ok);
 }
 
 .containers-banner--err {
-  border: 1px solid rgba(224, 112, 110, 0.45);
-  background: rgba(224, 112, 110, 0.08);
+  border: 1px solid var(--error-line);
+  background: var(--error-soft);
   color: var(--error);
 }
 
@@ -824,8 +832,8 @@ input[type="radio"] {
   padding: 0.55rem 0.75rem;
   font-size: 0.8125rem;
   color: var(--error);
-  background: rgba(224, 112, 110, 0.08);
-  border: 1px solid rgba(224, 112, 110, 0.35);
+  background: var(--error-soft);
+  border: 1px solid var(--error-line);
 }
 
 .auth-form__submit {
@@ -1133,12 +1141,12 @@ input[type="radio"] {
 
 .alert-history__status--sent {
   color: var(--ok);
-  background: rgba(92, 184, 138, 0.12);
+  background: var(--ok-soft);
 }
 
 .alert-history__status--failed {
   color: var(--error);
-  background: rgba(224, 112, 110, 0.12);
+  background: var(--error-soft);
 }
 
 .alert-history__time {
@@ -1154,14 +1162,14 @@ input[type="radio"] {
 }
 
 .settings-banner--ok {
-  border: 1px solid rgba(92, 184, 138, 0.45);
-  background: rgba(92, 184, 138, 0.1);
+  border: 1px solid var(--ok-line);
+  background: var(--ok-soft);
   color: var(--ok);
 }
 
 .settings-banner--err {
-  border: 1px solid rgba(224, 112, 110, 0.45);
-  background: rgba(224, 112, 110, 0.08);
+  border: 1px solid var(--error-line);
+  background: var(--error-soft);
   color: var(--error);
 }
 
@@ -1313,8 +1321,8 @@ input[type="radio"] {
   text-transform: uppercase;
   letter-spacing: 0.04em;
   color: var(--warn);
-  border: 1px solid rgba(232, 184, 74, 0.45);
-  background: rgba(232, 184, 74, 0.08);
+  border: 1px solid var(--warn-line);
+  background: var(--warn-soft);
 }
 
 .containers-github-picker__branch {
@@ -1432,7 +1440,7 @@ input[type="radio"] {
 }
 
 .workloads-log-panel__line--warn {
-  background: rgba(232, 184, 74, 0.12);
+  background: var(--warn-soft);
   display: inline;
 }
 
@@ -1994,11 +2002,11 @@ input[type="radio"] {
 }
 
 .toast--ok {
-  border-color: rgba(90, 180, 130, 0.45);
+  border-color: var(--ok-line);
 }
 
 .toast--err {
-  border-color: rgba(220, 90, 90, 0.55);
+  border-color: var(--error-line);
 }
 
 .toast__text {
