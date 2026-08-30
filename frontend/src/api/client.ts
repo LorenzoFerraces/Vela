@@ -1,22 +1,14 @@
 /**
  * Thin HTTP client for the Vela FastAPI backend.
- * Base URL: `VITE_API_BASE_URL` or `window.location.hostname:8000`
+ * Base URL: `VITE_API_BASE_URL`, or same-origin when unset — both the Vite dev
+ * server and the nginx container proxy `/api` to the API.
  */
-
-function getDefaultBaseUrl(): string {
-  if (typeof window === 'undefined') {
-    return 'http://localhost:8000'
-  }
-
-  const protocol = window.location.protocol === 'https:' ? 'https:' : 'http:'
-  return `${protocol}//${window.location.hostname}:8000`
-}
 
 export function getApiBaseUrl(): string {
   const fromEnv = import.meta.env.VITE_API_BASE_URL
   return typeof fromEnv === 'string' && fromEnv.length > 0
     ? fromEnv.replace(/\/$/, '')
-    : getDefaultBaseUrl()
+    : ''
 }
 
 // --- Access token storage ---
@@ -609,6 +601,11 @@ function apiBaseLooksLikeLocalDevBackend(api: URL): boolean {
 export function getApiWebSocketUrl(pathWithQuery: string): string {
   const base = getApiBaseUrl()
   const path = pathWithQuery.startsWith('/') ? pathWithQuery : `/${pathWithQuery}`
+
+  if (typeof window !== 'undefined' && base.length === 0) {
+    const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+    return `${wsProtocol}//${window.location.host}${path}`
+  }
 
   if (typeof window !== 'undefined' && import.meta.env.DEV) {
     try {
