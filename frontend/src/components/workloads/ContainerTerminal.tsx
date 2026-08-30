@@ -19,7 +19,7 @@ export function ContainerTerminal({ containerId, onClose }: ContainerTerminalPro
       cursorBlink: true,
       fontSize: 13,
       fontFamily: '"JetBrains Mono", "Fira Code", "Cascadia Code", Menlo, monospace',
-      theme: { background: '#1e1e2e', foreground: '#cdd6f4' },
+      theme: { background: '#120e1e', foreground: '#e9e4f2' },
     })
     const fit = new FitAddon()
     term.loadAddon(fit)

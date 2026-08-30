@@ -6,8 +6,8 @@ import type { LogEntry, LogQueryParams } from '../api/client'
 
 const LEVEL_STYLES: Record<string, CSSProperties> = {
   info: { backgroundColor: 'rgba(107, 114, 128, 0.12)', color: '#9aa5b4' },
-  warn: { backgroundColor: 'rgba(232, 184, 74, 0.12)', color: '#e8b84a' },
-  error: { backgroundColor: 'rgba(224, 112, 110, 0.12)', color: '#e0706e' },
+  warn: { backgroundColor: 'rgba(251, 191, 36, 0.12)', color: '#fbbf24' },
+  error: { backgroundColor: 'rgba(239, 68, 68, 0.12)', color: '#ef4444' },
   debug: { backgroundColor: 'rgba(122, 134, 153, 0.12)', color: '#7a8699' },
 }
 
