@@ -13,6 +13,8 @@
   --on-accent: #ffffff;
   --warn: #fbbf24;
   --error: #ef4444;
+  --info: #9aa5b4;
+  --debug: #7a8699;
   --danger: var(--error);
   --ok: #4ade80;
   --status-live: #4af626;
@@ -22,6 +24,8 @@
   --ok-soft: color-mix(in srgb, var(--ok) 10%, transparent);
   --warn-line: color-mix(in srgb, var(--warn) 45%, transparent);
   --warn-soft: color-mix(in srgb, var(--warn) 10%, transparent);
+  --info-soft: color-mix(in srgb, var(--info) 12%, transparent);
+  --debug-soft: color-mix(in srgb, var(--debug) 12%, transparent);
   --border-subtle: color-mix(in srgb, var(--border) 65%, transparent);
   --font: 'JetBrains Mono', ui-monospace, 'Cascadia Code', Menlo, Consolas, monospace;
   --font-display: 'Archivo Black', 'Arial Black', sans-serif;
@@ -85,15 +89,17 @@ body::after {
   --bg-nav: #eae9ed;
   --border: #ad98cd;
   --text: #312654;
-  --text-muted: #665c88;
+  --text-muted: #575072;
   --text-heading: #312654;
   --accent: #9f36bf;
   --accent-soft: rgba(153, 69, 217, 0.12);
   --accent-line: #9945d9;
   --accent-fill: #9945d9;
   --on-accent: #ffffff;
-  --warn: #b45309;
+  --warn: #78350f;
   --error: #b91c1c;
+  --info: #585074;
+  --debug: #544c6e;
   --ok: #166534;
   --status-live: #166534;
   color-scheme: light;

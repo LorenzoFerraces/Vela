@@ -5,10 +5,10 @@ import { exportLogs, formatApiError, getLogs } from '../api/client'
 import type { LogEntry, LogQueryParams } from '../api/client'
 
 const LEVEL_STYLES: Record<string, CSSProperties> = {
-  info: { backgroundColor: 'rgba(107, 114, 128, 0.12)', color: '#9aa5b4' },
-  warn: { backgroundColor: 'rgba(251, 191, 36, 0.12)', color: '#fbbf24' },
-  error: { backgroundColor: 'rgba(239, 68, 68, 0.12)', color: '#ef4444' },
-  debug: { backgroundColor: 'rgba(122, 134, 153, 0.12)', color: '#7a8699' },
+  info: { backgroundColor: 'var(--info-soft)', color: 'var(--info)' },
+  warn: { backgroundColor: 'var(--warn-soft)', color: 'var(--warn)' },
+  error: { backgroundColor: 'var(--error-soft)', color: 'var(--error)' },
+  debug: { backgroundColor: 'var(--debug-soft)', color: 'var(--debug)' },
 }
 
 const LIMIT = 100
