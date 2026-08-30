@@ -11,7 +11,6 @@
   min-height: 132px;
   padding: 1rem 1.1rem;
   border: 1px solid var(--border);
-  border-radius: var(--radius);
   background: var(--bg-elevated);
   transition: border-color 0.15s ease;
 }
@@ -80,7 +79,6 @@
   gap: 0.75rem;
   padding: 2rem 1.5rem;
   border: 1px dashed var(--border);
-  border-radius: var(--radius);
   color: var(--text-muted);
   text-align: center;
 }
@@ -109,7 +107,6 @@
   gap: 0.55rem;
   padding: 1rem;
   border: 1px solid var(--border);
-  border-radius: var(--radius);
   background: var(--bg-deep);
   color: var(--text);
   text-align: left;

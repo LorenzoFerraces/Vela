@@ -36,7 +36,7 @@ function DependencyEdge(props: EdgeProps<Edge<DepEdgeData>>) {
   })
   return (
     <>
-      <BaseEdge id={id} path={edgePath} style={{ stroke: selected ? '#3b82f6' : '#33415c', strokeWidth: 2 }} />
+      <BaseEdge id={id} path={edgePath} style={{ stroke: selected ? '#e61919' : '#33415c', strokeWidth: 2 }} />
       <EdgeLabelRenderer>
         <div
           style={{
@@ -114,7 +114,7 @@ function buildNodesFromServices(
   const baseStyle: CSSProperties = {
     padding: '10px 16px',
     borderRadius: '8px',
-    background: '#131820',
+    background: '#121212',
     color: '#eef3f8',
     fontSize: '0.8125rem',
     fontWeight: 500,
@@ -146,8 +146,8 @@ function buildNodesFromServices(
         border: isHighlighted
           ? '2px solid #f59e0b'
           : isSel
-            ? '2px solid #3b82f6'
-            : '1px solid #1e2836',
+            ? '2px solid #e61919'
+            : '1px solid #242424',
       },
       // Preserve measurement so React Flow can clear visibility:hidden.
       measured: existing?.measured,
@@ -204,8 +204,8 @@ export default function StackVisualizer({
             border: isHighlighted
               ? '2px solid #f59e0b'
               : isSel
-                ? '2px solid #3b82f6'
-                : '1px solid #1e2836',
+                ? '2px solid #e61919'
+                : '1px solid #242424',
           },
         }
       }),

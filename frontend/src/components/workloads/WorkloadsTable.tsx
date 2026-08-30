@@ -72,6 +72,12 @@ function aggregateStatus(group: WorkloadGroup, instances: ContainerInfo[]): stri
   return group.base.status
 }
 
+function statusClass(status: string): string {
+  return status.includes('running')
+    ? 'containers-status containers-status--live'
+    : 'containers-status'
+}
+
 function WorkloadStatsCell({
   group,
   instances,
@@ -245,7 +251,7 @@ export function WorkloadsTable({
                         {deploySourceImageLabel(containerRow)}
                       </td>
                       <td>
-                        <span className="containers-status">
+                        <span className={statusClass(aggregateStatus(group, instances))}>
                           {aggregateStatus(group, instances)}
                         </span>
                       </td>
