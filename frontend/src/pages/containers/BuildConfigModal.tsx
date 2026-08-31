@@ -132,7 +132,7 @@ export default function BuildConfigModal({
             </label>
             <select
               id="build-config-language"
-                  className="containers-form__input"
+              className="containers-form__input"
               value={form.language}
               onChange={(event) => {
                 const value = event.target.value
@@ -182,7 +182,7 @@ export default function BuildConfigModal({
                 </label>
                 <select
                   id="build-config-package-manager"
-              className="containers-form__input"
+                  className="containers-form__input"
                   value={form.packageManager}
                   onChange={(event) =>
                     setForm((previous) => ({
