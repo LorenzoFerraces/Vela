@@ -91,6 +91,22 @@
 
 .audit-log-page__details summary {
   cursor: pointer;
+  list-style: none;
+}
+
+.audit-log-page__details summary::-webkit-details-marker {
+  display: none;
+}
+
+.audit-log-page__details summary::before {
+  content: "\25B8";
+  margin-right: 0.4rem;
+  color: var(--accent);
+  transition: transform 0.15s ease;
+}
+
+.audit-log-page__details[open] summary::before {
+  transform: rotate(90deg);
 }
 
 .audit-log-page__details summary:focus-visible {
