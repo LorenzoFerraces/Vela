@@ -27,6 +27,7 @@
   --info-soft: color-mix(in srgb, var(--info) 12%, transparent);
   --debug-soft: color-mix(in srgb, var(--debug) 12%, transparent);
   --border-subtle: color-mix(in srgb, var(--border) 65%, transparent);
+  --wash: color-mix(in srgb, var(--text) 6%, transparent);
   --font: 'JetBrains Mono', ui-monospace, 'Cascadia Code', Menlo, Consolas, monospace;
   --font-display: 'Archivo Black', 'Arial Black', sans-serif;
   --radius: 0;
@@ -42,6 +43,15 @@
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
 }
+
+:root {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border); }
 
 *,
 *::before,
@@ -1612,7 +1622,7 @@ select {
   content: '';
   position: absolute;
   inset: 0;
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--wash);
   animation: pulse 1.4s ease-in-out infinite;
 }
 
@@ -2250,11 +2260,11 @@ select {
 }
 
 .teams-page__team-link:hover {
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--wash);
 }
 
 .teams-page__team-link--active {
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--wash);
   border-color: var(--border);
 }
 
@@ -2380,7 +2390,7 @@ select {
   content: '';
   position: absolute;
   inset: 0;
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--wash);
   animation: pulse 1.4s ease-in-out infinite;
 }
 

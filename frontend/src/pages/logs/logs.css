@@ -140,6 +140,6 @@
   content: '';
   position: absolute;
   inset: 0;
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--wash);
   animation: pulse 1.4s ease-in-out infinite;
 }
