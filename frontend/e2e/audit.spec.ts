@@ -31,4 +31,17 @@ test.describe('Audit log page', () => {
         .first(),
     ).toBeVisible()
   })
+
+  test('renders with a malformed from date URL param', async ({
+    authenticatedPage,
+  }) => {
+    await authenticatedPage.goto('/audit?from=not-a-date')
+
+    await expect(
+      authenticatedPage.getByRole('heading', { name: 'Audit Log', level: 1 }),
+    ).toBeVisible()
+    await expect(
+      authenticatedPage.getByLabel('From date'),
+    ).toBeVisible()
+  })
 })

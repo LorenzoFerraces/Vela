@@ -156,8 +156,14 @@ export default function AuditLogPage() {
     const params: AuditLogQueryParams = { limit: LIMIT, offset }
     if (actionFilter) params.action = actionFilter
     if (targetTypeFilter) params.target_type = targetTypeFilter
-    if (fromRaw) params.from_date = new Date(`${fromRaw}T00:00:00`).toISOString()
-    if (toRaw) params.to_date = new Date(`${toRaw}T23:59:59`).toISOString()
+    const fromDate = fromRaw ? new Date(`${fromRaw}T00:00:00`) : null
+    if (fromDate && !Number.isNaN(fromDate.getTime())) {
+      params.from_date = fromDate.toISOString()
+    }
+    const toDate = toRaw ? new Date(`${toRaw}T23:59:59`) : null
+    if (toDate && !Number.isNaN(toDate.getTime())) {
+      params.to_date = toDate.toISOString()
+    }
     return params
   }, [actionFilter, targetTypeFilter, fromRaw, toRaw, offset])
 
