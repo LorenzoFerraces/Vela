@@ -1,17 +1,19 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { CSSProperties } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { exportLogs, formatApiError, getLogs } from '../api/client'
-import type { LogEntry, LogQueryParams } from '../api/client'
-
-const LEVEL_STYLES: Record<string, CSSProperties> = {
-  info: { backgroundColor: 'var(--info-soft)', color: 'var(--info)' },
-  warn: { backgroundColor: 'var(--warn-soft)', color: 'var(--warn)' },
-  error: { backgroundColor: 'var(--error-soft)', color: 'var(--error)' },
-  debug: { backgroundColor: 'var(--debug-soft)', color: 'var(--debug)' },
-}
+import {
+  exportLogs,
+  formatApiError,
+  getLogs,
+  listContainers,
+} from '../api/client'
+import type { ContainerInfo, LogEntry, LogQueryParams } from '../api/client'
+import './logs/logs.css'
 
 const LIMIT = 100
+
+function toIsoDateTime(raw: string): string {
+  return new Date(raw).toISOString()
+}
 
 export default function LogsPage() {
   const [searchParams, setSearchParams] = useSearchParams()
@@ -19,15 +21,32 @@ export default function LogsPage() {
   const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [containers, setContainers] = useState<ContainerInfo[]>([])
   const fetchRequestRef = useRef(0)
 
   const search = searchParams.get('q') ?? ''
   const levelFilter = searchParams.get('level') ?? ''
   const containerFilter = searchParams.get('container_id') ?? ''
+  const startRaw = searchParams.get('start') ?? ''
+  const endRaw = searchParams.get('end') ?? ''
   const offsetParam = Number.parseInt(searchParams.get('offset') ?? '0', 10)
   const offset = Number.isNaN(offsetParam) ? 0 : offsetParam
 
   const hasContainer = containerFilter.trim().length > 0
+
+  useEffect(() => {
+    let active = true
+    listContainers()
+      .then((data) => {
+        if (active) setContainers(data)
+      })
+      .catch(() => {
+        // ponytail: picker stays empty on failure; URL-param container still works
+      })
+    return () => {
+      active = false
+    }
+  }, [])
 
   function setFilterParam(name: string, value: string) {
     const next = new URLSearchParams(searchParams)
@@ -50,18 +69,27 @@ export default function LogsPage() {
     setSearchParams(next, { replace: true })
   }
 
+  const buildParams = useCallback(
+    (includeOffset: boolean): LogQueryParams => {
+      const params: LogQueryParams = {
+        container_id: containerFilter.trim(),
+        limit: LIMIT,
+      }
+      if (includeOffset) params.offset = offset
+      if (search) params.q = search
+      if (levelFilter) params.level = levelFilter
+      if (startRaw) params.start_time = toIsoDateTime(startRaw)
+      if (endRaw) params.end_time = toIsoDateTime(endRaw)
+      return params
+    },
+    [search, levelFilter, containerFilter, startRaw, endRaw, offset],
+  )
+
   const fetchLogs = useCallback(async () => {
     const requestId = fetchRequestRef.current + 1
     fetchRequestRef.current = requestId
-    const params: LogQueryParams = {
-      container_id: containerFilter.trim(),
-      limit: LIMIT,
-      offset,
-    }
-    if (search) params.q = search
-    if (levelFilter) params.level = levelFilter
     try {
-      const res = await getLogs(params)
+      const res = await getLogs(buildParams(true))
       if (fetchRequestRef.current === requestId) {
         setEntries(res.entries)
         setTotal(res.total)
@@ -76,7 +104,7 @@ export default function LogsPage() {
         setLoading(false)
       }
     }
-  }, [search, levelFilter, containerFilter, offset])
+  }, [buildParams])
 
   useEffect(() => {
     if (!hasContainer) return
@@ -85,14 +113,27 @@ export default function LogsPage() {
 
   const handleExport = async () => {
     if (!hasContainer) return
-    const params: LogQueryParams = { container_id: containerFilter.trim() }
-    if (search) params.q = search
-    if (levelFilter) params.level = levelFilter
     try {
-      await exportLogs(params)
+      await exportLogs(buildParams(false))
     } catch (err) {
       setError(formatApiError(err))
     }
+  }
+
+  const knownContainer = containers.some(
+    (container) => container.id === containerFilter,
+  )
+
+  function onFilterChange(name: string, value: string) {
+    setFilterParam(name, value)
+    setEntries([])
+    setLoading(true)
+  }
+
+  function onOffsetChange(value: number) {
+    setOffsetParam(value)
+    setEntries([])
+    setLoading(true)
   }
 
   return (
@@ -116,29 +157,30 @@ export default function LogsPage() {
       ) : null}
 
       <div className="logs-page__filters">
-        <input
-          type="text"
-          name="q"
-          autoComplete="off"
-          aria-label="Search logs"
-          placeholder="Search logs…"
-          value={search}
-          onChange={(e) => {
-            setFilterParam('q', e.target.value)
-            setEntries([])
-            setLoading(true)
-          }}
-        />
         <select
-          name="level"
-          value={levelFilter}
-          onChange={(e) => {
-            setFilterParam('level', e.target.value)
-            setEntries([])
-            setLoading(true)
-          }}
-          className="settings-form__input"
+          aria-label="Container"
+          className="settings-form__input logs-page__container-select"
+          value={containerFilter}
+          onChange={(e) => onFilterChange('container_id', e.target.value)}
+        >
+          <option value="">Select a container…</option>
+          {containerFilter && !knownContainer ? (
+            <option value={containerFilter}>
+              {containerFilter.slice(0, 8)}
+            </option>
+          ) : null}
+          {containers.map((container) => (
+            <option key={container.id} value={container.id}>
+              {container.name || container.id.slice(0, 8)} (
+              {container.status})
+            </option>
+          ))}
+        </select>
+        <select
           aria-label="Filter by level"
+          className="settings-form__input"
+          value={levelFilter}
+          onChange={(e) => onFilterChange('level', e.target.value)}
         >
           <option value="">All levels</option>
           <option value="info">Info</option>
@@ -147,18 +189,27 @@ export default function LogsPage() {
           <option value="debug">Debug</option>
         </select>
         <input
-          type="text"
-          name="container_id"
-          autoComplete="off"
-          placeholder="Container ID…"
-          value={containerFilter}
-          onChange={(e) => {
-            setFilterParam('container_id', e.target.value)
-            setEntries([])
-            setLoading(true)
-          }}
+          type="datetime-local"
+          aria-label="From"
           className="settings-form__input"
-          aria-label="Filter by container"
+          value={startRaw}
+          onChange={(e) => onFilterChange('start', e.target.value)}
+        />
+        <input
+          type="datetime-local"
+          aria-label="To"
+          className="settings-form__input"
+          value={endRaw}
+          onChange={(e) => onFilterChange('end', e.target.value)}
+        />
+        <input
+          type="text"
+          aria-label="Search logs"
+          autoComplete="off"
+          placeholder="Search logs…"
+          className="logs-page__search"
+          value={search}
+          onChange={(e) => onFilterChange('q', e.target.value)}
         />
       </div>
 
@@ -177,26 +228,34 @@ export default function LogsPage() {
           <div className="logs-page__count">
             Showing {entries.length} of {total} entries
           </div>
-          <div className="logs-page__table-wrap">
-            {entries.map((entry, index) => {
-              return (
-                <div key={`${entry.timestamp}-${index}`} className="logs-page__row">
-                  <span
-                    className="logs-page__level"
-                    style={LEVEL_STYLES[entry.level] ?? LEVEL_STYLES.info}
-                  >
-                    {entry.level}
-                  </span>
-                  <span className="logs-page__timestamp">
-                    {new Date(entry.timestamp).toLocaleString()}
-                  </span>
-                  <span className="logs-page__container">
-                    {entry.container_name || entry.container_id}
-                  </span>
-                  <span className="logs-page__message">{entry.message}</span>
-                </div>
-              )
-            })}
+          <div
+            className="logs-page__terminal"
+            role="log"
+            aria-label="Log entries"
+          >
+            {entries.map((entry, index) => (
+              <div
+                key={`${entry.timestamp}-${index}`}
+                className="logs-page__line"
+              >
+                <span className="logs-page__line-time">
+                  {new Date(entry.timestamp).toLocaleString([], {
+                    hour12: false,
+                  })}
+                </span>
+                <span
+                  className={`logs-page__line-level logs-page__line-level--${entry.level}`}
+                >
+                  {entry.level}
+                </span>
+                <span className="logs-page__line-source">
+                  {entry.source}
+                </span>
+                <span className="logs-page__line-message">
+                  {entry.message}
+                </span>
+              </div>
+            ))}
             {entries.length === 0 && (
               <div className="logs-page__empty">No logs found</div>
             )}
@@ -205,11 +264,7 @@ export default function LogsPage() {
             {offset > 0 && (
               <button
                 type="button"
-                onClick={() => {
-                  setOffsetParam(offset - LIMIT)
-                  setEntries([])
-                  setLoading(true)
-                }}
+                onClick={() => onOffsetChange(offset - LIMIT)}
                 className="btn btn--ghost btn--sm"
               >
                 Previous
@@ -218,11 +273,7 @@ export default function LogsPage() {
             {offset + LIMIT < total && (
               <button
                 type="button"
-                onClick={() => {
-                  setOffsetParam(offset + LIMIT)
-                  setEntries([])
-                  setLoading(true)
-                }}
+                onClick={() => onOffsetChange(offset + LIMIT)}
                 className="btn btn--ghost btn--sm"
               >
                 Next
