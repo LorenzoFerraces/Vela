@@ -783,6 +783,98 @@ input[type="radio"] {
   color: var(--text-heading);
 }
 
+.user-menu {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.user-menu__trigger {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.3rem 0.55rem;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 0;
+  color: var(--text);
+  font: inherit;
+  font-size: 0.875rem;
+  cursor: pointer;
+}
+
+.user-menu__trigger:hover {
+  background: var(--bg-elevated);
+  border-color: var(--border);
+}
+
+.user-menu__trigger:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.user-menu__avatar {
+  flex-shrink: 0;
+  border-radius: 0;
+  border: 1px solid var(--border);
+}
+
+.user-menu__label {
+  max-width: 14rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-muted);
+  font-size: 0.8125rem;
+}
+
+.user-menu__menu {
+  position: absolute;
+  top: calc(100% + 0.4rem);
+  right: 0;
+  z-index: 40;
+  min-width: 11rem;
+  padding: 0.3rem;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 0;
+}
+
+.user-menu__item {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  width: 100%;
+  padding: 0.5rem 0.6rem;
+  background: none;
+  border: none;
+  border-radius: 0;
+  color: var(--text);
+  font: inherit;
+  font-size: 0.875rem;
+  text-align: left;
+  cursor: pointer;
+}
+
+.user-menu__item:hover {
+  background: var(--bg-deep);
+}
+
+.user-menu__item:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.user-menu__item--danger {
+  color: var(--error);
+}
+
+.user-menu__divider {
+  height: 1px;
+  margin: 0.3rem 0;
+  background: var(--border);
+}
+
 .settings-profile__header {
   display: flex;
   align-items: center;

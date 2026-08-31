@@ -1,11 +1,10 @@
 import { NavLink, useNavigate } from 'react-router-dom'
 import { useAuth } from '../auth/AuthContext'
-import UserAvatar from './UserAvatar'
-import { getUserDisplayLabel } from '../utils/userDisplay'
-import { VelaMarkIcon } from './VelaMarkIcon'
 import { MoonIcon } from '@phosphor-icons/react/Moon'
 import { SunIcon } from '@phosphor-icons/react/Sun'
 import { useTheme } from '../hooks/useTheme'
+import UserMenu from './UserMenu'
+import { VelaMarkIcon } from './VelaMarkIcon'
 
 const navItems = [
   { to: '/dashboard', label: 'Dashboard' },
@@ -13,9 +12,6 @@ const navItems = [
   { to: '/stacks', label: 'Stacks' },
   { to: '/builder', label: 'Builder' },
   { to: '/teams', label: 'Teams' },
-  { to: '/logs', label: 'Logs' },
-  { to: '/audit', label: 'Audit Log' },
-  { to: '/settings', label: 'Settings' },
 ] as const
 
 export default function Navbar() {
@@ -73,19 +69,7 @@ export default function Navbar() {
       </button>
       <div className="navbar__user">
         {isAuthenticated && user ? (
-          <>
-            <UserAvatar user={user} className="navbar__avatar" size={28} />
-            <span className="navbar__user-email" title={user.email}>
-              {getUserDisplayLabel(user)}
-            </span>
-            <button
-              type="button"
-              className="btn btn--ghost btn--sm"
-              onClick={onLogout}
-            >
-              Log out
-            </button>
-          </>
+          <UserMenu user={user} onLogout={onLogout} />
         ) : status === 'anonymous' ? (
           <NavLink to="/login" className="navbar__link">
             Log in
