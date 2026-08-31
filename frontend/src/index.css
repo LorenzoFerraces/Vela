@@ -143,6 +143,48 @@ input[type="radio"] {
   touch-action: manipulation;
 }
 
+input[type="checkbox"] {
+  appearance: none;
+  width: 1rem;
+  height: 1rem;
+  flex-shrink: 0;
+  display: grid;
+  place-content: center;
+  background: var(--bg-deep);
+  border: 1px solid var(--border);
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+input[type="checkbox"]::after {
+  content: "";
+  width: 0.5rem;
+  height: 0.25rem;
+  border-left: 2px solid var(--on-accent);
+  border-bottom: 2px solid var(--on-accent);
+  transform: rotate(-45deg) translate(0, -1px);
+  opacity: 0;
+}
+
+input[type="checkbox"]:checked {
+  background: var(--accent-fill);
+  border-color: var(--accent-fill);
+}
+
+input[type="checkbox"]:checked::after {
+  opacity: 1;
+}
+
+input[type="checkbox"]:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+input[type="checkbox"]:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
 .app-shell {
   min-height: 100vh;
   display: flex;
@@ -517,21 +559,6 @@ input[type="radio"] {
 
 .containers-source-check__hints li {
   margin-bottom: 0.25rem;
-}
-
-.containers-form__checkbox-label {
-  display: flex;
-  align-items: flex-start;
-  gap: 0.5rem;
-  margin: 0 0 1rem;
-  font-size: 0.875rem;
-  color: var(--text-muted);
-  cursor: pointer;
-}
-
-.containers-form__checkbox-label input {
-  margin-top: 0.2rem;
-  flex-shrink: 0;
 }
 
 .containers-form__actions {
@@ -1210,7 +1237,6 @@ input[type="radio"] {
 .settings-form__checkbox input {
   margin-top: 0.2rem;
   flex-shrink: 0;
-  accent-color: var(--accent);
 }
 
 .alert-history {

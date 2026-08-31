@@ -107,4 +107,17 @@ test.describe('Settings page', () => {
       authenticatedPage.getByRole('checkbox', { name: 'Container port' }),
     ).toBeChecked()
   })
+
+  test('toggling the email alerts master checkbox round-trips', async ({
+    authenticatedPage,
+  }) => {
+    await authenticatedPage.goto('/settings')
+    const alerts = authenticatedPage.getByRole('checkbox', {
+      name: 'Enable email alerts',
+    })
+    await alerts.click()
+    await expect(alerts).not.toBeChecked()
+    await alerts.click()
+    await expect(alerts).toBeChecked()
+  })
 })
