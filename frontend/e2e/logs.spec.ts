@@ -56,4 +56,17 @@ test.describe('Logs page', () => {
     await authenticatedPage.goto('/logs?container_id=nonexistent-id')
     await expect(authenticatedPage.getByRole('alert')).toBeVisible()
   })
+
+  test('renders with malformed start and end URL params', async ({
+    authenticatedPage,
+  }) => {
+    await authenticatedPage.goto('/logs?start=garbage&end=garbage')
+
+    await expect(
+      authenticatedPage.getByRole('heading', { name: 'Logs', level: 1 }),
+    ).toBeVisible()
+    await expect(
+      authenticatedPage.getByLabel('From'),
+    ).toBeVisible()
+  })
 })

@@ -11,10 +11,6 @@ import './logs/logs.css'
 
 const LIMIT = 100
 
-function toIsoDateTime(raw: string): string {
-  return new Date(raw).toISOString()
-}
-
 export default function LogsPage() {
   const [searchParams, setSearchParams] = useSearchParams()
   const [entries, setEntries] = useState<LogEntry[]>([])
@@ -78,8 +74,14 @@ export default function LogsPage() {
       if (includeOffset) params.offset = offset
       if (search) params.q = search
       if (levelFilter) params.level = levelFilter
-      if (startRaw) params.start_time = toIsoDateTime(startRaw)
-      if (endRaw) params.end_time = toIsoDateTime(endRaw)
+      const startDate = startRaw ? new Date(startRaw) : null
+      if (startDate && !Number.isNaN(startDate.getTime())) {
+        params.start_time = startDate.toISOString()
+      }
+      const endDate = endRaw ? new Date(endRaw) : null
+      if (endDate && !Number.isNaN(endDate.getTime())) {
+        params.end_time = endDate.toISOString()
+      }
       return params
     },
     [search, levelFilter, containerFilter, startRaw, endRaw, offset],
