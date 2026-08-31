@@ -115,9 +115,10 @@ test.describe('Settings page', () => {
     const alerts = authenticatedPage.getByRole('checkbox', {
       name: 'Enable email alerts',
     })
+    const initiallyChecked = await alerts.isChecked()
     await alerts.click()
-    await expect(alerts).not.toBeChecked()
+    await expect(alerts).toBeChecked(!initiallyChecked)
     await alerts.click()
-    await expect(alerts).toBeChecked()
+    await expect(alerts).toBeChecked(initiallyChecked)
   })
 })

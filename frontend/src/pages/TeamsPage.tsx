@@ -542,7 +542,7 @@ export default function TeamsPage() {
                             ) : isSelectedOwner ? (
                               <div className="teams-page__member-controls">
                                 <select
-                                  className="teams-page__input teams-page__select teams-page__select--inline"
+                                  className="teams-page__input teams-page__select--inline"
                                   aria-label={`Role for ${member.email}`}
                                   value={member.role}
                                   disabled={busy}
@@ -603,7 +603,7 @@ export default function TeamsPage() {
                           <label className="teams-page__field">
                             Role
                             <select
-                              className="teams-page__input teams-page__select"
+                              className="teams-page__input"
                               value={inviteRole}
                               disabled={busy}
                               onChange={(event) =>
