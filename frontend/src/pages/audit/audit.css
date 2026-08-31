@@ -69,7 +69,7 @@
 }
 
 .audit-log-page__target-id {
-  font-family: ui-monospace, monospace;
+  font-family: var(--font);
   font-size: 0.8125rem;
   background: var(--bg-deep);
   border: 1px solid var(--border);
