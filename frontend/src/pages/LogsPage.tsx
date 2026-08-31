@@ -7,6 +7,7 @@ import {
   listContainers,
 } from '../api/client'
 import type { ContainerInfo, LogEntry, LogQueryParams } from '../api/client'
+import { ContainerLogPanel } from '../components/workloads/ContainerLogPanel'
 import './logs/logs.css'
 
 const LIMIT = 100
@@ -125,6 +126,8 @@ export default function LogsPage() {
   const knownContainer = containers.some(
     (container) => container.id === containerFilter,
   )
+  const selectedContainer =
+    containers.find((container) => container.id === containerFilter) ?? null
 
   function onFilterChange(name: string, value: string) {
     setFilterParam(name, value)
@@ -214,6 +217,16 @@ export default function LogsPage() {
           onChange={(e) => onFilterChange('q', e.target.value)}
         />
       </div>
+
+      {hasContainer && selectedContainer?.status === 'running' ? (
+        <div className="logs-page__live">
+          <ContainerLogPanel
+            containerId={containerFilter}
+            isActive
+            workloadStatus={selectedContainer.status}
+          />
+        </div>
+      ) : null}
 
       {!hasContainer ? (
         <div className="logs-page__empty">

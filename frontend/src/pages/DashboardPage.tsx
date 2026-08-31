@@ -74,7 +74,7 @@ export default function DashboardPage() {
     <section className="dashboard-page">
       <h1 className="dashboard-page__title">Dashboard</h1>
       <p className="dashboard-page__lead">
-        Monitor workloads: live logs, resource stats per instance, and grouped
+        Monitor workloads: logs, resource stats per instance, and grouped
         replicas for auto-scaled deployments. Containers that are stopped,
         restarting, or failing health checks are listed first.
       </p>

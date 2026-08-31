@@ -6,7 +6,6 @@ import { containerWriteAllowed } from '../../api/client'
 import { deploySourceImageLabel } from '../../pages/containers/deploySourceDisplay'
 import type { WorkloadGroup } from '../../pages/containers/workloadGrouping'
 import { workloadInstances } from '../../pages/containers/workloadGrouping'
-import { ContainerLogPanel } from './ContainerLogPanel'
 import { ContainerStatsPanel } from './ContainerStatsPanel'
 import { ContainerTerminal } from './ContainerTerminal'
 import { ReplicaInstancesPanel } from './ReplicaInstancesPanel'
@@ -123,7 +122,6 @@ export function WorkloadsTable({
   onRemove,
   statsCell,
 }: WorkloadsTableProps) {
-  const [expandedLogId, setExpandedLogId] = useState<string | null>(null)
   const [expandedReplicaGroupId, setExpandedReplicaGroupId] = useState<
     string | null
   >(null)
@@ -138,12 +136,6 @@ export function WorkloadsTable({
   const [terminalContainerId, setTerminalContainerId] = useState<string | null>(null)
 
   const columnCount = statsCell ? 9 : 8
-
-  function toggleLogRow(containerId: string) {
-    setExpandedLogId((current) =>
-      current === containerId ? null : containerId,
-    )
-  }
 
   function toggleReplicaGroup(groupId: string) {
     setExpandedReplicaGroupId((current) =>
@@ -218,7 +210,6 @@ export function WorkloadsTable({
             <tbody>
               {groups.map((group) => {
                 const containerRow = group.base
-                const isLogExpanded = expandedLogId === containerRow.id
                 const isReplicaExpanded = expandedReplicaGroupId === containerRow.id
                 const isStatsExpanded = expandedStatsGroupId === containerRow.id
                 const accessUrl = containerRow.access_url?.trim() || ''
@@ -306,20 +297,20 @@ export function WorkloadsTable({
                         </td>
                       ) : null}
                       <td>
-                        <button
-                          type="button"
+                        <Link
+                          to={`/logs?container_id=${encodeURIComponent(containerRow.id)}`}
                           className="btn btn--ghost btn--sm"
-                          aria-expanded={isLogExpanded}
-                          aria-controls={`workloads-log-${containerRow.id}`}
-                          onClick={() => toggleLogRow(containerRow.id)}
+                          title="View logs"
+                          aria-label="View logs"
                         >
-                          {isLogExpanded ? 'Hide' : 'Show'}
-                        </button>
+                          Logs
+                        </Link>
+                      </td>
+                      <td className="containers-table__actions">
                         {containerRow.status === 'running' && canModify ? (
                           <button
                             type="button"
-                            className="btn btn--ghost btn--sm"
-                            style={{ marginLeft: '0.35rem' }}
+                            className="btn btn--sm btn--ghost"
                             title="Open terminal"
                             aria-label="Open terminal"
                             aria-expanded={terminalContainerId === containerRow.id}
@@ -335,17 +326,6 @@ export function WorkloadsTable({
                             {'>'}
                           </button>
                         ) : null}
-                        <Link
-                          to={`/logs?container_id=${encodeURIComponent(containerRow.id)}`}
-                          className="btn btn--ghost btn--sm"
-                          style={{ marginLeft: '0.35rem' }}
-                          title="View logs"
-                          aria-label="View logs"
-                        >
-                          Logs
-                        </Link>
-                      </td>
-                      <td className="containers-table__actions">
                         <button
                           type="button"
                           className="btn btn--sm btn--ghost"
@@ -443,22 +423,6 @@ export function WorkloadsTable({
                             <ContainerStatsPanel
                               containerId={statsTarget.id}
                               isActive={isStatsExpanded}
-                            />
-                          </div>
-                        </td>
-                      </tr>
-                    ) : null}
-                    {isLogExpanded ? (
-                      <tr className="workloads-table__expand-row">
-                        <td colSpan={columnCount}>
-                          <div
-                            id={`workloads-log-${containerRow.id}`}
-                            className="workloads-table__expand-inner"
-                          >
-                            <ContainerLogPanel
-                              containerId={containerRow.id}
-                              isActive={isLogExpanded}
-                              workloadStatus={containerRow.status}
                             />
                           </div>
                         </td>
