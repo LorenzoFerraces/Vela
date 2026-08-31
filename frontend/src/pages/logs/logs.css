@@ -44,7 +44,7 @@
 
 .logs-page__terminal {
   padding: 0.65rem 0.75rem;
-  font-family: ui-monospace, 'Cascadia Code', monospace;
+  font-family: var(--font);
   font-size: 0.8125rem;
   line-height: 1.5;
   background: var(--bg-elevated);

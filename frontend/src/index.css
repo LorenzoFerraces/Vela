@@ -734,7 +734,7 @@ select {
 }
 
 .containers-table__mono {
-  font-family: ui-monospace, monospace;
+  font-family: var(--font);
   font-size: 0.8125rem;
   overflow-wrap: anywhere;
 }
@@ -1467,7 +1467,7 @@ select {
   padding: 0.65rem 0.75rem;
   font-size: 0.78rem;
   line-height: 1.45;
-  font-family: ui-monospace, 'Cascadia Code', monospace;
+  font-family: var(--font);
   color: var(--text);
   background: var(--bg-elevated);
   border: 1px solid var(--border);
@@ -1497,7 +1497,7 @@ select {
 }
 
 .images-editor {
-  font-family: ui-monospace, 'Cascadia Code', monospace;
+  font-family: var(--font);
   font-size: 0.85rem;
   line-height: 1.45;
   resize: vertical;
@@ -2006,7 +2006,7 @@ select {
 .deployment-history__env-diff {
   margin: 0.25rem 0 1rem;
   padding-left: 1.25rem;
-  font-family: ui-monospace, monospace;
+  font-family: var(--font);
   font-size: 0.8125rem;
 }
 
@@ -2018,7 +2018,7 @@ select {
   overflow-x: auto;
   font-size: 0.78rem;
   line-height: 1.45;
-  font-family: ui-monospace, 'Cascadia Code', monospace;
+  font-family: var(--font);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }

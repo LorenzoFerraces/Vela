@@ -40,7 +40,7 @@
 }
 
 .stacks-card__network {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-family: var(--font);
   font-size: 0.75rem;
 }
 
@@ -140,7 +140,7 @@
 .new-stack-modal__manifest {
   min-height: 15rem;
   resize: vertical;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-family: var(--font);
 }
 
 .new-stack-review__origin {
