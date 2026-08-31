@@ -37,7 +37,7 @@ docker compose up -d --build
 ```
 
 - **http://localhost** — SPA + public routes (Traefik, port 80); port **8081** reaches the SPA directly; Traefik dashboard at http://127.0.0.1:8080 (dev only).
-- The API drives the **host** Docker daemon via a bind-mounted socket, so workload containers run on the host engine. If the socket mount fails (some Windows setups), run compose from a WSL2 distro.
+- The API drives the **host** Docker daemon via a bind-mounted socket, so workload containers run on the host engine. Works from Windows (Docker Desktop) or WSL2 — the api entrypoint grants its unprivileged user access to the socket on start.
 - All configuration lives in `.env` — see `.env.example` for the full annotated variable list.
 
 ## Backend

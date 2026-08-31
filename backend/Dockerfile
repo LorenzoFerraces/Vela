@@ -26,7 +26,9 @@ RUN set -e; \
     mkdir -p /data/volume-uploads /etc/traefik/dynamic; \
     chown -R vela:vela /app /data /etc/traefik/dynamic
 
-USER vela
+# The entrypoint starts as root to align the mounted socket's group, then
+# drops to `vela` (see entrypoint.sh).
+ENTRYPOINT ["sh", "/app/entrypoint.sh"]
 
 # Migrations are a one-shot deployment step (the compose `migrate` service),
 # not part of API startup, so restarts and replicas do not race alembic.
