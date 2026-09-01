@@ -24,7 +24,6 @@ MAX_TOTAL_BYTES = 48_000
 _README_CANDIDATES = ("README.md", "README", "readme.md", "Readme.md")
 
 _OTHER_CONTEXT_FILES = (
-    "Dockerfile",
     "package.json",
     "pyproject.toml",
     "requirements.txt",
@@ -38,6 +37,49 @@ _ENV_EXAMPLE_PATHS = (
     "backend/.env.example",
 )
 
+_README_SECTION_KEYWORDS = (
+    "env",
+    "config",
+    "deploy",
+    "docker",
+    "compose",
+    "k8s",
+    "port",
+    "install",
+    "setup",
+    "run",
+    "usage",
+    "start",
+    "requirement",
+)
+
+_MAP_IGNORED = frozenset(
+    {
+        ".git",
+        "node_modules",
+        "vendor",
+        "__pycache__",
+        ".venv",
+        "venv",
+        "dist",
+        "build",
+        "target",
+        ".next",
+        ".turbo",
+        "coverage",
+    }
+)
+
+_SUBDIR_MARKER_NAMES = (
+    "Dockerfile",
+    "package.json",
+    "pyproject.toml",
+    "requirements.txt",
+    "go.mod",
+    ".env.example",
+)
+_MAX_SUBDIR_FILES = 6
+
 _ENV_VAR_TABLE_ROW = re.compile(
     r"^\|\s*`?([A-Za-z_][A-Za-z0-9_]*)`?\s*\|",
     re.MULTILINE,
@@ -48,7 +90,7 @@ _ENV_ASSIGNMENT = re.compile(
 
 GIT_SOURCE_ANALYSIS_PROMPT_V1 = """You analyze Git repositories for deployment on Vela (Docker containers behind Traefik public routes).
 
-Given repository file excerpts, infer how the app should be deployed. The README excerpt (when present) is the primary source for ports, environment variables, and run/setup commands.
+Given repository file excerpts, infer how the app should be deployed. The README excerpt (when present) is the primary source for ports, environment variables, and run/setup commands. When a Detected facts block is supplied, treat it as ground truth for ports, environment variables, and build signals.
 - container_port: TCP port the app listens on inside the container (e.g. 5173 for Vite, 8000 for FastAPI, 8080 for Go). Prefer values documented in the README.
 - container_name: short DNS-safe name derived from the repo (lowercase, hyphens).
 - git_branch: keep the requested branch unless excerpts clearly indicate another default.
@@ -77,6 +119,96 @@ def _find_readme(project_root: Path) -> Path | None:
     return None
 
 
+def _select_readme_text(text: str) -> str:
+    if len(text.encode("utf-8")) <= MAX_FILE_BYTES:
+        return text
+    return _extract_readme_sections(text) or text[:MAX_FILE_BYTES]
+
+
+def _extract_readme_sections(text: str, max_bytes: int = 8_000) -> str:
+    lines = text.splitlines()
+    section_indices: list[int] = []
+    env_indices: set[int] = set()
+    in_kept_section = False
+    for index, line in enumerate(lines):
+        stripped = line.strip()
+        if line.startswith("#"):
+            in_kept_section = any(
+                keyword in line.lower() for keyword in _README_SECTION_KEYWORDS
+            )
+            if in_kept_section:
+                section_indices.append(index)
+            continue
+        if in_kept_section:
+            section_indices.append(index)
+        elif _ENV_VAR_TABLE_ROW.match(line) or _ENV_ASSIGNMENT.match(stripped):
+            for context_index in range(index - 2, index + 3):
+                if 0 <= context_index < len(lines):
+                    env_indices.add(context_index)
+    section_text = "\n".join(lines[index] for index in section_indices)
+    if len(section_text) < 800:
+        section_indices = []
+    keep = sorted(set(section_indices) | env_indices)
+    if not keep:
+        return ""
+    kept_text = "\n".join(lines[index] for index in keep)
+    if len(kept_text.encode("utf-8")) > max_bytes:
+        kept_text = (
+            kept_text.encode("utf-8", errors="replace")[:max_bytes].decode(
+                "utf-8", errors="replace"
+            )
+            + "…"
+        )
+    return kept_text
+
+
+def _repo_map(root: Path, max_entries: int = 150) -> str:
+    entries: list[str] = []
+
+    def walk(directory: Path) -> None:
+        try:
+            children = sorted(directory.iterdir(), key=lambda item: item.name)
+        except OSError:
+            return
+        for child in children:
+            if child.name.startswith(".") or child.name in _MAP_IGNORED:
+                continue
+            if child.is_dir():
+                walk(child)
+            else:
+                entries.append(child.relative_to(root).as_posix())
+
+    walk(root)
+    entries.sort()
+    if len(entries) > max_entries:
+        entries = entries[:max_entries] + ["…"]
+    return "\n".join(entries)
+
+
+def _subdir_marker_files(root: Path) -> list[tuple[str, str]]:
+    for name in _SUBDIR_MARKER_NAMES:
+        if (root / name).is_file():
+            return []
+    results: list[tuple[str, str]] = []
+    try:
+        children = sorted(root.iterdir(), key=lambda item: item.name)
+    except OSError:
+        return []
+    for child in children:
+        if not child.is_dir() or child.name.startswith(".") or child.name in _MAP_IGNORED:
+            continue
+        markers = sorted(
+            (child / name) for name in _SUBDIR_MARKER_NAMES if (child / name).is_file()
+        )
+        for marker in markers:
+            if len(results) >= _MAX_SUBDIR_FILES:
+                break
+            results.append((f"{child.name}/{marker.name}", _read_file_excerpt(marker)))
+        if len(results) >= _MAX_SUBDIR_FILES:
+            break
+    return results
+
+
 def _append_excerpt(
     parts: list[str],
     *,
@@ -95,13 +227,24 @@ def _collect_context_excerpts(project_root: Path) -> str:
     parts: list[str] = []
     total = 0
 
-    readme_path = _find_readme(project_root)
-    if readme_path is not None:
+    for relative_path in _ENV_EXAMPLE_PATHS:
+        path = project_root / relative_path
+        if not path.is_file():
+            continue
         total = _append_excerpt(
             parts,
             total=total,
-            label=readme_path.name,
-            text=_read_file_excerpt(readme_path),
+            label=relative_path,
+            text=_read_file_excerpt(path),
+        )
+
+    dockerfile_path = project_root / "Dockerfile"
+    if dockerfile_path.is_file():
+        total = _append_excerpt(
+            parts,
+            total=total,
+            label="Dockerfile",
+            text=_read_file_excerpt(dockerfile_path),
         )
 
     for name in _OTHER_CONTEXT_FILES:
@@ -114,21 +257,26 @@ def _collect_context_excerpts(project_root: Path) -> str:
             label=name,
             text=_read_file_excerpt(path),
         )
-        if total >= MAX_TOTAL_BYTES:
-            break
 
-    for relative_path in _ENV_EXAMPLE_PATHS:
-        if total >= MAX_TOTAL_BYTES:
-            break
-        path = project_root / relative_path
-        if not path.is_file():
-            continue
+    readme_path = _find_readme(project_root)
+    if readme_path is not None:
+        readme_text = readme_path.read_bytes().decode("utf-8", errors="replace")
         total = _append_excerpt(
             parts,
             total=total,
-            label=relative_path,
-            text=_read_file_excerpt(path),
+            label=readme_path.name,
+            text=_select_readme_text(readme_text),
         )
+
+    for label, text in _subdir_marker_files(project_root):
+        total = _append_excerpt(parts, total=total, label=label, text=text)
+
+    total = _append_excerpt(
+        parts,
+        total=total,
+        label="repo map",
+        text=_repo_map(project_root),
+    )
 
     if not parts:
         info = analyze_project(project_root)
@@ -175,6 +323,67 @@ def _extract_env_vars_from_context(context: str) -> dict[str, str]:
             if key:
                 env_vars[key] = value
     return env_vars
+
+
+def _dockerfile_facts(text: str) -> str | None:
+    base: str | None = None
+    ports: list[str] = []
+    command: str | None = None
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        tokens = stripped.split()
+        instruction = tokens[0].upper()
+        if instruction == "FROM":
+            for token in tokens[1:]:
+                if not token.startswith("--"):
+                    base = token
+                    break
+        elif instruction == "EXPOSE":
+            for token in tokens[1:]:
+                port = token.split("/")[0]
+                if port.isdigit() and port not in ports:
+                    ports.append(port)
+        elif instruction in {"CMD", "ENTRYPOINT"}:
+            command = stripped[:120]
+    if base is None and not ports and command is None:
+        return None
+    facts: list[str] = []
+    if base is not None:
+        facts.append(f"base={base}")
+    if ports:
+        facts.append(f"expose={','.join(ports)}")
+    if command is not None:
+        facts.append(f"cmd={command}")
+    return " ".join(facts)
+
+
+def _detected_facts_block(root: Path, context: str) -> str:
+    lines: list[str] = []
+    info = analyze_project(root)
+    if info.language is not SupportedLanguage.UNKNOWN:
+        language_line = f"language={info.language}"
+        if info.framework:
+            language_line += f", framework={info.framework}"
+        lines.append(language_line)
+    if info.build_subdir:
+        lines.append(f"app markers live in '{info.build_subdir}/'")
+    dockerfile_path = root / "Dockerfile"
+    if dockerfile_path.is_file():
+        dockerfile_facts = _dockerfile_facts(_read_file_excerpt(dockerfile_path))
+        if dockerfile_facts is not None:
+            lines.append(f"dockerfile: {dockerfile_facts}")
+    env_vars = _extract_env_vars_from_context(context)
+    if env_vars:
+        rendered = ", ".join(
+            f"{key}={value}" if value else key
+            for key, value in list(env_vars.items())[:20]
+        )
+        if len(env_vars) > 20:
+            rendered += " (more truncated)"
+        lines.append(f"documented env vars: {rendered}")
+    return "\n".join(f"- {line}" for line in lines)
 
 
 def _env_vars_from_payload(parsed: dict[str, object]) -> dict[str, str]:
@@ -282,13 +491,20 @@ def _analysis_json_schema() -> dict:
     }
 
 
-async def _call_gemini(context: str, git_url: str, git_branch: str) -> GitSourceAnalysis:
+async def _call_gemini(
+    context: str, git_url: str, git_branch: str, facts: str = ""
+) -> GitSourceAnalysis:
     prompt = (
         f"{GIT_SOURCE_ANALYSIS_PROMPT_V1}\n\n"
         f"Repository: {git_url}\n"
         f"Requested branch: {git_branch}\n\n"
         f"{context}"
     )
+    if facts:
+        prompt += (
+            "\n\nDetected facts (already verified by deterministic scans; "
+            f"prefer them over re-deriving):\n{facts}"
+        )
     try:
         parsed = await generate_json(prompt=prompt, schema=_analysis_json_schema())
     except LlmNotConfiguredError as exc:
@@ -373,9 +589,10 @@ async def analyze_git_source(
     parent = root.parent
     try:
         context = _collect_context_excerpts(root)
+        facts = _detected_facts_block(root, context)
         if resolve_llm_config() is None:
             return _merge_env_fallback(_fallback_analysis(root, git_branch), context)
-        analysis = await _call_gemini(context, git_url, git_branch)
+        analysis = await _call_gemini(context, git_url, git_branch, facts)
         enriched = _enrich_with_local_detection(analysis, root)
         return _merge_env_fallback(enriched, context)
     finally:
