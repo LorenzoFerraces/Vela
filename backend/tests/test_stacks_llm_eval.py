@@ -119,9 +119,7 @@ FIXTURES: list[dict] = [
             "README.md": (
                 "# Huge App\n\n"
                 + "\n".join(f"## Changelog {i}\n\nPatched item {i}.\n" for i in range(400))
-                + "\n## Installation and Setup\n\n"
-                + "This section is long enough to survive the section floor. " * 20
-                + "\n\n## Environment\n\n"
+                + "\n## Environment\n\n"
                 "| Variable | Notes |\n|---|---|\n"
                 "| `LATE_DB_URL` | `postgresql://late:pw@db:5432/late` |\n"
                 "| `LATE_TOKEN` | `tok-late-1` |\n\n"

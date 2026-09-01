@@ -144,7 +144,7 @@ def _extract_readme_sections(text: str, max_bytes: int = 8_000) -> str:
             continue
         if in_kept_section:
             section_indices.append(index)
-        elif _ENV_VAR_TABLE_ROW.match(line) or _ENV_ASSIGNMENT.match(stripped):
+        if _ENV_VAR_TABLE_ROW.match(line) or _ENV_ASSIGNMENT.match(stripped):
             for context_index in range(index - 2, index + 3):
                 if 0 <= context_index < len(lines):
                     env_indices.add(context_index)

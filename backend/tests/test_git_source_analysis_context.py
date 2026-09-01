@@ -73,6 +73,22 @@ def test_extract_readme_sections_reaches_env_table_past_head_truncation() -> Non
     assert "## Changelog 50" not in selected
 
 
+def test_select_readme_text_keeps_env_table_in_short_kept_section() -> None:
+    filler = "".join(f"## Changelog {index}\n\nPatched item {index}.\n" for index in range(400))
+    readme = filler + (
+        "## Environment\n\n"
+        "| Variable | Notes |\n|---|---|\n| `LATE_KEY` | `late-value` |\n"
+    )
+    assert len(readme.encode("utf-8")) > 12_000
+    assert readme.index("LATE_KEY") > 12_000
+
+    selected = _select_readme_text(readme)
+
+    assert "LATE_KEY" in selected
+    assert "late-value" in selected
+    assert "## Changelog 50" not in selected
+
+
 def test_extract_readme_sections_flat_file_keeps_env_lines_only() -> None:
     readme = "no headings here, just prose to pad the file.\n" * 700 + "PORT=3000\n"
     assert len(readme.encode("utf-8")) > 12_000
