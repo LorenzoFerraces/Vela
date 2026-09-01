@@ -299,8 +299,11 @@ async def test_pipeline_stubbed_llm_merges_env_fallback(
     fixture = FIXTURES[0]
     root = _write_fixture(tmp_path, fixture)
 
+    captured: dict[str, str] = {}
+
     async def fake_generate_json(*, prompt: str, schema: dict) -> dict:
-        _ = prompt, schema
+        _ = schema
+        captured["prompt"] = prompt
         return STUB_PAYLOAD
 
     monkeypatch.setattr(repo_analysis, "generate_json", fake_generate_json)
@@ -321,6 +324,8 @@ async def test_pipeline_stubbed_llm_merges_env_fallback(
     assert web.env_vars["DATABASE_URL"] == "postgresql://app:secret@db:5432/app"
     assert web.container_port == 8000
     assert by_name["db"].source_ref == "postgres:16"
+    assert "Detected facts" in captured["prompt"]
+    assert "DATABASE_URL" in captured["prompt"]
 
 
 @pytest.mark.parametrize("fixture", FIXTURES, ids=lambda fixture: fixture["name"])
