@@ -113,6 +113,58 @@ FIXTURES: list[dict] = [
         "required_env": ["API_HOST", "API_TOKEN"],
         "pinned_env": {"API_TOKEN": "tok-123"},
     },
+    {
+        "name": "huge-readme-late-table",
+        "files": {
+            "README.md": (
+                "# Huge App\n\n"
+                + "\n".join(f"## Changelog {i}\n\nPatched item {i}.\n" for i in range(400))
+                + "\n## Installation and Setup\n\n"
+                + "This section is long enough to survive the section floor. " * 20
+                + "\n\n## Environment\n\n"
+                "| Variable | Notes |\n|---|---|\n"
+                "| `LATE_DB_URL` | `postgresql://late:pw@db:5432/late` |\n"
+                "| `LATE_TOKEN` | `tok-late-1` |\n\n"
+                "End of docs.\n"
+            ),
+        },
+        "services": [
+            {"aliases": ["app", "web", "api"], "kind": "git"},
+        ],
+        "required_env": ["LATE_DB_URL", "LATE_TOKEN"],
+        "pinned_env": {
+            "LATE_DB_URL": "postgresql://late:pw@db:5432/late",
+            "LATE_TOKEN": "tok-late-1",
+        },
+    },
+    {
+        "name": "monorepo-subdir",
+        "files": {
+            "README.md": (
+                "# Monorepo\n\n"
+                "Two subprojects in one repository:\n\n"
+                "- `web/` — frontend (Node.js); env vars in `web/.env.example`.\n"
+                "- `api/` — backend service (Python); built from `api/Dockerfile`.\n"
+            ),
+            "web/package.json": (
+                '{"name": "web", "version": "1.0.0", "scripts": {"start": "node server.js"}}\n'
+            ),
+            "web/.env.example": "WEB_SESSION_SECRET=websess\nWEB_API_URL=http://api:8080\n",
+            "api/Dockerfile": (
+                "FROM python:3.12-slim\n"
+                "WORKDIR /app\n"
+                "COPY . .\n"
+                "EXPOSE 8000\n"
+                'CMD ["python", "main.py"]\n'
+            ),
+        },
+        "services": [
+            {"aliases": ["web", "frontend"], "kind": "git"},
+            {"aliases": ["api", "backend", "service"], "kind": "git", "port": 8000},
+        ],
+        "required_env": ["WEB_SESSION_SECRET", "WEB_API_URL"],
+        "pinned_env": {"WEB_API_URL": "http://api:8080"},
+    },
 ]
 
 STUB_PAYLOAD = {
@@ -161,7 +213,9 @@ def _write_fixture(tmp_path: Path, fixture: dict) -> Path:
     root = tmp_path / fixture["name"] / "repo"
     root.mkdir(parents=True)
     for filename, content in fixture["files"].items():
-        (root / filename).write_text(content, encoding="utf-8")
+        path = root / filename
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="utf-8")
     return root
 
 
