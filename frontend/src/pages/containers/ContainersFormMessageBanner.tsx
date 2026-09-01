@@ -35,6 +35,7 @@ export function ContainersFormMessageBanner({
           <button
             type="button"
             className="btn btn--ghost btn--sm"
+            aria-live="polite"
             onClick={() => {
               const url = message.publicUrl
               if (!url) return

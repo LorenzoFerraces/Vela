@@ -47,7 +47,7 @@ export function DeployProjectSelect({
       </label>
       <select
         id="deploy-project-select"
-        className="containers-form__input containers-form__select"
+        className="containers-form__input"
         value={selectedProjectId}
         onChange={(event) => onSelectedProjectIdChange(event.target.value)}
       >

@@ -2,26 +2,22 @@
 
 from __future__ import annotations
 
-import json
-import logging
-import os
 import re
 from pathlib import Path
 
-import httpx
 from pydantic import ValidationError
 
 from app.api.schemas import GitSourceAnalysis
 from app.core.build.default_image_builder import DefaultImageBuilder
 from app.core.enums import SupportedLanguage
-from app.core.exceptions import GitSourceAnalysisError
+from app.core.exceptions import (
+    GitSourceAnalysisError,
+    LlmCallError,
+    LlmNotConfiguredError,
+)
 from app.core.git.project_analysis import analyze_project
+from app.core.llm import generate_json, resolve_llm_config
 from app.e2e_support import e2e_git_source_analysis_if_enabled
-
-logger = logging.getLogger(__name__)
-
-GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta"
-DEFAULT_GEMINI_MODEL = "gemini-2.0-flash"
 MAX_FILE_BYTES = 12_000
 MAX_TOTAL_BYTES = 48_000
 
@@ -64,15 +60,6 @@ Given repository file excerpts, infer how the app should be deployed. The README
 - summary_hint: one short sentence for the UI (max 120 chars).
 
 Respond with JSON matching the schema exactly."""
-
-
-def _gemini_api_key() -> str | None:
-    key = os.environ.get("VELA_GEMINI_API_KEY", "").strip()
-    return key or None
-
-
-def _gemini_model() -> str:
-    return os.environ.get("VELA_GEMINI_MODEL", DEFAULT_GEMINI_MODEL).strip() or DEFAULT_GEMINI_MODEL
 
 
 def _read_file_excerpt(path: Path) -> str:
@@ -296,75 +283,32 @@ def _analysis_json_schema() -> dict:
 
 
 async def _call_gemini(context: str, git_url: str, git_branch: str) -> GitSourceAnalysis:
-    api_key = _gemini_api_key()
-    if api_key is None:
-        raise GitSourceAnalysisError(
-            "AI analysis is not configured on this server (missing VELA_GEMINI_API_KEY)."
-        )
-
-    model = _gemini_model()
-    url = f"{GEMINI_API_BASE}/models/{model}:generateContent"
-    payload = {
-        "contents": [
-            {
-                "role": "user",
-                "parts": [
-                    {
-                        "text": (
-                            f"{GIT_SOURCE_ANALYSIS_PROMPT_V1}\n\n"
-                            f"Repository: {git_url}\n"
-                            f"Requested branch: {git_branch}\n\n"
-                            f"{context}"
-                        )
-                    }
-                ],
-            }
-        ],
-        "generationConfig": {
-            "responseMimeType": "application/json",
-            "responseSchema": _analysis_json_schema(),
-        },
-    }
+    prompt = (
+        f"{GIT_SOURCE_ANALYSIS_PROMPT_V1}\n\n"
+        f"Repository: {git_url}\n"
+        f"Requested branch: {git_branch}\n\n"
+        f"{context}"
+    )
     try:
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            response = await client.post(
-                url,
-                params={"key": api_key},
-                json=payload,
-            )
-            response.raise_for_status()
-    except httpx.HTTPError as exc:
-        response_detail = ""
-        if isinstance(exc, httpx.HTTPStatusError) and exc.response is not None:
-            response_detail = exc.response.text[:240]
-        logger.info(
-            "Gemini analysis request failed: %s %s",
-            exc,
-            response_detail,
-        )
+        parsed = await generate_json(prompt=prompt, schema=_analysis_json_schema())
+    except LlmNotConfiguredError as exc:
+        raise GitSourceAnalysisError("AI analysis is not configured on this server.") from exc
+    except LlmCallError as exc:
+        if str(exc) == "Could not complete AI analysis. Try again later.":
+            raise GitSourceAnalysisError(
+                "Could not complete AI repository analysis. Try again later."
+            ) from exc
         raise GitSourceAnalysisError(
-            "Could not complete AI repository analysis. Try again later."
+            "AI analysis returned an invalid response. Try again or fill the form manually."
         ) from exc
 
     try:
-        body = response.json()
-        text = body["candidates"][0]["content"]["parts"][0]["text"]
-        parsed = json.loads(text)
-        if not isinstance(parsed, dict):
-            raise TypeError("Gemini JSON root must be an object.")
         analysis = _payload_to_analysis(parsed)
         sanitized_name = sanitize_container_name(analysis.container_name)
         if sanitized_name != analysis.container_name:
             return analysis.model_copy(update={"container_name": sanitized_name})
         return analysis
-    except (
-        KeyError,
-        IndexError,
-        TypeError,
-        json.JSONDecodeError,
-        ValidationError,
-    ) as exc:
-        logger.info("Gemini analysis response parse failed: %s", exc)
+    except (TypeError, ValidationError) as exc:
         raise GitSourceAnalysisError(
             "AI analysis returned an invalid response. Try again or fill the form manually."
         ) from exc
@@ -429,7 +373,7 @@ async def analyze_git_source(
     parent = root.parent
     try:
         context = _collect_context_excerpts(root)
-        if _gemini_api_key() is None:
+        if resolve_llm_config() is None:
             return _merge_env_fallback(_fallback_analysis(root, git_branch), context)
         analysis = await _call_gemini(context, git_url, git_branch)
         enriched = _enrich_with_local_detection(analysis, root)

@@ -1290,44 +1290,30 @@ def test_stack_composition_cycle_prevention(api_client: TestClient) -> None:
     api_client.delete(f"/api/stacks/{id_a}")
 
 
-def test_stack_compose_import(api_client: TestClient) -> None:
-    """Import a docker-compose YAML and verify services are created."""
-    compose_yaml = """
-version: "3.8"
-services:
-  web:
-    image: nginx:alpine
-    ports:
-      - "80:80"
-    environment:
-      NGINX_HOST: example.com
-  redis:
-    image: redis:7
-    ports:
-      - "6379:6379"
+def test_stack_parse_manifest_k8s(api_client: TestClient) -> None:
+    k8s_yaml = """
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web
+spec:
+  template:
+    spec:
+      containers:
+        - name: web
+          image: nginx:alpine
+          ports:
+            - containerPort: 8080
 """
-    resp = api_client.post("/api/stacks/import-compose", json={
-        "name": "imported-stack",
-        "yaml_content": compose_yaml,
-    })
-    assert resp.status_code == 201
+    resp = api_client.post("/api/stacks/parse-manifest", json={"yaml_content": k8s_yaml})
+    assert resp.status_code == 200
     data = resp.json()
-    assert data["stack"]["name"] == "imported-stack"
-    service_names = {s["service_name"] for s in data["stack"]["services"]}
-    assert "web" in service_names
-    assert "redis" in service_names
-
-    # Verify the stack is accessible
-    stack_id = data["stack"]["id"]
-    got = api_client.get(f"/api/stacks/{stack_id}")
-    assert got.status_code == 200
-    assert got.json()["name"] == "imported-stack"
-
-    # Cleanup
-    api_client.delete(f"/api/stacks/{stack_id}")
+    assert data["manifest_kind"] == "k8s"
+    assert data["services"][0]["service_name"] == "web"
+    assert data["services"][0]["container_port"] == 8080
 
 
-def test_stack_parse_compose(api_client: TestClient) -> None:
+def test_stack_parse_manifest_compose(api_client: TestClient) -> None:
     """Parse compose returns services without creating a stack."""
     compose_yaml = """
 services:
@@ -1346,9 +1332,10 @@ services:
     assert before.status_code == 200
     count_before = len(before.json())
 
-    resp = api_client.post("/api/stacks/parse-compose", json={"yaml_content": compose_yaml})
+    resp = api_client.post("/api/stacks/parse-manifest", json={"yaml_content": compose_yaml})
     assert resp.status_code == 200, resp.text
     data = resp.json()
+    assert data["manifest_kind"] == "compose"
     service_names = {s["service_name"] for s in data["services"]}
     assert service_names == {"web", "redis"}
     web = next(s for s in data["services"] if s["service_name"] == "web")
@@ -1361,14 +1348,14 @@ services:
     assert len(after.json()) == count_before
 
 
-def test_stack_parse_compose_git_url(api_client: TestClient) -> None:
+def test_stack_parse_manifest_git_url(api_client: TestClient) -> None:
     compose_yaml = """
 services:
   app:
     build:
       context: https://github.com/LorenzoFerraces/Commit-y-me-voy.git
 """
-    resp = api_client.post("/api/stacks/parse-compose", json={"yaml_content": compose_yaml})
+    resp = api_client.post("/api/stacks/parse-manifest", json={"yaml_content": compose_yaml})
     assert resp.status_code == 200, resp.text
     app = resp.json()["services"][0]
     assert app["source_kind"] == "git"
@@ -1376,10 +1363,10 @@ services:
     assert app["git_branch"] == "main"
 
 
-def test_stack_parse_compose_empty(api_client: TestClient) -> None:
-    resp = api_client.post("/api/stacks/parse-compose", json={"yaml_content": "services: {}"})
+def test_stack_parse_manifest_unrecognized(api_client: TestClient) -> None:
+    resp = api_client.post("/api/stacks/parse-manifest", json={"yaml_content": "foo: bar"})
     assert resp.status_code == 400
-    assert "no valid services" in resp.json()["detail"].lower()
+    assert "unrecognized manifest" in resp.json()["detail"].lower()
 
 
 def test_stack_deploy_creates_network(api_client: TestClient) -> None:

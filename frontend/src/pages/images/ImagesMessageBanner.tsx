@@ -15,7 +15,7 @@ export function ImagesMessageBanner({ banner }: ImagesMessageBannerProps) {
           ? 'containers-banner containers-banner--ok'
           : 'containers-banner containers-banner--err'
       }
-      role="alert"
+      role={banner.tone === 'ok' ? 'status' : 'alert'}
     >
       <p className="containers-banner__text">{banner.text}</p>
     </div>

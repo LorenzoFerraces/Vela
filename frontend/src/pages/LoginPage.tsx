@@ -175,6 +175,7 @@ export default function LoginPage() {
             className="auth-form__input"
             type="email"
             autoComplete="email"
+            spellCheck={false}
             required
             value={email}
             onChange={(event) => setEmail(event.target.value)}

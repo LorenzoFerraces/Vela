@@ -15,7 +15,7 @@ from app.core.exceptions import (
     CloneError,
     ClerkAccountAlreadyLinkedError,
     ClerkTokenError,
-    ComposeImportError,
+    ManifestParseError,
     GitSourceAnalysisError,
     NeedsBuildOverrideError,
     UnsupportedProjectError,
@@ -36,6 +36,8 @@ from app.core.exceptions import (
     IntegrationConfigurationError,
     IntegrationError,
     InvalidCredentialsError,
+    LlmCallError,
+    LlmNotConfiguredError,
     NotAuthenticatedError,
     ObjectStorageError,
     AlreadyProjectMemberError,
@@ -344,8 +346,10 @@ def register_exception_handlers(app) -> None:
         )
 
     @app.exception_handler(GitSourceAnalysisError)
-    async def git_source_analysis_handler(
-        _request: Request, exc: GitSourceAnalysisError
+    @app.exception_handler(LlmCallError)
+    @app.exception_handler(LlmNotConfiguredError)
+    async def llm_analysis_handler(
+        _request: Request, exc: VelaError
     ) -> JSONResponse:
         return JSONResponse(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -405,13 +409,12 @@ def register_exception_handlers(app) -> None:
             content={"detail": str(exc), "stack_names": exc.stack_names},
         )
 
-    @app.exception_handler(ComposeImportError)
-    async def handle_compose_import(
-        _request: Request, exc: ComposeImportError
+    @app.exception_handler(ManifestParseError)
+    async def manifest_parse_handler(
+        _request: Request, exc: ManifestParseError
     ) -> JSONResponse:
         return JSONResponse(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            content={"detail": str(exc), "warnings": exc.warnings},
+            status_code=status.HTTP_400_BAD_REQUEST, content={"detail": str(exc)}
         )
 
     @app.exception_handler(VelaError)

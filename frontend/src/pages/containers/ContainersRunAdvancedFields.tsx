@@ -11,7 +11,11 @@ import {
   volumeUploadLimitMegabytes,
 } from '../../constants/volumeUploadLimits'
 import type { EnvVarRow, VolumeMountRow } from './runFormAdvanced'
-import { createEmptyVolumeMountRow, folderTotalBytes } from './runFormAdvanced'
+import {
+  createEmptyEnvRow,
+  createEmptyVolumeMountRow,
+  folderTotalBytes,
+} from './runFormAdvanced'
 import { ContainersRunScalingFields } from './ContainersRunScalingFields'
 import { formatBytes } from '../../utils/formatBytes'
 
@@ -25,6 +29,7 @@ type ContainersRunAdvancedFieldsProps = {
   scalingPolicy: ScalingPolicyRequest | null
   onScalingPolicyChange: (policy: ScalingPolicyRequest | null) => void
   scalingValidationError?: string | null
+  volumeError?: string | null
 }
 
 export function ContainersRunAdvancedFields({
@@ -37,10 +42,12 @@ export function ContainersRunAdvancedFields({
   scalingPolicy,
   onScalingPolicyChange,
   scalingValidationError = null,
+  volumeError = null,
 }: ContainersRunAdvancedFieldsProps) {
   const [expanded, setExpanded] = useState(false)
   const folderInputRef = useRef<HTMLInputElement>(null)
   const [pickingRowIndex, setPickingRowIndex] = useState<number | null>(null)
+  const advancedOpen = expanded || volumeError !== null
 
   function updateEnvRow(index: number, patch: Partial<EnvVarRow>) {
     onEnvRowsChange(
@@ -51,12 +58,12 @@ export function ContainersRunAdvancedFields({
   }
 
   function addEnvRow() {
-    onEnvRowsChange([...envRows, { key: '', value: '' }])
+    onEnvRowsChange([...envRows, createEmptyEnvRow()])
   }
 
   function removeEnvRow(index: number) {
     const next = envRows.filter((_, rowIndex) => rowIndex !== index)
-    onEnvRowsChange(next.length > 0 ? next : [{ key: '', value: '' }])
+    onEnvRowsChange(next.length > 0 ? next : [createEmptyEnvRow()])
   }
 
   function updateVolumeRow(index: number, patch: Partial<VolumeMountRow>) {
@@ -150,10 +157,10 @@ export function ContainersRunAdvancedFields({
       <button
         type="button"
         className="btn btn--ghost containers-form__advanced-toggle"
-        aria-expanded={expanded}
+        aria-expanded={advancedOpen}
         onClick={() => setExpanded((open) => !open)}
       >
-        <span>Advanced options</span>
+        <span>Advanced Options</span>
         <span
           className="containers-form__advanced-chevron"
           aria-hidden="true"
@@ -161,12 +168,12 @@ export function ContainersRunAdvancedFields({
           ›
         </span>
       </button>
-      {expanded ? (
+      {advancedOpen ? (
         <div className="containers-form__advanced-body">
           <p className="containers-form__label">Environment variables</p>
           <ul className="containers-env-list">
             {envRows.map((row, index) => (
-              <li key={index} className="containers-env-list__row">
+              <li key={row.id} className="containers-env-list__row">
                 <input
                   className="containers-form__input"
                   type="text"
@@ -176,6 +183,7 @@ export function ContainersRunAdvancedFields({
                   onChange={(event) =>
                     updateEnvRow(index, { key: event.target.value })
                   }
+                  autoComplete="off"
                 />
                 <input
                   className="containers-form__input"
@@ -186,6 +194,7 @@ export function ContainersRunAdvancedFields({
                   onChange={(event) =>
                     updateEnvRow(index, { value: event.target.value })
                   }
+                  autoComplete="off"
                 />
                 <button
                   type="button"
@@ -209,16 +218,17 @@ export function ContainersRunAdvancedFields({
           <p className="containers-form__label">Volumes (read-only)</p>
           <p className="containers-muted containers-form__hint">
             Choose a folder from your computer (up to{' '}
-            {volumeUploadLimitMegabytes(VOLUME_UPLOAD_MAX_BYTES)} MB per folder,{' '}
-            {volumeUploadLimitMegabytes(VOLUME_UPLOAD_USER_QUOTA_BYTES)} MB total per
-            account). Mounts are read-only inside the container.
+            {volumeUploadLimitMegabytes(VOLUME_UPLOAD_MAX_BYTES)}\u00a0MB per folder,{' '}
+            {volumeUploadLimitMegabytes(VOLUME_UPLOAD_USER_QUOTA_BYTES)}\u00a0MB total
+            per account). Mounts are read-only inside the container.
           </p>
           <ul className="containers-env-list">
             {volumeRows.map((row, index) => (
-              <li key={index} className="containers-env-list__row containers-env-list__row--volume">
+              <li key={row.id} className="containers-env-list__row containers-env-list__row--volume">
                 <div className="containers-volume-row">
                   <button
                     type="button"
+                    id={`volume-folder-${index + 1}`}
                     className="btn btn--ghost btn--compact"
                     disabled={row.uploading}
                     onClick={() => openFolderPicker(index)}
@@ -237,16 +247,25 @@ export function ContainersRunAdvancedFields({
                         : ''}
                     </span>
                   ) : null}
-                  <input
-                    className="containers-form__input"
-                    type="text"
-                    placeholder="/path/in/container"
-                    aria-label={`Volume target ${index + 1}`}
-                    value={row.target}
-                    onChange={(event) =>
-                      updateVolumeRow(index, { target: event.target.value })
-                    }
-                  />
+                  <div className="containers-volume-row__target">
+                    <label
+                      className="containers-form__label containers-volume-row__target-label"
+                      htmlFor={`volume-target-${index + 1}`}
+                    >
+                      Target
+                    </label>
+                    <input
+                      id={`volume-target-${index + 1}`}
+                      className="containers-form__input"
+                      type="text"
+                      placeholder="/path/in/container"
+                      value={row.target}
+                      onChange={(event) =>
+                        updateVolumeRow(index, { target: event.target.value })
+                      }
+                      autoComplete="off"
+                    />
+                  </div>
                   <button
                     type="button"
                     className="btn btn--ghost btn--compact"
@@ -271,6 +290,15 @@ export function ContainersRunAdvancedFields({
           >
             Add volume
           </button>
+          {volumeError ? (
+            <p
+              id="volume-error"
+              className="settings-banner settings-banner--err"
+              role="alert"
+            >
+              {volumeError}
+            </p>
+          ) : null}
 
           <label className="containers-form__label" htmlFor="start-command-input">
             Start command

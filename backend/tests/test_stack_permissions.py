@@ -31,7 +31,7 @@ def _create_stack(client: TestClient, *, name: str, project_id: str | None = Non
     return response.json()
 
 
-def test_viewer_cannot_import_or_deploy_stack(integration_app: Any) -> None:
+def test_viewer_cannot_create_or_deploy_stack(integration_app: Any) -> None:
     with TestClient(integration_app) as owner_client, TestClient(integration_app) as viewer_client:
         _, project_id, _ = _register(owner_client, "stack-owner@example.com")
         _register(viewer_client, "stack-viewer@example.com")
@@ -44,16 +44,6 @@ def test_viewer_cannot_import_or_deploy_stack(integration_app: Any) -> None:
         )
 
         stack = _create_stack(owner_client, name="rbac-stack", project_id=project_id)
-
-        import_denied = viewer_client.post(
-            "/api/stacks/import-compose",
-            json={
-                "project_id": project_id,
-                "name": "viewer-import",
-                "yaml_content": "services:\n  web:\n    image: nginx:alpine\n",
-            },
-        )
-        assert import_denied.status_code == 403
 
         deploy_denied = viewer_client.post(f"/api/stacks/{stack['id']}/deploy")
         assert deploy_denied.status_code == 403

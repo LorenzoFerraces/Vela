@@ -10,13 +10,14 @@
 
 ## Global Constraints
 
-- **No backend changes.** `GET /api/logs/` already accepts `start_time`/`end_time`/`source`; `GET /api/audit/log` already accepts `from_date`/`to_date`; `listContainers()` exists at `frontend/src/api/client.ts:559`.
+- **No backend changes.** `GET /api/logs/` already accepts `start_time`/`end_time`/`source`; `GET /api/audit/log` already accepts `from_date`/`to_date`; `listContainers()` exists at `frontend/src/api/client.ts:551`.
 - **No new npm dependencies**; `package.json` versions stay exact (no `^`/`~`).
-- **Design tokens**: no raw hex/rgba in TSX or inline styles. The log-level palette is the one documented exception (AGENTS.md) and lives in `pages/logs/logs.css`.
+- **Design tokens**: no raw hex/rgba in TSX or inline styles. Log-level chips use the theme tokens `--info`/`--warn`/`--error`/`--debug` and `*-soft` (defined for both themes in `index.css`; the light theme re-resolves the `color-mix` softs automatically). No raw-hex exception is needed.
+- **Brutalist rules (post 2026-08-30 theme work)**: 0 `border-radius` everywhere, flat surfaces (no drop shadows). Per-page CSS must NOT re-declare `.logs-page__title` / `.audit-log-page__title` — the `/* --- Brutalist macro typography ... --- */` block at the end of `index.css` gives every page title the Archivo Black `[ TITLE ]` treatment. Skeleton rows must use the global `pulse` keyframes (`animation: pulse 1.4s ease-in-out infinite` on a `rgba(255, 255, 255, 0.05)` overlay) — there is no `skeleton-shimmer` keyframe.
 - **Focus**: never remove a focus outline without a visible replacement — use the 2px `var(--accent)` outline pattern.
 - **Icons**: decorative Phosphor icons get `aria-hidden="true"`; menu items are `<button>`s with `role="menuitem"`.
 - **Errors**: `role="alert"` with the existing `containers-banner containers-banner--err` classes.
-- **CSS organization**: new page styles go in separate files imported by the page; `index.css` only gains the user-menu block, and the old `.logs-page__*` / `.audit-log-page__*` blocks are deleted (do not leave duplicates). The global `@media (prefers-reduced-motion: reduce)` block in `index.css` (~line 2439) already lists `.logs-page__skeleton-row::after` and `.audit-log-page__skeleton-row::after` — keep those class names so it keeps working.
+- **CSS organization**: new page styles go in separate files imported by the page; `index.css` only gains the user-menu block, and the old `.logs-page__*` / `.audit-log-page__*` blocks are deleted (do not leave duplicates). The global `@media (prefers-reduced-motion: reduce)` block in `index.css` (~line 2473) already lists `.logs-page__skeleton-row::after` and `.audit-log-page__skeleton-row::after` — keep those class names so it keeps working.
 - **Filters live in URL params** via `useSearchParams` with `{ replace: true }`; any filter change clears `offset`.
 - **E2E**: drive the real SPA against the real API — no `page.route` mocking for app flows. Run single specs with `npm run test:e2e -- e2e/<file>.spec.ts` from `frontend/`; stop any dev server on ports 8000/5173 first (`reuseExistingServer` is off).
 - **Verification after every task**: `npm run lint` and `npm run build` in `frontend/` must pass.
@@ -28,8 +29,8 @@
 
 **Files:**
 - Create: `frontend/src/components/UserMenu.tsx`
-- Modify: `frontend/src/components/Navbar.tsx` (whole file, 80 lines)
-- Modify: `frontend/src/index.css` (add user-menu block after the `.navbar__avatar` / `.user-avatar--initials` block, ~line 686+)
+- Modify: `frontend/src/components/Navbar.tsx` (whole file, 97 lines — includes the persisted theme-toggle button from the 2026-08-30 theme work, which MUST be preserved or `e2e/theme.spec.ts` breaks)
+- Modify: `frontend/src/index.css` (add user-menu block after the `.navbar__avatar` / `.user-avatar--initials` block, ~line 768-784)
 - Test: `frontend/e2e/smoke.spec.ts` (rewrite)
 
 **Interfaces:**
@@ -280,6 +281,9 @@ Note: `UserMenu` does not call `useAuth()` itself — `Navbar` already owns `log
 ```tsx
 import { NavLink, useNavigate } from 'react-router-dom'
 import { useAuth } from '../auth/AuthContext'
+import { MoonIcon } from '@phosphor-icons/react/Moon'
+import { SunIcon } from '@phosphor-icons/react/Sun'
+import { useTheme } from '../hooks/useTheme'
 import UserMenu from './UserMenu'
 import { VelaMarkIcon } from './VelaMarkIcon'
 
@@ -294,6 +298,7 @@ const navItems = [
 export default function Navbar() {
   const { status, user, logout } = useAuth()
   const navigate = useNavigate()
+  const { theme, toggle } = useTheme()
 
   const isAuthenticated = status === 'authenticated'
 
@@ -330,6 +335,19 @@ export default function Navbar() {
       ) : (
         <span className="navbar__spacer" aria-hidden />
       )}
+      <button
+        type="button"
+        className="icon-btn"
+        onClick={toggle}
+        aria-label="Toggle color theme"
+        aria-pressed={theme === 'light'}
+      >
+        {theme === 'light' ? (
+          <MoonIcon size={14} weight="bold" aria-hidden />
+        ) : (
+          <SunIcon size={14} weight="bold" aria-hidden />
+        )}
+      </button>
       <div className="navbar__user">
         {isAuthenticated && user ? (
           <UserMenu user={user} onLogout={onLogout} />
@@ -344,11 +362,11 @@ export default function Navbar() {
 }
 ```
 
-Removed imports: `UserAvatar`, `getUserDisplayLabel` (both now inside `UserMenu`).
+Removed imports: `UserAvatar`, `getUserDisplayLabel` (both now inside `UserMenu`). Kept: the `useTheme` toggle button (added by the 2026-08-30 theme work) — `e2e/theme.spec.ts` locates it by accessible name `Toggle color theme`.
 
 - [ ] **Step 5: Add user-menu CSS to `frontend/src/index.css`**
 
-Insert after the `.user-avatar--initials` block (which ends ~line 693), i.e. still inside the navbar section:
+Insert after the `.user-avatar--initials` block (which ends ~line 784), i.e. still inside the navbar section:
 
 ```css
 .user-menu {
@@ -364,7 +382,7 @@ Insert after the `.user-avatar--initials` block (which ends ~line 693), i.e. sti
   padding: 0.3rem 0.55rem;
   background: none;
   border: 1px solid transparent;
-  border-radius: 8px;
+  border-radius: 0;
   color: var(--text);
   font: inherit;
   font-size: 0.875rem;
@@ -383,7 +401,7 @@ Insert after the `.user-avatar--initials` block (which ends ~line 693), i.e. sti
 
 .user-menu__avatar {
   flex-shrink: 0;
-  border-radius: 50%;
+  border-radius: 0;
   border: 1px solid var(--border);
 }
 
@@ -405,8 +423,7 @@ Insert after the `.user-avatar--initials` block (which ends ~line 693), i.e. sti
   padding: 0.3rem;
   background: var(--bg-elevated);
   border: 1px solid var(--border);
-  border-radius: 8px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  border-radius: 0;
 }
 
 .user-menu__item {
@@ -417,7 +434,7 @@ Insert after the `.user-avatar--initials` block (which ends ~line 693), i.e. sti
   padding: 0.5rem 0.6rem;
   background: none;
   border: none;
-  border-radius: 6px;
+  border-radius: 0;
   color: var(--text);
   font: inherit;
   font-size: 0.875rem;
@@ -546,15 +563,9 @@ Expected: FAIL — the page still has a "Container ID…" text input (no `combob
 
 - [ ] **Step 3: Create `frontend/src/pages/logs/logs.css`**
 
-```css
-.logs-page__title {
-  margin: 0 0 0.35rem;
-  font-size: 1.75rem;
-  font-weight: 600;
-  color: var(--text-heading);
-  text-wrap: balance;
-}
+(No `.logs-page__title` rule here — the global `/* --- Brutalist macro typography ... --- */` block in `index.css` owns the `[ LOGS ]` Archivo Black title and must keep working.)
 
+```css
 .logs-page__header {
   display: flex;
   align-items: center;
@@ -584,7 +595,7 @@ Expected: FAIL — the page still has a "Container ID…" text input (no `combob
   color: var(--text-heading);
   background: var(--bg-deep);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 0;
 }
 
 .logs-page__search:focus {
@@ -626,31 +637,30 @@ Expected: FAIL — the page still has a "Container ID…" text input (no `combob
   flex-shrink: 0;
   width: 3.5rem;
   padding: 0.05rem 0.35rem;
-  border-radius: 4px;
+  border-radius: 0;
   text-align: center;
   font-size: 0.75rem;
   font-weight: 500;
 }
 
-/* ponytail: log-level palette is the documented token exception (AGENTS.md), kept with the page */
 .logs-page__line-level--info {
-  background: rgba(107, 114, 128, 0.12);
-  color: #9aa5b4;
+  background: var(--info-soft);
+  color: var(--info);
 }
 
 .logs-page__line-level--warn {
-  background: rgba(232, 184, 74, 0.12);
-  color: #e8b84a;
+  background: var(--warn-soft);
+  color: var(--warn);
 }
 
 .logs-page__line-level--error {
-  background: rgba(224, 112, 110, 0.12);
-  color: #e0706e;
+  background: var(--error-soft);
+  color: var(--error);
 }
 
 .logs-page__line-level--debug {
-  background: rgba(122, 134, 153, 0.12);
-  color: #7a8699;
+  background: var(--debug-soft);
+  color: var(--debug);
 }
 
 .logs-page__line-source {
@@ -690,7 +700,7 @@ Expected: FAIL — the page still has a "Container ID…" text input (no `combob
   position: relative;
   height: 2rem;
   overflow: hidden;
-  border-radius: 6px;
+  border-radius: 0;
   background: var(--border);
 }
 
@@ -698,14 +708,8 @@ Expected: FAIL — the page still has a "Container ID…" text input (no `combob
   content: '';
   position: absolute;
   inset: 0;
-  background: linear-gradient(
-    90deg,
-    transparent,
-    rgba(255, 255, 255, 0.04) 50%,
-    transparent
-  );
-  transform: translateX(-100%);
-  animation: skeleton-shimmer 1.2s ease-in-out infinite;
+  background: rgba(255, 255, 255, 0.05);
+  animation: pulse 1.4s ease-in-out infinite;
 }
 ```
 
@@ -1005,7 +1009,7 @@ The `knownContainer` fallback `<option>` keeps the select valid when the URL car
 
 - [ ] **Step 5: Delete the old logs CSS from `frontend/src/index.css`**
 
-Remove everything from the `/* --- Logs page --- */` comment (~line 3199) to the end of the file (the file currently ends inside that block). Keep the `/* --- Audit log page --- */` block above it (Task 3 removes it).
+Remove ONLY the `/* --- Logs page --- */` block (lines 3212-3346, from that comment to the blank line before the next section comment). Do NOT delete `/* --- Brutalist macro typography (overrides per-page title rules) --- */` (line 3348) or anything after it — that block styles `.logs-page__title` / `.audit-log-page__title` and must stay. Keep the `/* --- Audit log page --- */` block above (lines 3104-3210; Task 3 removes it).
 
 - [ ] **Step 6: Lint and build**
 
@@ -1086,15 +1090,9 @@ Expected: FAIL — no input labelled "From date" exists on the current page.
 
 - [ ] **Step 3: Create `frontend/src/pages/audit/audit.css`**
 
-```css
-.audit-log-page__title {
-  margin: 0 0 0.35rem;
-  font-size: 1.75rem;
-  font-weight: 600;
-  color: var(--text-heading);
-  text-wrap: balance;
-}
+(No `.audit-log-page__title` rule here — the global `/* --- Brutalist macro typography ... --- */` block in `index.css` owns the `[ AUDIT LOG ]` Archivo Black title and must keep working.)
 
+```css
 .audit-log-page__lead {
   margin: 0 0 1.25rem;
   color: var(--text-muted);
@@ -1170,7 +1168,7 @@ Expected: FAIL — no input labelled "From date" exists on the current page.
   font-size: 0.8125rem;
   background: var(--bg-deep);
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: 0;
   padding: 0 0.3rem;
 }
 
@@ -1203,7 +1201,7 @@ Expected: FAIL — no input labelled "From date" exists on the current page.
   font-size: 0.75rem;
   background: var(--bg-deep);
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: 0;
 }
 
 .audit-log-page__empty {
@@ -1229,7 +1227,7 @@ Expected: FAIL — no input labelled "From date" exists on the current page.
   position: relative;
   height: 2.25rem;
   overflow: hidden;
-  border-radius: 6px;
+  border-radius: 0;
   background: var(--border);
 }
 
@@ -1237,14 +1235,8 @@ Expected: FAIL — no input labelled "From date" exists on the current page.
   content: '';
   position: absolute;
   inset: 0;
-  background: linear-gradient(
-    90deg,
-    transparent,
-    rgba(255, 255, 255, 0.04) 50%,
-    transparent
-  );
-  transform: translateX(-100%);
-  animation: skeleton-shimmer 1.2s ease-in-out infinite;
+  background: rgba(255, 255, 255, 0.05);
+  animation: pulse 1.4s ease-in-out infinite;
 }
 ```
 
@@ -1581,7 +1573,7 @@ export default function AuditLogPage() {
 
 - [ ] **Step 5: Delete the old audit CSS from `frontend/src/index.css`**
 
-Remove the `/* --- Audit log page --- */` block (~lines 3083-3197, i.e. from that comment up to just before the next section comment). After Task 2 the file's remaining tail is this block only — delete through end of file.
+Remove ONLY the `/* --- Audit log page --- */` block (lines 3104-3210, from that comment up to just before the `/* --- Logs page --- */` comment, which Task 2 already removed). Keep the `/* --- Brutalist macro typography ... --- */` block that follows.
 
 - [ ] **Step 6: Lint and build**
 

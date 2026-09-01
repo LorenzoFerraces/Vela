@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import type { SavedImage } from '../../api/client'
+import ConfirmDialog from '../../components/ConfirmDialog'
 
 type SavedImagesSectionProps = {
   rows: SavedImage[]
@@ -17,6 +18,11 @@ export function SavedImagesSection({
   onRemove,
 }: SavedImagesSectionProps) {
   const [newRef, setNewRef] = useState('')
+  const [pendingRemoveId, setPendingRemoveId] = useState<string | null>(null)
+
+  const pendingRemoveRow = pendingRemoveId
+    ? rows.find((row) => row.id === pendingRemoveId)
+    : undefined
 
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault()
@@ -43,7 +49,7 @@ export function SavedImagesSection({
           id="saved-image-ref"
           className="containers-form__input"
           type="text"
-          placeholder="nginx:alpine"
+          placeholder="nginx:alpine…"
           value={newRef}
           onChange={(event) => setNewRef(event.target.value)}
           autoComplete="off"
@@ -81,15 +87,7 @@ export function SavedImagesSection({
                       type="button"
                       className="btn btn--sm btn--danger"
                       disabled={busy}
-                      onClick={() => {
-                        if (
-                          window.confirm(
-                            `Remove saved reference ${row.ref}?`
-                          )
-                        ) {
-                          void onRemove(row.id)
-                        }
-                      }}
+                      onClick={() => setPendingRemoveId(row.id)}
                     >
                       Remove
                     </button>
@@ -100,6 +98,24 @@ export function SavedImagesSection({
           </table>
         </div>
       )}
+
+      <ConfirmDialog
+        open={pendingRemoveId !== null}
+        title="Remove saved reference?"
+        message={
+          pendingRemoveRow
+            ? `"${pendingRemoveRow.ref}" will be removed.`
+            : 'The saved reference will be removed.'
+        }
+        confirmLabel="Remove"
+        onConfirm={() => {
+          if (pendingRemoveRow) {
+            onRemove(pendingRemoveRow.id)
+          }
+          setPendingRemoveId(null)
+        }}
+        onClose={() => setPendingRemoveId(null)}
+      />
     </section>
   )
 }

@@ -32,7 +32,7 @@ function DependencyEdge(props: EdgeProps<Edge<DepEdgeData>>) {
   })
   return (
     <>
-      <BaseEdge id={id} path={edgePath} style={{ stroke: selected ? '#3b82f6' : '#3b82f6', strokeWidth: 2 }} />
+      <BaseEdge id={id} path={edgePath} style={{ stroke: selected ? '#9945d9' : '#5a4b7a', strokeWidth: 2 }} />
       <EdgeLabelRenderer>
         <div
           style={{
@@ -44,6 +44,7 @@ function DependencyEdge(props: EdgeProps<Edge<DepEdgeData>>) {
           <button
             type="button"
             className="stacks-visualizer__edge-remove"
+            aria-label="Remove dependency"
             onClick={(e) => {
               e.stopPropagation()
               data?.onRemove()
@@ -109,8 +110,8 @@ function buildNodesFromServices(
   const baseStyle: CSSProperties = {
     padding: '10px 16px',
     borderRadius: '8px',
-    background: '#131820',
-    color: '#eef3f8',
+    background: '#312654',
+    color: '#e9e4f2',
     fontSize: '0.8125rem',
     fontWeight: 500,
     minWidth: '160px',
@@ -141,8 +142,8 @@ function buildNodesFromServices(
         border: isHighlighted
           ? '2px solid #f59e0b'
           : isSel
-            ? '2px solid #3b82f6'
-            : '1px solid #1e2836',
+            ? '2px solid #9945d9'
+            : '1px solid #5a4b7a',
       },
       // Preserve measurement so React Flow can clear visibility:hidden.
       measured: existing?.measured,
@@ -176,15 +177,55 @@ export default function StackVisualizer({
     onNodeClickRef.current = onNodeClick
   }, [onNodeClick])
 
-  const [nodes, setNodes] = useState<Node[]>(() =>
-    buildNodesFromServices(services, highlightedIndex, selectedIndex, !!onNodeClick, []),
+  const [prefersReducedMotion, setPrefersReducedMotion] = useState(() =>
+    window.matchMedia('(prefers-reduced-motion: reduce)').matches,
   )
 
   useEffect(() => {
-    setNodes((previous) =>
-      buildNodesFromServices(services, highlightedIndex, selectedIndex, !!onNodeClickRef.current, previous),
+    const query = window.matchMedia('(prefers-reduced-motion: reduce)')
+    const onChange = (event: MediaQueryListEvent) => setPrefersReducedMotion(event.matches)
+    query.addEventListener('change', onChange)
+    return () => query.removeEventListener('change', onChange)
+  }, [])
+
+  const [baseNodes, setBaseNodes] = useState<Node[]>(() =>
+    buildNodesFromServices(services, null, null, !!onNodeClick, []),
+  )
+
+  useEffect(() => {
+    setBaseNodes((previous) =>
+      buildNodesFromServices(services, null, null, !!onNodeClickRef.current, previous),
     )
-  }, [services, highlightedIndex, selectedIndex])
+  }, [services])
+
+  const nodes = useMemo<Node[]>(
+    () => {
+      const nodeIdAt = (index: number | null | undefined): string | null => {
+        if (index == null) return null
+        const service = services[index]
+        return service ? serviceNodeId(service, index) : null
+      }
+      const highlightedId = nodeIdAt(highlightedIndex)
+      const selectedId = nodeIdAt(selectedIndex)
+      return baseNodes.map((node) => {
+        const isHighlighted = node.id === highlightedId
+        const isSel = node.id === selectedId
+        return {
+          ...node,
+          data: { ...node.data, isHighlighted, isSel },
+          style: {
+            ...node.style,
+            border: isHighlighted
+              ? '2px solid #f59e0b'
+              : isSel
+                ? '2px solid #9945d9'
+                : '1px solid #5a4b7a',
+          },
+        }
+      })
+    },
+    [baseNodes, highlightedIndex, selectedIndex, services],
+  )
 
   const edges = useMemo<Edge[]>(
     () =>
@@ -196,7 +237,7 @@ export default function StackVisualizer({
             source: sourceId,
             target: dep,
             type: 'dependency',
-            animated: true,
+            animated: !prefersReducedMotion,
             data: {
               onRemove: () => {
                 const handler = onDependencyChangeRef.current
@@ -210,11 +251,11 @@ export default function StackVisualizer({
         })
         .flat()
         .filter((edge) => edge.source && edge.target),
-    [services],
+    [services, prefersReducedMotion],
   )
 
   const onNodesChange = useCallback((changes: NodeChange[]) => {
-    setNodes((current) => applyNodeChanges(changes, current))
+    setBaseNodes((current) => applyNodeChanges(changes, current))
   }, [])
 
   const onEdgesChange = useCallback(() => {}, [])

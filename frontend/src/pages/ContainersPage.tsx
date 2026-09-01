@@ -10,6 +10,7 @@ import {
   type RunFromSourceRequest,
   type ScalingPolicyRequest,
 } from '../api/client'
+import ConfirmDialog from '../components/ConfirmDialog'
 import BuildConfigModal from './containers/BuildConfigModal'
 import {
   buildOverrideFromAnalysis,
@@ -17,23 +18,24 @@ import {
 } from './containers/buildOverride'
 import { ContainersFormMessageBanner } from './containers/ContainersFormMessageBanner'
 import { ContainersRunAdvancedFields } from './containers/ContainersRunAdvancedFields'
-import { ContainersRunFormFields } from './containers/ContainersRunFormFields'
+import {
+  ContainersRunFormFields,
+  ContainersRunGitFields,
+} from './containers/ContainersRunFormFields'
 import { validateScalingPolicy } from './containers/scalingPolicyUtils'
 import { DeployProjectSelect } from './containers/DeployProjectSelect'
 import { DeploySourceCombobox } from './containers/DeploySourceCombobox'
 import { Toast } from '../components/Toast'
 import { WorkloadsTable } from '../components/workloads/WorkloadsTable'
 import type { FormMessage } from './containers/types'
-import {
-  selectionNeedsRegistryCheck,
-  selectionShowsGitBranch,
-} from './containers/deploySourceTypes'
+import { selectionShowsGitBranch } from './containers/deploySourceTypes'
 import { useWorkloadGroups } from './containers/useWorkloadGroups'
 import { useDeploySourceSelection } from './containers/useDeploySourceSelection'
 import { useDeployProjects } from './containers/useDeployProjects'
 import { useGitSourceAnalysis } from './containers/useGitSourceAnalysis'
 import { useImageRefAvailability } from './containers/useImageRefAvailability'
 import {
+  createEmptyEnvRow,
   createEmptyVolumeMountRow,
   parseStartCommand,
   recordFromEnvRows,
@@ -46,7 +48,7 @@ export default function ContainersPage() {
   const [containerName, setContainerName] = useState('')
   const [gitBranch, setGitBranch] = useState('main')
   const [containerPort, setContainerPort] = useState('80')
-  const [envRows, setEnvRows] = useState<EnvVarRow[]>([{ key: '', value: '' }])
+  const [envRows, setEnvRows] = useState<EnvVarRow[]>([createEmptyEnvRow()])
   const [volumeRows, setVolumeRows] = useState<VolumeMountRow[]>([
     createEmptyVolumeMountRow(),
   ])
@@ -60,19 +62,28 @@ export default function ContainersPage() {
   const [retryRunAfterConfirm, setRetryRunAfterConfirm] = useState(false)
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState<FormMessage | null>(null)
+  const [sourceError, setSourceError] = useState<string | null>(null)
+  const [portError, setPortError] = useState<string | null>(null)
+  const [volumeError, setVolumeError] = useState<string | null>(null)
   const [rowBusy, setRowBusy] = useState<string | null>(null)
+  const [pendingRemoveId, setPendingRemoveId] = useState<string | null>(null)
   const deploySource = useDeploySourceSelection()
   const showGitBranch = selectionShowsGitBranch(deploySource.selection)
+
+  const handleContainerPortChange = useCallback((value: string) => {
+    setPortError(null)
+    setContainerPort(value)
+  }, [])
 
   const gitAnalysisSetters = useMemo(
     () => ({
       setGitBranch,
-      setContainerPort,
+      setContainerPort: handleContainerPortChange,
       setContainerName,
       setEnvRows,
       setStartCommand,
     }),
-    []
+    [handleContainerPortChange]
   )
 
   const gitAnalysis = useGitSourceAnalysis(gitAnalysisSetters)
@@ -98,7 +109,7 @@ export default function ContainersPage() {
   )
 
   function resetAdvancedFields() {
-    setEnvRows([{ key: '', value: '' }])
+    setEnvRows([createEmptyEnvRow()])
     setVolumeRows([createEmptyVolumeMountRow()])
     setStartCommand('')
     setScalingPolicy(null)
@@ -119,7 +130,13 @@ export default function ContainersPage() {
     setBuildConfigOpen(true)
   }
 
-  function validateVolumeRows(): string | null {
+  type VolumeRowIssue = {
+    message: string
+    rowIndex: number
+    field: 'folder' | 'target'
+  }
+
+  function validateVolumeRows(): VolumeRowIssue | null {
     for (const [index, row] of volumeRows.entries()) {
       const target = row.target.trim()
       const hasUpload = Boolean(row.uploadId)
@@ -128,25 +145,47 @@ export default function ContainersPage() {
         continue
       }
       if (row.uploading) {
-        return 'Wait for folder uploads to finish before deploying.'
+        return {
+          message: 'Wait for folder uploads to finish before deploying.',
+          rowIndex: index,
+          field: 'folder',
+        }
       }
       if (!hasUpload) {
-        return `Choose a folder for volume ${index + 1}.`
+        return {
+          message: `Choose a folder for volume ${index + 1}.`,
+          rowIndex: index,
+          field: 'folder',
+        }
       }
       if (!hasTarget) {
-        return `Enter a container path for volume ${index + 1}.`
+        return {
+          message: `Enter a container path for volume ${index + 1}.`,
+          rowIndex: index,
+          field: 'target',
+        }
       }
       if (!target.startsWith('/')) {
-        return `Volume ${index + 1} target must start with /.`
+        return {
+          message: `Volume ${index + 1} target must start with /.`,
+          rowIndex: index,
+          field: 'target',
+        }
       }
     }
     return null
+  }
+
+  function handleVolumeRowsChange(rows: VolumeMountRow[]) {
+    setVolumeError(null)
+    setVolumeRows(rows)
   }
 
   function applyDeploySuggestion(
     suggestion: Parameters<typeof deploySource.applySuggestion>[0]
   ) {
     deploySource.applySuggestion(suggestion)
+    setSourceError(null)
     if (suggestion.kind === 'git') {
       setGitBranch(suggestion.default_branch || 'main')
       setImageRefCheck({ status: 'idle' })
@@ -234,21 +273,29 @@ export default function ContainersPage() {
       parsedPort < 1 ||
       parsedPort > 65535
     ) {
-      setMessage({
-        type: 'err',
-        text: 'Enter a container port between 1 and 65535.',
-      })
+      setMessage(null)
+      setPortError('Enter a container port between 1 and 65535.')
+      document.getElementById('container-port-input')?.focus()
       return
     }
 
-    const volumeError = validateVolumeRows()
-    if (volumeError) {
-      setMessage({ type: 'err', text: volumeError })
+    const volumeIssue = validateVolumeRows()
+    if (volumeIssue) {
+      setMessage(null)
+      setVolumeError(volumeIssue.message)
+      document
+        .getElementById(`volume-${volumeIssue.field}-${volumeIssue.rowIndex + 1}`)
+        ?.focus()
       return
     }
 
     if (scalingValidationError) {
       setMessage({ type: 'err', text: scalingValidationError })
+      return
+    }
+
+    if (!deployProjects.selectedProjectId) {
+      setMessage({ type: 'err', text: 'Select a project to deploy into.' })
       return
     }
 
@@ -306,10 +353,9 @@ export default function ContainersPage() {
     event.preventDefault()
     const selection = deploySource.selection
     if (!selection) {
-      setMessage({
-        type: 'err',
-        text: 'Choose a deploy source from the search results.',
-      })
+      setMessage(null)
+      setSourceError('Choose a deploy source from the search results.')
+      document.getElementById('deploy-source-input')?.focus()
       return
     }
     if (selection.kind === 'image') {
@@ -320,16 +366,14 @@ export default function ContainersPage() {
         try {
           const availability = await getImageAvailability(trimmed)
           if (availability.checked && !availability.available) {
-            const notFoundMessage = availability.can_attempt_deploy
-              ? 'Registry did not confirm this image (you may need registry access).'
-              : 'Image not found in the registry.'
             setImageRefCheck({
               status: 'unavailable',
               ref: availability.ref,
               canAttemptDeploy: availability.can_attempt_deploy === true,
             })
             if (!availability.can_attempt_deploy) {
-              setMessage({ type: 'err', text: notFoundMessage })
+              setMessage(null)
+              document.getElementById('deploy-source-input')?.focus()
               return
             }
           }
@@ -381,8 +425,15 @@ export default function ContainersPage() {
     }
   }
 
-  async function onRemove(containerId: string) {
-    if (!window.confirm('Remove this container?')) return
+  function onRemove(containerId: string) {
+    setPendingRemoveId(containerId)
+  }
+
+  async function confirmPendingRemove() {
+    const containerId = pendingRemoveId
+    if (!containerId) {
+      return
+    }
     setRowBusy(containerId)
     setMessage(null)
     try {
@@ -392,8 +443,15 @@ export default function ContainersPage() {
       setMessage({ type: 'err', text: formatApiError(error) })
     } finally {
       setRowBusy(null)
+      setPendingRemoveId(null)
     }
   }
+
+  const pendingRemoveContainer = pendingRemoveId
+    ? groups.find((group) => group.base.id === pendingRemoveId)?.base
+    : undefined
+  const pendingRemoveBusy =
+    pendingRemoveId !== null && rowBusy === pendingRemoveId
 
   return (
     <section className="containers-page">
@@ -422,7 +480,10 @@ export default function ContainersPage() {
           pastedGithubRepoPending={deploySource.pastedGithubRepoPending}
           pastedGithubHint={deploySource.pastedGithubHint}
           imageRefCheck={imageRefCheck}
-          onInputChange={deploySource.onInputChange}
+          onInputChange={(value) => {
+            setSourceError(null)
+            deploySource.onInputChange(value)
+          }}
           onInputFocus={deploySource.onInputFocus}
           onPickSuggestion={applyDeploySuggestion}
           onRequestImageCheck={runImageRefAvailabilityCheck}
@@ -432,7 +493,17 @@ export default function ContainersPage() {
               applyDeploySuggestion(committed)
             }
           }}
+          onListClose={() => deploySource.setListOpen(false)}
         />
+        {sourceError ? (
+          <p
+            id="deploy-source-error"
+            className="containers-source-check containers-source-check--err"
+            role="alert"
+          >
+            {sourceError}
+          </p>
+        ) : null}
         <DeployProjectSelect
           projects={deployProjects.projects}
           selectedProjectId={deployProjects.selectedProjectId}
@@ -440,23 +511,34 @@ export default function ContainersPage() {
           loading={deployProjects.loading}
           error={deployProjects.error}
         />
-        <ContainersRunFormFields
-          showGitBranch={showGitBranch}
-          containerName={containerName}
-          onContainerNameChange={setContainerName}
-          containerPort={containerPort}
-          onContainerPortChange={setContainerPort}
-          gitBranch={gitBranch}
-          onGitBranchChange={setGitBranch}
-          gitAnalysisLoading={gitAnalysis.analysisLoading}
-          gitAnalysisError={gitAnalysis.analysisError}
-          onAnalyzeGit={showGitBranch ? () => void onAnalyzeGitSource() : undefined}
-        />
+        {showGitBranch ? (
+          <ContainersRunGitFields
+            containerName={containerName}
+            onContainerNameChange={setContainerName}
+            containerPort={containerPort}
+            onContainerPortChange={handleContainerPortChange}
+            portError={portError}
+            gitBranch={gitBranch}
+            onGitBranchChange={setGitBranch}
+            gitAnalysisLoading={gitAnalysis.analysisLoading}
+            gitAnalysisError={gitAnalysis.analysisError}
+            onAnalyzeGit={() => void onAnalyzeGitSource()}
+          />
+        ) : (
+          <ContainersRunFormFields
+            containerName={containerName}
+            onContainerNameChange={setContainerName}
+            containerPort={containerPort}
+            onContainerPortChange={handleContainerPortChange}
+            portError={portError}
+          />
+        )}
         <ContainersRunAdvancedFields
           envRows={envRows}
           onEnvRowsChange={setEnvRows}
           volumeRows={volumeRows}
-          onVolumeRowsChange={setVolumeRows}
+          onVolumeRowsChange={handleVolumeRowsChange}
+          volumeError={volumeError}
           startCommand={startCommand}
           onStartCommandChange={setStartCommand}
           scalingPolicy={scalingPolicy}
@@ -468,16 +550,7 @@ export default function ContainersPage() {
           <button
             type="submit"
             className="btn btn--primary"
-            disabled={
-              busy ||
-              deployProjects.loading ||
-              deployProjects.projects.length === 0 ||
-              gitAnalysis.analysisLoading ||
-              !deploySource.selection ||
-              (selectionNeedsRegistryCheck(deploySource.selection) &&
-                imageRefCheck.status === 'unavailable' &&
-                !imageRefCheck.canAttemptDeploy)
-            }
+            disabled={busy || !deployProjects.selectedProjectId}
           >
             {busy ? 'Building…' : 'Build'}
           </button>
@@ -524,6 +597,20 @@ export default function ContainersPage() {
         onConfirm={(override) => {
           void onBuildConfigConfirm(override)
         }}
+      />
+
+      <ConfirmDialog
+        open={pendingRemoveId !== null}
+        title="Remove container?"
+        message={
+          pendingRemoveContainer
+            ? `This permanently removes ${pendingRemoveContainer.name}. This cannot be undone.`
+            : 'This permanently removes the container. This cannot be undone.'
+        }
+        confirmLabel={pendingRemoveBusy ? 'Removing…' : 'Remove'}
+        busy={pendingRemoveBusy}
+        onConfirm={() => void confirmPendingRemove()}
+        onClose={() => setPendingRemoveId(null)}
       />
     </section>
   )
