@@ -14,6 +14,7 @@ from app.core.git.git_ops import rm_tree
 from app.core.git.git_source_analysis import (
     _collect_context_excerpts,
     _env_vars_from_payload,
+    _extract_env_vars_from_context,
     _read_file_excerpt,
 )
 from app.core.llm import generate_json
@@ -193,6 +194,7 @@ def _payload_to_services(
     git_url: str,
     git_branch: str,
     warnings: list[str],
+    env_fallback: dict[str, str] | None = None,
 ) -> list[StackService]:
     raw_services = payload.get("services")
     if not isinstance(raw_services, list):
@@ -229,13 +231,16 @@ def _payload_to_services(
         port = raw_port if isinstance(raw_port, int) and not isinstance(raw_port, bool) else 80
         if not 1 <= port <= 65535:
             port = 80
+        env_vars = _env_vars_from_payload(raw_service)
+        if source_kind == "git" and env_fallback:
+            env_vars = {**env_fallback, **env_vars}
         data = {
             "service_name": name.strip(),
             "source_kind": source_kind,
             "source_ref": source_ref,
             "git_branch": git_branch if source_kind == "git" else None,
             "container_port": port,
-            "env_vars": _env_vars_from_payload(raw_service),
+            "env_vars": env_vars,
             "command": raw_service.get("command"),
             "public_route": raw_service.get("public_route", False),
             "depends_on": raw_service.get("depends_on"),
@@ -280,6 +285,9 @@ async def _generate_services(
         "Every repository-built service must use source_kind: \"git\" and use the supplied "
         "repository URL as source_ref. External dependencies such as databases, caches, and "
         "queues must use source_kind: \"image\" and an image reference as source_ref. "
+        "Populate env_var_entries with every environment variable named in README tables, "
+        ".env.example files, or export lines; use documented example values when present, "
+        "otherwise an empty string. "
         "Do not use host paths, volume sources, or unsupported source kinds. "
         "Use an empty source_ref only when source_kind is git and the supplied repository URL "
         "will be used. Return only JSON matching the schema.\n\n"
@@ -294,6 +302,7 @@ async def _generate_services(
         git_url=git_url,
         git_branch=git_branch,
         warnings=warnings,
+        env_fallback=_extract_env_vars_from_context(context),
     )
     summary = payload.get("summary_hint")
     return services, summary.strip() if isinstance(summary, str) and summary.strip() else None

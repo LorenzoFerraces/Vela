@@ -19,6 +19,7 @@ async def generate_json(*, prompt: str, schema: dict) -> dict:
     payload = {
         "contents": [{"role": "user", "parts": [{"text": prompt}]}],
         "generationConfig": {
+            "temperature": 0,
             "responseMimeType": "application/json",
             "responseSchema": schema,
         },
