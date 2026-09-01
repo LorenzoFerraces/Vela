@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from app.core.git.git_source_analysis import (
     _collect_context_excerpts,
     _detected_facts_block,
@@ -117,6 +119,27 @@ def test_repo_map_lists_files_and_skips_ignored(tmp_path: Path) -> None:
     lines = _repo_map(tmp_path).splitlines()
 
     assert lines == ["app.py", "src/main.py"]
+
+
+def test_repo_map_skips_symlink_cycles(tmp_path: Path) -> None:
+    (tmp_path / "app.py").write_text("x", encoding="utf-8")
+    link = tmp_path / "loop"
+    try:
+        link.symlink_to(tmp_path, target_is_directory=True)
+    except (OSError, ValueError):
+        pytest.skip("symlinks not supported in this environment")
+    try:
+        lines = _repo_map(tmp_path).splitlines()
+    finally:
+        link.unlink()
+    assert lines == ["app.py"]
+
+
+def test_empty_repo_falls_back_to_analysis_block(tmp_path: Path) -> None:
+    context = _collect_context_excerpts(tmp_path)
+
+    assert "=== analysis ===" in context
+    assert "language=" in context
 
 
 def test_repo_map_respects_entry_cap(tmp_path: Path) -> None:

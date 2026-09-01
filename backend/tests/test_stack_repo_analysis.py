@@ -269,6 +269,30 @@ def test_analyze_repo_compose_manifest(
     assert by_name["db"]["source_ref"] == "postgres:16"
 
 
+def test_compose_manifest_path_skips_head_commit(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = tmp_path / "repo"
+    root.mkdir()
+    (root / "docker-compose.yml").write_text(COMPOSE_FILE, encoding="utf-8")
+    monkeypatch.delenv("VELA_E2E", raising=False)
+    monkeypatch.setattr(
+        repo_analysis,
+        "head_commit",
+        lambda directory: pytest.fail("head_commit ran on the manifest path"),
+    )
+    analysis = asyncio.run(
+        repo_analysis.analyze_repo_stack(
+            StubImageBuilder(root),
+            git_url="https://github.com/org/repo.git",
+            git_branch="main",
+            access_token=None,
+        )
+    )
+    assert analysis.manifest_kind == "compose"
+
+
 def test_generate_services_prompt_contains_detected_facts(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

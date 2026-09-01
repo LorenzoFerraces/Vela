@@ -19,7 +19,7 @@ from app.core.git.git_source_analysis import (
     _read_file_excerpt,
 )
 from app.core.llm import generate_json
-from app.core.llm.cache import load_cached, store_cached
+from app.core.llm.cache import delete_cached, load_cached, store_cached
 from app.core.stacks.k8s_parser import _file_has_workload_kind
 from app.core.stacks.manifest_parser import parse_manifest
 from app.db.models import StackService
@@ -313,13 +313,17 @@ async def _generate_services(
     if payload is None:
         payload = await generate_json(prompt=prompt, schema=_generation_schema())
         store_cached("stacks", commit, STACKS_PROMPT_VERSION, payload)
-    services = _payload_to_services(
-        payload,
-        git_url=git_url,
-        git_branch=git_branch,
-        warnings=warnings,
-        env_fallback=_extract_env_vars_from_context(context),
-    )
+    try:
+        services = _payload_to_services(
+            payload,
+            git_url=git_url,
+            git_branch=git_branch,
+            warnings=warnings,
+            env_fallback=_extract_env_vars_from_context(context),
+        )
+    except LlmCallError:
+        delete_cached("stacks", commit, STACKS_PROMPT_VERSION)
+        raise
     summary = payload.get("summary_hint")
     return services, summary.strip() if isinstance(summary, str) and summary.strip() else None
 
@@ -341,7 +345,6 @@ async def analyze_repo_stack(
         access_token=access_token,
     )
     root = Path(project_path)
-    commit = head_commit(root) or ""
     parent = root.parent
     try:
         detected = detect_manifest_file(root)
@@ -373,6 +376,7 @@ async def analyze_repo_stack(
         else:
             relative_path = None
 
+        commit = head_commit(root) or ""
         services, summary_hint = await _generate_services(
             context=_collect_context_excerpts(root),
             manifest=manifest_excerpt,

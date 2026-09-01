@@ -18,7 +18,7 @@ from app.core.exceptions import (
 from app.core.git.git_ops import head_commit
 from app.core.git.project_analysis import analyze_project
 from app.core.llm import generate_json, resolve_llm_config
-from app.core.llm.cache import load_cached, store_cached
+from app.core.llm.cache import delete_cached, load_cached, store_cached
 from app.e2e_support import e2e_git_source_analysis_if_enabled
 MAX_FILE_BYTES = 12_000
 MAX_TOTAL_BYTES = 48_000
@@ -176,6 +176,8 @@ def _repo_map(root: Path, max_entries: int = 150) -> str:
         for child in children:
             if child.name.startswith(".") or child.name in _MAP_IGNORED:
                 continue
+            if child.is_symlink():
+                continue
             if child.is_dir():
                 walk(child)
             else:
@@ -274,12 +276,14 @@ def _collect_context_excerpts(project_root: Path) -> str:
     for label, text in _subdir_marker_files(project_root):
         total = _append_excerpt(parts, total=total, label=label, text=text)
 
-    total = _append_excerpt(
-        parts,
-        total=total,
-        label="repo map",
-        text=_repo_map(project_root),
-    )
+    map_text = _repo_map(project_root)
+    if map_text:
+        total = _append_excerpt(
+            parts,
+            total=total,
+            label="repo map",
+            text=map_text,
+        )
 
     if not parts:
         info = analyze_project(project_root)
@@ -512,11 +516,12 @@ async def _call_gemini(
             "\n\nDetected facts (already verified by deterministic scans; "
             f"prefer them over re-deriving):\n{facts}"
         )
+    cache_key = f"{commit}:{git_branch}" if commit else ""
     try:
-        parsed = load_cached("git_source", commit, GIT_SOURCE_PROMPT_VERSION)
+        parsed = load_cached("git_source", cache_key, GIT_SOURCE_PROMPT_VERSION)
         if parsed is None:
             parsed = await generate_json(prompt=prompt, schema=_analysis_json_schema())
-            store_cached("git_source", commit, GIT_SOURCE_PROMPT_VERSION, parsed)
+            store_cached("git_source", cache_key, GIT_SOURCE_PROMPT_VERSION, parsed)
     except LlmNotConfiguredError as exc:
         raise GitSourceAnalysisError("AI analysis is not configured on this server.") from exc
     except LlmCallError as exc:
@@ -535,6 +540,7 @@ async def _call_gemini(
             return analysis.model_copy(update={"container_name": sanitized_name})
         return analysis
     except (TypeError, ValidationError) as exc:
+        delete_cached("git_source", cache_key, GIT_SOURCE_PROMPT_VERSION)
         raise GitSourceAnalysisError(
             "AI analysis returned an invalid response. Try again or fill the form manually."
         ) from exc
@@ -596,13 +602,13 @@ async def analyze_git_source(
         access_token=access_token,
     )
     root = Path(project_path)
-    commit = head_commit(root) or ""
     parent = root.parent
     try:
         context = _collect_context_excerpts(root)
-        facts = _detected_facts_block(root, context)
         if resolve_llm_config() is None:
             return _merge_env_fallback(_fallback_analysis(root, git_branch), context)
+        commit = head_commit(root) or ""
+        facts = _detected_facts_block(root, context)
         analysis = await _call_gemini(context, git_url, git_branch, facts, commit)
         enriched = _enrich_with_local_detection(analysis, root)
         return _merge_env_fallback(enriched, context)

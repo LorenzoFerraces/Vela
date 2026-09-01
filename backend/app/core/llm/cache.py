@@ -42,6 +42,23 @@ def load_cached(kind: str, commit: str, version: str) -> dict | None:
     return payload if isinstance(payload, dict) else None
 
 
+def delete_cached(kind: str, commit: str, version: str) -> None:
+    if not _enabled() or not commit:
+        return
+    path = _cache_path(kind)
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return
+    if not isinstance(data, dict):
+        return
+    key = f"{version}:{commit}"
+    if key not in data:
+        return
+    del data[key]
+    path.write_text(json.dumps(data), encoding="utf-8")
+
+
 # ponytail: single-writer assumption (one API process); swap for SQLite if concurrent writers appear
 def store_cached(kind: str, commit: str, version: str, payload: dict) -> None:
     if not _enabled() or not commit:
