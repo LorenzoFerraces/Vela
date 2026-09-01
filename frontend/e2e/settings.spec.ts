@@ -1,13 +1,5 @@
 import { expect, fakeUser, test } from './fixtures'
 
-const connectedGithubStatus = {
-  connected: true,
-  login: 'vela-user',
-  avatar_url: 'https://avatars.example.com/u/1',
-  scopes: ['repo', 'read:user'],
-  connected_at: '2026-03-15T10:00:00.000Z',
-}
-
 const profileUser = {
   ...fakeUser,
   display_name: 'E2E User',
@@ -114,5 +106,19 @@ test.describe('Settings page', () => {
     await expect(
       authenticatedPage.getByRole('checkbox', { name: 'Container port' }),
     ).toBeChecked()
+  })
+
+  test('toggling the email alerts master checkbox round-trips', async ({
+    authenticatedPage,
+  }) => {
+    await authenticatedPage.goto('/settings')
+    const alerts = authenticatedPage.getByRole('checkbox', {
+      name: 'Enable email alerts',
+    })
+    const initiallyChecked = await alerts.isChecked()
+    await alerts.click()
+    await expect(alerts).toBeChecked(!initiallyChecked)
+    await alerts.click()
+    await expect(alerts).toBeChecked(initiallyChecked)
   })
 })

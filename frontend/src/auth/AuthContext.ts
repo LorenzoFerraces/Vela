@@ -1,4 +1,4 @@
-import { createContext, useContext } from 'react'
+import { createContext, use } from 'react'
 import type { LoginRequest, RegisterRequest, UserPublic } from '../api/client'
 
 export type AuthStatus = 'loading' | 'authenticated' | 'anonymous'
@@ -8,6 +8,7 @@ export interface AuthContextValue {
   user: UserPublic | null
   login: (body: LoginRequest) => Promise<UserPublic>
   register: (body: RegisterRequest) => Promise<UserPublic>
+  clerkLogin: (clerkToken: string) => Promise<UserPublic>
   logout: () => void
   refreshUser: () => Promise<void>
 }
@@ -15,7 +16,7 @@ export interface AuthContextValue {
 export const AuthContext = createContext<AuthContextValue | null>(null)
 
 export function useAuth(): AuthContextValue {
-  const ctx = useContext(AuthContext)
+  const ctx = use(AuthContext)
   if (!ctx) {
     throw new Error('useAuth must be used inside an <AuthProvider>')
   }

@@ -9,6 +9,12 @@ import {
   getAlertHistory,
 } from '../api/client'
 
+const alertTypeLabels: Record<'stop' | 'failure' | 'unhealthy', string> = {
+  stop: 'Container stopped',
+  failure: 'Container failed',
+  unhealthy: 'Container unhealthy',
+}
+
 export function EmailNotificationSettingsCard() {
   const [preferences, setPreferences] = useState<EmailNotificationPreferences | null>(null)
   const [alertHistory, setAlertHistory] = useState<AlertHistoryEntry[]>([])
@@ -78,12 +84,6 @@ export function EmailNotificationSettingsCard() {
     }
   }
 
-  const alertTypeLabels: Record<'stop' | 'failure' | 'unhealthy', string> = {
-    stop: 'Container stopped',
-    failure: 'Container failed',
-    unhealthy: 'Container unhealthy',
-  }
-
   return (
     <div className="settings-card">
       <div className="settings-card__header">
@@ -136,8 +136,11 @@ export function EmailNotificationSettingsCard() {
                   </p>
                 </div>
 
-                <div className="settings-form__group">
-                  <span className="settings-form__label">Alert types</span>
+                <fieldset
+                  className="settings-form__group"
+                  style={{ border: '0', margin: '0', padding: '0' }}
+                >
+                  <legend className="settings-form__label">Alert types</legend>
                   <ul className="settings-form__checkbox-list">
                     {(Object.keys(alertTypeLabels) as Array<'stop' | 'failure' | 'unhealthy'>).map(
                       (type) => (
@@ -155,7 +158,7 @@ export function EmailNotificationSettingsCard() {
                       ),
                     )}
                   </ul>
-                </div>
+                </fieldset>
 
                 <p className="settings-form__hint">
                   Alerts are sent immediately when an issue is detected.

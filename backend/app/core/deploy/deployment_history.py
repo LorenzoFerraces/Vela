@@ -28,6 +28,7 @@ class DeploymentSnapshot:
     command: list[str] | None
     dockerfile_snapshot: str | None
     public_url: str | None
+    build_override: dict | None = None
 
 
 async def record_deployment(
@@ -50,6 +51,7 @@ async def record_deployment(
         env_vars=dict(snapshot.env_vars),
         command=list(snapshot.command) if snapshot.command else None,
         dockerfile_snapshot=snapshot.dockerfile_snapshot,
+        build_override=snapshot.build_override,
         public_url=snapshot.public_url,
     )
     session.add(row)
@@ -85,6 +87,7 @@ async def _to_public(
         env_vars=row.env_vars or {},
         command=row.command,
         dockerfile_snapshot=row.dockerfile_snapshot,
+        build_override=row.build_override,
         public_url=row.public_url,
         created_at=row.created_at,
     )

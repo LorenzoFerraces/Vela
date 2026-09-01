@@ -1,393 +1,181 @@
-import {
-  Fragment,
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from 'react'
-import type { ContainerInfo, ContainerStatus } from '../../api/client'
-import {
-  containerWriteAllowed,
-  fetchContainerLogs,
-  formatApiError,
-  openContainerLogWebSocket,
-} from '../../api/client'
+import { Fragment, useMemo, useState } from 'react'
+import type { ReactNode } from 'react'
+import { Link } from 'react-router-dom'
+import type { ContainerInfo } from '../../api/client'
+import { containerWriteAllowed } from '../../api/client'
 import { deploySourceImageLabel } from '../../pages/containers/deploySourceDisplay'
+import type { WorkloadGroup } from '../../pages/containers/workloadGrouping'
+import { workloadInstances } from '../../pages/containers/workloadGrouping'
+import { ContainerStatsPanel } from './ContainerStatsPanel'
+import { ContainerTerminal } from './ContainerTerminal'
+import { ReplicaInstancesPanel } from './ReplicaInstancesPanel'
 
-const ERROR_LINE_PATTERN = /\b(error|exception|fatal|traceback)\b/i
 const VIEWER_ACTION_DISABLED_TITLE =
   'Insufficient permissions to modify this workload (viewer role).'
 
-type WorkloadsTableProps = {
-  listLoading: boolean
-  rows: ContainerInfo[]
-  rowBusyId: string | null
-  onStart: (containerId: string) => void
-  onStop: (containerId: string) => void
-  onRemove: (containerId: string) => void
-  /** When true, show containers that need attention first (dashboard). */
-  prioritizeProblemWorkloads?: boolean
+type WorkloadStatsCellProps = {
+  group: WorkloadGroup
+  instances: ContainerInfo[]
+  statsContainerId: string
+  statsExpanded: boolean
+  onToggleStats: () => void
+  onSelectStatsContainer: (containerId: string) => void
 }
 
-// Memoize the container row rendering to avoid unnecessary re-renders
-const ContainerRow = React.memo(function ContainerRow({
-  containerRow,
-  isExpanded,
-  toggleLogRow,
-  rowBusyId,
-  onStart,
-  onStop,
-  onRemove,
-  canModify,
-  modifyDisabledTitle,
-  copiedRowId,
-  copyFailedRowId,
-  copyAccessUrl,
-  setCopiedRowId,
-  setCopyFailedRowId,
-  expandedRowId,
-  accessUrl,
-  handleCopy,
-}: {
-  containerRow: ContainerInfo
-  isExpanded: boolean
-  toggleLogRow: (containerId: string) => void
+type WorkloadsTableProps = {
+  listLoading: boolean
+  groups: WorkloadGroup[]
   rowBusyId: string | null
   onStart: (containerId: string) => void
   onStop: (containerId: string) => void
   onRemove: (containerId: string) => void
-  canModify: boolean
-  modifyDisabledTitle: string | undefined
-  copiedRowId: string | null
-  copyFailedRowId: string | null
-  copyAccessUrl: (accessUrl: string, rowId: string) => void
-  setCopiedRowId: (rowId: string | null) => void
-  setCopyFailedRowId: (rowId: string | null) => void
-  expandedRowId: string | null
-  accessUrl: string
-  handleCopy: (accessUrl: string, rowId: string) => void
-}) {
-  const handleCopyClick = useCallback(() => {
-    handleCopy(accessUrl, containerRow.id)
-  }, [accessUrl, containerRow.id])
+  statsCell?: (row: WorkloadStatsCellProps) => ReactNode
+}
 
+function workloadConcernRank(row: ContainerInfo): number {
+  if (row.status === 'stopped' || row.status === 'dead') {
+    return 0
+  }
+  if (row.status === 'restarting') {
+    return 1
+  }
+  const health = (row.health || '').toLowerCase()
+  if (health && health !== 'none' && health !== 'healthy') {
+    return 2
+  }
+  return 3
+}
+
+function sortGroupsForDashboard(groups: WorkloadGroup[]): WorkloadGroup[] {
+  return [...groups].sort((groupA, groupB) => {
+    const rankA = workloadConcernRank(groupA.base)
+    const rankB = workloadConcernRank(groupB.base)
+    if (rankA !== rankB) {
+      return rankA - rankB
+    }
+    return groupA.base.name.localeCompare(groupB.base.name)
+  })
+}
+
+function showsInstanceSummary(group: WorkloadGroup): boolean {
+  return group.replicas.length > 0 || group.scalingEnabled
+}
+
+function aggregateStatus(group: WorkloadGroup, instances: ContainerInfo[]): string {
+  const runningCount = instances.filter(
+    (instance) => instance.status === 'running',
+  ).length
+  if (showsInstanceSummary(group)) {
+    return `${runningCount}/${instances.length} running`
+  }
+  return group.base.status
+}
+
+function statusIsLive(group: WorkloadGroup, instances: ContainerInfo[]): boolean {
+  if (showsInstanceSummary(group)) {
+    return instances.some((instance) => instance.status === 'running')
+  }
+  return group.base.status === 'running'
+}
+
+function WorkloadStatsCell({
+  group,
+  instances,
+  statsContainerId,
+  statsExpanded,
+  onToggleStats,
+  onSelectStatsContainer,
+}: WorkloadStatsCellProps) {
+  const containerRow = group.base
   return (
-    <Fragment key={containerRow.id}>
-      <tr>
-        <td>{containerRow.name}</td>
-        <td
-          className="containers-table__mono"
-          title={
-            containerRow.source_kind === 'dockerfile_template' ||
-            containerRow.source_kind === 'git'
-              ? containerRow.image
-              : undefined
-          }
-        >
-          {deploySourceImageLabel(containerRow)}
-        </td>
-        <td>
-          <span className="containers-status">{containerRow.status}</span>
-        </td>
-        <td className="containers-table__ports">
-          {containerRow.ports.length === 0
-            ? '—'
-            : containerRow.ports
-                .map(
-                  (portMapping) =>
-                    `${portMapping.host_port}:${portMapping.container_port}/${portMapping.protocol}`,
-                )
-                .join(', ')}
-        </td>
-        <td className="workloads-table__url-cell">
-          {accessUrl ? (
-            <button
-              type="button"
-              className="btn btn--ghost btn--sm"
-              onClick={handleCopyClick}
-            >
-              {copiedRowId === containerRow.id
-                ? 'Copied'
-                : copyFailedRowId === containerRow.id
-                  ? 'Copy failed'
-                  : 'Copy'}
-            </button>
-          ) : (
-            <span className="containers-muted" title="No Traefik route on this container">
-              —
-            </span>
-          )}
-        </td>
-        <td>
-          <button
-            type="button"
-            className="btn btn--ghost btn--sm"
-            aria-expanded={isExpanded}
-            aria-controls={`workloads-log-${containerRow.id}`}
-            onClick={() => toggleLogRow(containerRow.id)}
-          >
-            {isExpanded ? 'Hide' : 'Show'}
-          </button>
-        </td>
-        <td className="containers-table__actions">
-          <button
-            type="button"
-            className="btn btn--sm btn--ghost"
-            title={modifyDisabledTitle}
-            aria-label={
-              canModify ? 'Start container' : `Start container — ${VIEWER_ACTION_DISABLED_TITLE}`
-            }
-            disabled={
-              !canModify ||
-              rowBusyId === containerRow.id ||
-              containerRow.status === 'running'
-            }
-            onClick={() => onStart(containerRow.id)}
-          >
-            Start
-          </button>
-          <button
-            type="button"
-            className="btn btn--sm btn--ghost"
-            title={modifyDisabledTitle}
-            aria-label={
-              canModify ? 'Stop container' : `Stop container — ${VIEWER_ACTION_DISABLED_TITLE}`
-            }
-            disabled={
-              !canModify ||
-              rowBusyId === containerRow.id ||
-              containerRow.status !== 'running'
-            }
-            onClick={() => onStop(containerRow.id)}
-          >
-            Stop
-          </button>
-          <button
-            type="button"
-            className="btn btn--sm btn--danger"
-            title={modifyDisabledTitle}
-            aria-label={
-              canModify
-                ? 'Remove container'
-                : `Remove container — ${VIEWER_ACTION_DISABLED_TITLE}`
-            }
-            disabled={!canModify || rowBusyId === containerRow.id}
-            onClick={() => onRemove(containerRow.id)}
-          >
-            Remove
-          </button>
-        </td>
-      </tr>
-      {isExpanded ? (
-        <tr className="workloads-table__expand-row">
-          <td colSpan={7}>
-            <div
-              id={`workloads-log-${containerRow.id}`}
-              className="workloads-table__expand-inner"
-            >
-              <ContainerLogPanel
-                containerId={containerRow.id}
-                isActive={isExpanded}
-                workloadStatus={containerRow.status}
-              />
-            </div>
-          </td>
-        </tr>
-      ) : null}
-    </Fragment>
-  )
-})
-
-// Memoize the ContainerLogPanel component to avoid unnecessary re-renders
-const ContainerLogPanel = React.memo(function ContainerLogPanel({
-  containerId,
-  isActive,
-  workloadStatus,
-}: {
-  containerId: string
-  isActive: boolean
-  workloadStatus: ContainerStatus
-}) {
-  const isRunning = workloadStatus === 'running'
-  const [logText, setLogText] = useState('')
-  const [streamStatus, setStreamStatus] = useState<
-    'connecting' | 'live' | 'ended' | 'err'
-  >('connecting')
-  const [errorText, setErrorText] = useState<string | null>(null)
-  const [highlightErrors, setHighlightErrors] = useState(false)
-  const decoderRef = useRef(new TextDecoder())
-
-  const refreshSnapshot = useCallback(async () => {
-    try {
-      const snapshot = await fetchContainerLogs(containerId, { tail: 500 })
-      setLogText(snapshot)
-      setErrorText(null)
-    } catch (error) {
-      setErrorText(formatApiError(error))
-    }
-  }, [containerId])
-
-  useEffect(() => {
-    if (!isActive || isRunning) {
-      return
-    }
-    void refreshSnapshot()
-  }, [isActive, isRunning, containerId, refreshSnapshot])
-
-  useEffect(() => {
-    if (!isActive || !isRunning) {
-      return
-    }
-
-    decoderRef.current = new TextDecoder()
-    setLogText('')
-    setStreamStatus('connecting')
-    setErrorText(null)
-
-    let websocket: WebSocket
-    try {
-      websocket = openContainerLogWebSocket(containerId, {
-        tail: 400,
-        follow: true,
-      })
-    } catch (error) {
-      queueMicrotask(() => {
-        setStreamStatus('err')
-        setErrorText(formatApiError(error))
-      })
-      return
-    }
-    websocket.binaryType = 'arraybuffer'
-    websocket.onopen = () => {
-      queueMicrotask(() => {
-        setStreamStatus('live')
-      })
-    }
-    websocket.onmessage = (event) => {
-      const payload = event.data
-      const chunk =
-        payload instanceof ArrayBuffer
-          ? new Uint8Array(payload)
-          : typeof payload === 'string'
-            ? new TextEncoder().encode(payload)
-            : new Uint8Array()
-      if (chunk.length === 0) {
-        return
-      }
-      const piece = decoderRef.current.decode(chunk, { stream: true })
-      setLogText((previous) => previous + piece)
-    }
-    websocket.onerror = () => {
-      queueMicrotask(() => {
-        setErrorText('Log stream connection failed.')
-        setStreamStatus('err')
-      })
-    }
-    websocket.onclose = () => {
-      queueMicrotask(() => {
-        setStreamStatus((previous) => (previous === 'err' ? previous : 'ended'))
-      })
-    }
-    return () => {
-      websocket.onopen = null
-      websocket.onmessage = null
-      websocket.onerror = null
-      websocket.onclose = null
-      websocket.close()
-    }
-  }, [containerId, isActive, isRunning])
-
-  const lines = useMemo(() => logText.split('\n'), [logText])
-
-  return (
-    <div className="workloads-log-panel">
-      <div className="workloads-log-panel__toolbar">
-        <span className="workloads-log-panel__status" role="status">
-          {!isRunning
-            ? 'Stream paused'
-            : streamStatus === 'connecting'
-              ? 'Connecting…'
-              : streamStatus === 'live'
-                ? 'Live'
-                : streamStatus === 'ended'
-                  ? 'Stream ended'
-                  : 'Error'}
-        </span>
-        <label className="workloads-log-panel__toggle">
-          <input
-            type="checkbox"
-            checked={highlightErrors}
-            onChange={(event) => setHighlightErrors(event.target.checked)}
-          />
-          Highlight error lines
-        </label>
-        <button
-          type="button"
-          className="btn btn--ghost btn--sm"
-          onClick={() => void refreshSnapshot()}
-        >
-          Refresh snapshot
-        </button>
-      </div>
-      {errorText ? (
-        <p className="workloads-log-panel__error" role="alert">
-          {errorText}
-        </p>
-      ) : null}
-      <pre
-        className="workloads-log-panel__pre"
-        tabIndex={0}
-        aria-label="Container log output"
+    <>
+      <label
+        className="containers-form__label"
+        htmlFor={`workloads-stats-select-${containerRow.id}`}
       >
-        {lines.map((line, index) => {
-          const key = `${index}-${line.slice(0, 24)}`
-          if (highlightErrors && ERROR_LINE_PATTERN.test(line)) {
-            return (
-              <span key={key} className="workloads-log-panel__line workloads-log-panel__line--warn">
-                {line}
-                {'\n'}
-              </span>
-            )
-          }
-          return (
-            <span key={key} className="workloads-log-panel__line">
-              {line}
-              {'\n'}
-            </span>
-          )
-        })}
-      </pre>
-    </div>
+        Instance
+      </label>
+      <select
+        id={`workloads-stats-select-${containerRow.id}`}
+        className="containers-form__input workloads-table__stats-select"
+        aria-label={`Stats instance for ${containerRow.name}`}
+        value={statsContainerId}
+        onChange={(event) => onSelectStatsContainer(event.target.value)}
+      >
+        {instances.map((instance, index) => (
+          <option key={instance.id} value={instance.id}>
+            {index === 0 ? `${instance.name} (primary)` : instance.name}
+          </option>
+        ))}
+      </select>
+      <button
+        type="button"
+        className="btn btn--ghost btn--sm"
+        aria-expanded={statsExpanded}
+        aria-controls={`workloads-stats-${containerRow.id}`}
+        onClick={onToggleStats}
+      >
+        {statsExpanded ? 'Hide' : 'View'}
+      </button>
+    </>
   )
-})
+}
 
 export function WorkloadsTable({
   listLoading,
-  rows,
+  groups,
   rowBusyId,
   onStart,
   onStop,
   onRemove,
-  prioritizeProblemWorkloads = false,
+  statsCell,
 }: WorkloadsTableProps) {
-  const [expandedRowId, setExpandedRowId] = useState<string | null>(null)
+  const [expandedReplicaGroupId, setExpandedReplicaGroupId] = useState<
+    string | null
+  >(null)
+  const [expandedStatsGroupId, setExpandedStatsGroupId] = useState<
+    string | null
+  >(null)
+  const [statsContainerByGroup, setStatsContainerByGroup] = useState<
+    Record<string, string>
+  >({})
   const [copiedRowId, setCopiedRowId] = useState<string | null>(null)
   const [copyFailedRowId, setCopyFailedRowId] = useState<string | null>(null)
+  const [terminalContainerId, setTerminalContainerId] = useState<string | null>(null)
 
-  const displayRows = useMemo(
-    () =>
-      prioritizeProblemWorkloads ? sortRowsForDashboard(rows) : rows,
-    [prioritizeProblemWorkloads, rows],
-  )
+  const columnCount = statsCell ? 9 : 8
 
-  const toggleLogRow = useCallback((containerId: string) => {
-    setExpandedRowId((current) =>
-      current === containerId ? null : containerId,
+  function toggleReplicaGroup(groupId: string) {
+    setExpandedReplicaGroupId((current) =>
+      current === groupId ? null : groupId,
     )
-  }, [])
+  }
 
-  const copyAccessUrl = useCallback((accessUrl: string, rowId: string) => {
+  function toggleStatsGroup(groupId: string) {
+    setExpandedStatsGroupId((current) =>
+      current === groupId ? null : groupId,
+    )
+  }
+
+  function resolvedStatsContainerId(
+    group: WorkloadGroup,
+    instances: ContainerInfo[],
+  ): string {
+    const storedId = statsContainerByGroup[group.base.id]
+    if (storedId && instances.some((instance) => instance.id === storedId)) {
+      return storedId
+    }
+    return group.base.id
+  }
+
+  function setStatsContainerForGroup(group: WorkloadGroup, containerId: string) {
+    setStatsContainerByGroup((previous) => ({
+      ...previous,
+      [group.base.id]: containerId,
+    }))
+  }
+
+  function copyAccessUrl(accessUrl: string, rowId: string) {
     void navigator.clipboard.writeText(accessUrl).then(
       () => {
         setCopiedRowId(rowId)
@@ -403,21 +191,13 @@ export function WorkloadsTable({
         }, 2500)
       },
     )
-  }, [])
-
-  const handleCopy = useCallback((accessUrl: string, rowId: string) => {
-    copyAccessUrl(accessUrl, rowId)
-  }, [copyAccessUrl])
-
-  const handleRowClick = useCallback((containerId: string) => {
-    // This would be used for virtualized lists
-  }, [])
+  }
 
   return (
-    <div aria-live="polite" className="workloads-table-wrap-outer">
-      {listLoading && rows.length === 0 ? (
+    <div className="workloads-table-wrap-outer">
+      {listLoading && groups.length === 0 ? (
         <p className="containers-muted">Loading…</p>
-      ) : rows.length === 0 ? (
+      ) : groups.length === 0 ? (
         <p className="containers-muted">No Vela-managed containers yet.</p>
       ) : (
         <div className="containers-table-wrap workloads-table-wrap">
@@ -429,37 +209,256 @@ export function WorkloadsTable({
                 <th>Status</th>
                 <th>Ports</th>
                 <th>Access URL</th>
+                {statsCell ? <th>Stats</th> : null}
                 <th>Logs</th>
                 <th />
+                <th className="workloads-table__expand-col" aria-label="Instances" />
               </tr>
             </thead>
             <tbody>
-              {displayRows.map((containerRow) => {
-                const isExpanded = expandedRowId === containerRow.id
+              {groups.map((group) => {
+                const containerRow = group.base
+                const isReplicaExpanded = expandedReplicaGroupId === containerRow.id
+                const isStatsExpanded = expandedStatsGroupId === containerRow.id
                 const accessUrl = containerRow.access_url?.trim() || ''
                 const canModify = containerWriteAllowed(containerRow)
-                const modifyDisabledTitle = canModify ? undefined : VIEWER_ACTION_DISABLED_TITLE
+                const modifyDisabledTitle = canModify
+                  ? undefined
+                  : VIEWER_ACTION_DISABLED_TITLE
+                const instances = workloadInstances(group)
+                const statusText = aggregateStatus(group, instances)
+                const statsContainerId = resolvedStatsContainerId(group, instances)
+                const statsTarget =
+                  instances.find((instance) => instance.id === statsContainerId) ??
+                  containerRow
+                const showReplicaControls = showsInstanceSummary(group)
+
                 return (
-                  <ContainerRow
-                    key={containerRow.id}
-                    containerRow={containerRow}
-                    isExpanded={isExpanded}
-                    toggleLogRow={toggleLogRow}
-                    rowBusyId={rowBusyId}
-                    onStart={onStart}
-                    onStop={onStop}
-                    onRemove={onRemove}
-                    canModify={canModify}
-                    modifyDisabledTitle={modifyDisabledTitle}
-                    copiedRowId={copiedRowId}
-                    copyFailedRowId={copyFailedRowId}
-                    copyAccessUrl={copyAccessUrl}
-                    setCopiedRowId={setCopiedRowId}
-                    setCopyFailedRowId={setCopyFailedRowId}
-                    expandedRowId={expandedRowId}
-                    accessUrl={accessUrl}
-                    handleCopy={handleCopy}
-                  />
+                  <Fragment key={containerRow.id}>
+                    <tr>
+                      <td className="workloads-table__name-cell">
+                        {containerRow.name}
+                      </td>
+                      <td
+                        className="containers-table__mono"
+                        title={
+                          containerRow.source_kind === 'dockerfile_template' ||
+                          containerRow.source_kind === 'git'
+                            ? containerRow.image
+                            : undefined
+                        }
+                      >
+                        {deploySourceImageLabel(containerRow)}
+                      </td>
+                      <td>
+                        <span
+                          className={
+                            statusIsLive(group, instances)
+                              ? 'containers-status containers-status--live'
+                              : 'containers-status'
+                          }
+                        >
+                          {statusText}
+                        </span>
+                      </td>
+                      <td className="containers-table__ports">
+                        {containerRow.ports.length === 0
+                          ? '—'
+                          : containerRow.ports
+                              .map(
+                                (portMapping) =>
+                                  `${portMapping.host_port}:${portMapping.container_port}/${portMapping.protocol}`,
+                              )
+                              .join(', ')}
+                      </td>
+                      <td className="workloads-table__url-cell">
+                        {accessUrl ? (
+                          <button
+                            type="button"
+                            className="btn btn--ghost btn--sm"
+                            onClick={() =>
+                              copyAccessUrl(accessUrl, containerRow.id)
+                            }
+                          >
+                            {copiedRowId === containerRow.id
+                              ? 'Copied'
+                              : copyFailedRowId === containerRow.id
+                                ? 'Copy failed'
+                                : 'Copy'}
+                          </button>
+                        ) : (
+                          <span
+                            className="containers-muted"
+                            title="No Traefik route on this container"
+                          >
+                            —
+                          </span>
+                        )}
+                      </td>
+                      {statsCell ? (
+                        <td className="workloads-table__stats-cell">
+                          {statsCell({
+                            group,
+                            instances,
+                            statsContainerId,
+                            statsExpanded: isStatsExpanded,
+                            onToggleStats: () =>
+                              toggleStatsGroup(containerRow.id),
+                            onSelectStatsContainer: (containerId) => {
+                              setStatsContainerForGroup(group, containerId)
+                              setExpandedStatsGroupId(containerRow.id)
+                            },
+                          })}
+                        </td>
+                      ) : null}
+                      <td>
+                        <Link
+                          to={`/logs?container_id=${encodeURIComponent(containerRow.id)}`}
+                          className="btn btn--ghost btn--sm"
+                          title="View logs"
+                          aria-label="View logs"
+                        >
+                          Logs
+                        </Link>
+                      </td>
+                      <td className="containers-table__actions">
+                        {containerRow.status === 'running' && canModify ? (
+                          <button
+                            type="button"
+                            className="btn btn--sm btn--ghost"
+                            title="Open terminal"
+                            aria-label="Open terminal"
+                            aria-expanded={terminalContainerId === containerRow.id}
+                            aria-controls={`workloads-terminal-${containerRow.id}`}
+                            onClick={() =>
+                              setTerminalContainerId(
+                                terminalContainerId === containerRow.id
+                                  ? null
+                                  : containerRow.id,
+                              )
+                            }
+                          >
+                            {'>'}
+                          </button>
+                        ) : null}
+                        <button
+                          type="button"
+                          className="btn btn--sm btn--ghost"
+                          title={modifyDisabledTitle}
+                          aria-label={
+                            canModify
+                              ? 'Start container'
+                              : `Start container — ${VIEWER_ACTION_DISABLED_TITLE}`
+                          }
+                          disabled={
+                            !canModify ||
+                            rowBusyId === containerRow.id ||
+                            containerRow.status === 'running'
+                          }
+                          onClick={() => void onStart(containerRow.id)}
+                        >
+                          Start
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn--sm btn--ghost"
+                          title={modifyDisabledTitle}
+                          aria-label={
+                            canModify
+                              ? 'Stop container'
+                              : `Stop container — ${VIEWER_ACTION_DISABLED_TITLE}`
+                          }
+                          disabled={
+                            !canModify ||
+                            rowBusyId === containerRow.id ||
+                            containerRow.status !== 'running'
+                          }
+                          onClick={() => void onStop(containerRow.id)}
+                        >
+                          Stop
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn--sm btn--danger"
+                          title={modifyDisabledTitle}
+                          aria-label={
+                            canModify
+                              ? 'Remove container'
+                              : `Remove container — ${VIEWER_ACTION_DISABLED_TITLE}`
+                          }
+                          disabled={!canModify || rowBusyId === containerRow.id}
+                          onClick={() => void onRemove(containerRow.id)}
+                        >
+                          Remove
+                        </button>
+                      </td>
+                      <td className="workloads-table__expand-cell">
+                        {showReplicaControls ? (
+                          <button
+                            type="button"
+                            className="workloads-table__expand-toggle"
+                            aria-expanded={isReplicaExpanded}
+                            aria-controls={`workloads-replicas-${containerRow.id}`}
+                            aria-label={
+                              isReplicaExpanded
+                                ? `Hide ${instances.length} instances`
+                                : `Show ${instances.length} instances`
+                            }
+                            onClick={() => toggleReplicaGroup(containerRow.id)}
+                          >
+                            <span
+                              className="workloads-table__expand-chevron"
+                              aria-hidden="true"
+                            >
+                              ›
+                            </span>
+                          </button>
+                        ) : null}
+                      </td>
+                    </tr>
+                    {showReplicaControls && isReplicaExpanded ? (
+                      <tr className="workloads-table__expand-row">
+                        <td colSpan={columnCount}>
+                          <div
+                            id={`workloads-replicas-${containerRow.id}`}
+                            className="workloads-table__expand-inner"
+                          >
+                            <ReplicaInstancesPanel group={group} />
+                          </div>
+                        </td>
+                      </tr>
+                    ) : null}
+                    {statsCell && isStatsExpanded ? (
+                      <tr className="workloads-table__expand-row">
+                        <td colSpan={columnCount}>
+                          <div
+                            id={`workloads-stats-${containerRow.id}`}
+                            className="workloads-table__expand-inner"
+                          >
+                            <ContainerStatsPanel
+                              containerId={statsTarget.id}
+                              isActive={isStatsExpanded}
+                            />
+                          </div>
+                        </td>
+                      </tr>
+                    ) : null}
+                    {terminalContainerId === containerRow.id ? (
+                      <tr className="workloads-table__expand-row">
+                        <td colSpan={columnCount}>
+                          <div
+                            id={`workloads-terminal-${containerRow.id}`}
+                            className="workloads-table__expand-inner"
+                          >
+                            <ContainerTerminal
+                              containerId={containerRow.id}
+                              onClose={() => setTerminalContainerId(null)}
+                            />
+                          </div>
+                        </td>
+                      </tr>
+                    ) : null}
+                  </Fragment>
                 )
               })}
             </tbody>
@@ -470,27 +469,26 @@ export function WorkloadsTable({
   )
 }
 
-function sortRowsForDashboard(rows: ContainerInfo[]): ContainerInfo[] {
-  return [...rows].sort((rowA, rowB) => {
-    const rankA = workloadConcernRank(rowA)
-    const rankB = workloadConcernRank(rowB)
-    if (rankA !== rankB) {
-      return rankA - rankB
-    }
-    return rowA.name.localeCompare(rowB.name)
-  })
-}
+type DashboardWorkloadsTableProps = Omit<WorkloadsTableProps, 'statsCell'>
 
-function workloadConcernRank(row: ContainerInfo): number {
-  if (row.status === 'stopped' || row.status === 'dead') {
-    return 0
-  }
-  if (row.status === 'restarting') {
-    return 1
-  }
-  const health = (row.health || '').toLowerCase()
-  if (health && health !== 'none' && health !== 'healthy') {
-    return 2
-  }
-  return 3
+export function DashboardWorkloadsTable({
+  listLoading,
+  groups,
+  rowBusyId,
+  onStart,
+  onStop,
+  onRemove,
+}: DashboardWorkloadsTableProps) {
+  const displayGroups = useMemo(() => sortGroupsForDashboard(groups), [groups])
+  return (
+    <WorkloadsTable
+      listLoading={listLoading}
+      groups={displayGroups}
+      rowBusyId={rowBusyId}
+      onStart={onStart}
+      onStop={onStop}
+      onRemove={onRemove}
+      statsCell={(row) => <WorkloadStatsCell {...row} />}
+    />
+  )
 }

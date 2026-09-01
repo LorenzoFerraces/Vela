@@ -27,6 +27,18 @@ FastAPI backend, Vite/React frontend, optional Traefik as an edge proxy, and Pos
 | `backend/alembic/` | Database migrations (Alembic) |
 | `frontend/` | UI (`npm run dev`) |
 | `docker-compose.dev.yml` | Optional local Postgres for development |
+| `docker-compose.yml` + `.env.example` | Full stack (API, SPA, Postgres, Traefik) in Docker |
+
+## Docker (full stack)
+
+```powershell
+cp .env.example .env   # fill in VELA_AUTH_SECRET and VELA_TOKEN_ENCRYPTION_KEY
+docker compose up -d --build
+```
+
+- **http://localhost** — SPA + public routes (Traefik, port 80); port **8081** reaches the SPA directly; Traefik dashboard at http://127.0.0.1:8080 (dev only).
+- The API drives the **host** Docker daemon via a bind-mounted socket, so workload containers run on the host engine. Works from Windows (Docker Desktop) or WSL2 — the api entrypoint grants its unprivileged user access to the socket on start.
+- All configuration lives in `.env` — see `.env.example` for the full annotated variable list.
 
 ## Backend
 
@@ -85,11 +97,17 @@ Create `backend/.env` as needed. Common variables:
 | `VELA_TOKEN_ENCRYPTION_KEY` | Fernet key used to encrypt third-party access tokens at rest. Generate with `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"` |
 | `VELA_GEMINI_API_KEY` | Google Gemini API key for GitHub repo analysis (pre-fill on Containers). Optional; without it, analysis uses deterministic project detection |
 | `VELA_GEMINI_MODEL` | Optional Gemini model id (default `gemini-2.0-flash`) |
+| `VELA_VERTEX_API_KEY` / `VELA_VERTEX_PROJECT_ID` | Optional Vertex AI key + project ID; when both are set, Vertex is used instead of direct Gemini |
+| `VELA_VERTEX_LOCATION` / `VELA_VERTEX_MODEL` | Optional Vertex location and model (defaults `us-central1`, `gemini-2.5-flash`) |
 | `BREVO_API_KEY` | Brevo transactional API key for container alert emails ([Python SDK](https://developers.brevo.com/guides/python); free tier ~300/day) |
 | `BREVO_SENDER_EMAIL` | Verified sender address in Brevo (required with `BREVO_API_KEY`) |
 | `BREVO_SENDER_NAME` | Optional From name (default `Vela`) |
 | `VELA_LOG_LEVEL` | App + uvicorn log level: `DEBUG`, `INFO`, `WARNING`, `ERROR` (default `INFO`) |
 | `VELA_CONTAINER_MONITOR_INTERVAL_SECONDS` | Container alert poll interval in seconds (default `15`) |
+| `VELA_LOG_COLLECTOR_ENABLED` | Background log collector; set `0` to disable (default: enabled) |
+| `VELA_LOG_COLLECTOR_INTERVAL_SECONDS` | Log collector poll interval in seconds (default `5`) |
+| `VELA_LOG_MAX_LINES_PER_POLL` | Max log lines pulled per container per poll (default `2000`) |
+| `VELA_EXEC_MAX_SESSION_SECONDS` | Max live exec terminal session length in seconds (default `3600`) |
 
 ```powershell
 python run.py
@@ -141,7 +159,52 @@ When you `POST /api/containers/run` with a private `github.com` URL, the server 
 
 ## Traefik (optional)
 
-Use a **single JSON file** for dynamic config (not a directory). Point `VELA_TRAEFIK_DYNAMIC_FILE` at it and set `VELA_TRAFFIC_ROUTER=traefik_file`. Put Traefik and app containers on the same Docker network (`VELA_DOCKER_NETWORK`). Set **`VELA_TRAEFIK_RELOAD_CONTAINER`** to your Traefik container name so the API can signal Traefik to reload after each change (file watches often fail on Docker Desktop bind mounts; Traefik reloads dynamic file config on SIGHUP). See [Traefik docs](https://doc.traefik.io/traefik/) for TLS and entrypoints.
+By default the API uses `VELA_TRAFFIC_ROUTER=noop` (no public hostnames). To turn Traefik on for public routes:
+
+1. **Shared Docker network** (Traefik + workload containers must share it):
+
+```powershell
+docker network create vela-net
+```
+
+2. **Dynamic config file** — a **single JSON file** (not a directory). Create an empty object once, then let Vela overwrite it:
+
+```powershell
+New-Item -ItemType Directory -Force resources | Out-Null
+Set-Content -Path resources\traefik-http.json -Value '{}' -NoNewline
+```
+
+3. **Run Traefik** (v3). Mount the **parent directory** of the JSON file (more reliable than a single-file bind on Docker Desktop). Entry points must be named `web` / `websecure` (what Vela writes when TLS is on). Use an **absolute** host path — if you run this from `backend/`, `${PWD}\resources` points at the wrong folder and Traefik will keep serving `404`:
+
+```powershell
+# From the repo root (or substitute your absolute path to resources\).
+docker run -d --name traefik --restart unless-stopped `
+  --network vela-net `
+  -p 80:80 -p 443:443 -p 8080:8080 `
+  -v "F:\path\to\Vela\resources:/etc/traefik/dynamic" `
+  traefik:v3.2 `
+  --providers.file.filename=/etc/traefik/dynamic/traefik-http.json `
+  --providers.file.watch=true `
+  --entrypoints.web.address=:80 `
+  --entrypoints.websecure.address=:443 `
+  --api.dashboard=true `
+  --api.insecure=true
+```
+
+Dashboard (dev only): **http://127.0.0.1:8080**. Confirm routes loaded: `http://127.0.0.1:8080/api/http/routers` should list `*@file` entries after a deploy.
+
+4. **Enable in `backend/.env`** — `VELA_TRAEFIK_DYNAMIC_FILE` must be the **same** file Traefik mounts (absolute path), then restart the API:
+
+```env
+VELA_TRAFFIC_ROUTER=traefik_file
+VELA_TRAEFIK_DYNAMIC_FILE=F:\path\to\Vela\resources\traefik-http.json
+VELA_TRAEFIK_RELOAD_CONTAINER=traefik
+VELA_DOCKER_NETWORK=vela-net
+VELA_PUBLIC_ROUTE_DOMAIN=apps.example.com
+VELA_PUBLIC_URL_SCHEME=https
+```
+
+`VELA_TRAEFIK_RELOAD_CONTAINER` should match the Traefik container name (`docker ps`). After each route write, Vela sends **SIGHUP** so Traefik reloads the file when fsnotify misses changes (common on Docker Desktop). Deploys with `public_route` then get a hostname under `VELA_PUBLIC_ROUTE_DOMAIN`. See [Traefik docs](https://doc.traefik.io/traefik/) for production TLS.
 
 ## Frontend
 
@@ -158,6 +221,8 @@ VITE_API_BASE_URL=http://127.0.0.1:8000
 ```
 
 **Sign-in:** use **Register** (`/register`) or **Log in** (`/login`). After a successful register or login, the UI stores the access token in **localStorage** under `vela.access_token` and sends it on API requests. Protected app routes redirect to `/login` when you are not signed in.
+
+**Git builds:** auto-detect Go, Python, Node, Java/Clojure, Rust, Ruby, PHP, .NET, and Elixir (root + shallow scan); Containers and Stacks open a build override modal when inference is insufficient.
 
 ## Useful commands
 

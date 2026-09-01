@@ -2,15 +2,19 @@
 
 from __future__ import annotations
 
+import asyncio
+import logging
+import threading
+import time
 import uuid
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from datetime import datetime, timezone
-from typing import Callable
 
 from app.core.containers.docker_orchestrator import (
     VELA_MANAGED_LABEL,
     VELA_MANAGED_VALUE,
     VELA_OWNER_LABEL,
+    VELA_REPLICA_OF_LABEL,
     VELA_ROUTE_HOST_LABEL,
     VELA_ROUTE_PATH_PREFIX_LABEL,
     VELA_ROUTE_TLS_LABEL,
@@ -27,6 +31,8 @@ from app.core.exceptions import (
 from app.core.models import ContainerInfo, ContainerStats, DeployConfig, HealthResult
 from app.core.containers.orchestrator import ContainerOrchestrator
 
+logger = logging.getLogger(__name__)
+
 
 class FakeContainerOrchestrator(ContainerOrchestrator):
     """Process-local fake that tracks containers and images without Docker."""
@@ -34,28 +40,38 @@ class FakeContainerOrchestrator(ContainerOrchestrator):
     def __init__(self) -> None:
         """
         Initialize internal in-memory state used by the fake container orchestrator.
-        
+
         Sets up empty container storage, a seeded set of available images, a list for recorded built image tags, and instrumentation fields for the last deploy configuration, verification call history, and per-image verification handlers.
-        
+
         Attributes:
             _containers (dict[str, ContainerInfo]): Mapping of container id to stored container info.
             _images (set[str]): Available image references; initially contains common test images.
             _built_tags (list[str]): Sequence of tags recorded when build_image is called.
+            _built_paths (list[str]): Build-context paths passed to build_image, in call order.
             last_deploy_config (DeployConfig | None): The most recent deploy config passed to deploy, or None.
             verify_calls (list[str]): Ordered list of image refs passed to verify_image_reference_available.
             _verify_handlers (dict[str, Callable[[], None]]): Optional per-image handlers invoked during verification.
+            _log_lines (dict[str, list[tuple[float, str]]]): Per-container fake log buffers of (timestamp, line) pairs.
         """
         self._containers: dict[str, ContainerInfo] = {}
         self._images: set[str] = {"nginx:alpine", "python:3.12-slim"}
         self._built_tags: list[str] = []
+        self._built_paths: list[str] = []
         self.last_deploy_config: DeployConfig | None = None
         self.verify_calls: list[str] = []
         self._verify_handlers: dict[str, Callable[[], None]] = {}
+        self._networks: set[str] = set()
+        self._deploy_fail_images: set[str] = set()
+        self._log_lines: dict[str, list[tuple[float, str]]] = {}
+
+    def fail_deploy_for_image(self, image_ref: str) -> None:
+        """Cause future deploy() calls for this image to raise RuntimeError."""
+        self._deploy_fail_images.add(image_ref.strip())
 
     def register_image(self, image_ref: str) -> None:
         """
         Register an image reference as available in the fake orchestrator.
-        
+
         Parameters:
             image_ref (str): Image reference to register; leading and trailing whitespace will be removed before storing.
         """
@@ -64,9 +80,9 @@ class FakeContainerOrchestrator(ContainerOrchestrator):
     def seed_container(self, info: ContainerInfo) -> None:
         """
         Insert a ContainerInfo into the orchestrator's in-memory container store.
-        
+
         If an entry with the same container id already exists, it is replaced.
-        
+
         Parameters:
             info (ContainerInfo): The container record to store; its `id` field is used as the key.
         """
@@ -75,11 +91,12 @@ class FakeContainerOrchestrator(ContainerOrchestrator):
     def set_verify_error(self, image_ref: str, error: Exception) -> None:
         """
         Register a verification handler that causes future verification of the given image reference to raise the provided exception.
-        
+
         Parameters:
             image_ref (str): Image reference string to associate with the error (whitespace is stripped).
             error (Exception): Exception instance that will be raised when the image reference is verified.
         """
+
         def raise_error() -> None:
             raise error
 
@@ -88,14 +105,17 @@ class FakeContainerOrchestrator(ContainerOrchestrator):
     async def deploy(self, config: DeployConfig) -> ContainerInfo:
         """
         Create and register a new fake container based on the provided deployment configuration.
-        
+
         Parameters:
             config (DeployConfig): Deployment configuration used to create the container (name, image, labels, routing settings, etc.). The orchestrator's `last_deploy_config` is set to this value.
-        
+
         Returns:
             ContainerInfo: A newly created container record in `RUNNING` state with a generated `id`, the resolved `name`, merged `labels` (including route-related labels when `config.route_host` is set), computed `access_url`, and the current UTC creation timestamp. The container is stored in the orchestrator's internal container registry.
         """
         self.last_deploy_config = config
+        image_ref = config.image.strip()
+        if image_ref in self._deploy_fail_images:
+            raise RuntimeError(f"Simulated deploy failure for {image_ref}")
         labels = {
             VELA_MANAGED_LABEL: VELA_MANAGED_VALUE,
             **config.labels,
@@ -116,6 +136,7 @@ class FakeContainerOrchestrator(ContainerOrchestrator):
             status=ContainerStatus.RUNNING,
             created_at=datetime.now(timezone.utc),
             ports=[],
+            volumes=list(config.volumes),
             labels=labels,
             health=HealthStatus.NONE,
             access_url=_access_url_from_route_labels(labels),
@@ -128,13 +149,13 @@ class FakeContainerOrchestrator(ContainerOrchestrator):
     async def start(self, container_id: str) -> ContainerInfo:
         """
         Ensure the specified container is in the RUNNING state and return its ContainerInfo.
-        
+
         Parameters:
             container_id (str): Identifier of the container to start.
-        
+
         Returns:
             ContainerInfo: The container information with `status` set to `ContainerStatus.RUNNING`. If the container was already running, the existing `ContainerInfo` is returned.
-        
+
         Raises:
             ContainerNotFoundError: If no container exists with the given `container_id`.
             ContainerNotRunningError: If the container exists but is in an invalid state for operations.
@@ -149,11 +170,11 @@ class FakeContainerOrchestrator(ContainerOrchestrator):
     async def stop(self, container_id: str, *, timeout: int = 10) -> ContainerInfo:
         """
         Stop the stored container and mark its status as stopped.
-        
+
         Parameters:
             container_id (str): Identifier of the container to stop.
             timeout (int): Accepted for API compatibility; ignored by this implementation.
-        
+
         Returns:
             ContainerInfo: The container info updated with `status` set to `ContainerStatus.STOPPED`.
         """
@@ -166,11 +187,11 @@ class FakeContainerOrchestrator(ContainerOrchestrator):
     async def restart(self, container_id: str, *, timeout: int = 10) -> ContainerInfo:
         """
         Restart a container by stopping it and then starting it.
-        
+
         Parameters:
             container_id (str): ID of the container to restart.
             timeout (int): Shutdown timeout in seconds; accepted for API compatibility but ignored by this implementation.
-        
+
         Returns:
             ContainerInfo: The container's updated information after it has been started.
         """
@@ -180,11 +201,11 @@ class FakeContainerOrchestrator(ContainerOrchestrator):
     async def remove(self, container_id: str, *, force: bool = False) -> None:
         """
         Remove the container record with the given ID from the orchestrator's in-memory store.
-        
+
         Parameters:
             container_id (str): Identifier of the container to remove.
             force (bool): Ignored in this implementation; accepted for API compatibility.
-        
+
         Raises:
             ContainerNotFoundError: If no container with `container_id` exists.
             ContainerNotRunningError: If the container exists but is in an invalid state for operations.
@@ -196,15 +217,21 @@ class FakeContainerOrchestrator(ContainerOrchestrator):
     async def get(self, container_id: str) -> ContainerInfo:
         """
         Retrieve stored container information for the given container id.
-        
+
         Returns:
             ContainerInfo: The container record corresponding to the provided id.
-        
+
         Raises:
             ContainerNotFoundError: If no container with the given id exists.
             ContainerNotRunningError: If the container exists but is in an invalid state for operations.
         """
-        return self._require_container(container_id)
+        info = self._containers.get(container_id)
+        if info is None:
+            for candidate in self._containers.values():
+                if candidate.name == container_id:
+                    info = candidate
+                    break
+        return self._require_container(info.id if info is not None else container_id)
 
     async def list(
         self,
@@ -216,11 +243,7 @@ class FakeContainerOrchestrator(ContainerOrchestrator):
     ) -> list[ContainerInfo]:
         rows = list(self._containers.values())
         if owner_id is not None:
-            rows = [
-                row
-                for row in rows
-                if row.labels.get(VELA_OWNER_LABEL) == owner_id
-            ]
+            rows = [row for row in rows if row.labels.get(VELA_OWNER_LABEL) == owner_id]
         if project_ids is not None and user_id is not None:
             from app.core.projects.access import container_visible_to_user
 
@@ -237,20 +260,28 @@ class FakeContainerOrchestrator(ContainerOrchestrator):
             rows = [row for row in rows if row.status == status]
         return rows
 
-    async def logs(self, container_id: str, *, tail: int = 100) -> str:
-        """
-        Retrieve the logs for the specified container.
-        
-        Parameters:
-        	container_id (str): ID of the container whose logs are requested.
-        	tail (int): Number of most-recent lines to include; ignored by this fake orchestrator.
-        
-        Returns:
-        	logs (str): The container logs as a string (for the fake orchestrator this is the fixed value "log line\n").
-        """
-        _ = tail
+    def add_log_line(self, container_id: str, line: str) -> None:
+        """Append a timestamped line to the container's fake log buffer."""
         self._require_container(container_id)
-        return "log line\n"
+        self._log_lines.setdefault(container_id, []).append((time.time(), line))
+
+    def _fake_log_text(
+        self, container_id: str, *, tail: int | None, since: float | None
+    ) -> str:
+        lines = self._log_lines.setdefault(container_id, [])
+        if not lines:
+            lines.append((time.time(), "log line 1"))
+        visible = [text for ts, text in lines if since is None or ts >= since]
+        if tail is not None:
+            visible = visible[-tail:]
+        return "".join(f"{text}\n" for text in visible)
+
+    async def logs(
+        self, container_id: str, *, tail: int | None = 100, since: float | None = None
+    ) -> str:
+        """Return fake log lines: one per call for a fresh container, honoring `tail` and `since`."""
+        self._require_container(container_id)
+        return self._fake_log_text(container_id, tail=tail, since=since)
 
     async def stream_logs(
         self,
@@ -259,32 +290,113 @@ class FakeContainerOrchestrator(ContainerOrchestrator):
         tail: int | None = 100,
         follow: bool = True,
     ) -> AsyncIterator[bytes]:
-        """
-        Yield a single chunk of fake raw log data for the specified container.
-        
-        Ensures the container exists, then yields one bytes chunk containing "log line\n".
-        Parameters:
-            container_id (str): Identifier of the container whose logs are requested.
-            tail (int | None): Ignored; kept for API compatibility.
-            follow (bool): Ignored; kept for API compatibility.
-        
-        Returns:
-            AsyncIterator[bytes]: An async iterator that yields one bytes chunk (b"log line\n").
-        """
-        _ = tail, follow
+        """Yield the container's current fake log buffer as one bytes chunk."""
+        _ = follow
         self._require_container(container_id)
-        yield b"log line\n"
+        yield self._fake_log_text(container_id, tail=tail, since=None).encode()
+
+    def stream_exec(
+        self,
+        container_id: str,
+        cols: int = 80,
+        rows: int = 24,
+    ) -> tuple[AsyncIterator[bytes], Callable[[bytes], None], Callable[[], None], str]:
+        """Echo shell fake exec session."""
+        _ = cols, rows
+        self._require_container(container_id)
+        exec_id = f"fake-{uuid.uuid4().hex[:12]}"
+        stdin_queue: asyncio.Queue[bytes | None] = asyncio.Queue()
+        stdout_queue: asyncio.Queue[bytes | None] = asyncio.Queue()
+        loop = asyncio.get_running_loop()
+        closed = threading.Event()
+
+        def _shell_worker() -> None:
+            try:
+                asyncio.run_coroutine_threadsafe(
+                    stdout_queue.put(f"root@{container_id[:12]}:~# ".encode()),
+                    loop,
+                ).result(timeout=10)
+                command_buffer = ""
+                while not closed.is_set():
+                    try:
+                        data_event = asyncio.run_coroutine_threadsafe(
+                            asyncio.wait_for(stdin_queue.get(), timeout=0.1),
+                            loop,
+                        ).result(timeout=0.2)
+                        if data_event is None:
+                            break
+                        command_buffer += data_event.decode(
+                            "utf-8", errors="replace"
+                        ).replace("\r", "\n")
+                        while "\n" in command_buffer:
+                            line, command_buffer = command_buffer.split("\n", 1)
+                            command = line.strip()
+                            if command == "exit":
+                                asyncio.run_coroutine_threadsafe(
+                                    stdout_queue.put(None), loop
+                                ).result(timeout=10)
+                                return
+                            if command:
+                                asyncio.run_coroutine_threadsafe(
+                                    stdout_queue.put(
+                                        f"{line}\nroot@{container_id[:12]}:~# ".encode()
+                                    ),
+                                    loop,
+                                ).result(timeout=10)
+                            else:
+                                asyncio.run_coroutine_threadsafe(
+                                    stdout_queue.put(
+                                        f"root@{container_id[:12]}:~# ".encode()
+                                    ),
+                                    loop,
+                                ).result(timeout=10)
+                    except asyncio.TimeoutError:
+                        continue
+                    except Exception:
+                        logger.warning("fake exec stdin error for %s", container_id)
+                        break
+            except Exception:
+                logger.exception("fake exec worker failed for %s", container_id)
+            finally:
+                asyncio.run_coroutine_threadsafe(stdout_queue.put(None), loop).result(timeout=10)
+
+        threading.Thread(target=_shell_worker, daemon=True, name="vela-fake-exec").start()
+
+        def _write(data: bytes) -> None:
+            if not closed.is_set():
+                asyncio.run_coroutine_threadsafe(stdin_queue.put(data), loop)
+
+        def _close() -> None:
+            if not closed.is_set():
+                closed.set()
+                asyncio.run_coroutine_threadsafe(stdin_queue.put(None), loop)
+
+        async def _stdout_iterator() -> AsyncIterator[bytes]:
+            try:
+                while True:
+                    item = await stdout_queue.get()
+                    if item is None:
+                        break
+                    yield item
+            except asyncio.CancelledError:
+                _close()
+                raise
+
+        return _stdout_iterator(), _write, _close, exec_id
+
+    def resize_exec(self, container_id: str, exec_id: str, cols: int, rows: int) -> None:
+        pass
 
     async def get_stats(self, container_id: str) -> ContainerStats:
         """
         Return a snapshot of resource usage statistics for the specified container.
-        
+
         Parameters:
             container_id (str): Identifier of the container to query.
-        
+
         Returns:
             ContainerStats: Snapshot containing the container id, timestamp, CPU percent, memory usage and limit, and memory percent.
-        
+
         Raises:
             ContainerNotFoundError: If no container exists with the given id.
             ContainerNotRunningError: If the container exists but is not in a valid lifecycle state for inspection.
@@ -302,10 +414,10 @@ class FakeContainerOrchestrator(ContainerOrchestrator):
     async def get_health(self, container_id: str) -> HealthResult:
         """
         Provide the simulated health status for a container.
-        
+
         Returns:
             HealthResult: A result with `status` set to `HealthStatus.HEALTHY` and `timestamp` set to the current UTC time.
-        
+
         Raises:
             ContainerNotFoundError: If no container exists with the given `container_id`.
             ContainerNotRunningError: If the container exists but is in an invalid state for health checks.
@@ -319,9 +431,9 @@ class FakeContainerOrchestrator(ContainerOrchestrator):
     async def pull_image(self, image: str, *, tag: str = "latest") -> None:
         """
         Marks an image reference as available in the fake orchestrator's in-memory image store.
-        
+
         If `image` contains no `:`, the function appends `:{tag}` to form the resolved image reference; if `image` already contains a `:`, it is used as given and marked available.
-        
+
         Parameters:
             image (str): Image name or reference (e.g., "nginx" or "registry.example.com/nginx:1.2").
             tag (str): Tag to append when `image` has no explicit tag (default: "latest").
@@ -333,16 +445,17 @@ class FakeContainerOrchestrator(ContainerOrchestrator):
     ) -> str:
         """
         Create a fake image record and return a synthetic image digest.
-        
+
         Parameters:
-            path (str): Ignored; included for API compatibility.
+            path (str): Build context path; recorded on ``_built_paths`` for assertions.
             tag (str): The image tag to register and record as built.
             dockerfile (str): Ignored; included for API compatibility.
-        
+
         Returns:
             digest (str): A synthetic digest string in the form `sha256:fake-<tag>` where `:` in the tag is replaced by `-`.
         """
-        _ = path, dockerfile
+        _ = dockerfile
+        self._built_paths.append(path)
         self.register_image(tag)
         self._built_tags.append(tag)
         return f"sha256:fake-{tag.replace(':', '-')}"
@@ -350,21 +463,55 @@ class FakeContainerOrchestrator(ContainerOrchestrator):
     async def list_images(self) -> list[str]:
         """
         Get a sorted list of available image references.
-        
+
         Returns:
             list[str]: Image reference strings sorted in ascending order.
         """
         return sorted(self._images)
 
+    async def list_replicas(self, base_name: str) -> list[ContainerInfo]:
+        return [
+            info
+            for info in self._containers.values()
+            if info.labels.get(VELA_REPLICA_OF_LABEL) == base_name
+        ]
+
+    async def deploy_replica(
+        self, base_config: DeployConfig, replica_index: int
+    ) -> ContainerInfo:
+        base_name = base_config.name or ""
+        replica_name = f"{base_name}-r{replica_index}"
+        replica_labels = {
+            key: value
+            for key, value in base_config.labels.items()
+            if key
+            not in {
+                VELA_ROUTE_HOST_LABEL,
+                VELA_ROUTE_PATH_PREFIX_LABEL,
+                VELA_ROUTE_TLS_LABEL,
+            }
+        }
+        replica_labels[VELA_REPLICA_OF_LABEL] = base_name
+        replica_config = base_config.model_copy(
+            update={
+                "name": replica_name,
+                "labels": replica_labels,
+                "ports": [],
+                "route_host": None,
+                "public_route": False,
+            }
+        )
+        return await self.deploy(replica_config)
+
     async def verify_image_reference_available(self, image_ref: str) -> None:
         """
         Validate that a given image reference is available to the fake orchestrator.
-        
+
         This records the stripped image reference in `verify_calls` and, if a per-image handler was registered, runs that handler. If the reference is already known to the fake orchestrator or begins with "vela/", the check succeeds. References starting with "missing:" cause an ImageNotFoundError; those starting with "denied:" cause a RegistryAccessDeniedError. If the reference contains ":" or "/", it is registered as available and the check succeeds. All other references raise ImageNotFoundError.
-        
+
         Parameters:
             image_ref (str): The image reference to verify; leading and trailing whitespace are ignored.
-        
+
         Raises:
             ImageNotFoundError: If the image is determined to be missing.
             RegistryAccessDeniedError: If access to the registry for the image is denied.
@@ -386,16 +533,22 @@ class FakeContainerOrchestrator(ContainerOrchestrator):
             return
         raise ImageNotFoundError(stripped)
 
+    async def create_network(self, name: str) -> None:
+        self._networks.add(name)
+
+    async def remove_network(self, name: str) -> None:
+        self._networks.discard(name)
+
     def _require_container(self, container_id: str) -> ContainerInfo:
         """
         Retrieve a stored container by its ID and ensure its status is one of the valid runtime states.
-        
+
         Parameters:
             container_id (str): Identifier of the container to retrieve.
-        
+
         Returns:
             ContainerInfo: The container information for the given `container_id`.
-        
+
         Raises:
             ContainerNotFoundError: If no container exists with the given `container_id`.
             ContainerNotRunningError: If the container exists but its status is not one of
@@ -421,9 +574,9 @@ _shared_fake: FakeContainerOrchestrator | None = None
 def get_shared_fake_orchestrator() -> FakeContainerOrchestrator:
     """
     Get the shared FakeContainerOrchestrator singleton used for end-to-end and development tests.
-    
+
     The instance is lazily created on first call and pre-registers the image "nginx:alpine".
-    
+
     Returns:
         FakeContainerOrchestrator: the singleton orchestrator instance.
     """

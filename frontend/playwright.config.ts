@@ -9,8 +9,8 @@ const repoRoot = path.join(__dirname, '..')
 /** FastAPI lives under `backend/app`; uvicorn must run with this as cwd so `import app` resolves without an editable install. */
 const backendRoot = path.join(repoRoot, 'backend')
 
-const e2eApiPort = process.env.PW_API_PORT ?? '8001'
-const e2eVitePort = process.env.PW_VITE_PORT ?? '5174'
+const e2eApiPort = process.env.PW_API_PORT ?? '8000'
+const e2eVitePort = process.env.PW_VITE_PORT ?? '5173'
 const baseURL = `http://127.0.0.1:${e2eVitePort}`
 const apiHealthURL = `http://127.0.0.1:${e2eApiPort}/api/health`
 
@@ -49,6 +49,9 @@ const e2eDatabasePath = path.join(backendRoot, 'e2e-playwright.db')
 const e2eApiEnv: Record<string, string> = {
   VELA_E2E: '1',
   VELA_E2E_ALLOW_DB_RESET: '1',
+  // Empty on purpose: keeps load_dotenv from filling in the local .env key,
+  // so Clerk stays disabled and E2E never loads the real Clerk script.
+  VELA_CLERK_PUBLISHABLE_KEY: '',
   VELA_FAKE_ORCHESTRATOR: '1',
   VELA_DATABASE_URL: `sqlite+aiosqlite:///${e2eDatabasePath.replace(/\\/g, '/')}`,
   VELA_AUTH_SECRET: 'e2e-test-secret-do-not-use-in-prod',
@@ -60,12 +63,14 @@ const e2eApiEnv: Record<string, string> = {
 
 export default defineConfig({
   testDir: './e2e',
+  // Demo-recording walkthrough: run via `npm run demo:record` (playwright.demo.config.ts).
+  testIgnore: ['demo.spec.ts'],
   globalSetup: './e2e/global-setup.ts',
   fullyParallel: false,
   workers: 1,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
-  reporter: process.env.CI ? [['html', { open: 'never' }], ['list']] : 'html',
+  reporter: [['html', { open: 'never' }], ['line']],
   use: {
     baseURL,
     trace: 'on-first-retry',
@@ -77,6 +82,8 @@ export default defineConfig({
       use: { ...devices['Desktop Chrome'] },
     },
   ],
+  // Never reuse a running dev server: it lacks e2eApiEnv (E2E DB, Clerk disabled),
+  // and the default ports match the dev ports. Free 8000/5173 before running.
   webServer: [
     {
       command: apiServerCommand,

@@ -19,7 +19,13 @@ from app.core.containers.volume_uploads import (
     VOLUME_UPLOAD_MAX_BYTES,
     VOLUME_UPLOAD_USER_QUOTA_BYTES,
 )
-from app.core.models import ContainerInfo, ProjectSource
+from app.core.models import (
+    BuildOverride,
+    ContainerInfo,
+    ProjectSource,
+    ScalingPolicyConfig,
+    ScalingPolicyInfo,
+)
 
 
 class VolumeMountRequest(BaseModel):
@@ -154,6 +160,14 @@ class RunFromSourceRequest(BaseModel):
     volumes: list[VolumeMountRequest] = Field(
         default_factory=list,
         description="Read-only mounts from user-uploaded folders.",
+    )
+    scaling_policy: ScalingPolicyConfig | None = Field(
+        default=None,
+        description="When set, persist an auto-scaling policy for this container after deploy.",
+    )
+    build_override: BuildOverride | None = Field(
+        default=None,
+        description="Manual language / build settings when auto-detection is insufficient.",
     )
 
     @field_validator("env_vars")
@@ -331,6 +345,16 @@ class RunFromSourceResponse(BaseModel):
         default=None,
         description="Canonical URL when public_route was used and the route was wired.",
     )
+    scaling_policy: ScalingPolicyInfo | None = Field(
+        default=None,
+        description="Persisted scaling policy when one was requested at deploy time.",
+    )
+    scaling_policy_warning: str | None = Field(
+        default=None,
+        description=(
+            "Set when deploy succeeded but the requested auto-scaling policy could not be saved."
+        ),
+    )
 
 
 class BuilderBuildRequest(BaseModel):
@@ -342,6 +366,10 @@ class BuilderBuildRequest(BaseModel):
         min_length=1,
         max_length=256,
         description="Image reference to assign to the built image (e.g. vela/myapp:dev).",
+    )
+    build_override: BuildOverride | None = Field(
+        default=None,
+        description="Manual language / build settings when auto-detection is insufficient.",
     )
 
 
@@ -388,6 +416,8 @@ class GitSourceAnalysis(BaseModel):
         "generated_dockerfile"
     )
     summary_hint: str = ""
+    build_subdir: str | None = None
+    needs_manual_build_config: bool = False
 
 
 class AiPrefillPreferences(BaseModel):
@@ -491,6 +521,7 @@ class DeploymentRecordPublic(BaseModel):
     env_vars: dict[str, str]
     command: list[str] | None
     dockerfile_snapshot: str | None
+    build_override: dict | None = None
     public_url: str | None
     created_at: datetime
 
@@ -548,6 +579,16 @@ class TokenResponse(BaseModel):
     access_token: str
     token_type: Literal["bearer"] = "bearer"
     user: UserPublic
+
+
+class ClerkExchangeRequest(BaseModel):
+    clerk_token: str = Field(..., min_length=1, max_length=4096)
+
+
+class AuthConfigResponse(BaseModel):
+    clerk_enabled: bool
+    clerk_publishable_key: str | None = None
+    clerk_frontend_api: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -665,3 +706,105 @@ class ContainerMonitoringStatus(BaseModel):
     enabled: bool
     interval_seconds: int
     total_containers_tracked: int
+
+
+# ---------------------------------------------------------------------------
+# Audit log
+# ---------------------------------------------------------------------------
+
+
+class AuditLogEntry(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    user_id: uuid.UUID
+    action: str
+    target_type: str
+    target_id: str
+    details: dict | None = None
+    created_at: datetime
+
+
+class AuditLogListResponse(BaseModel):
+    entries: list[AuditLogEntry]
+    total: int
+
+
+# Stacks
+# ---------------------------------------------------------------------------
+
+
+class StackServiceCreate(BaseModel):
+    service_name: str = Field(min_length=1, max_length=128)
+    source_kind: Literal["image", "git", "dockerfile_template"]
+    source_ref: str = Field(min_length=1, max_length=2048)
+    git_branch: str | None = Field(default=None, max_length=256)
+    container_port: int = Field(default=80, ge=1, le=65535)
+    env_vars: dict[str, str] = Field(default_factory=dict)
+    command: list[str] | None = None
+    public_route: bool = False
+    depends_on: list[str] | None = None
+    volumes: list[VolumeMountRequest] = Field(default_factory=list)
+    scaling_policy: ScalingPolicyConfig | None = None
+    build_override: BuildOverride | None = None
+
+
+class StackCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=128)
+    project_id: uuid.UUID | None = None
+    services: list[StackServiceCreate] = Field(min_length=1)
+    child_stack_ids: list[uuid.UUID] = Field(default_factory=list)
+
+
+class StackServicePublic(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    stack_id: uuid.UUID
+    service_name: str
+    source_kind: str
+    source_ref: str
+    git_branch: str | None = None
+    container_port: int
+    env_vars: dict[str, str]
+    command: list[str] | None
+    public_route: bool
+    depends_on: list[str] | None
+    volumes: list
+    scaling_policy: dict | None
+    build_override: dict | None = None
+
+
+class StackPublic(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    project_id: uuid.UUID
+    name: str
+    network_name: str
+    created_at: datetime
+    services: list[StackServicePublic] = []
+    child_stack_ids: list[uuid.UUID] = []
+
+
+class ManifestParseRequest(BaseModel):
+    yaml_content: str
+
+
+class ManifestParseResponse(BaseModel):
+    services: list[StackServiceCreate]
+    warnings: list[str] = []
+    manifest_kind: Literal["compose", "k8s"]
+
+
+class AnalyzeRepoRequest(BaseModel):
+    git_url: str = Field(min_length=1, max_length=2048)
+    git_branch: str = Field(default="main", max_length=256)
+
+
+class AnalyzeRepoResponse(BaseModel):
+    services: list[StackServiceCreate]
+    warnings: list[str] = []
+    manifest_kind: Literal["compose", "k8s", "llm"]
+    manifest_path: str | None = None
+    summary_hint: str | None = None

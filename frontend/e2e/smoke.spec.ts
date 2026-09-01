@@ -6,9 +6,13 @@ const baseURL = appBase
 const protectedNavItems = [
   { label: 'Dashboard', path: '/dashboard', title: 'Dashboard' },
   { label: 'Containers', path: '/containers', title: 'Containers' },
+  { label: 'Stacks', path: '/stacks', title: 'Stacks' },
   { label: 'Builder', path: '/builder', title: 'Builder' },
-  { label: 'Settings', path: '/settings', title: 'Settings' },
+  { label: 'Teams', path: '/teams', title: 'Teams' },
 ] as const
+
+// Display label of the seeded E2E user (display_name is null, so the email is shown).
+const USER_MENU_TRIGGER = 'e2e@example.com'
 
 test.describe('home page (anonymous)', () => {
   test('shows the Vela greeting and API health', async ({ page }) => {
@@ -38,11 +42,12 @@ test.describe('navbar (authenticated)', () => {
   }) => {
     await authenticatedPage.goto('/')
 
+    const nav = authenticatedPage.getByRole('navigation', { name: 'Main' })
+    await expect(nav.getByRole('link', { name: 'Logs' })).toHaveCount(0)
+    await expect(nav.getByRole('link', { name: 'Audit Log' })).toHaveCount(0)
+
     for (const { label, path, title } of protectedNavItems) {
-      await authenticatedPage
-        .getByRole('navigation', { name: 'Main' })
-        .getByRole('link', { name: label })
-        .click()
+      await nav.getByRole('link', { name: label }).click()
       await expect(authenticatedPage).toHaveURL(`${baseURL}${path}`)
       await expect(
         authenticatedPage.getByRole('heading', { name: title, level: 1 }),
@@ -62,7 +67,37 @@ test.describe('navbar (authenticated)', () => {
     }
   })
 
-  test('signed-in user can log out and return to anonymous state', async ({
+  test('user menu navigates to Settings', async ({ authenticatedPage }) => {
+    await authenticatedPage.goto('/dashboard')
+    await authenticatedPage
+      .getByRole('button', { name: USER_MENU_TRIGGER })
+      .click()
+    const settingsItem = authenticatedPage.getByRole('button', {
+      name: 'Settings',
+    })
+    await expect(settingsItem).toBeVisible()
+    await settingsItem.click()
+    await expect(authenticatedPage).toHaveURL(`${baseURL}/settings`)
+    await expect(
+      authenticatedPage.getByRole('heading', { name: 'Settings', level: 1 }),
+    ).toBeVisible()
+  })
+
+  test('user menu navigates to Audit Log', async ({ authenticatedPage }) => {
+    await authenticatedPage.goto('/dashboard')
+    await authenticatedPage
+      .getByRole('button', { name: USER_MENU_TRIGGER })
+      .click()
+    await authenticatedPage
+      .getByRole('button', { name: 'Audit Log' })
+      .click()
+    await expect(authenticatedPage).toHaveURL(`${baseURL}/audit`)
+    await expect(
+      authenticatedPage.getByRole('heading', { name: 'Audit Log', level: 1 }),
+    ).toBeVisible()
+  })
+
+  test('signed-in user can log out through the user menu', async ({
     authenticatedPage,
   }) => {
     await authenticatedPage.goto('/dashboard')
@@ -70,6 +105,9 @@ test.describe('navbar (authenticated)', () => {
       authenticatedPage.getByRole('heading', { name: 'Dashboard', level: 1 }),
     ).toBeVisible()
 
+    await authenticatedPage
+      .getByRole('button', { name: USER_MENU_TRIGGER })
+      .click()
     await authenticatedPage.getByRole('button', { name: 'Log out' }).click()
     await expect(authenticatedPage).toHaveURL(/\/login(\?.*)?$/)
     await expect(

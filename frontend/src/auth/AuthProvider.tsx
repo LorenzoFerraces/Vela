@@ -9,6 +9,7 @@ import {
 import {
   ApiError,
   clearAccessToken,
+  clerkLogin as apiClerkLogin,
   getAccessToken,
   getMe,
   login as apiLogin,
@@ -89,6 +90,14 @@ export function AuthProvider({ children }: AuthProviderProps) {
     return response.user
   }, [])
 
+  const clerkLogin = useCallback(async (clerkToken: string) => {
+    const response = await apiClerkLogin(clerkToken)
+    setAccessToken(response.access_token)
+    setUser(response.user)
+    setStatus('authenticated')
+    return response.user
+  }, [])
+
   const logout = useCallback(() => {
     clearAccessToken()
     setUser(null)
@@ -107,8 +116,8 @@ export function AuthProvider({ children }: AuthProviderProps) {
   }, [])
 
   const value = useMemo<AuthContextValue>(
-    () => ({ status, user, login, register, logout, refreshUser }),
-    [status, user, login, register, logout, refreshUser]
+    () => ({ status, user, login, register, clerkLogin, logout, refreshUser }),
+    [status, user, login, register, clerkLogin, logout, refreshUser]
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

@@ -43,4 +43,13 @@ class SupportedLanguage(StrEnum):
     JAVA = "java"
     RUST = "rust"
     RUBY = "ruby"
+    PHP = "php"
+    DOTNET = "dotnet"
+    ELIXIR = "elixir"
+    CLOJURE = "clojure"
     UNKNOWN = "unknown"
+
+
+class ScalingMetric(StrEnum):
+    CPU_PERCENT = "cpu_percent"
+    REQUESTS_PER_SECOND = "requests_per_second"

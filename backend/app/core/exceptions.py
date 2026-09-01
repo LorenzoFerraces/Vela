@@ -117,6 +117,18 @@ class UnsupportedProjectError(VelaError):
         super().__init__(message)
 
 
+class NeedsBuildOverrideError(BuilderError):
+    """Detection failed; client should collect a BuildOverride via modal."""
+
+    code = "needs_build_override"
+
+    def __init__(self, message: str) -> None:
+        super().__init__(message)
+
+    def api_response_content(self) -> dict[str, object]:
+        return {"code": self.code, "detail": str(self)}
+
+
 class CloneError(BuilderError):
     def __init__(self, git_url: str, message: str) -> None:
         self.git_url = git_url
@@ -131,6 +143,14 @@ class AnalysisError(BuilderError):
 
 class GitSourceAnalysisError(BuilderError):
     """Gemini or repository analysis for deploy pre-fill failed."""
+
+
+class LlmNotConfiguredError(VelaError):
+    """No supported LLM provider is configured."""
+
+
+class LlmCallError(VelaError):
+    """An LLM provider request or response failed."""
 
 
 class DockerfileGenerationError(BuilderError):
@@ -273,6 +293,13 @@ class GitHubAPIError(IntegrationError):
         super().__init__(message)
 
 
+class ClerkTokenError(IntegrationError):
+    """Clerk token verification failed (bad signature, expired, missing claims)."""
+
+    def __init__(self, message: str = "Clerk authentication failed.") -> None:
+        super().__init__(message)
+
+
 class GitHubAccountAlreadyLinkedError(IntegrationError):
     """This GitHub account is already stored for a different Vela user."""
 
@@ -281,6 +308,19 @@ class GitHubAccountAlreadyLinkedError(IntegrationError):
         message: str = (
             "This GitHub account is already connected to another Vela user. "
             "Disconnect it from the other account first, or sign in as that user."
+        ),
+    ) -> None:
+        super().__init__(message)
+
+
+class ClerkAccountAlreadyLinkedError(IntegrationError):
+    """This Clerk account is already stored for a different Vela user."""
+
+    def __init__(
+        self,
+        message: str = (
+            "This Clerk account is already connected to another Vela user. "
+            "Sign in as that user instead."
         ),
     ) -> None:
         super().__init__(message)
@@ -343,3 +383,34 @@ class AlreadyProjectMemberError(ProjectError):
     def __init__(self, email: str) -> None:
         self.email = email
         super().__init__("User is already a member of this project.")
+
+
+# ---------------------------------------------------------------------------
+# Stack errors
+# ---------------------------------------------------------------------------
+
+
+class StackError(VelaError):
+    """Base exception for stack operations."""
+
+
+class StackNotFoundError(StackError):
+    def __init__(self, stack_id: str) -> None:
+        self.stack_id = stack_id
+        super().__init__(f"Stack not found: {stack_id}")
+
+
+class StackCompositionCycleError(StackError):
+    def __init__(self, stack_names: list[str]) -> None:
+        self.stack_names = stack_names
+        super().__init__(f"Cycle detected in stack composition: {' → '.join(stack_names)}")
+
+
+class ManifestParseError(StackError):
+    """Uploaded/checked-in manifest could not be recognized or parsed."""
+
+
+class DuplicateStackNameError(StackError):
+    def __init__(self, name: str) -> None:
+        self.name = name
+        super().__init__(f"Stack name already exists: {name}")

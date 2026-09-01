@@ -1,6 +1,7 @@
 /**
  * Thin HTTP client for the Vela FastAPI backend.
- * Base URL: `VITE_API_BASE_URL` or `window.location.hostname:8000`
+ * Base URL: `VITE_API_BASE_URL`, or same-origin when unset — both the Vite dev
+ * server and the nginx container proxy `/api` to the API.
  */
 
 // --- Request deduplication and caching ---
@@ -8,20 +9,11 @@ const activeRequests = new Map<string, Promise<unknown>>()
 const cache = new Map<string, { data: unknown; timestamp: number }>()
 const CACHE_TTL = 5 * 60 * 1000 // 5 minutes cache TTL
 
-function getDefaultBaseUrl(): string {
-  if (typeof window === 'undefined') {
-    return 'http://localhost:8000'
-  }
-
-  const protocol = window.location.protocol === 'https:' ? 'https:' : 'http:'
-  return `${protocol}//${window.location.hostname}:8000`
-}
-
 export function getApiBaseUrl(): string {
   const fromEnv = import.meta.env.VITE_API_BASE_URL
   return typeof fromEnv === 'string' && fromEnv.length > 0
     ? fromEnv.replace(/\/$/, '')
-    : getDefaultBaseUrl()
+    : ''
 }
 
 // --- Access token storage ---
@@ -283,6 +275,18 @@ export async function apiPatch<TResponse, TBody = unknown>(
   })
 }
 
+export async function apiPut<TResponse, TBody = unknown>(
+  path: string,
+  body: TBody,
+  options: ApiRequestOptions = {}
+): Promise<TResponse> {
+  return apiRequest<TResponse>(
+    path,
+    { method: 'PUT', body: JSON.stringify(body) },
+    options
+  )
+}
+
 /**
  * Send a DELETE request to the API for the given path.
  *
@@ -339,4 +343,1266 @@ export async function apiUploadFile<T>(
 
 export async function getHealth(): Promise<HealthResponse> {
   return apiGet<HealthResponse>('/api/health')
+}
+
+// --- Containers (Docker orchestrator) ---
+
+export type ContainerStatus =
+  | 'created'
+  | 'running'
+  | 'paused'
+  | 'restarting'
+  | 'stopped'
+  | 'dead'
+  | 'unknown'
+
+export interface PortMapping {
+  host_port: number
+  container_port: number
+  protocol: string
+}
+
+export interface ContainerInfo {
+  id: string
+  name: string
+  image: string
+  status: ContainerStatus
+  created_at: string
+  ports: PortMapping[]
+  labels: Record<string, string>
+  health: string
+  /** Public edge URL when Traefik route labels are present on the container. */
+  access_url?: string | null
+  /** From vela.source_kind label when the workload was deployed via the run API. */
+  source_kind?: RunSourceKind | null
+  /** User-facing source (template name, image ref, Git URL) from vela.source_ref. */
+  source_label?: string | null
+  /** Caller's role for this container's project. */
+  access_role?: ProjectRole | null
+}
+
+export const VELA_REPLICA_OF_LABEL = 'vela.replica_of'
+
+export interface ContainerStats {
+  container_id: string
+  timestamp: string
+  cpu_percent: number
+  memory_usage_bytes: number
+  memory_limit_bytes: number
+  memory_percent: number
+  network_rx_bytes: number
+  network_tx_bytes: number
+}
+
+export type ProjectRole = 'owner' | 'operator' | 'viewer'
+
+export type RunSourceKind = 'image' | 'git' | 'dockerfile_template'
+
+export type ScalingMetric = 'cpu_percent' | 'requests_per_second'
+
+export interface ScalingPolicyRequest {
+  enabled: boolean
+  min_replicas: number
+  max_replicas: number
+  metric: ScalingMetric
+  scale_up_threshold: number
+  scale_down_threshold: number
+  cooldown_seconds: number
+  scale_up_stabilization_seconds: number
+  scale_down_stabilization_seconds: number
+}
+
+export interface ScalingPolicyInfo {
+  id: string
+  container_name: string
+  enabled: boolean
+  min_replicas: number
+  max_replicas: number
+  metric: ScalingMetric
+  scale_up_threshold: number
+  scale_down_threshold: number
+  cooldown_seconds: number
+  scale_up_stabilization_seconds: number
+  scale_down_stabilization_seconds: number
+  last_scaled_at: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface VolumeUploadResponse {
+  upload_id: string
+  folder_name: string
+  total_bytes: number
+  file_count: number
+  max_bytes: number
+  user_quota_bytes: number
+  user_used_bytes: number
+}
+
+export interface VolumeMountRequest {
+  upload_id: string
+  target: string
+}
+
+export type BuildOverrideLanguage =
+  | 'python'
+  | 'javascript'
+  | 'typescript'
+  | 'go'
+  | 'java'
+  | 'rust'
+  | 'ruby'
+  | 'php'
+  | 'dotnet'
+  | 'elixir'
+  | 'clojure'
+
+export type BuildOverride = {
+  language: BuildOverrideLanguage
+  language_version?: string | null
+  package_manager?: string | null
+  build_subdir?: string | null
+  start_command?: string[] | null
+}
+
+export interface RunFromSourceRequest {
+  source_kind?: RunSourceKind
+  source?: string
+  image_ref?: string
+  git_url?: string
+  dockerfile_template_id?: string
+  container_name?: string | null
+  host_port?: number | null
+  container_port?: number
+  git_branch?: string
+  route_host?: string | null
+  route_path_prefix?: string
+  route_tls?: boolean
+  public_route?: boolean
+  env_vars?: Record<string, string>
+  command?: string[] | null
+  project_id?: string | null
+  volumes?: VolumeMountRequest[]
+  scaling_policy?: ScalingPolicyRequest | null
+  build_override?: BuildOverride | null
+}
+
+export interface RunFromSourceResponse {
+  container: ContainerInfo
+  kind: RunSourceKind
+  image: string
+  route_wired: boolean
+  public_url?: string | null
+  scaling_policy?: ScalingPolicyInfo | null
+  scaling_policy_warning?: string | null
+}
+
+export interface ImageAvailabilityResponse {
+  ref: string
+  available: boolean
+  checked: boolean
+  detail: string | null
+  can_attempt_deploy?: boolean
+  error_code?: string | null
+  hints?: string[] | null
+  registry_detail?: string | null
+}
+
+export async function getImageAvailability(
+  ref: string
+): Promise<ImageAvailabilityResponse> {
+  const query = new URLSearchParams({ ref })
+  return apiGet<ImageAvailabilityResponse>(
+    `/api/containers/image/availability?${query.toString()}`
+  )
+}
+
+export type ImageSuggestionSource = 'local' | 'registry'
+
+export interface ImageSuggestion {
+  ref: string
+  pull_count: number | null
+  source: ImageSuggestionSource
+}
+
+export type DeploySourceSuggestion =
+  | { kind: 'image'; ref: string; label: string }
+  | {
+    kind: 'git'
+    url: string
+    name: string
+    default_branch: string
+  }
+  | { kind: 'dockerfile_template'; id: string; name: string }
+
+/**
+ * Fetches deploy source suggestions that match the provided query.
+ *
+ * @param query - Search string used to find matching deploy sources
+ * @param options - Optional parameters for the request
+ * @param options.limit - Maximum number of suggestions to return
+ * @returns An array of DeploySourceSuggestion objects matching the query
+ */
+export async function getDeploySourceSuggestions(
+  query: string,
+  options: { limit?: number } = {}
+): Promise<{
+  suggestions: DeploySourceSuggestion[]
+  pasted_github_hint: string | null
+}> {
+  const params = new URLSearchParams({ q: query })
+  if (options.limit != null) {
+    params.set('limit', String(options.limit))
+  }
+  const data = await apiGet<{
+    suggestions: DeploySourceSuggestion[]
+    pasted_github_hint?: string | null
+  }>(`/api/containers/deploy-sources?${params.toString()}`)
+  return {
+    suggestions: data.suggestions,
+    pasted_github_hint: data.pasted_github_hint ?? null,
+  }
+}
+
+/**
+ * Fetches image suggestions that match the given query.
+ *
+ * @param query - The search text used to find image suggestions
+ * @param options - Optional settings for the request
+ * @param options.limit - Maximum number of suggestions to return
+ * @returns The list of matching image suggestion objects
+ */
+export async function getImageSuggestions(
+  query: string,
+  options: { limit?: number } = {}
+): Promise<ImageSuggestion[]> {
+  const params = new URLSearchParams({ q: query })
+  if (options.limit != null) {
+    params.set('limit', String(options.limit))
+  }
+  const data = await apiGet<{ suggestions: ImageSuggestion[] }>(
+    `/api/containers/image/suggestions?${params.toString()}`
+  )
+  return data.suggestions
+}
+
+export async function listContainers(): Promise<ContainerInfo[]> {
+  return apiGet<ContainerInfo[]>('/api/containers/')
+}
+
+export async function listScalingPolicies(): Promise<ScalingPolicyInfo[]> {
+  return apiGet<ScalingPolicyInfo[]>('/api/scaling/policies')
+}
+
+export async function getContainerStats(containerId: string): Promise<ContainerStats> {
+  return apiGet<ContainerStats>(
+    `/api/containers/${encodeURIComponent(containerId)}/stats`,
+  )
+}
+
+const MAX_CONTAINER_LOG_TAIL = 2000
+
+function apiBaseLooksLikeLocalDevBackend(api: URL): boolean {
+  if (api.hostname === 'localhost' || api.hostname === '127.0.0.1') {
+    return true
+  }
+  if (typeof window === 'undefined') {
+    return false
+  }
+  return api.hostname === window.location.hostname
+}
+
+/**
+ * Build ws/wss URL for the API.
+ *
+ * HTTPS pages cannot open `ws:` to another port (mixed content). In dev, use the
+ * Vite dev server origin + `/api/...` so `vite.config` proxy upgrades WebSockets
+ * to FastAPI. In production, if the API base is `http` on the same host as the
+ * page, assume a reverse proxy serves `/api` on the page origin and use `wss`
+ * there.
+ */
+export function getApiWebSocketUrl(pathWithQuery: string): string {
+  const base = getApiBaseUrl()
+  const path = pathWithQuery.startsWith('/') ? pathWithQuery : `/${pathWithQuery}`
+
+  if (typeof window !== 'undefined' && base.length === 0) {
+    const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+    return `${wsProtocol}//${window.location.host}${path}`
+  }
+
+  if (typeof window !== 'undefined' && import.meta.env.DEV) {
+    try {
+      const api = new URL(base)
+      if (apiBaseLooksLikeLocalDevBackend(api)) {
+        const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+        return `${wsProtocol}//${window.location.host}${path}`
+      }
+    } catch {
+      // fall through
+    }
+  }
+
+  if (typeof window !== 'undefined' && window.location.protocol === 'https:') {
+    try {
+      const api = new URL(base)
+      if (api.protocol === 'http:' && api.hostname === window.location.hostname) {
+        return `wss://${window.location.host}${path}`
+      }
+    } catch {
+      // fall through
+    }
+  }
+
+  if (base.startsWith('https://')) {
+    return `wss://${base.slice('https://'.length)}${path}`
+  }
+  return `ws://${base.slice('http://'.length)}${path}`
+}
+
+export type ContainerLogWebSocketOptions = {
+  tail?: number
+  follow?: boolean
+}
+
+/**
+ * Open an authenticated WebSocket for live container logs.
+ * Pass `access_token` query param (required for browser WebSocket auth).
+ */
+export function openContainerLogWebSocket(
+  containerId: string,
+  options: ContainerLogWebSocketOptions = {}
+): WebSocket {
+  const token = getAccessToken()
+  if (!token) {
+    throw new Error('Sign in to view logs.')
+  }
+  const tail =
+    options.tail != null
+      ? Math.min(Math.max(1, options.tail), MAX_CONTAINER_LOG_TAIL)
+      : 400
+  const params = new URLSearchParams({
+    access_token: token,
+    tail: String(tail),
+  })
+  if (options.follow === false) {
+    params.set('follow', 'false')
+  }
+  const path = `/api/containers/${encodeURIComponent(containerId)}/logs/stream?${params.toString()}`
+  return new WebSocket(getApiWebSocketUrl(path))
+}
+
+export interface ExecWebSocketHandle {
+  send: (data: string | Uint8Array) => void
+  dispose: () => void
+}
+
+export function openContainerExecWebSocket(
+  containerId: string,
+  onOpen: () => void,
+  onMessage: (data: Uint8Array) => void,
+  onClose: () => void,
+  onError: () => void,
+): ExecWebSocketHandle {
+  const token = getAccessToken()
+  if (!token) {
+    throw new Error('Sign in to open a terminal.')
+  }
+  const params = new URLSearchParams({ access_token: token })
+  const path = `/api/containers/${encodeURIComponent(containerId)}/exec/ws?${params.toString()}`
+  const ws = new WebSocket(getApiWebSocketUrl(path))
+  ws.binaryType = 'arraybuffer'
+
+  ws.onopen = () => onOpen()
+  ws.onmessage = (event) => {
+    const data =
+      typeof event.data === 'string'
+        ? new TextEncoder().encode(event.data)
+        : new Uint8Array(event.data)
+    onMessage(data)
+  }
+  ws.onclose = () => onClose()
+  ws.onerror = () => onError()
+
+  return {
+    send: (data) => {
+      if (ws.readyState === WebSocket.OPEN) ws.send(data)
+    },
+    dispose: () => ws.close(),
+  }
+}
+
+export async function fetchContainerLogs(
+  containerId: string,
+  options: { tail?: number } = {}
+): Promise<string> {
+  const tail =
+    options.tail != null
+      ? Math.min(Math.max(1, options.tail), MAX_CONTAINER_LOG_TAIL)
+      : 200
+  const query = new URLSearchParams({ tail: String(tail) })
+  const data = await apiGet<{ logs: string }>(
+    `/api/containers/${encodeURIComponent(containerId)}/logs?${query.toString()}`
+  )
+  return data.logs
+}
+
+export async function runContainerFromSource(
+  body: RunFromSourceRequest
+): Promise<RunFromSourceResponse> {
+  return apiPost<RunFromSourceResponse, RunFromSourceRequest>(
+    '/api/containers/run',
+    body
+  )
+}
+
+export async function uploadVolumeFolder(
+  files: File[]
+): Promise<VolumeUploadResponse> {
+  const formData = new FormData()
+  for (const file of files) {
+    const relativePath = file.webkitRelativePath || file.name
+    formData.append('files', file, relativePath)
+  }
+
+  const url = `${getApiBaseUrl()}/api/containers/volume-uploads`
+  const headers = new Headers()
+  headers.set('Accept', 'application/json')
+  const token = getAccessToken()
+  if (token) {
+    headers.set('Authorization', `Bearer ${token}`)
+  }
+
+  const response = await fetch(url, {
+    method: 'POST',
+    body: formData,
+    headers,
+  })
+
+  if (!response.ok) {
+    const body = await response.text()
+    if (response.status === 401) {
+      clearAccessToken()
+      notifyUnauthorized()
+    }
+    throw new ApiError(
+      `Request failed: ${response.status} ${response.statusText}`,
+      response.status,
+      body
+    )
+  }
+
+  const text = await response.text()
+  if (!text) {
+    throw new ApiError('Empty upload response', response.status, '')
+  }
+  return JSON.parse(text) as VolumeUploadResponse
+}
+
+export type AiPrefillPreferences = {
+  git_branch: boolean
+  container_port: boolean
+  container_name: boolean
+  env_vars: boolean
+  start_command: boolean
+}
+
+export type AiPrefillPreferencesUpdate = Partial<AiPrefillPreferences>
+
+export type GitSourceAnalysis = {
+  git_branch: string | null
+  container_port: number
+  container_name: string | null
+  env_vars: Record<string, string>
+  start_command: string[] | null
+  language: string | null
+  framework: string | null
+  has_dockerfile: boolean
+  build_strategy: 'dockerfile_exists' | 'generated_dockerfile'
+  summary_hint: string
+  build_subdir: string | null
+  needs_manual_build_config: boolean
+}
+
+export type DeploymentRecord = {
+  id: string
+  user_id: string
+  author_email: string
+  container_id: string
+  container_name: string | null
+  source_kind: RunSourceKind
+  source_ref: string
+  git_branch: string | null
+  image_tag: string
+  container_port: number
+  env_vars: Record<string, string>
+  command: string[] | null
+  dockerfile_snapshot: string | null
+  public_url: string | null
+  created_at: string
+  build_override?: BuildOverride | null
+}
+
+export type DeploymentEnvDiff = {
+  added: Record<string, string>
+  removed: Record<string, string>
+  changed: Record<string, { before: string; after: string }>
+}
+
+export type DeploymentDiffResponse = {
+  left_id: string
+  right_id: string
+  env: DeploymentEnvDiff
+  dockerfile_diff: string[]
+}
+
+export async function getAiPrefillPreferences(): Promise<AiPrefillPreferences> {
+  return apiGet<AiPrefillPreferences>('/api/settings/ai-prefill')
+}
+
+export async function patchAiPrefillPreferences(
+  patch: AiPrefillPreferencesUpdate
+): Promise<AiPrefillPreferences> {
+  return apiPatch<AiPrefillPreferences, AiPrefillPreferencesUpdate>(
+    '/api/settings/ai-prefill',
+    patch
+  )
+}
+
+export async function getGeminiConfigStatus(): Promise<{ configured: boolean }> {
+  return apiGet<{ configured: boolean }>('/api/settings/gemini-status')
+}
+
+// --- Email Notifications ---
+
+export type EmailNotificationPreferences = {
+  id: string | null
+  user_id: string
+  email: string
+  alerts_enabled: boolean
+  alert_types: Array<'stop' | 'failure' | 'unhealthy'>
+  alert_frequency: 'immediate' | 'daily_digest' | 'weekly_summary'
+  created_at: string
+  updated_at: string
+}
+
+export type EmailNotificationPreferencesUpdate = Partial<Omit<EmailNotificationPreferences, 'id' | 'user_id' | 'created_at' | 'updated_at'>>
+
+export type AlertHistoryEntry = {
+  id: string
+  container_id: string
+  event_type: string
+  sent_at: string
+  email_sent_to: string | null
+  status: 'sent' | 'failed'
+}
+
+export async function getEmailNotificationPreferences(): Promise<EmailNotificationPreferences> {
+  return apiGet<EmailNotificationPreferences>('/api/settings/email-notifications')
+}
+
+export async function updateEmailNotificationPreferences(
+  patch: EmailNotificationPreferencesUpdate
+): Promise<EmailNotificationPreferences> {
+  return apiPatch<EmailNotificationPreferences, EmailNotificationPreferencesUpdate>(
+    '/api/settings/email-notifications',
+    patch
+  )
+}
+
+export async function getAlertHistory(options: {
+  limit?: number
+  container_id?: string
+} = {}): Promise<AlertHistoryEntry[]> {
+  const params = new URLSearchParams()
+  if (options.limit != null) {
+    params.set('limit', String(options.limit))
+  }
+  if (options.container_id) {
+    params.set('container_id', options.container_id)
+  }
+  const query = params.toString()
+  return apiGet<AlertHistoryEntry[]>(
+    query ? `/api/settings/email-notifications/history?${query}` : '/api/settings/email-notifications/history'
+  )
+}
+
+// --- Team / projects ---
+
+export type Project = {
+  id: string
+  name: string
+  is_personal: boolean
+  role: ProjectRole
+  owner_email: string
+}
+
+export type ProjectMember = {
+  user_id: string
+  email: string
+  role: ProjectRole
+  created_at: string
+}
+
+export type ProjectInvitation = {
+  id: string
+  invitee_user_id: string
+  email: string
+  role: 'operator' | 'viewer'
+  created_at: string
+}
+
+export type IncomingProjectInvitation = {
+  id: string
+  project_id: string
+  project_name: string
+  inviter_email: string
+  role: 'operator' | 'viewer'
+  created_at: string
+}
+
+export async function listProjects(): Promise<Project[]> {
+  return apiGet<Project[]>('/api/projects/')
+}
+
+export async function createProject(name: string): Promise<Project> {
+  return apiPost<Project, { name: string }>('/api/projects/', { name })
+}
+
+export async function apiPostEmpty(path: string): Promise<void> {
+  const url = `${getApiBaseUrl()}${path.startsWith('/') ? path : `/${path}`}`
+  const headers = new Headers({ Accept: 'application/json', 'Content-Type': 'application/json' })
+  const token = getAccessToken()
+  if (token) {
+    headers.set('Authorization', `Bearer ${token}`)
+  }
+  const response = await fetch(url, { method: 'POST', headers, body: '{}' })
+  await readEmptyOk(response)
+}
+
+export async function leaveProject(projectId: string): Promise<void> {
+  await apiPostEmpty(
+    `/api/projects/${encodeURIComponent(projectId)}/leave`,
+  )
+}
+
+export async function listProjectMembers(projectId: string): Promise<ProjectMember[]> {
+  return apiGet<ProjectMember[]>(`/api/projects/${encodeURIComponent(projectId)}/members`)
+}
+
+export async function listProjectInvitations(projectId: string): Promise<ProjectInvitation[]> {
+  return apiGet<ProjectInvitation[]>(
+    `/api/projects/${encodeURIComponent(projectId)}/invitations`
+  )
+}
+
+export async function createProjectInvitation(
+  projectId: string,
+  body: { email: string; role: 'operator' | 'viewer' }
+): Promise<ProjectInvitation> {
+  return apiPost<ProjectInvitation, { email: string; role: 'operator' | 'viewer' }>(
+    `/api/projects/${encodeURIComponent(projectId)}/invitations`,
+    body
+  )
+}
+
+export async function cancelProjectInvitation(
+  projectId: string,
+  invitationId: string
+): Promise<void> {
+  await apiDelete(
+    `/api/projects/${encodeURIComponent(projectId)}/invitations/${encodeURIComponent(invitationId)}`
+  )
+}
+
+export async function listIncomingInvitations(): Promise<IncomingProjectInvitation[]> {
+  return apiGet<IncomingProjectInvitation[]>('/api/projects/invitations/incoming')
+}
+
+export async function acceptProjectInvitation(invitationId: string): Promise<Project> {
+  return apiPost<Project>(
+    `/api/projects/invitations/${encodeURIComponent(invitationId)}/accept`,
+    {}
+  )
+}
+
+export async function rejectProjectInvitation(invitationId: string): Promise<void> {
+  await apiPostEmpty(
+    `/api/projects/invitations/${encodeURIComponent(invitationId)}/reject`,
+  )
+}
+
+export async function updateProjectMemberRole(
+  projectId: string,
+  userId: string,
+  role: 'operator' | 'viewer'
+): Promise<ProjectMember> {
+  return apiPatch<ProjectMember, { role: 'operator' | 'viewer' }>(
+    `/api/projects/${encodeURIComponent(projectId)}/members/${encodeURIComponent(userId)}`,
+    { role }
+  )
+}
+
+export async function removeProjectMember(
+  projectId: string,
+  userId: string
+): Promise<void> {
+  await apiDelete(
+    `/api/projects/${encodeURIComponent(projectId)}/members/${encodeURIComponent(userId)}`
+  )
+}
+
+export function containerWriteAllowed(container: ContainerInfo): boolean {
+  return container.access_role === 'owner' || container.access_role === 'operator'
+}
+
+export async function analyzeGitSource(body: {
+  git_url: string
+  git_branch: string
+}): Promise<GitSourceAnalysis> {
+  return apiPost<GitSourceAnalysis, typeof body>(
+    '/api/builder/analyze-source',
+    body
+  )
+}
+
+export async function listDeployments(options: {
+  container_name?: string
+  limit?: number
+} = {}): Promise<DeploymentRecord[]> {
+  const params = new URLSearchParams()
+  if (options.container_name) {
+    params.set('container_name', options.container_name)
+  }
+  if (options.limit != null) {
+    params.set('limit', String(options.limit))
+  }
+  const query = params.toString()
+  return apiGet<DeploymentRecord[]>(
+    query ? `/api/deployments/?${query}` : '/api/deployments/'
+  )
+}
+
+export async function getDeploymentDiff(
+  leftId: string,
+  rightId: string
+): Promise<DeploymentDiffResponse> {
+  return apiGet<DeploymentDiffResponse>(
+    `/api/deployments/${encodeURIComponent(leftId)}/diff/${encodeURIComponent(rightId)}`
+  )
+}
+
+export async function startContainer(containerId: string): Promise<ContainerInfo> {
+  return apiPost<ContainerInfo>(`/api/containers/${encodeURIComponent(containerId)}/start`, {})
+}
+
+export async function stopContainer(containerId: string): Promise<ContainerInfo> {
+  return apiPost<ContainerInfo>(`/api/containers/${encodeURIComponent(containerId)}/stop`, {})
+}
+
+export async function removeContainer(
+  containerId: string,
+  force = false
+): Promise<void> {
+  const q = force ? '?force=true' : ''
+  await apiDelete(
+    `/api/containers/${encodeURIComponent(containerId)}${q}`
+  )
+}
+
+// --- Auth ---
+
+export interface UserPublic {
+  id: string
+  email: string
+  created_at: string
+  display_name: string | null
+  pronouns: string | null
+  avatar_url: string | null
+}
+
+export interface UserProfileUpdate {
+  display_name?: string | null
+  pronouns?: string | null
+}
+
+export interface TokenResponse {
+  access_token: string
+  token_type: 'bearer'
+  user: UserPublic
+}
+
+export interface RegisterRequest {
+  email: string
+  password: string
+}
+
+export interface LoginRequest {
+  email: string
+  password: string
+}
+
+export async function registerUser(
+  body: RegisterRequest
+): Promise<TokenResponse> {
+  return apiPost<TokenResponse, RegisterRequest>(
+    '/api/auth/register',
+    body,
+    { skipAuth: true }
+  )
+}
+
+export async function login(body: LoginRequest): Promise<TokenResponse> {
+  return apiPost<TokenResponse, LoginRequest>('/api/auth/login', body, {
+    skipAuth: true,
+  })
+}
+
+export async function clerkLogin(clerkToken: string): Promise<TokenResponse> {
+  return apiPost<TokenResponse, { clerk_token: string }>(
+    '/api/auth/clerk/exchange',
+    { clerk_token: clerkToken },
+    { skipAuth: true },
+  )
+}
+
+export async function getMe(): Promise<UserPublic> {
+  return apiGet<UserPublic>('/api/auth/me')
+}
+
+export async function updateProfile(body: UserProfileUpdate): Promise<UserPublic> {
+  return apiPatch<UserPublic, UserProfileUpdate>('/api/users/me', body)
+}
+
+export async function uploadAvatar(file: File): Promise<UserPublic> {
+  const formData = new FormData()
+  formData.append('file', file)
+  return apiUploadFile<UserPublic>('/api/users/me/avatar', formData)
+}
+
+export async function deleteAvatar(): Promise<UserPublic> {
+  return apiRequest<UserPublic>('/api/users/me/avatar', { method: 'DELETE' })
+}
+
+// --- GitHub OAuth ---
+
+export interface GithubStatus {
+  connected: boolean
+  login: string | null
+  avatar_url: string | null
+  scopes: string[]
+  connected_at: string | null
+}
+
+export interface GithubAuthorizeUrlResponse {
+  authorize_url: string
+}
+
+export interface GithubRepo {
+  full_name: string
+  default_branch: string
+  private: boolean
+  html_url: string
+  description: string | null
+}
+
+export interface GithubBranch {
+  name: string
+}
+
+export async function getGithubStatus(): Promise<GithubStatus> {
+  return apiGet<GithubStatus>('/api/auth/github/status')
+}
+
+const disconnectedGithubStatus: GithubStatus = {
+  connected: false,
+  login: null,
+  avatar_url: null,
+  scopes: [],
+  connected_at: null,
+}
+
+/** Same as getGithubStatus but tolerates a cold API or brief network failures (e.g. right after dev server start). */
+export async function getGithubStatusWithRetry(): Promise<GithubStatus> {
+  const backoffMs = [0, 400, 1200]
+  let lastError: unknown
+  for (const wait of backoffMs) {
+    if (wait > 0) {
+      await new Promise((resolve) => setTimeout(resolve, wait))
+    }
+    if (!getAccessToken()) {
+      return disconnectedGithubStatus
+    }
+    try {
+      return await getGithubStatus()
+    } catch (error) {
+      lastError = error
+    }
+  }
+  if (lastError !== undefined) {
+    throw lastError
+  }
+  return disconnectedGithubStatus
+}
+
+export async function getGithubAuthorizeUrl(): Promise<GithubAuthorizeUrlResponse> {
+  return apiGet<GithubAuthorizeUrlResponse>('/api/auth/github/start')
+}
+
+export async function disconnectGithub(): Promise<void> {
+  await apiDelete('/api/auth/github')
+}
+
+export interface ListGithubReposParams {
+  /** Server-side filter (GitHub search API). */
+  query?: string
+  page?: number
+  perPage?: number
+}
+
+export async function listGithubRepos(
+  params?: ListGithubReposParams
+): Promise<GithubRepo[]> {
+  const page = params?.page ?? 1
+  const perPage = Math.min(100, Math.max(1, params?.perPage ?? 30))
+  const searchParams = new URLSearchParams({
+    page: String(page),
+    per_page: String(perPage),
+  })
+  const trimmedQuery = params?.query?.trim()
+  if (trimmedQuery) {
+    searchParams.set('q', trimmedQuery)
+  }
+  return apiGet<GithubRepo[]>(`/api/github/repos?${searchParams.toString()}`)
+}
+
+// --- User library (saved image references) ---
+
+export interface SavedImage {
+  id: string
+  ref: string
+  created_at: string
+}
+
+export async function listSavedImages(): Promise<SavedImage[]> {
+  return apiGet<SavedImage[]>('/api/saved-images/')
+}
+
+export async function createSavedImage(ref: string): Promise<SavedImage> {
+  return apiPost<SavedImage, { ref: string }>('/api/saved-images/', { ref })
+}
+
+export async function updateSavedImage(
+  imageId: string,
+  ref: string
+): Promise<SavedImage> {
+  return apiPatch<SavedImage, { ref: string }>(
+    `/api/saved-images/${encodeURIComponent(imageId)}`,
+    { ref }
+  )
+}
+
+export async function deleteSavedImage(imageId: string): Promise<void> {
+  await apiDelete(`/api/saved-images/${encodeURIComponent(imageId)}`)
+}
+
+// --- User library (Dockerfile templates) ---
+
+export interface DockerfileTemplate {
+  id: string
+  name: string
+  contents: string
+  created_at: string
+  updated_at: string
+}
+
+/**
+ * Retrieves all Dockerfile templates in the user's library.
+ *
+ * @returns An array of `DockerfileTemplate` objects
+ */
+export async function listDockerfileTemplates(): Promise<DockerfileTemplate[]> {
+  return apiGet<DockerfileTemplate[]>('/api/dockerfiles/')
+}
+
+/**
+ * Create a new Dockerfile template.
+ *
+ * @param body - The template payload containing `name` and `contents`
+ * @returns The created `DockerfileTemplate`
+ */
+export async function createDockerfileTemplate(body: {
+  name: string
+  contents: string
+}): Promise<DockerfileTemplate> {
+  return apiPost<DockerfileTemplate, { name: string; contents: string }>(
+    '/api/dockerfiles/',
+    body
+  )
+}
+
+/**
+ * Update an existing Dockerfile template.
+ *
+ * @param templateId - The identifier of the Dockerfile template to update
+ * @param body - Partial template fields to change; may include `name` and/or `contents`
+ * @returns The updated DockerfileTemplate
+ */
+export async function updateDockerfileTemplate(
+  templateId: string,
+  body: { name?: string; contents?: string }
+): Promise<DockerfileTemplate> {
+  return apiPatch<DockerfileTemplate, { name?: string; contents?: string }>(
+    `/api/dockerfiles/${encodeURIComponent(templateId)}`,
+    body
+  )
+}
+
+/**
+ * Delete a Dockerfile template by its identifier.
+ *
+ * @param templateId - The ID of the Dockerfile template to remove
+ */
+export async function deleteDockerfileTemplate(templateId: string): Promise<void> {
+  await apiDelete(`/api/dockerfiles/${encodeURIComponent(templateId)}`)
+}
+
+/**
+ * Fetches the branches for a GitHub repository identified by its full name.
+ *
+ * @param fullName - The repository full name in the form `owner/repo`
+ * @returns The list of repository branches
+ * @throws Error when `fullName` is not in the `owner/repo` format
+ */
+export async function listGithubRepoBranches(
+  fullName: string
+): Promise<GithubBranch[]> {
+  const slashIndex = fullName.indexOf('/')
+  if (slashIndex <= 0 || slashIndex === fullName.length - 1) {
+    throw new Error(`Invalid repo full_name: ${fullName}`)
+  }
+  const owner = encodeURIComponent(fullName.slice(0, slashIndex))
+  const repo = encodeURIComponent(fullName.slice(slashIndex + 1))
+  return apiGet<GithubBranch[]>(`/api/github/repos/${owner}/${repo}/branches`)
+}
+
+// --- Log aggregation ---
+
+export type LogEntry = {
+  container_id: string
+  container_name: string | null
+  timestamp: string
+  source: 'stdout' | 'stderr'
+  level: 'info' | 'warn' | 'error' | 'debug'
+  message: string
+}
+
+export type LogQueryResponse = {
+  entries: LogEntry[]
+  total: number
+}
+
+export type LogQueryParams = {
+  container_id?: string
+  level?: string
+  source?: string
+  start_time?: string
+  end_time?: string
+  q?: string
+  limit?: number
+  offset?: number
+}
+
+export async function getLogs(
+  params: LogQueryParams = {}
+): Promise<LogQueryResponse> {
+  const searchParams = new URLSearchParams()
+  for (const [key, value] of Object.entries(params)) {
+    if (value !== undefined && value !== null) {
+      searchParams.set(key, String(value))
+    }
+  }
+  const query = searchParams.toString()
+  return apiGet<LogQueryResponse>(
+    query ? `/api/logs/?${query}` : '/api/logs/'
+  )
+}
+
+export async function exportLogs(params: Partial<LogQueryParams> = {}) {
+  const searchParams = new URLSearchParams()
+  for (const [key, value] of Object.entries(params)) {
+    if (value !== undefined && value !== null) {
+      searchParams.set(key, String(value))
+    }
+  }
+  const url = `${getApiBaseUrl()}/api/logs/export?${searchParams.toString()}`
+  const headers = new Headers({ Accept: 'text/csv' })
+  const token = getAccessToken()
+  if (token) {
+    headers.set('Authorization', `Bearer ${token}`)
+  }
+  const response = await fetch(url, { headers })
+  if (!response.ok) {
+    throw new ApiError(
+      `Export failed: ${response.status} ${response.statusText}`,
+      response.status,
+      await response.text()
+    )
+  }
+  const blob = await response.blob()
+  const link = document.createElement('a')
+  link.href = URL.createObjectURL(blob)
+  link.download = 'container-logs.csv'
+  link.click()
+  URL.revokeObjectURL(link.href)
+}
+
+// --- Audit log ---
+
+export type AuditLogEntry = {
+  id: string
+  user_id: string
+  action: string
+  target_type: string
+  target_id: string
+  details: Record<string, unknown> | null
+  created_at: string
+}
+
+export type AuditLogResponse = {
+  entries: AuditLogEntry[]
+  total: number
+}
+
+export type AuditLogQueryParams = {
+  action?: string
+  target_type?: string
+  from_date?: string
+  to_date?: string
+  limit?: number
+  offset?: number
+}
+
+export async function getAuditLog(
+  params: AuditLogQueryParams = {}
+): Promise<AuditLogResponse> {
+  const searchParams = new URLSearchParams()
+  for (const [key, value] of Object.entries(params)) {
+    if (value !== undefined && value !== null) {
+      searchParams.set(key, String(value))
+    }
+  }
+  const query = searchParams.toString()
+  return apiGet<AuditLogResponse>(
+    query ? `/api/audit/log?${query}` : '/api/audit/log'
+  )
+}
+// ---------------------------------------------------------------------------
+// Stacks
+// ---------------------------------------------------------------------------
+
+export interface StackService {
+  id: string
+  stack_id: string
+  service_name: string
+  source_kind: 'image' | 'git' | 'dockerfile_template'
+  source_ref: string
+  git_branch: string | null
+  container_port: number
+  env_vars: Record<string, string>
+  command: string[] | null
+  public_route: boolean
+  depends_on: string[] | null
+  volumes: VolumeMountRequest[]
+  scaling_policy: ScalingPolicyRequest | null
+  build_override?: BuildOverride | null
+}
+
+export interface Stack {
+  id: string
+  project_id: string
+  name: string
+  network_name: string
+  created_at: string
+  services: StackService[]
+  child_stack_ids: string[]
+}
+
+export interface StackServiceCreate {
+  service_name: string
+  source_kind: 'image' | 'git' | 'dockerfile_template'
+  source_ref: string
+  git_branch?: string | null
+  container_port?: number
+  env_vars?: Record<string, string>
+  command?: string[] | null
+  public_route?: boolean
+  depends_on?: string[] | null
+  volumes?: VolumeMountRequest[]
+  scaling_policy?: ScalingPolicyRequest | null
+  build_override?: BuildOverride | null
+}
+
+export async function listStacks(): Promise<Stack[]> {
+  return apiGet<Stack[]>('/api/stacks/')
+}
+
+export async function createStack(body: {
+  name: string
+  project_id?: string
+  services: StackServiceCreate[]
+  child_stack_ids?: string[]
+}): Promise<Stack> {
+  return apiPost<Stack>('/api/stacks/', body)
+}
+
+export async function updateStack(id: string, body: {
+  name: string
+  project_id?: string
+  services: StackServiceCreate[]
+  child_stack_ids?: string[]
+}): Promise<Stack> {
+  return apiPut<Stack>(`/api/stacks/${encodeURIComponent(id)}`, body)
+}
+
+export type ManifestKind = 'compose' | 'k8s'
+
+export type RepoManifestKind = 'compose' | 'k8s' | 'llm'
+
+export interface ManifestParseResult {
+  services: StackServiceCreate[]
+  warnings: string[]
+  manifest_kind: ManifestKind
+}
+
+export interface RepoAnalysisResult {
+  services: StackServiceCreate[]
+  warnings: string[]
+  manifest_kind: RepoManifestKind
+  manifest_path: string | null
+  summary_hint: string | null
+}
+
+export async function parseManifest(body: {
+  yaml_content: string
+}): Promise<ManifestParseResult> {
+  return apiPost<ManifestParseResult>('/api/stacks/parse-manifest', body)
+}
+
+export async function analyzeRepo(body: {
+  git_url: string
+  git_branch: string
+}): Promise<RepoAnalysisResult> {
+  return apiPost<RepoAnalysisResult>('/api/stacks/analyze-repo', body)
+}
+
+export async function getStack(id: string): Promise<Stack> {
+  return apiGet<Stack>(`/api/stacks/${encodeURIComponent(id)}`)
+}
+
+export async function deleteStack(id: string): Promise<void> {
+  await apiDelete(`/api/stacks/${encodeURIComponent(id)}`)
+}
+
+export async function deployStack(id: string): Promise<Record<string, unknown>> {
+  return apiPost<Record<string, unknown>>(`/api/stacks/${encodeURIComponent(id)}/deploy`, {})
 }

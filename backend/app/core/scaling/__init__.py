@@ -1,5 +1,1 @@
-def init():
-    from . import manager
-
-
-__all__ = ["manager"]
+"""Auto-scaling domain: policy persistence and scaling engine."""

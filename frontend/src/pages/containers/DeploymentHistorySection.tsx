@@ -175,7 +175,7 @@ export function DeploymentHistorySection({
           <p className="containers-muted">Loading deploy history…</p>
         ) : null}
         {error ? (
-          <p className="containers-form-message containers-form-message--err" role="alert">
+          <p className="containers-banner containers-banner--err" role="alert">
             {error}
           </p>
         ) : null}

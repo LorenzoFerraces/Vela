@@ -16,6 +16,10 @@ backend/.env
 # Playwright E2E SQLite (see frontend/playwright.config.ts)
 backend/e2e-playwright.db
 
+# LLM eval benchmark history
+backend/tests/llm_eval_history.jsonl
+backend/data/
+
 # Frontend
 node_modules/
 frontend/dist/
@@ -25,3 +29,5 @@ frontend/dist/
 playwright-report/
 test-results/
 blob-report/
+
+.gradle/

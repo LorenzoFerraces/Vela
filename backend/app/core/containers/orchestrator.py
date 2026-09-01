@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import uuid
 from abc import ABC, abstractmethod
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 
 from app.core.enums import ContainerStatus
 from app.core.models import ContainerInfo, ContainerStats, DeployConfig, HealthResult
@@ -68,8 +68,13 @@ class ContainerOrchestrator(ABC):
         """List managed containers, optionally filtered by status, owner, or project access."""
 
     @abstractmethod
-    async def logs(self, container_id: str, *, tail: int = 100) -> str:
-        """Return the most recent log lines for a container."""
+    async def logs(self, container_id: str, *, tail: int | None = 100, since: float | None = None) -> str:
+        """Return the most recent log lines for a container.
+
+        Args:
+            tail: Number of most recent lines to include; None for all lines.
+            since: Unix timestamp in seconds; only lines logged at or after it are returned.
+        """
 
     @abstractmethod
     async def stream_logs(
@@ -80,6 +85,25 @@ class ContainerOrchestrator(ABC):
         follow: bool = True,
     ) -> AsyncIterator[bytes]:
         """Yield log chunks from the runtime (blocking iterator wrapped for async consumption)."""
+
+    @abstractmethod
+    def stream_exec(
+        self,
+        container_id: str,
+        cols: int = 80,
+        rows: int = 24,
+    ) -> tuple[AsyncIterator[bytes], Callable[[bytes], None], Callable[[], None], str]:
+        """Open a PTY exec session inside a container.
+
+        Returns:
+            A tuple of (stdout_async_iterator, stdin_write_func, close_func, exec_id).
+            Consume the iterator for output, call stdin_write to send input,
+            call close to tear down the session. exec_id is used for resize.
+        """
+
+    @abstractmethod
+    def resize_exec(self, container_id: str, exec_id: str, cols: int, rows: int) -> None:
+        """Resize an active exec session."""
 
     # ------------------------------------------------------------------
     # Telemetry
@@ -124,3 +148,37 @@ class ContainerOrchestrator(ABC):
             RegistryAccessDeniedError: The registry returned 401/403 for the manifest lookup.
             ProviderConnectionError: The runtime or registry could not be reached.
         """
+
+    # ------------------------------------------------------------------
+    # Replica management (auto-scaling)
+    # ------------------------------------------------------------------
+
+    @abstractmethod
+    async def list_replicas(self, base_name: str) -> list[ContainerInfo]:
+        """Return all running replica containers for a base service name.
+
+        Replicas are identified by the ``vela.replica_of`` label matching ``base_name``.
+        """
+
+    @abstractmethod
+    async def deploy_replica(
+        self, base_config: DeployConfig, replica_index: int
+    ) -> ContainerInfo:
+        """Deploy a numbered replica of an existing service.
+
+        The replica name is ``{base_config.name}-r{replica_index}`` and the
+        ``vela.replica_of`` label is set to ``base_config.name`` so that
+        :meth:`list_replicas` can discover it.
+        """
+
+    # ------------------------------------------------------------------
+    # Network management (stacks)
+    # ------------------------------------------------------------------
+
+    @abstractmethod
+    async def create_network(self, name: str) -> None:
+        """Create a Docker network for stack services."""
+
+    @abstractmethod
+    async def remove_network(self, name: str) -> None:
+        """Remove a Docker network."""

@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
-from urllib.parse import urlencode
+from urllib.parse import quote, urlencode, urlparse
 
 import httpx
 
@@ -22,6 +22,7 @@ _API_BASE = "https://api.github.com"
 _DEFAULT_TIMEOUT = httpx.Timeout(15.0)
 _DEFAULT_SCOPES = "repo,read:user"
 _USER_AGENT = "vela-backend"
+_MAX_ACCESSIBLE_REPO_PAGES = 10
 
 
 @dataclass(frozen=True)
@@ -46,6 +47,18 @@ class GitHubRepo:
     private: bool
     html_url: str
     description: str | None
+
+
+@dataclass(frozen=True)
+class GitHubRepoRef:
+    owner: str
+    repo: str
+
+
+@dataclass(frozen=True)
+class RepoLookupOutcome:
+    repo: GitHubRepo | None = None
+    org_sso_authorize_url: str | None = None
 
 
 def load_config() -> GitHubOAuthConfig:
@@ -150,6 +163,225 @@ async def fetch_github_user(access_token: str) -> GitHubProfile:
     )
 
 
+def parse_github_repo_url(raw: str) -> GitHubRepoRef | None:
+    """
+    Extract ``owner`` and ``repo`` from common GitHub clone or browse URLs.
+
+    Supports HTTPS, SSH, and ``git@`` forms, including paths such as
+    ``/tree/branch`` or a trailing ``.git``.
+    """
+    stripped = raw.strip()
+    if not stripped:
+        return None
+
+    if stripped.startswith("git@"):
+        host, _, path = stripped.partition(":")
+        if not path or "github.com" not in host.removeprefix("git@"):
+            return None
+        return _github_repo_ref_from_path(path)
+
+    try:
+        parsed = urlparse(stripped)
+    except ValueError:
+        return None
+
+    host = (parsed.hostname or "").lower()
+    if host != "github.com" and not host.endswith(".github.com"):
+        return None
+    if parsed.scheme not in {"http", "https", "ssh"}:
+        return None
+    return _github_repo_ref_from_path(parsed.path)
+
+
+async def fetch_user_repo_if_accessible(
+    access_token: str,
+    *,
+    owner: str,
+    repo: str,
+) -> RepoLookupOutcome:
+    """
+    Return repository metadata when the authenticated user can access it.
+
+    When GitHub requires organization SSO authorization, the outcome includes
+  ``org_sso_authorize_url`` so the UI can link the user to approve access.
+    """
+    from app.e2e_support import e2e_github_repo_if_accessible
+
+    fixture_repo = e2e_github_repo_if_accessible(
+        access_token,
+        owner=owner,
+        repo=repo,
+    )
+    if fixture_repo is not None:
+        return RepoLookupOutcome(repo=fixture_repo)
+
+    headers = {
+        "Authorization": f"Bearer {access_token}",
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+        "User-Agent": _USER_AGENT,
+    }
+    async with httpx.AsyncClient(timeout=_DEFAULT_TIMEOUT, base_url=_API_BASE) as client:
+        try:
+            response = await client.get(
+                f"/repos/{quote(owner, safe='')}/{quote(repo, safe='')}",
+                headers=headers,
+            )
+        except httpx.HTTPError as exc:
+            raise GitHubAPIError("Could not reach GitHub.") from exc
+
+    if response.status_code == httpx.codes.FORBIDDEN:
+        return RepoLookupOutcome(
+            org_sso_authorize_url=_parse_github_sso_authorize_url(response),
+        )
+    if response.status_code == httpx.codes.NOT_FOUND:
+        return RepoLookupOutcome()
+    if response.status_code == httpx.codes.UNAUTHORIZED:
+        raise GitHubAPIError(
+            "GitHub rejected the stored access token. Reconnect your account in Settings."
+        )
+    if response.status_code >= 400:
+        raise GitHubAPIError(
+            f"GitHub API call failed (HTTP {response.status_code})."
+        )
+
+    payload = _decode_json(response)
+    if not isinstance(payload, dict):
+        raise GitHubAPIError("GitHub returned an unexpected response shape.")
+    return RepoLookupOutcome(repo=_parse_repo(payload))
+
+
+async def find_accessible_repo_by_name(
+    access_token: str,
+    *,
+    repo_name: str,
+    preferred_owners: list[str],
+) -> RepoLookupOutcome:
+    """Resolve a repository the user can access by exact repo name."""
+    normalized_repo = repo_name.strip().lower()
+    if not normalized_repo:
+        return RepoLookupOutcome()
+
+    owners_to_try: list[str] = []
+    seen_owners: set[str] = set()
+    org_sso_authorize_url: str | None = None
+
+    for owner in preferred_owners:
+        cleaned_owner = owner.strip()
+        if not cleaned_owner:
+            continue
+        lowered = cleaned_owner.lower()
+        if lowered in seen_owners:
+            continue
+        seen_owners.add(lowered)
+        owners_to_try.append(cleaned_owner)
+
+    try:
+        profile = await fetch_github_user(access_token)
+        if profile.login:
+            lowered = profile.login.lower()
+            if lowered not in seen_owners:
+                seen_owners.add(lowered)
+                owners_to_try.append(profile.login)
+    except GitHubAPIError:
+        pass
+
+    for owner in owners_to_try:
+        outcome = await fetch_user_repo_if_accessible(
+            access_token,
+            owner=owner,
+            repo=repo_name,
+        )
+        if outcome.org_sso_authorize_url and org_sso_authorize_url is None:
+            org_sso_authorize_url = outcome.org_sso_authorize_url
+        if outcome.repo is not None:
+            return outcome
+
+    for owner in owners_to_try:
+        repo = await _search_repo_for_owner(
+            access_token,
+            owner=owner,
+            repo_name=repo_name,
+        )
+        if repo is not None:
+            return RepoLookupOutcome(repo=repo)
+
+    accessible_repos = await _list_all_accessible_user_repos(access_token)
+    matches = [
+        row
+        for row in accessible_repos
+        if row.full_name
+        and row.full_name.rsplit("/", maxsplit=1)[-1].lower() == normalized_repo
+    ]
+    if matches:
+        for owner in owners_to_try:
+            lowered_owner = owner.lower()
+            for row in matches:
+                owner_name, _, name = row.full_name.partition("/")
+                if (
+                    owner_name.lower() == lowered_owner
+                    and name.lower() == normalized_repo
+                ):
+                    return RepoLookupOutcome(repo=row)
+        return RepoLookupOutcome(repo=matches[0])
+
+    return RepoLookupOutcome(org_sso_authorize_url=org_sso_authorize_url)
+
+
+async def _search_repo_for_owner(
+    access_token: str,
+    *,
+    owner: str,
+    repo_name: str,
+) -> GitHubRepo | None:
+    search_term = repo_name
+    if " " not in search_term and "/" not in search_term:
+        search_term = f'"{search_term}"'
+    normalized_repo = repo_name.strip().lower()
+    for qualifier in ("user", "org"):
+        search_q = f"{qualifier}:{owner} {search_term} in:name"
+        try:
+            payload = await _api_get(
+                access_token,
+                "/search/repositories",
+                params={"q": search_q, "per_page": 10, "page": 1, "sort": "updated"},
+            )
+        except GitHubAPIError:
+            continue
+        items = payload.get("items") if isinstance(payload, dict) else None
+        raw_list = items if isinstance(items, list) else []
+        for item in raw_list:
+            if not isinstance(item, dict):
+                continue
+            repo = _parse_repo(item)
+            if (
+                repo.full_name
+                and repo.full_name.rsplit("/", maxsplit=1)[-1].lower() == normalized_repo
+            ):
+                return repo
+    return None
+
+
+async def _list_all_accessible_user_repos(access_token: str) -> list[GitHubRepo]:
+    all_repos: list[GitHubRepo] = []
+    for page in range(1, _MAX_ACCESSIBLE_REPO_PAGES + 1):
+        try:
+            batch = await list_user_repos(
+                access_token,
+                query=None,
+                page=page,
+                per_page=100,
+            )
+        except GitHubAPIError:
+            break
+        if not batch:
+            break
+        all_repos.extend(batch)
+        if len(batch) < 100:
+            break
+    return all_repos
+
+
 async def list_user_repos(
     access_token: str,
     *,
@@ -187,7 +419,10 @@ async def list_user_repos(
         return fixture_repos
 
     if cleaned_query:
-        search_q = f"{cleaned_query} in:name user:@me fork:true"
+        search_term = cleaned_query
+        if " " not in search_term and "/" not in search_term:
+            search_term = f'"{search_term}"'
+        search_q = f"{search_term} in:name user:@me fork:true"
         payload = await _api_get(
             access_token,
             "/search/repositories",
@@ -204,6 +439,7 @@ async def list_user_repos(
                 "per_page": per_page,
                 "page": page,
                 "affiliation": "owner,collaborator,organization_member",
+                "type": "all",
             },
         )
         raw_list = payload if isinstance(payload, list) else []
@@ -290,6 +526,27 @@ async def _api_get(
             f"GitHub API call failed (HTTP {response.status_code})."
         )
     return _decode_json(response)
+
+
+def _parse_github_sso_authorize_url(response: httpx.Response) -> str | None:
+    header = response.headers.get("X-GitHub-SSO", "")
+    lowered = header.lower()
+    marker = "url="
+    if marker not in lowered:
+        return None
+    start = lowered.index(marker) + len(marker)
+    url = header[start:].strip().strip('"')
+    return url or None
+
+
+def _github_repo_ref_from_path(path: str) -> GitHubRepoRef | None:
+    cleaned = path.strip().strip("/")
+    if cleaned.endswith(".git"):
+        cleaned = cleaned[:-4]
+    parts = [segment for segment in cleaned.split("/") if segment]
+    if len(parts) < 2:
+        return None
+    return GitHubRepoRef(owner=parts[0], repo=parts[1])
 
 
 def _parse_repo(item: dict[str, object]) -> GitHubRepo:

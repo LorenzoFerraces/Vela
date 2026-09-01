@@ -1,0 +1,330 @@
+COMMITS:
+b9f693e docs: record Task 4 commit hash in report
+f19b422 feat: honor build override and subdir in image builds
+STAT:
+ backend/app/core/build/builder.py                  |   5 +-
+ backend/app/core/build/default_image_builder.py    |  18 ++-
+ backend/app/core/containers/fake_orchestrator.py   |   7 +-
+ backend/app/core/stacks/deploy.py                  |  21 ++-
+ .../tests/test_default_image_builder_override.py   | 146 +++++++++++++++++++++
+ docs/superpowers/plans/reports/task-4-report.md    |  64 +++++++++
+ 6 files changed, 252 insertions(+), 9 deletions(-)
+DIFF:
+diff --git a/backend/app/core/build/builder.py b/backend/app/core/build/builder.py
+index cc4616f..0d448de 100644
+--- a/backend/app/core/build/builder.py
++++ b/backend/app/core/build/builder.py
+@@ -1,8 +1,8 @@
+ from abc import ABC, abstractmethod
+ 
+-from app.core.models import BuildResult, ProjectInfo, ProjectSource
++from app.core.models import BuildOverride, BuildResult, ProjectInfo, ProjectSource
+ 
+ 
+ class ImageBuilder(ABC):
+     """Provider-agnostic interface for turning source code into container images.
+ 
+@@ -18,10 +18,11 @@ class ImageBuilder(ABC):
+         self,
+         source: ProjectSource,
+         *,
+         tag: str,
+         access_token: str | None = None,
++        override: BuildOverride | None = None,
+     ) -> BuildResult:
+         """Full pipeline: clone ÔåÆ analyse ÔåÆ generate/detect Dockerfile ÔåÆ build.
+ 
+         This is the single method most consumers should call.  Concrete
+         implementations decide whether to use an existing Dockerfile,
+@@ -30,10 +31,12 @@ class ImageBuilder(ABC):
+         Args:
+             source: Git URL or local path to the project.
+             tag:    Image tag to assign to the built image.
+             access_token: Optional credential forwarded to the git clone for
+                 private HTTPS repos. Never stored alongside ``source``.
++            override: Optional client-supplied build settings when detection
++                fails or the user pins language / ``build_subdir``.
+ 
+         Returns:
+             A ``BuildResult`` with the image ID, tag, strategy used, and
+             build log.
+         """
+diff --git a/backend/app/core/build/default_image_builder.py b/backend/app/core/build/default_image_builder.py
+index c1bbd1a..9e9e565 100644
+--- a/backend/app/core/build/default_image_builder.py
++++ b/backend/app/core/build/default_image_builder.py
+@@ -8,11 +8,11 @@ from pathlib import Path
+ 
+ from app.core.build.builder import ImageBuilder
+ from app.core.enums import BuildStrategy
+ from app.core.exceptions import AnalysisError
+ from app.core.git.git_ops import git_shallow_clone, rm_tree
+-from app.core.models import BuildResult, ProjectInfo, ProjectSource
++from app.core.models import BuildOverride, BuildResult, ProjectInfo, ProjectSource
+ from app.core.containers.orchestrator import ContainerOrchestrator
+ from app.core.git.project_analysis import (
+     analyze_project,
+     dockerfile_contents_for,
+     ensure_dockerfile_for_build,
+@@ -78,18 +78,20 @@ class DefaultImageBuilder(ImageBuilder):
+         self,
+         source: ProjectSource,
+         *,
+         tag: str,
+         access_token: str | None = None,
++        override: BuildOverride | None = None,
+     ) -> BuildResult:
+         """
+         Builds a container image from the given project source (either a Git repository or a local directory) and returns metadata about the completed build.
+         
+         Parameters:
+             source (ProjectSource): Source describing either a Git repository (git_url, optional branch) or a local filesystem path (local_path).
+             tag (str): Image tag to apply to the built image.
+             access_token (str | None): Optional access token used when cloning private Git repositories.
++            override (BuildOverride | None): Optional manual language / subdir settings.
+         
+         Returns:
+             BuildResult: Contains the built image identifier and tag, the selected build strategy, an (empty) build log, and the analyzed ProjectInfo for the build context.
+         
+         Raises:
+@@ -110,20 +112,28 @@ class DefaultImageBuilder(ImageBuilder):
+         else:
+             raise AnalysisError("", "ProjectSource requires git_url or local_path")
+ 
+         try:
+             strategy, info = ensure_dockerfile_for_build(
+-                Path(project_path), from_git_clone=source.git_url is not None
++                Path(project_path),
++                from_git_clone=source.git_url is not None,
++                override=override,
+             )
+-            dockerfile_path = Path(project_path) / "Dockerfile"
++            build_root = Path(project_path)
++            if info.build_subdir:
++                candidate = (build_root / info.build_subdir).resolve()
++                if not candidate.is_relative_to(build_root.resolve()):
++                    raise AnalysisError(str(build_root), "invalid build_subdir")
++                build_root = candidate
++            dockerfile_path = build_root / "Dockerfile"
+             dockerfile_snapshot = (
+                 dockerfile_path.read_text(encoding="utf-8")
+                 if dockerfile_path.is_file()
+                 else None
+             )
+             image_id = await self._orchestrator.build_image(
+-                project_path, tag=tag, dockerfile="Dockerfile"
++                str(build_root), tag=tag, dockerfile="Dockerfile"
+             )
+             return BuildResult(
+                 image_id=image_id,
+                 image_tag=tag,
+                 strategy=strategy,
+diff --git a/backend/app/core/stacks/deploy.py b/backend/app/core/stacks/deploy.py
+index 8313292..89f2617 100644
+--- a/backend/app/core/stacks/deploy.py
++++ b/backend/app/core/stacks/deploy.py
+@@ -16,15 +16,29 @@ from app.core.containers.docker_orchestrator import (
+ )
+ from app.core.containers.orchestrator import ContainerOrchestrator
+ from app.core.containers.volume_uploads import resolve_volume_upload_path
+ from app.core.enums import RestartPolicy
+ from app.core.exceptions import CloneError
+-from app.core.models import ContainerInfo, DeployConfig, ProjectSource, VolumeMount
++from app.core.models import (
++    BuildOverride,
++    ContainerInfo,
++    DeployConfig,
++    ProjectSource,
++    VolumeMount,
++)
+ from app.core.traffic.traffic_router import TrafficRouter
+ from app.db.models import DeploymentRecord, Stack, StackService, User
+ 
+ 
++def _build_override_from_service(service: StackService) -> BuildOverride | None:
++    """Parse persisted JSON ``build_override`` into a ``BuildOverride`` when present."""
++    raw = getattr(service, "build_override", None)
++    if not raw:
++        return None
++    return BuildOverride.model_validate(raw)
++
++
+ async def deploy_stack(
+     session: AsyncSession,
+     orchestrator: ContainerOrchestrator,
+     traffic_router: TrafficRouter,
+     image_builder: DefaultImageBuilder,
+@@ -163,17 +177,20 @@ async def _resolve_service_image(
+                 _is_github_https_url,
+                 _looks_like_auth_failure,
+             )
+ 
+             git_url = service.source_ref.strip()
++            branch = (service.git_branch or "main").strip() or "main"
+             access_token = await _github_token_for_url(session, user, git_url)
+             tag = f"vela/gitbuild:{uuid.uuid4().hex[:12]}"
++            override = _build_override_from_service(service)
+             try:
+                 build_result = await image_builder.build_from_source(
+-                    ProjectSource(git_url=git_url, branch="main"),
++                    ProjectSource(git_url=git_url, branch=branch),
+                     tag=tag,
+                     access_token=access_token,
++                    override=override,
+                 )
+             except CloneError as exc:
+                 if (
+                     access_token is None
+                     and _is_github_https_url(git_url)
+diff --git a/backend/tests/test_default_image_builder_override.py b/backend/tests/test_default_image_builder_override.py
+new file mode 100644
+index 0000000..450c08a
+--- /dev/null
++++ b/backend/tests/test_default_image_builder_override.py
+@@ -0,0 +1,146 @@
++"""DefaultImageBuilder must honor build_subdir and BuildOverride."""
++
++from __future__ import annotations
++
++from pathlib import Path
++from types import SimpleNamespace
++from unittest.mock import AsyncMock, MagicMock
++
++import pytest
++
++from app.core.build.default_image_builder import DefaultImageBuilder
++from app.core.containers.fake_orchestrator import FakeContainerOrchestrator
++from app.core.enums import BuildStrategy, SupportedLanguage
++from app.core.exceptions import AnalysisError
++from app.core.models import BuildOverride, BuildResult, ProjectInfo, ProjectSource
++from app.core.stacks import deploy as stack_deploy
++
++
++class RecordingOrchestrator(FakeContainerOrchestrator):
++    def __init__(self) -> None:
++        super().__init__()
++        self.build_paths: list[str] = []
++
++    async def build_image(
++        self, path: str, *, tag: str, dockerfile: str = "Dockerfile"
++    ) -> str:
++        self.build_paths.append(path)
++        return await super().build_image(path, tag=tag, dockerfile=dockerfile)
++
++
++@pytest.mark.asyncio
++async def test_nested_marker_builds_from_subdir(tmp_path: Path) -> None:
++    backend = tmp_path / "backend"
++    backend.mkdir()
++    (backend / "requirements.txt").write_text("flask\n", encoding="utf-8")
++
++    orchestrator = RecordingOrchestrator()
++    builder = DefaultImageBuilder(orchestrator=orchestrator)
++
++    result = await builder.build_from_source(
++        ProjectSource(local_path=str(tmp_path)),
++        tag="test:nested",
++    )
++
++    assert result.project_info.build_subdir == "backend"
++    assert len(orchestrator.build_paths) == 1
++    assert Path(orchestrator.build_paths[0]).resolve() == backend.resolve()
++    assert (backend / "Dockerfile").is_file()
++
++
++@pytest.mark.asyncio
++async def test_override_build_subdir_used_as_context(tmp_path: Path) -> None:
++    apps = tmp_path / "apps" / "api"
++    apps.mkdir(parents=True)
++    (apps / "requirements.txt").write_text("flask\n", encoding="utf-8")
++
++    orchestrator = RecordingOrchestrator()
++    builder = DefaultImageBuilder(orchestrator=orchestrator)
++
++    await builder.build_from_source(
++        ProjectSource(local_path=str(tmp_path)),
++        tag="test:override-subdir",
++        override=BuildOverride(
++            language=SupportedLanguage.PYTHON,
++            build_subdir="apps/api",
++        ),
++    )
++
++    assert Path(orchestrator.build_paths[0]).resolve() == apps.resolve()
++
++
++@pytest.mark.asyncio
++async def test_invalid_build_subdir_rejected(tmp_path: Path) -> None:
++    (tmp_path / "requirements.txt").write_text("flask\n", encoding="utf-8")
++    builder = DefaultImageBuilder(orchestrator=FakeContainerOrchestrator())
++
++    with pytest.raises(AnalysisError, match="build_subdir"):
++        await builder.build_from_source(
++            ProjectSource(local_path=str(tmp_path)),
++            tag="test:bad-subdir",
++            override=BuildOverride(
++                language=SupportedLanguage.PYTHON,
++                build_subdir="../outside",
++            ),
++        )
++
++
++@pytest.mark.asyncio
++async def test_resolve_service_image_passes_build_override(
++    monkeypatch: pytest.MonkeyPatch,
++) -> None:
++    captured: dict[str, object] = {}
++
++    async def fake_build_from_source(
++        source: ProjectSource,
++        *,
++        tag: str,
++        access_token: str | None = None,
++        override: BuildOverride | None = None,
++    ) -> BuildResult:
++        captured["override"] = override
++        captured["source"] = source
++        captured["access_token"] = access_token
++        return BuildResult(
++            image_id="sha256:fake",
++            image_tag=tag,
++            strategy=BuildStrategy.GENERATED_DOCKERFILE,
++            build_log="",
++            project_info=ProjectInfo(language=SupportedLanguage.PYTHON),
++        )
++
++    async def fake_github_token(_session: object, _user: object, _url: str) -> None:
++        return None
++
++    monkeypatch.setattr(
++        "app.api.routes.containers._github_token_for_url",
++        fake_github_token,
++    )
++
++    builder = MagicMock()
++    builder.build_from_source = AsyncMock(side_effect=fake_build_from_source)
++    session = AsyncMock()
++    user = SimpleNamespace(id="user-1")
++    service = SimpleNamespace(
++        source_kind="git",
++        source_ref="https://github.com/example/repo.git",
++        git_branch="develop",
++        build_override={
++            "language": "python",
++            "build_subdir": "backend",
++            "language_version": "3.12",
++        },
++    )
++
++    tag = await stack_deploy._resolve_service_image(session, user, builder, service)
++
++    assert tag.startswith("vela/gitbuild:")
++    override = captured["override"]
++    assert isinstance(override, BuildOverride)
++    assert override.language is SupportedLanguage.PYTHON
++    assert override.build_subdir == "backend"
++    assert override.language_version == "3.12"
++    source = captured["source"]
++    assert isinstance(source, ProjectSource)
++    assert source.git_url == "https://github.com/example/repo.git"
++    assert source.branch == "develop"

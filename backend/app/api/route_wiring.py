@@ -6,7 +6,7 @@ import logging
 
 from app.core.exceptions import RouteNotFoundError
 from app.core.models import ContainerInfo, DeployConfig
-from app.core.traffic.traffic_models import RouteSpec
+from app.core.traffic.traffic_models import BackendServer, RouteSpec
 from app.core.traffic.traffic_router import TrafficRouter
 
 logger = logging.getLogger(__name__)
@@ -27,19 +27,25 @@ async def register_route_for_deployed_container(
     path_prefix: str,
     backend_port: int,
     tls_enabled: bool,
+    extra_backend_servers: list[BackendServer] | None = None,
 ) -> None:
-    """Publish a ``RouteSpec`` using the container name as ``route_id`` and backend DNS name."""
+    """Publish a ``RouteSpec`` using the container name as ``route_id`` and backend DNS name.
+
+    ``extra_backend_servers`` allows the scaling engine to register additional replica
+    backends alongside the primary container in a single call.
+    """
     trimmed_host = route_host.strip()
     if not trimmed_host:
         return
+    primary = BackendServer(host=container_info.name, port=backend_port)
+    backend_servers = [primary] + (extra_backend_servers or [])
     # TLS routes get two Traefik routers (``web`` + ``websecure``) so HTTP and HTTPS both match.
     entrypoints = ["web", "websecure"] if tls_enabled else ["web"]
     spec = RouteSpec(
         route_id=container_info.name,
         host=trimmed_host,
         path_prefix=path_prefix,
-        backend_host=container_info.name,
-        backend_port=backend_port,
+        backend_servers=backend_servers,
         tls_enabled=tls_enabled,
         entrypoints=entrypoints,
     )

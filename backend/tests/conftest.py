@@ -17,6 +17,11 @@ os.environ.setdefault(
 os.environ.setdefault("VELA_AUTH_SECRET", "test-secret-please-do-not-use-in-prod")
 os.environ.setdefault("VELA_AUTH_ACCESS_TOKEN_TTL_MINUTES", "60")
 os.environ.setdefault("VELA_FAKE_ORCHESTRATOR", "1")
+# Keep the background collector out of unit tests (it would hit a separate engine).
+os.environ.setdefault("VELA_LOG_COLLECTOR_ENABLED", "0")
+# Force default so a developer .env cannot change module-level monitor constants.
+os.environ["VELA_CONTAINER_MONITOR_INTERVAL_SECONDS"] = "15"
+os.environ.setdefault("VELA_OBJECT_STORAGE", "memory")
 
 import uuid
 from collections.abc import AsyncIterator, Iterator
@@ -59,6 +64,8 @@ from app.db.models import User
 os.environ.setdefault("VELA_AUTH_SECRET", "test-secret-please-do-not-use-in-prod")
 os.environ.setdefault("VELA_AUTH_ACCESS_TOKEN_TTL_MINUTES", "60")
 os.environ.setdefault("VELA_OBJECT_STORAGE", "memory")
+# ``engine.load_dotenv(override=True)`` may clobber the early set above.
+os.environ["VELA_CONTAINER_MONITOR_INTERVAL_SECONDS"] = "15"
 
 
 def make_container_info(
@@ -231,9 +238,12 @@ def _build_app_with_overrides(
 ) -> Any:
     app = create_app()
 
+    # Use a single persistent session so data survives across requests
+    # (needed because :memory: SQLite loses data when connections close)
+    persistent_session = db_session_factory()
+
     async def _get_db_override() -> AsyncIterator[AsyncSession]:
-        async with db_session_factory() as session:
-            yield session
+        yield persistent_session
 
     app.dependency_overrides[get_db] = _get_db_override
     if orchestrator is not None:
