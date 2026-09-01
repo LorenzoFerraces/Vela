@@ -7,7 +7,7 @@ SOCKET=/var/run/docker.sock
 APP_USER=vela
 
 if [ "$(id -u)" -eq 0 ]; then
-    if [ -S "$SOCKET" ] && [ "$(stat -c %G "$SOCKET")" = "0" ]; then
+    if [ -S "$SOCKET" ] && [ "$(stat -c %g "$SOCKET")" = "0" ]; then
         # Docker Desktop (Windows) exposes the host socket as root:root, which
         # the vela user cannot open. Sockets owned by a real `docker` group
         # are left as-is (match its GID via DOCKER_GROUP_ID at build time).

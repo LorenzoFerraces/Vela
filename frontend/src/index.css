@@ -28,7 +28,7 @@
   --debug-soft: color-mix(in srgb, var(--debug) 12%, transparent);
   --border-subtle: color-mix(in srgb, var(--border) 65%, transparent);
   --wash: color-mix(in srgb, var(--text) 6%, transparent);
-  --font: 'JetBrains Mono', ui-monospace, 'Cascadia Code', Menlo, Consolas, monospace;
+  --font: 'JetBrains Mono', ui-monospace, 'Cascadia Code', 'Menlo', 'Consolas', monospace;
   --font-display: 'Archivo Black', 'Arial Black', sans-serif;
   --radius: 0;
   --nav-height: 56px;
@@ -1867,6 +1867,19 @@ input[type="checkbox"]:disabled {
   width: 100%;
 }
 
+.containers-volume-row__target {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+}
+
+.containers-volume-row__target-label {
+  flex: 0 0 auto;
+  margin-bottom: 0;
+  white-space: nowrap;
+}
+
 .containers-volume-row__meta {
   flex: 1 1 8rem;
   min-width: 0;
@@ -2584,6 +2597,7 @@ input[type="checkbox"]:disabled {
 }
 
 .stacks-builder__list-item {
+  width: 100%;
   font-family: inherit;
   text-align: left;
   padding: 0.625rem 0.75rem;

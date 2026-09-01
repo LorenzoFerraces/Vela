@@ -32,13 +32,13 @@ def parse_k8s(yaml_content: str) -> tuple[list[StackService], list[str]]:
     config_maps: dict[str, dict[str, str]] = {}
     ingress_backend_names: set[str] = set()
     service_kind_names: list[str] = []
-    workloads: list[tuple[StackService, list[str]]] = []
+    workloads: list[tuple[StackService, list[str], list[tuple[str, str, str]]]] = []
 
     for document in documents:
         kind = document.get("kind")
         if kind in SUPPORTED_WORKLOAD_KINDS:
-            service, config_map_refs = _parse_workload(document, warnings)
-            workloads.append((service, config_map_refs))
+            service, config_map_refs, config_map_key_refs = _parse_workload(document, warnings)
+            workloads.append((service, config_map_refs, config_map_key_refs))
         elif kind == "ConfigMap":
             name = _doc_name(document)
             data = document.get("data")
@@ -62,7 +62,7 @@ def parse_k8s(yaml_content: str) -> tuple[list[StackService], list[str]]:
                 "skipped — add volumes manually."
             )
 
-    for service, config_map_refs in workloads:
+    for service, config_map_refs, config_map_key_refs in workloads:
         for config_map_name in config_map_refs:
             if config_map_name in config_maps:
                 service.env_vars = {**config_maps[config_map_name], **service.env_vars}
@@ -71,10 +71,20 @@ def parse_k8s(yaml_content: str) -> tuple[list[StackService], list[str]]:
                     f"Service '{service.service_name}': ConfigMap "
                     f"'{config_map_name}' not found in the manifest."
                 )
+        for env_key, config_map_name, config_map_key in config_map_key_refs:
+            resolved = config_maps.get(config_map_name, {}).get(config_map_key)
+            if resolved is not None:
+                service.env_vars[env_key] = resolved
+            else:
+                warnings.append(
+                    f"Service '{service.service_name}': env '{env_key}' "
+                    f"configMapKeyRef key '{config_map_key}' not found in "
+                    f"ConfigMap '{config_map_name}'."
+                )
         if service.service_name in ingress_backend_names:
             service.public_route = True
 
-    workload_names = {service.service_name for service, _ in workloads}
+    workload_names = {service.service_name for service, _, _ in workloads}
     for orphan_name in service_kind_names:
         if orphan_name not in workload_names:
             warnings.append(
@@ -82,7 +92,7 @@ def parse_k8s(yaml_content: str) -> tuple[list[StackService], list[str]]:
                 "Deployment/StatefulSet and was ignored."
             )
 
-    services = _deduplicate_names([service for service, _ in workloads])
+    services = _deduplicate_names([service for service, _, _ in workloads])
     return services, warnings
 
 
@@ -111,11 +121,17 @@ def _doc_name(document: dict) -> str:
 def _parse_workload(
     document: dict,
     warnings: list[str],
-) -> tuple[StackService, list[str]]:
+) -> tuple[StackService, list[str], list[tuple[str, str, str]]]:
     raw_name = _doc_name(document)
     name = sanitize_container_name(raw_name) or "service"
 
-    spec = document.get("spec") or {}
+    spec = document.get("spec")
+    if not isinstance(spec, dict):
+        warnings.append(
+            f"Workload '{raw_name}': 'spec' is not a mapping; "
+            "container details were ignored."
+        )
+        spec = {}
     template_spec = (spec.get("template") or {}).get("spec") or {}
     containers = template_spec.get("containers") or []
     container = containers[0] if containers else {}
@@ -136,11 +152,34 @@ def _parse_workload(
             pass
 
     env_vars: dict[str, str] = {}
+    config_map_key_refs: list[tuple[str, str, str]] = []
     for entry in container.get("env") or []:
         if not isinstance(entry, dict):
             continue
         key = str(entry.get("name") or "").strip()
         if not key:
+            continue
+        value_from = entry.get("valueFrom")
+        if isinstance(value_from, dict):
+            config_map_key_ref = value_from.get("configMapKeyRef")
+            if isinstance(config_map_key_ref, dict):
+                config_map_name = str(config_map_key_ref.get("name") or "")
+                config_map_key = str(config_map_key_ref.get("key") or "")
+                if config_map_name and config_map_key:
+                    config_map_key_refs.append((key, config_map_name, config_map_key))
+                else:
+                    warnings.append(
+                        f"Service '{name}': env '{key}' configMapKeyRef "
+                        "is missing a name or key; skipped."
+                    )
+                continue
+            secret_key_ref = value_from.get("secretKeyRef")
+            if isinstance(secret_key_ref, dict):
+                warnings.append(
+                    f"Service '{name}': secretKeyRef "
+                    f"'{secret_key_ref.get('name') or 'unnamed'}' skipped — "
+                    "secrets cannot be imported. Add the env var manually."
+                )
             continue
         value = entry.get("value")
         env_vars[key] = "" if value is None else str(value)
@@ -186,7 +225,7 @@ def _parse_workload(
         public_route=False,
         depends_on=None,
     )
-    return service, config_map_refs
+    return service, config_map_refs, config_map_key_refs
 
 
 def _ingress_backend_service_names(document: dict) -> set[str]:

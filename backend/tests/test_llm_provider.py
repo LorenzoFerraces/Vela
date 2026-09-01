@@ -52,7 +52,7 @@ def test_gemini_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
     assert config.provider == "gemini"
     assert config.params == {"key": "gemini-key"}
     assert config.headers == {}
-    assert "gemini-2.0-flash:generateContent" in config.url
+    assert "gemini-3.5-flash:generateContent" in config.url
 
 
 def test_incomplete_vertex_config_falls_back_to_gemini(
@@ -65,5 +65,5 @@ def test_incomplete_vertex_config_falls_back_to_gemini(
     assert config.provider == "gemini"
 
 
-def test_no_provider(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_no_provider() -> None:
     assert resolve_llm_config() is None

@@ -72,9 +72,11 @@ test.describe('navbar (authenticated)', () => {
     await authenticatedPage
       .getByRole('button', { name: USER_MENU_TRIGGER })
       .click()
-    const menu = authenticatedPage.getByRole('menu', { name: 'Account' })
-    await expect(menu).toBeVisible()
-    await menu.getByRole('menuitem', { name: 'Settings' }).click()
+    const settingsItem = authenticatedPage.getByRole('button', {
+      name: 'Settings',
+    })
+    await expect(settingsItem).toBeVisible()
+    await settingsItem.click()
     await expect(authenticatedPage).toHaveURL(`${baseURL}/settings`)
     await expect(
       authenticatedPage.getByRole('heading', { name: 'Settings', level: 1 }),
@@ -87,7 +89,7 @@ test.describe('navbar (authenticated)', () => {
       .getByRole('button', { name: USER_MENU_TRIGGER })
       .click()
     await authenticatedPage
-      .getByRole('menuitem', { name: 'Audit Log' })
+      .getByRole('button', { name: 'Audit Log' })
       .click()
     await expect(authenticatedPage).toHaveURL(`${baseURL}/audit`)
     await expect(
@@ -106,7 +108,7 @@ test.describe('navbar (authenticated)', () => {
     await authenticatedPage
       .getByRole('button', { name: USER_MENU_TRIGGER })
       .click()
-    await authenticatedPage.getByRole('menuitem', { name: 'Log out' }).click()
+    await authenticatedPage.getByRole('button', { name: 'Log out' }).click()
     await expect(authenticatedPage).toHaveURL(/\/login(\?.*)?$/)
     await expect(
       authenticatedPage.getByRole('heading', { name: 'Sign in to Vela' }),

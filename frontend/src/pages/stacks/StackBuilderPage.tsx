@@ -1007,23 +1007,24 @@ export default function StackBuilderPage() {
                   {services.map((service, index) => {
                     if (selectedIndex === index) return null
                     return (
-                      <button
-                        key={service.uid}
-                        type="button"
-                        className={[
-                          'stacks-builder__list-item',
-                          highlightIndex === index
-                            ? 'stacks-builder__list-item--highlight'
-                            : '',
-                        ]
-                          .filter(Boolean)
-                          .join(' ')}
-                        onClick={() =>
-                          setSelectedIndex((prev) => (prev === index ? null : index))
-                        }
-                      >
-                        {service.service_name || `service-${index + 1}`}
-                      </button>
+                      <li key={service.uid}>
+                        <button
+                          type="button"
+                          className={[
+                            'stacks-builder__list-item',
+                            highlightIndex === index
+                              ? 'stacks-builder__list-item--highlight'
+                              : '',
+                          ]
+                            .filter(Boolean)
+                            .join(' ')}
+                          onClick={() =>
+                            setSelectedIndex((prev) => (prev === index ? null : index))
+                          }
+                        >
+                          {service.service_name || `service-${index + 1}`}
+                        </button>
+                      </li>
                     )
                   })}
                 </ul>

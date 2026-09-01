@@ -9,7 +9,7 @@ test.describe('Audit log page', () => {
       .getByRole('button', { name: 'e2e@example.com' })
       .click()
     await authenticatedPage
-      .getByRole('menuitem', { name: 'Audit Log' })
+      .getByRole('button', { name: 'Audit Log' })
       .click()
 
     await expect(authenticatedPage).toHaveURL(/\/audit/)

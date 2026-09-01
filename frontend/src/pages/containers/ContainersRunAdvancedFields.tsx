@@ -247,18 +247,25 @@ export function ContainersRunAdvancedFields({
                         : ''}
                     </span>
                   ) : null}
-                  <input
-                    id={`volume-target-${index + 1}`}
-                    className="containers-form__input"
-                    type="text"
-                    placeholder="/path/in/container"
-                    aria-label={`Volume target ${index + 1}`}
-                    value={row.target}
-                    onChange={(event) =>
-                      updateVolumeRow(index, { target: event.target.value })
-                    }
-                    autoComplete="off"
-                  />
+                  <div className="containers-volume-row__target">
+                    <label
+                      className="containers-form__label containers-volume-row__target-label"
+                      htmlFor={`volume-target-${index + 1}`}
+                    >
+                      Target
+                    </label>
+                    <input
+                      id={`volume-target-${index + 1}`}
+                      className="containers-form__input"
+                      type="text"
+                      placeholder="/path/in/container"
+                      value={row.target}
+                      onChange={(event) =>
+                        updateVolumeRow(index, { target: event.target.value })
+                      }
+                      autoComplete="off"
+                    />
+                  </div>
                   <button
                     type="button"
                     className="btn btn--ghost btn--compact"

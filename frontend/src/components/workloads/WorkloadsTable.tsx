@@ -71,10 +71,11 @@ function aggregateStatus(group: WorkloadGroup, instances: ContainerInfo[]): stri
   return group.base.status
 }
 
-function statusClass(status: string): string {
-  return status.includes('running')
-    ? 'containers-status containers-status--live'
-    : 'containers-status'
+function statusIsLive(group: WorkloadGroup, instances: ContainerInfo[]): boolean {
+  if (showsInstanceSummary(group)) {
+    return instances.some((instance) => instance.status === 'running')
+  }
+  return group.base.status === 'running'
 }
 
 function WorkloadStatsCell({
@@ -88,7 +89,14 @@ function WorkloadStatsCell({
   const containerRow = group.base
   return (
     <>
+      <label
+        className="containers-form__label"
+        htmlFor={`workloads-stats-select-${containerRow.id}`}
+      >
+        Instance
+      </label>
       <select
+        id={`workloads-stats-select-${containerRow.id}`}
         className="containers-form__input workloads-table__stats-select"
         aria-label={`Stats instance for ${containerRow.name}`}
         value={statsContainerId}
@@ -218,6 +226,7 @@ export function WorkloadsTable({
                   ? undefined
                   : VIEWER_ACTION_DISABLED_TITLE
                 const instances = workloadInstances(group)
+                const statusText = aggregateStatus(group, instances)
                 const statsContainerId = resolvedStatsContainerId(group, instances)
                 const statsTarget =
                   instances.find((instance) => instance.id === statsContainerId) ??
@@ -242,8 +251,14 @@ export function WorkloadsTable({
                         {deploySourceImageLabel(containerRow)}
                       </td>
                       <td>
-                        <span className={statusClass(aggregateStatus(group, instances))}>
-                          {aggregateStatus(group, instances)}
+                        <span
+                          className={
+                            statusIsLive(group, instances)
+                              ? 'containers-status containers-status--live'
+                              : 'containers-status'
+                          }
+                        >
+                          {statusText}
                         </span>
                       </td>
                       <td className="containers-table__ports">

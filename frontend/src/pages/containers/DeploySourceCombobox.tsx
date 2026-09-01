@@ -246,7 +246,12 @@ export function DeploySourceCombobox({
       onPickSuggestion(options[activeOptionIndex])
       return
     }
-    if (event.key === 'Enter' && onCommitPastedGithubRepo) {
+    if (
+      event.key === 'Enter' &&
+      listOpen &&
+      pastedGithubRepoPending &&
+      onCommitPastedGithubRepo
+    ) {
       event.preventDefault()
       onCommitPastedGithubRepo()
     }

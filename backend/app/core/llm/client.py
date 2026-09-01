@@ -66,10 +66,9 @@ async def generate_json(*, prompt: str, schema: dict) -> dict:
         return parsed
     except (TypeError, ValueError) as exc:
         logger.info(
-            "%s analysis response parse failed: %s %s",
+            "%s analysis response parse failed: %s",
             config.provider,
             exc,
-            text[:240],
         )
         raise LlmCallError(
             "AI analysis returned an invalid response. Try again later."

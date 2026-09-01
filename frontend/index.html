@@ -14,11 +14,11 @@
     <title>VELA</title>
     <script>
       try {
-        var t = localStorage.getItem('vela.theme')
-        if (t !== 'dark' && t !== 'light') {
-          t = matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark'
+        var theme = localStorage.getItem('vela.theme')
+        if (theme !== 'dark' && theme !== 'light') {
+          theme = matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark'
         }
-        if (t === 'light') document.documentElement.dataset.theme = 'light'
+        if (theme === 'light') document.documentElement.dataset.theme = 'light'
       } catch {}
     </script>
   </head>

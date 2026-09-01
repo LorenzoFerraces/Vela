@@ -38,7 +38,7 @@ def resolve_llm_config() -> LlmConfig | None:
 
     gemini_api_key = _env("VELA_GEMINI_API_KEY")
     if gemini_api_key:
-        model = _env("VELA_GEMINI_MODEL") or "gemini-2.0-flash"
+        model = _env("VELA_GEMINI_MODEL") or "gemini-3.5-flash"
         return LlmConfig(
             provider="gemini",
             url=f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",

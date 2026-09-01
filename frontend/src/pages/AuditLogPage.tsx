@@ -204,43 +204,63 @@ export default function AuditLogPage() {
       ) : null}
 
       <div className="audit-log-page__filters">
-        <select
-          aria-label="Filter by action"
-          className="settings-form__input"
-          value={actionFilter}
-          onChange={(e) => setFilterParam('action', e.target.value)}
-        >
-          <option value="">All actions</option>
-          {Object.entries(ACTION_META).map(([value, meta]) => (
-            <option key={value} value={value}>
-              {meta.label}
-            </option>
-          ))}
-        </select>
-        <select
-          aria-label="Filter by target type"
-          className="settings-form__input"
-          value={targetTypeFilter}
-          onChange={(e) => setFilterParam('target', e.target.value)}
-        >
-          <option value="">All targets</option>
-          <option value="container">Containers</option>
-          <option value="user">Users</option>
-        </select>
-        <input
-          type="date"
-          aria-label="From date"
-          className="settings-form__input"
-          value={fromRaw}
-          onChange={(e) => setFilterParam('from', e.target.value)}
-        />
-        <input
-          type="date"
-          aria-label="To date"
-          className="settings-form__input"
-          value={toRaw}
-          onChange={(e) => setFilterParam('to', e.target.value)}
-        />
+        <div className="settings-form__field">
+          <label className="settings-form__label" htmlFor="audit-filter-action">
+            Filter by action
+          </label>
+          <select
+            id="audit-filter-action"
+            className="settings-form__input"
+            value={actionFilter}
+            onChange={(e) => setFilterParam('action', e.target.value)}
+          >
+            <option value="">All actions</option>
+            {Object.entries(ACTION_META).map(([value, meta]) => (
+              <option key={value} value={value}>
+                {meta.label}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="settings-form__field">
+          <label className="settings-form__label" htmlFor="audit-filter-target">
+            Filter by target type
+          </label>
+          <select
+            id="audit-filter-target"
+            className="settings-form__input"
+            value={targetTypeFilter}
+            onChange={(e) => setFilterParam('target', e.target.value)}
+          >
+            <option value="">All targets</option>
+            <option value="container">Containers</option>
+            <option value="user">Users</option>
+          </select>
+        </div>
+        <div className="settings-form__field">
+          <label className="settings-form__label" htmlFor="audit-filter-from">
+            From date
+          </label>
+          <input
+            id="audit-filter-from"
+            type="date"
+            className="settings-form__input"
+            value={fromRaw}
+            onChange={(e) => setFilterParam('from', e.target.value)}
+          />
+        </div>
+        <div className="settings-form__field">
+          <label className="settings-form__label" htmlFor="audit-filter-to">
+            To date
+          </label>
+          <input
+            id="audit-filter-to"
+            type="date"
+            className="settings-form__input"
+            value={toRaw}
+            onChange={(e) => setFilterParam('to', e.target.value)}
+          />
+        </div>
       </div>
 
       {loading ? (

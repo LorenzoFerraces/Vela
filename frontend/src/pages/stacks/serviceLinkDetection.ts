@@ -24,6 +24,7 @@ function serviceNamePattern(serviceName: string): RegExp {
     `(?<![A-Za-z0-9_-])${escapeRegExp(serviceName)}(?![A-Za-z0-9_-])`,
     'g',
   )
+  if (patternCache.size >= 200) patternCache.clear()
   patternCache.set(serviceName, pattern)
   return pattern
 }

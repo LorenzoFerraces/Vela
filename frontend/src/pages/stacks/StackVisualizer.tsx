@@ -17,10 +17,6 @@ import {
 import '@xyflow/react/dist/style.css'
 import type { StackServiceCreate } from '../../api/client'
 
-const prefersReducedMotion = window.matchMedia(
-  '(prefers-reduced-motion: reduce)',
-).matches
-
 type DepEdgeData = { onRemove: () => void }
 type ServiceNodeData = { label: string; isHighlighted?: boolean; isSel?: boolean }
 
@@ -181,6 +177,17 @@ export default function StackVisualizer({
     onNodeClickRef.current = onNodeClick
   }, [onNodeClick])
 
+  const [prefersReducedMotion, setPrefersReducedMotion] = useState(() =>
+    window.matchMedia('(prefers-reduced-motion: reduce)').matches,
+  )
+
+  useEffect(() => {
+    const query = window.matchMedia('(prefers-reduced-motion: reduce)')
+    const onChange = (event: MediaQueryListEvent) => setPrefersReducedMotion(event.matches)
+    query.addEventListener('change', onChange)
+    return () => query.removeEventListener('change', onChange)
+  }, [])
+
   const [baseNodes, setBaseNodes] = useState<Node[]>(() =>
     buildNodesFromServices(services, null, null, !!onNodeClick, []),
   )
@@ -192,10 +199,17 @@ export default function StackVisualizer({
   }, [services])
 
   const nodes = useMemo<Node[]>(
-    () =>
-      baseNodes.map((node, index) => {
-        const isHighlighted = highlightedIndex === index
-        const isSel = selectedIndex === index
+    () => {
+      const nodeIdAt = (index: number | null | undefined): string | null => {
+        if (index == null) return null
+        const service = services[index]
+        return service ? serviceNodeId(service, index) : null
+      }
+      const highlightedId = nodeIdAt(highlightedIndex)
+      const selectedId = nodeIdAt(selectedIndex)
+      return baseNodes.map((node) => {
+        const isHighlighted = node.id === highlightedId
+        const isSel = node.id === selectedId
         return {
           ...node,
           data: { ...node.data, isHighlighted, isSel },
@@ -208,8 +222,9 @@ export default function StackVisualizer({
                 : '1px solid #5a4b7a',
           },
         }
-      }),
-    [baseNodes, highlightedIndex, selectedIndex],
+      })
+    },
+    [baseNodes, highlightedIndex, selectedIndex, services],
   )
 
   const edges = useMemo<Edge[]>(
@@ -236,7 +251,7 @@ export default function StackVisualizer({
         })
         .flat()
         .filter((edge) => edge.source && edge.target),
-    [services],
+    [services, prefersReducedMotion],
   )
 
   const onNodesChange = useCallback((changes: NodeChange[]) => {

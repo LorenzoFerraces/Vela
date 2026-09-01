@@ -260,7 +260,7 @@ export default function ServiceReviewStep({
           type="button"
           className="btn btn--primary"
           onClick={onCreate}
-          disabled={creating}
+          disabled={creating || services.length === 0}
         >
           {creating ? 'Creating…' : 'Create stack'}
         </button>

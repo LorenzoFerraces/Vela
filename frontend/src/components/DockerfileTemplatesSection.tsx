@@ -52,6 +52,9 @@ export function DockerfileTemplatesSection({
     selectedTemplate !== undefined &&
     (editName !== selectedTemplate.name ||
       editContents !== selectedTemplate.contents)
+  const removeTarget = removeTargetId
+    ? rows.find((row) => row.id === removeTargetId)
+    : undefined
 
   async function handleCreate(event: React.FormEvent) {
     event.preventDefault()
@@ -213,7 +216,11 @@ export function DockerfileTemplatesSection({
       <ConfirmDialog
         open={removeTargetId !== null}
         title="Delete Dockerfile template?"
-        message={`"${editName}" will be permanently deleted.`}
+        message={
+          removeTarget
+            ? `"${removeTarget.name}" will be permanently deleted.`
+            : 'This Dockerfile template will be permanently deleted.'
+        }
         confirmLabel="Delete"
         onConfirm={() => {
           if (removeTargetId) {

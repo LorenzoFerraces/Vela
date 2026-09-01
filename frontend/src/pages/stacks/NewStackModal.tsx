@@ -119,7 +119,7 @@ export default function NewStackModal({ open, onClose, onCreated }: NewStackModa
 
   const busy = readingFile || working
   const hasChanges = Boolean(
-    manifestContent.trim() || fileName || repoUrl.trim() || services.length > 0,
+    manifestContent.trim() || fileName || repoUrl.trim() || stackName.trim() || services.length > 0,
   )
 
   function requestClose() {
@@ -342,6 +342,9 @@ export default function NewStackModal({ open, onClose, onCreated }: NewStackModa
                   onChange={(event) => setManifestContent(event.target.value)}
                   spellCheck={false}
                 />
+                <label className="containers-form__label" htmlFor="new-stack-manifest-file">
+                  Manifest file
+                </label>
                 <input
                   ref={fileInputRef}
                   id="new-stack-manifest-file"

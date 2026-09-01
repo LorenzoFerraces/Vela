@@ -48,6 +48,8 @@ from app.db.models import Stack, StackService, User
 
 logger = logging.getLogger(__name__)
 
+MAX_MANIFEST_YAML_BYTES = 256 * 1024
+
 router = APIRouter()
 
 
@@ -118,6 +120,11 @@ async def parse_manifest_route(
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> ManifestParseResponse:
     _ = current_user
+    if len(body.yaml_content.encode("utf-8")) > MAX_MANIFEST_YAML_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Manifest is too large.",
+        )
     services, warnings, manifest_kind = parse_manifest(body.yaml_content)
     if not services:
         raise HTTPException(

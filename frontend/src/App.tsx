@@ -1,6 +1,7 @@
 import { lazy, Suspense } from 'react'
 import { Route, Routes } from 'react-router-dom'
 import Layout from './components/Layout'
+import Navbar from './components/Navbar'
 import RequireAuth from './auth/RequireAuth'
 import Home from './pages/Home'
 import LoginPage from './pages/LoginPage'
@@ -25,7 +26,18 @@ const StackBuilderPage = lazy(() => import('./pages/stacks/StackBuilderPage'))
  */
 export default function App() {
   return (
-    <Suspense fallback={<p className="containers-muted">Loading…</p>}>
+    <Suspense
+      fallback={
+        <div className="app-shell">
+          <Navbar />
+          <main className="main-content" role="status" aria-live="polite">
+            <span className="skeleton skeleton--detail-title" />
+            <span className="skeleton skeleton--team-row" />
+            <span className="skeleton skeleton--team-row" />
+          </main>
+        </div>
+      }
+    >
       <Routes>
         <Route path="/login" element={<LoginPage />} />
         <Route path="/register" element={<RegisterPage />} />

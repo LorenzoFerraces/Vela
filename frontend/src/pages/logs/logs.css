@@ -17,10 +17,13 @@
   max-width: 16rem;
 }
 
-.logs-page__search {
+.logs-page__search-field {
   flex: 1;
   min-width: 12rem;
   max-width: 20rem;
+}
+
+.logs-page__search {
   padding: 0.55rem 0.75rem;
   font: inherit;
   font-size: 0.9375rem;

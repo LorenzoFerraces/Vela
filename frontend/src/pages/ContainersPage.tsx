@@ -294,6 +294,11 @@ export default function ContainersPage() {
       return
     }
 
+    if (!deployProjects.selectedProjectId) {
+      setMessage({ type: 'err', text: 'Select a project to deploy into.' })
+      return
+    }
+
     setBusy(true)
     setMessage(null)
     try {
@@ -545,7 +550,7 @@ export default function ContainersPage() {
           <button
             type="submit"
             className="btn btn--primary"
-            disabled={busy}
+            disabled={busy || !deployProjects.selectedProjectId}
           >
             {busy ? 'Building…' : 'Build'}
           </button>

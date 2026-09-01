@@ -61,7 +61,7 @@ export default function UserMenu({ user, onLogout }: UserMenuProps) {
         ref={triggerRef}
         type="button"
         className="user-menu__trigger"
-        aria-haspopup="menu"
+        aria-haspopup="true"
         aria-expanded={open}
         title={user.email}
         onClick={() => setOpen((previous) => !previous)}
@@ -71,10 +71,9 @@ export default function UserMenu({ user, onLogout }: UserMenuProps) {
         <CaretDown size={14} aria-hidden="true" />
       </button>
       {open && (
-        <div className="user-menu__menu" role="menu" aria-label="Account">
+        <div className="user-menu__menu" aria-label="Account">
           <button
             type="button"
-            role="menuitem"
             className="user-menu__item"
             onClick={() => navigateTo('/settings')}
           >
@@ -83,7 +82,6 @@ export default function UserMenu({ user, onLogout }: UserMenuProps) {
           </button>
           <button
             type="button"
-            role="menuitem"
             className="user-menu__item"
             onClick={() => navigateTo('/audit')}
           >
@@ -93,7 +91,6 @@ export default function UserMenu({ user, onLogout }: UserMenuProps) {
           <div className="user-menu__divider" role="separator" />
           <button
             type="button"
-            role="menuitem"
             className="user-menu__item user-menu__item--danger"
             onClick={handleLogout}
           >

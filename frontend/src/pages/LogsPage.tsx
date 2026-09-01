@@ -162,60 +162,85 @@ export default function LogsPage() {
       ) : null}
 
       <div className="logs-page__filters">
-        <select
-          aria-label="Container"
-          className="settings-form__input logs-page__container-select"
-          value={containerFilter}
-          onChange={(e) => onFilterChange('container_id', e.target.value)}
-        >
-          <option value="">Select a container…</option>
-          {containerFilter && !knownContainer ? (
-            <option value={containerFilter}>
-              {containerFilter.slice(0, 8)}
-            </option>
-          ) : null}
-          {containers.map((container) => (
-            <option key={container.id} value={container.id}>
-              {container.name || container.id.slice(0, 8)} (
-              {container.status})
-            </option>
-          ))}
-        </select>
-        <select
-          aria-label="Filter by level"
-          className="settings-form__input"
-          value={levelFilter}
-          onChange={(e) => onFilterChange('level', e.target.value)}
-        >
-          <option value="">All levels</option>
-          <option value="info">Info</option>
-          <option value="warn">Warn</option>
-          <option value="error">Error</option>
-          <option value="debug">Debug</option>
-        </select>
-        <input
-          type="datetime-local"
-          aria-label="From"
-          className="settings-form__input"
-          value={startRaw}
-          onChange={(e) => onFilterChange('start', e.target.value)}
-        />
-        <input
-          type="datetime-local"
-          aria-label="To"
-          className="settings-form__input"
-          value={endRaw}
-          onChange={(e) => onFilterChange('end', e.target.value)}
-        />
-        <input
-          type="text"
-          aria-label="Search logs"
-          autoComplete="off"
-          placeholder="Search logs…"
-          className="logs-page__search"
-          value={search}
-          onChange={(e) => onFilterChange('q', e.target.value)}
-        />
+        <div className="settings-form__field">
+          <label className="settings-form__label" htmlFor="logs-filter-container">
+            Container
+          </label>
+          <select
+            id="logs-filter-container"
+            className="settings-form__input logs-page__container-select"
+            value={containerFilter}
+            onChange={(e) => onFilterChange('container_id', e.target.value)}
+          >
+            <option value="">Select a container…</option>
+            {containerFilter && !knownContainer ? (
+              <option value={containerFilter}>
+                {containerFilter.slice(0, 8)}
+              </option>
+            ) : null}
+            {containers.map((container) => (
+              <option key={container.id} value={container.id}>
+                {container.name || container.id.slice(0, 8)} (
+                {container.status})
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="settings-form__field">
+          <label className="settings-form__label" htmlFor="logs-filter-level">
+            Level
+          </label>
+          <select
+            id="logs-filter-level"
+            className="settings-form__input"
+            value={levelFilter}
+            onChange={(e) => onFilterChange('level', e.target.value)}
+          >
+            <option value="">All levels</option>
+            <option value="info">Info</option>
+            <option value="warn">Warn</option>
+            <option value="error">Error</option>
+            <option value="debug">Debug</option>
+          </select>
+        </div>
+        <div className="settings-form__field">
+          <label className="settings-form__label" htmlFor="logs-filter-from">
+            From
+          </label>
+          <input
+            id="logs-filter-from"
+            type="datetime-local"
+            className="settings-form__input"
+            value={startRaw}
+            onChange={(e) => onFilterChange('start', e.target.value)}
+          />
+        </div>
+        <div className="settings-form__field">
+          <label className="settings-form__label" htmlFor="logs-filter-to">
+            To
+          </label>
+          <input
+            id="logs-filter-to"
+            type="datetime-local"
+            className="settings-form__input"
+            value={endRaw}
+            onChange={(e) => onFilterChange('end', e.target.value)}
+          />
+        </div>
+        <div className="settings-form__field logs-page__search-field">
+          <label className="settings-form__label" htmlFor="logs-filter-search">
+            Search
+          </label>
+          <input
+            id="logs-filter-search"
+            type="text"
+            autoComplete="off"
+            placeholder="Search logs…"
+            className="logs-page__search"
+            value={search}
+            onChange={(e) => onFilterChange('q', e.target.value)}
+          />
+        </div>
       </div>
 
       {hasContainer && selectedContainer?.status === 'running' ? (
