@@ -15,11 +15,14 @@ from app.core.exceptions import (
     LlmCallError,
     LlmNotConfiguredError,
 )
+from app.core.git.git_ops import head_commit
 from app.core.git.project_analysis import analyze_project
 from app.core.llm import generate_json, resolve_llm_config
+from app.core.llm.cache import load_cached, store_cached
 from app.e2e_support import e2e_git_source_analysis_if_enabled
 MAX_FILE_BYTES = 12_000
 MAX_TOTAL_BYTES = 48_000
+GIT_SOURCE_PROMPT_VERSION = "v1"  # ponytail: bump when the git-source prompt text changes
 
 _README_CANDIDATES = ("README.md", "README", "readme.md", "Readme.md")
 
@@ -492,7 +495,11 @@ def _analysis_json_schema() -> dict:
 
 
 async def _call_gemini(
-    context: str, git_url: str, git_branch: str, facts: str = ""
+    context: str,
+    git_url: str,
+    git_branch: str,
+    facts: str = "",
+    commit: str = "",
 ) -> GitSourceAnalysis:
     prompt = (
         f"{GIT_SOURCE_ANALYSIS_PROMPT_V1}\n\n"
@@ -506,7 +513,10 @@ async def _call_gemini(
             f"prefer them over re-deriving):\n{facts}"
         )
     try:
-        parsed = await generate_json(prompt=prompt, schema=_analysis_json_schema())
+        parsed = load_cached("git_source", commit, GIT_SOURCE_PROMPT_VERSION)
+        if parsed is None:
+            parsed = await generate_json(prompt=prompt, schema=_analysis_json_schema())
+            store_cached("git_source", commit, GIT_SOURCE_PROMPT_VERSION, parsed)
     except LlmNotConfiguredError as exc:
         raise GitSourceAnalysisError("AI analysis is not configured on this server.") from exc
     except LlmCallError as exc:
@@ -586,13 +596,14 @@ async def analyze_git_source(
         access_token=access_token,
     )
     root = Path(project_path)
+    commit = head_commit(root) or ""
     parent = root.parent
     try:
         context = _collect_context_excerpts(root)
         facts = _detected_facts_block(root, context)
         if resolve_llm_config() is None:
             return _merge_env_fallback(_fallback_analysis(root, git_branch), context)
-        analysis = await _call_gemini(context, git_url, git_branch, facts)
+        analysis = await _call_gemini(context, git_url, git_branch, facts, commit)
         enriched = _enrich_with_local_detection(analysis, root)
         return _merge_env_fallback(enriched, context)
     finally:

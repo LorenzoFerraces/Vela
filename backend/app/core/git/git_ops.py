@@ -103,5 +103,21 @@ def _sanitize_message(message: str) -> str:
     return _CREDENTIALS_IN_URL.sub(r"\1***@", message)
 
 
+def head_commit(root: Path) -> str | None:
+    try:
+        proc = subprocess.run(
+            ["git", "-C", str(root), "rev-parse", "HEAD"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if proc.returncode != 0:
+        return None
+    return proc.stdout.strip() or None
+
+
 def rm_tree(path: Path) -> None:
     shutil.rmtree(path, ignore_errors=True)

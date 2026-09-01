@@ -10,7 +10,7 @@ from pydantic import ValidationError
 from app.api.schemas import StackServiceCreate
 from app.core.build.default_image_builder import DefaultImageBuilder
 from app.core.exceptions import LlmCallError, ManifestParseError
-from app.core.git.git_ops import rm_tree
+from app.core.git.git_ops import head_commit, rm_tree
 from app.core.git.git_source_analysis import (
     _collect_context_excerpts,
     _detected_facts_block,
@@ -19,6 +19,7 @@ from app.core.git.git_source_analysis import (
     _read_file_excerpt,
 )
 from app.core.llm import generate_json
+from app.core.llm.cache import load_cached, store_cached
 from app.core.stacks.k8s_parser import _file_has_workload_kind
 from app.core.stacks.manifest_parser import parse_manifest
 from app.db.models import StackService
@@ -32,6 +33,7 @@ _IGNORED_DIRECTORIES = frozenset(
 _COMPOSE_NAMES = ("docker-compose.yml", "docker-compose.yaml", "compose.yml", "compose.yaml")
 _COMPOSE_PATTERNS = ("docker-compose", "compose")
 _PREFERRED_DIRECTORIES = ("k8s", "kubernetes", "deploy", "manifests")
+STACKS_PROMPT_VERSION = "v2"  # ponytail: bump when the stacks prompt text changes
 
 
 @dataclass(frozen=True)
@@ -281,6 +283,7 @@ async def _generate_services(
     git_branch: str,
     warnings: list[str],
     root: Path,
+    commit: str = "",
 ) -> tuple[list[StackService], str | None]:
     prompt = (
         "Analyze this repository and produce the deployable services for a Vela stack. "
@@ -306,7 +309,10 @@ async def _generate_services(
             "\n\nDetected facts (already verified by deterministic scans; "
             f"prefer them over re-deriving):\n{facts}"
         )
-    payload = await generate_json(prompt=prompt, schema=_generation_schema())
+    payload = load_cached("stacks", commit, STACKS_PROMPT_VERSION)
+    if payload is None:
+        payload = await generate_json(prompt=prompt, schema=_generation_schema())
+        store_cached("stacks", commit, STACKS_PROMPT_VERSION, payload)
     services = _payload_to_services(
         payload,
         git_url=git_url,
@@ -335,6 +341,7 @@ async def analyze_repo_stack(
         access_token=access_token,
     )
     root = Path(project_path)
+    commit = head_commit(root) or ""
     parent = root.parent
     try:
         detected = detect_manifest_file(root)
@@ -373,6 +380,7 @@ async def analyze_repo_stack(
             git_branch=git_branch,
             warnings=warnings,
             root=root,
+            commit=commit,
         )
         return RepoStackAnalysis(
             services=services,
