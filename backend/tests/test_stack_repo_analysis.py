@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 
 import pytest
@@ -9,7 +10,13 @@ from fastapi.testclient import TestClient
 
 from app.api.deps import get_image_builder
 from app.core.exceptions import LlmCallError
-from app.core.stacks.repo_analysis import _payload_to_services, detect_manifest_file
+from app.core.git.git_source_analysis import _collect_context_excerpts
+from app.core.stacks import repo_analysis
+from app.core.stacks.repo_analysis import (
+    _generate_services,
+    _payload_to_services,
+    detect_manifest_file,
+)
 
 COMPOSE_FILE = """
 services:
@@ -260,6 +267,40 @@ def test_analyze_repo_compose_manifest(
     assert by_name["web"]["source_ref"] == "nginx:alpine"
     assert by_name["web"]["container_port"] == 80
     assert by_name["db"]["source_ref"] == "postgres:16"
+
+
+def test_generate_services_prompt_contains_detected_facts(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = tmp_path / "repo"
+    root.mkdir()
+    (root / "README.md").write_text(
+        "# Setup\n\n| Variable | Notes |\n| --- | --- |\n"
+        "| `DATABASE_URL` | `postgres://db:5432/app` |\n",
+        encoding="utf-8",
+    )
+    (root / "requirements.txt").write_text("fastapi\n", encoding="utf-8")
+
+    captured: dict[str, str] = {}
+
+    async def fake_generate_json(*, prompt: str, schema: dict) -> dict:
+        captured["prompt"] = prompt
+        return LLM_PAYLOAD
+
+    monkeypatch.setattr(repo_analysis, "generate_json", fake_generate_json)
+    asyncio.run(
+        _generate_services(
+            context=_collect_context_excerpts(root),
+            manifest=None,
+            git_url="https://github.com/org/repo.git",
+            git_branch="main",
+            warnings=[],
+            root=root,
+        )
+    )
+    assert "Detected facts" in captured["prompt"]
+    assert "DATABASE_URL" in captured["prompt"]
 
 
 def test_analyze_repo_k8s_manifest(

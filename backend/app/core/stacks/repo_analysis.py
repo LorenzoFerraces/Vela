@@ -13,6 +13,7 @@ from app.core.exceptions import LlmCallError, ManifestParseError
 from app.core.git.git_ops import rm_tree
 from app.core.git.git_source_analysis import (
     _collect_context_excerpts,
+    _detected_facts_block,
     _env_vars_from_payload,
     _extract_env_vars_from_context,
     _read_file_excerpt,
@@ -279,6 +280,7 @@ async def _generate_services(
     git_url: str,
     git_branch: str,
     warnings: list[str],
+    root: Path,
 ) -> tuple[list[StackService], str | None]:
     prompt = (
         "Analyze this repository and produce the deployable services for a Vela stack. "
@@ -288,6 +290,8 @@ async def _generate_services(
         "Populate env_var_entries with every environment variable named in README tables, "
         ".env.example files, or export lines; use documented example values when present, "
         "otherwise an empty string. "
+        "When Detected facts are supplied, treat them as ground truth for ports and "
+        "environment variables. "
         "Do not use host paths, volume sources, or unsupported source kinds. "
         "Use an empty source_ref only when source_kind is git and the supplied repository URL "
         "will be used. Return only JSON matching the schema.\n\n"
@@ -296,6 +300,12 @@ async def _generate_services(
     )
     if manifest:
         prompt += f"\n\nDeployment manifest excerpt:\n{manifest}"
+    facts = _detected_facts_block(root, context)
+    if facts:
+        prompt += (
+            "\n\nDetected facts (already verified by deterministic scans; "
+            f"prefer them over re-deriving):\n{facts}"
+        )
     payload = await generate_json(prompt=prompt, schema=_generation_schema())
     services = _payload_to_services(
         payload,
@@ -362,6 +372,7 @@ async def analyze_repo_stack(
             git_url=git_url,
             git_branch=git_branch,
             warnings=warnings,
+            root=root,
         )
         return RepoStackAnalysis(
             services=services,
