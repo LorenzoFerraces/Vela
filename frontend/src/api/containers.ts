@@ -114,8 +114,10 @@ export type DeploySourceSuggestion =
   }
   | { kind: 'dockerfile_template'; id: string; name: string }
 
-export async function listContainers(): Promise<ContainerInfo[]> {
-  return apiGet<ContainerInfo[]>('/api/containers/', { cache: true })
+export async function listContainers(
+  options: { revalidate?: boolean } = {}
+): Promise<ContainerInfo[]> {
+  return apiGet<ContainerInfo[]>('/api/containers/', { cache: true, ...options })
 }
 
 export async function getContainerStats(containerId: string): Promise<ContainerStats> {

@@ -165,6 +165,8 @@ export interface ApiRequestOptions {
   cache?: boolean
   /** Cache TTL in milliseconds (default 5 minutes). */
   cacheTtl?: number
+  /** Skip the TTL cache read; the fresh response still populates the cache. */
+  revalidate?: boolean
 }
 
 function buildHeaders(initHeaders: HeadersInit | undefined, skipAuth: boolean): Headers {
@@ -197,7 +199,7 @@ export async function apiRequest<T>(
   }
 
   // Check cache first if enabled
-  if (shouldCache) {
+  if (shouldCache && options.revalidate !== true) {
     const cached = cache.get(cacheKey)
     if (cached && Date.now() - cached.timestamp < (options.cacheTtl || CACHE_TTL)) {
       return cached.data as T
