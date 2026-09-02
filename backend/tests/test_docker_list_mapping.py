@@ -20,7 +20,8 @@ def test_inspect_to_container_info_maps_list_payload() -> None:
         "Image": "nginx:latest",
         "Labels": {"vela.managed": "true", "vela.owner_id": "u1"},
         "Created": created_unix,
-        "State": {"Status": "running", "Health": {"Status": "healthy"}},
+        "State": "running",
+        "Status": "Up 2 minutes",
         "Ports": [
             {"IP": "0.0.0.0", "PrivatePort": 80, "PublicPort": 8080, "Type": "tcp"},
             {"PrivatePort": 443, "Type": "tcp"},
@@ -32,7 +33,7 @@ def test_inspect_to_container_info_maps_list_payload() -> None:
     assert info.image == "nginx:latest"
     assert info.labels == {"vela.managed": "true", "vela.owner_id": "u1"}
     assert info.status is ContainerStatus.RUNNING
-    assert info.health is HealthStatus.HEALTHY
+    assert info.health is HealthStatus.NONE
     assert info.created_at == datetime.fromtimestamp(created_unix, tz=timezone.utc)
     assert info.created_at.tzinfo is not None
     assert len(info.ports) == 1

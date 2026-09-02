@@ -12,9 +12,6 @@ dist
 dist-ssr
 *.local
 
-# Playwright demo recordings
-demo-recordings/
-demo.live.env
 test-results/
 playwright-report/
 

@@ -1,4 +1,11 @@
-import { ApiError, apiGet, getAccessToken, getApiBaseUrl } from './core'
+import {
+  ApiError,
+  apiGet,
+  clearAccessToken,
+  getAccessToken,
+  getApiBaseUrl,
+  notifyUnauthorized,
+} from './core'
 
 export type LogEntry = {
   container_id: string
@@ -55,10 +62,15 @@ export async function exportLogs(params: Partial<LogQueryParams> = {}) {
   }
   const response = await fetch(url, { headers })
   if (!response.ok) {
+    const body = await response.text()
+    if (response.status === 401) {
+      clearAccessToken()
+      notifyUnauthorized()
+    }
     throw new ApiError(
       `Export failed: ${response.status} ${response.statusText}`,
       response.status,
-      await response.text()
+      body
     )
   }
   const blob = await response.blob()

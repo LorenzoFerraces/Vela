@@ -182,11 +182,12 @@ export async function listGithubRepos(
 export async function listGithubRepoBranches(
   fullName: string
 ): Promise<GithubBranch[]> {
-  const slashIndex = fullName.indexOf('/')
-  if (slashIndex <= 0 || slashIndex === fullName.length - 1) {
+  const segments = fullName.split('/')
+  if (segments.length !== 2 || segments.some((segment) => segment.length === 0)) {
     throw new Error(`Invalid repo full_name: ${fullName}`)
   }
-  const owner = encodeURIComponent(fullName.slice(0, slashIndex))
-  const repo = encodeURIComponent(fullName.slice(slashIndex + 1))
-  return apiGet<GithubBranch[]>(`/api/github/repos/${owner}/${repo}/branches`)
+  const [owner, repo] = segments
+  return apiGet<GithubBranch[]>(
+    `/api/github/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/branches`
+  )
 }

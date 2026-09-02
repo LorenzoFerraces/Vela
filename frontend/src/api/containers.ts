@@ -114,10 +114,23 @@ export type DeploySourceSuggestion =
   }
   | { kind: 'dockerfile_template'; id: string; name: string }
 
+const CONTAINER_PAGE_SIZE = 500
+
 export async function listContainers(
   options: { revalidate?: boolean } = {}
 ): Promise<ContainerInfo[]> {
-  return apiGet<ContainerInfo[]>('/api/containers/', { cache: true, ...options })
+  const allContainers: ContainerInfo[] = []
+  let offset = 0
+  while (true) {
+    const page = await apiGet<ContainerInfo[]>(
+      `/api/containers/?limit=${CONTAINER_PAGE_SIZE}&offset=${offset}`,
+      { cache: true, ...options }
+    )
+    allContainers.push(...page)
+    if (page.length < CONTAINER_PAGE_SIZE) break
+    offset += CONTAINER_PAGE_SIZE
+  }
+  return allContainers
 }
 
 export async function getContainerStats(containerId: string): Promise<ContainerStats> {

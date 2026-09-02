@@ -11,6 +11,7 @@
 const activeRequests = new Map<string, Promise<unknown>>()
 const cache = new Map<string, { data: unknown; timestamp: number }>()
 const CACHE_TTL = 5 * 60 * 1000 // 5 minutes cache TTL
+let requestSessionGeneration = 0
 
 export function getApiBaseUrl(): string {
   const fromEnv = import.meta.env.VITE_API_BASE_URL
@@ -33,6 +34,9 @@ export function getAccessToken(): string | null {
 }
 
 export function setAccessToken(token: string): void {
+  requestSessionGeneration += 1
+  cache.clear()
+  activeRequests.clear()
   if (typeof window === 'undefined') return
   try {
     window.localStorage.setItem(ACCESS_TOKEN_STORAGE_KEY, token)
@@ -42,6 +46,9 @@ export function setAccessToken(token: string): void {
 }
 
 export function clearAccessToken(): void {
+  requestSessionGeneration += 1
+  cache.clear()
+  activeRequests.clear()
   if (typeof window === 'undefined') return
   try {
     window.localStorage.removeItem(ACCESS_TOKEN_STORAGE_KEY)
@@ -193,7 +200,7 @@ export async function apiRequest<T>(
   const method = (init.method ?? 'GET').toUpperCase()
   
   // Request deduplication
-  const cacheKey = `${url}-${JSON.stringify(init)}`
+  const cacheKey = `${requestSessionGeneration}:${url}-${JSON.stringify(init)}`
   if (activeRequests.has(cacheKey)) {
     return activeRequests.get(cacheKey) as Promise<T>
   }
@@ -237,7 +244,10 @@ export async function apiRequest<T>(
 
   // Track active request for deduplication
   activeRequests.set(cacheKey, requestPromise)
-  requestPromise.finally(() => activeRequests.delete(cacheKey))
+  const release = () => {
+    activeRequests.delete(cacheKey)
+  }
+  requestPromise.then(release, release)
   
   return requestPromise
 }
@@ -315,6 +325,7 @@ export async function apiDelete(path: string): Promise<void> {
     headers,
   })
   await readEmptyOk(response)
+  cache.clear()
 }
 
 export async function apiUploadFile<T>(
@@ -358,6 +369,7 @@ export async function apiPostEmpty(path: string): Promise<void> {
   }
   const response = await fetch(url, { method: 'POST', headers, body: '{}' })
   await readEmptyOk(response)
+  cache.clear()
 }
 
 export async function getHealth(): Promise<HealthResponse> {

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import re
 from pathlib import Path
 
@@ -16,7 +17,7 @@ from app.core.exceptions import (
     LlmCallError,
     LlmNotConfiguredError,
 )
-from app.core.git.git_ops import git_head_ref, rm_tree
+from app.core.git.git_ops import _CREDENTIALS_IN_URL, git_head_ref, rm_tree
 from app.core.git.project_analysis import analyze_project
 from app.core.models import ProjectInfo
 from app.core.llm import generate_json, resolve_llm_config
@@ -592,6 +593,16 @@ def _fallback_analysis(
     )
 
 
+def _git_source_cache_key(git_url: str, commit: str, git_branch: str) -> str:
+    if not commit:
+        return ""
+    normalized = _CREDENTIALS_IN_URL.sub(r"\1", git_url.strip()).rstrip("/")
+    if normalized.lower().endswith(".git"):
+        normalized = normalized[: -len(".git")]
+    digest = hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+    return f"{digest}:{commit}:{git_branch}"
+
+
 async def analyze_git_source(
     image_builder: DefaultImageBuilder,
     *,
@@ -621,7 +632,7 @@ async def analyze_git_source(
 
     # LLM path: cheap commit resolution (no clone) so a full-result cache hit skips the clone.
     commit = await git_head_ref(url=git_url, branch=git_branch, access_token=access_token) or ""
-    cache_key = f"{commit}:{git_branch}" if commit else ""
+    cache_key = _git_source_cache_key(git_url, commit, git_branch)
     # ponytail: full-result cache hit returns the stored GitSourceAnalysis and skips the clone
     if cache_key:
         cached = load_cached("git_source", cache_key, GIT_SOURCE_PROMPT_VERSION)

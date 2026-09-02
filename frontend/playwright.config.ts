@@ -63,8 +63,6 @@ const e2eApiEnv: Record<string, string> = {
 
 export default defineConfig({
   testDir: './e2e',
-  // Demo-recording walkthrough: run via `npm run demo:record` (playwright.demo.config.ts).
-  testIgnore: ['demo.spec.ts'],
   globalSetup: './e2e/global-setup.ts',
   fullyParallel: false,
   workers: 1,

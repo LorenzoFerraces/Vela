@@ -130,20 +130,31 @@ async def git_head_ref(*, url: str, branch: str, access_token: str | None = None
         cmd.extend(["-c", f"http.extraheader=Authorization: Basic {encoded}"])
     cmd.extend(["ls-remote", url, ref])
 
-    def _run() -> str | None:
-        try:
-            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=30, check=False)
-        except (FileNotFoundError, OSError, subprocess.TimeoutExpired):
-            return None
-        if proc.returncode != 0:
-            return None
-        for line in (proc.stdout or "").splitlines():
-            parts = line.split("\t", 1)
-            if len(parts) == 2 and parts[1].strip() == ref:
-                return parts[0].strip() or None
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+    except OSError:
         return None
-
-    return await asyncio.to_thread(_run)
+    try:
+        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=30)
+    except asyncio.TimeoutError:
+        proc.terminate()
+        await proc.wait()
+        return None
+    except asyncio.CancelledError:
+        proc.terminate()
+        await proc.wait()
+        raise
+    if proc.returncode != 0:
+        return None
+    for line in (stdout.decode(errors="replace") if stdout else "").splitlines():
+        parts = line.split("\t", 1)
+        if len(parts) == 2 and parts[1].strip() == ref:
+            return parts[0].strip() or None
+    return None
 
 
 def rm_tree(path: Path) -> None:

@@ -79,13 +79,13 @@ export default function LogsPage() {
   }
 
   const buildParams = useCallback(
-    (includeOffset: boolean): LogQueryParams => {
+    (includeOffset: boolean, searchValue: string): LogQueryParams => {
       const params: LogQueryParams = {
         container_id: containerFilter.trim(),
         limit: LIMIT,
       }
       if (includeOffset) params.offset = offset
-      if (debouncedSearch) params.q = debouncedSearch
+      if (searchValue) params.q = searchValue
       if (levelFilter) params.level = levelFilter
       const startDate = startRaw ? new Date(startRaw) : null
       if (startDate && !Number.isNaN(startDate.getTime())) {
@@ -97,14 +97,14 @@ export default function LogsPage() {
       }
       return params
     },
-    [debouncedSearch, levelFilter, containerFilter, startRaw, endRaw, offset],
+    [levelFilter, containerFilter, startRaw, endRaw, offset],
   )
 
   const fetchLogs = useCallback(async () => {
     const requestId = fetchRequestRef.current + 1
     fetchRequestRef.current = requestId
     try {
-      const res = await getLogs(buildParams(true))
+      const res = await getLogs(buildParams(true, debouncedSearch))
       if (fetchRequestRef.current === requestId) {
         setEntries(res.entries)
         setTotal(res.total)
@@ -119,7 +119,7 @@ export default function LogsPage() {
         setLoading(false)
       }
     }
-  }, [buildParams])
+  }, [buildParams, debouncedSearch])
 
   useEffect(() => {
     if (!hasContainer) return
@@ -129,7 +129,7 @@ export default function LogsPage() {
   const handleExport = async () => {
     if (!hasContainer) return
     try {
-      await exportLogs(buildParams(false))
+      await exportLogs(buildParams(false, search))
     } catch (err) {
       setError(formatApiError(err))
     }

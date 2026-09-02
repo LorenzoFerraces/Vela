@@ -21,6 +21,7 @@ export function TeamsListPanel({
             <li key={project.id}>
               <Link
                 to={`/teams/${project.id}`}
+                aria-current={isActive ? 'page' : undefined}
                 className={
                   isActive
                     ? 'teams-page__team-link teams-page__team-link--active'

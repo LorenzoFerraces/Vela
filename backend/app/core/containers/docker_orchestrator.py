@@ -68,6 +68,8 @@ class _BuildLogTail:
         return self._size
 
     def append(self, text: str) -> None:
+        if len(text) > _MAX_BUILD_LOG_BYTES:
+            text = text[-_MAX_BUILD_LOG_BYTES:]
         self._parts.append(text)
         self._size += len(text)
         while len(self._parts) > 1 and self._size > _MAX_BUILD_LOG_BYTES:
@@ -285,10 +287,15 @@ def _inspect_to_container_info(data: dict[str, Any]) -> ContainerInfo:
     else:
         names = data.get("Names") or []
         name = (names[0].lstrip("/") if names else "") or cid[:12]
-    state = data.get("State") or {}
-    status = _map_container_status(state.get("Status", ""))
-    health_raw = (state.get("Health") or {}).get("Status")
-    health = _health_status_from_docker(health_raw)
+    state = data.get("State")
+    if isinstance(state, str):
+        status = _map_container_status(state)
+        health = HealthStatus.NONE
+    else:
+        state = state or {}
+        status = _map_container_status(state.get("Status", ""))
+        health_raw = (state.get("Health") or {}).get("Status")
+        health = _health_status_from_docker(health_raw)
 
     cfg = data.get("Config") or {}
     image_ref = cfg.get("Image") or data.get("Image") or ""

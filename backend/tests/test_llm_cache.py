@@ -226,6 +226,41 @@ def test_git_source_cache_key_includes_requested_branch(
     assert calls == 2
 
 
+def test_git_source_cache_key_isolates_distinct_repositories(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls = 0
+
+    async def fake_generate_json(*, prompt: str, schema: dict) -> dict:
+        nonlocal calls
+        calls += 1
+        return dict(VALID_GIT_SOURCE_PAYLOAD)
+
+    async def fake_head_ref(
+        *, url: str, branch: str, access_token: str | None = None
+    ) -> str:
+        _ = url, branch, access_token
+        return "abc123"
+
+    monkeypatch.delenv("VELA_E2E", raising=False)
+    monkeypatch.setenv("VELA_GEMINI_API_KEY", "test-key")
+    monkeypatch.setattr(git_source_analysis, "git_head_ref", fake_head_ref)
+    monkeypatch.setattr(git_source_analysis, "generate_json", fake_generate_json)
+    root = tmp_path / "repo"
+    root.mkdir()
+    builder = _StubImageBuilder(root)
+    for url in ["https://github.com/org/repo-a.git", "https://github.com/org/repo-b.git"]:
+        asyncio.run(
+            git_source_analysis.analyze_git_source(
+                builder,
+                git_url=url,
+                git_branch="main",
+                access_token=None,
+            )
+        )
+    assert calls == 2
+
+
 def test_git_source_invalid_payload_is_not_cached(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -241,7 +276,11 @@ def test_git_source_invalid_payload_is_not_cached(
         )
     assert (
         cache_module.load_cached(
-            "git_source", "abc123:main", git_source_analysis.GIT_SOURCE_PROMPT_VERSION
+            "git_source",
+            git_source_analysis._git_source_cache_key(
+                "https://github.com/org/repo.git", "abc123", "main"
+            ),
+            git_source_analysis.GIT_SOURCE_PROMPT_VERSION,
         )
         is None
     )

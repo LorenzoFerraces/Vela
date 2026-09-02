@@ -19,7 +19,7 @@ mypy app/ tests/                                              # typecheck
 alembic upgrade head                                          # DB migrations
 
 # Frontend
-cd frontend
+cd ..\frontend
 npm run dev                                                   # dev server (Vite proxy → :8000)
 npm run build                                                 # tsc -b && vite build
 npm run lint                                                  # eslint .
@@ -28,7 +28,7 @@ npm run test:e2e                                              # Playwright suite
 npm run test:e2e -- e2e/auth.spec.ts                          # single spec
 npm run test:e2e -- -g "Settings page"                        # filter by name
 npm run test:e2e:headed                                       # headed (watch browser)
-PW_API_SERVER_COMMAND="..." npm run test:e2e                   # custom API command
+$env:PW_API_SERVER_COMMAND = "..."; npm run test:e2e           # custom API command
 ```
 
 ## CI environment

@@ -17,10 +17,10 @@ def test_build_log_tail_keeps_trailing_content_within_budget() -> None:
     assert tail.text() == chunk * 2
 
 
-def test_build_log_tail_keeps_single_oversized_item_whole() -> None:
+def test_build_log_tail_truncates_oversized_chunk_to_trailing_budget() -> None:
     tail = _BuildLogTail()
     oversized = "y" * (_MAX_BUILD_LOG_BYTES * 2)
     tail.append("seed")
     tail.append(oversized)
-    assert tail.text() == oversized
-    assert tail.size > _MAX_BUILD_LOG_BYTES
+    assert tail.size <= _MAX_BUILD_LOG_BYTES
+    assert tail.text() == "y" * _MAX_BUILD_LOG_BYTES

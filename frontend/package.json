@@ -10,9 +10,7 @@
     "preview": "vite preview",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
-    "test:e2e:headed": "playwright test --headed",
-    "demo:record": "playwright test --config playwright.demo.config.ts",
-    "demo:record:live": "playwright test --config playwright.demo.live.config.ts"
+    "test:e2e:headed": "playwright test --headed"
   },
   "dependencies": {
     "@phosphor-icons/react": "2.1.10",
