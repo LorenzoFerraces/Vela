@@ -9,6 +9,7 @@ import {
 import { MetricChart } from '../components/charts/MetricChart'
 import { formatBytes } from '../utils/formatBytes'
 import { Skeleton } from '../components/Skeleton'
+import './resource-dashboard.css'
 
 type TimeRange = '1h' | '6h' | '24h' | '7d'
 
@@ -78,8 +79,8 @@ export default function ResourceDashboardPage() {
         {containerName ? ` — ${containerName}` : ''}
       </h1>
 
-      <div className="metrics-toolbar" style={{ display: 'flex', gap: '8px', marginBottom: '16px', alignItems: 'center' }}>
-        <span style={{ fontSize: '14px', color: '#6b7280' }}>Time range:</span>
+      <div className="metrics-toolbar">
+        <span className="metrics-toolbar__label">Time range:</span>
         {timeRangeButtons.map((range) => (
           <button
             key={range}
@@ -92,10 +93,9 @@ export default function ResourceDashboardPage() {
         ))}
         <button
           type="button"
-          className="btn btn--ghost btn--sm"
+          className="btn btn--ghost btn--sm metrics-toolbar__refresh"
           onClick={() => void fetchMetrics()}
           disabled={loading}
-          style={{ marginLeft: 'auto' }}
         >
           Refresh
         </button>
@@ -108,39 +108,39 @@ export default function ResourceDashboardPage() {
       ) : null}
 
       {loading ? (
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+        <div className="metrics-grid">
           {[1, 2, 3, 4].map((i) => (
             <Skeleton key={i} className="skeleton--metrics-chart" />
           ))}
         </div>
       ) : metrics.length === 0 ? (
-        <div style={{ padding: '40px', textAlign: 'center', color: '#6b7280' }}>
+        <div className="metrics-empty">
           <p>No metrics data available yet.</p>
-          <p style={{ fontSize: '14px' }}>
+          <p className="metrics-empty__hint">
             The background collector records stats every 30 seconds. Data will appear here shortly.
           </p>
         </div>
       ) : (
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
-          <div className="metrics-card" style={{ border: '1px solid #e5e7eb', borderRadius: '8px', padding: '16px' }}>
-            <h3 style={{ margin: '0 0 8px', fontSize: '14px', color: '#374151' }}>CPU Usage</h3>
+        <div className="metrics-grid">
+          <div className="metrics-card">
+            <h3 className="metrics-card__title">CPU Usage</h3>
             <MetricChart
               data={chartData}
               dataKey="cpu"
               label="CPU %"
-              color="#3b82f6"
+              color="#bc7fed"
               yAxisLabel="CPU %"
               formatValue={(v) => `${v.toFixed(1)}%`}
             />
           </div>
 
-          <div className="metrics-card" style={{ border: '1px solid #e5e7eb', borderRadius: '8px', padding: '16px' }}>
-            <h3 style={{ margin: '0 0 8px', fontSize: '14px', color: '#374151' }}>Memory Usage</h3>
+          <div className="metrics-card">
+            <h3 className="metrics-card__title">Memory Usage</h3>
             <MetricChart
               data={chartData}
               dataKey="memoryUsage"
               label="Memory"
-              color="#10b981"
+              color="#4ade80"
               yAxisLabel="Memory"
               chartType="area"
               formatValue={formatBytes}
@@ -152,28 +152,30 @@ export default function ResourceDashboardPage() {
             />
           </div>
 
-          <div className="metrics-card" style={{ border: '1px solid #e5e7eb', borderRadius: '8px', padding: '16px' }}>
-            <h3 style={{ margin: '0 0 8px', fontSize: '14px', color: '#374151' }}>Memory Percent</h3>
+          <div className="metrics-card">
+            <h3 className="metrics-card__title">Memory Percent</h3>
             <MetricChart
               data={chartData}
               dataKey="memoryPercent"
               label="Memory %"
-              color="#f59e0b"
+              color="#fbbf24"
               yAxisLabel="Mem %"
               chartType="area"
               formatValue={(v) => `${v.toFixed(1)}%`}
             />
           </div>
 
-          <div className="metrics-card" style={{ border: '1px solid #e5e7eb', borderRadius: '8px', padding: '16px' }}>
-            <h3 style={{ margin: '0 0 8px', fontSize: '14px', color: '#374151' }}>Network I/O</h3>
+          <div className="metrics-card">
+            <h3 className="metrics-card__title">Network I/O</h3>
             <MetricChart
               data={chartData}
-              dataKey="networkRx"
-              label="Network Rx"
-              color="#8b5cf6"
+              label="Network I/O"
               yAxisLabel="Bytes"
               formatValue={formatBytes}
+              series={[
+                { dataKey: 'networkRx', label: 'Network Rx', color: '#9aa5b4' },
+                { dataKey: 'networkTx', label: 'Network Tx', color: '#bc7fed' },
+              ]}
             />
           </div>
         </div>

@@ -7,6 +7,7 @@ import {
 } from '../../api/client'
 import { formatBytes } from '../../utils/formatBytes'
 import { Skeleton } from '../../components/Skeleton'
+import './resource-usage-panel.css'
 
 function formatGib(bytes: number): string {
   return `${(bytes / 1024 ** 3).toFixed(1)} GiB`
@@ -53,7 +54,7 @@ export function ResourceUsagePanel({ refreshSignal = 0 }: ResourceUsagePanelProp
   if (projects.length === 0) {
     return (
       <section className="dashboard-page__section">
-        <p style={{ color: '#6b7280', fontSize: 14 }}>
+        <p className="resource-usage__empty">
           No running workloads to report usage for.
         </p>
       </section>
@@ -63,31 +64,21 @@ export function ResourceUsagePanel({ refreshSignal = 0 }: ResourceUsagePanelProp
   return (
     <section className="dashboard-page__section">
       <h2 className="dashboard-page__subtitle">Resource usage by team</h2>
-      <p style={{ color: '#6b7280', fontSize: 14, marginBottom: 12 }}>
+      <p className="resource-usage__summary">
         {summary.running_containers} running ·{' '}
         {formatBytes(summary.total_memory_usage_bytes)} memory ·{' '}
         {summary.total_cpu_percent.toFixed(1)}% CPU in total
       </p>
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))',
-          gap: 12,
-        }}
-      >
+      <div className="resource-usage__grid">
         {projects.map((project, index) => (
           <div
             key={project.project_id ?? `personal-${index}`}
-            style={{
-              border: '1px solid #e5e7eb',
-              borderRadius: 8,
-              padding: 16,
-            }}
+            className="resource-usage__card"
           >
-            <h3 style={{ margin: 0, fontSize: 14, color: '#374151' }}>
+            <h3 className="resource-usage__card-title">
               {project.team_name ?? project.project_name ?? 'Personal'}
             </h3>
-            <p style={{ margin: '4px 0 12px', fontSize: 13, color: '#6b7280' }}>
+            <p className="resource-usage__card-meta">
               {project.memory_usage_bytes_total
                 ? formatBytes(project.memory_usage_bytes_total)
                 : '0 B'}{' '}
@@ -104,21 +95,12 @@ export function ResourceUsagePanel({ refreshSignal = 0 }: ResourceUsagePanelProp
                 {formatGib(project.storage_used_bytes)} used
               </p>
             )}
-            <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
+            <ul className="resource-usage__list">
               {project.containers.map((container) => (
-                <li
-                  key={container.container_id}
-                  style={{
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    fontSize: 13,
-                    padding: '2px 0',
-                  }}
-                >
+                <li key={container.container_id} className="resource-usage__row">
                   <button
                     type="button"
-                    className="btn btn--ghost btn--sm"
-                    style={{ color: '#3b82f6' }}
+                    className="btn btn--ghost btn--sm resource-usage__name"
                     onClick={() =>
                       navigate(
                         `/containers/${container.container_id}/resources`,
@@ -127,7 +109,7 @@ export function ResourceUsagePanel({ refreshSignal = 0 }: ResourceUsagePanelProp
                   >
                     {container.name}
                   </button>
-                  <span style={{ color: '#6b7280' }}>
+                  <span className="resource-usage__value">
                     {container.memory_usage_bytes != null
                       ? formatBytes(container.memory_usage_bytes)
                       : 'stopped'}
