@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, memo } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import {
   analyzeGitSource,
@@ -48,6 +48,34 @@ type Banner = { tone: 'ok' | 'err'; text: string } | null
 type ServiceFieldErrors = { name: string | null; source: string | null }
 
 type StackServiceRow = StackServiceCreate & { uid: string }
+
+function graphServicesEqual(
+  prev: StackServiceCreate[],
+  next: StackServiceCreate[],
+): boolean {
+  if (prev.length !== next.length) return false
+  for (let i = 0; i < prev.length; i += 1) {
+    const a = prev[i]
+    const b = next[i]
+    if (a.service_name !== b.service_name) return false
+    if ((a.depends_on || []).join('\u0000') !== (b.depends_on || []).join('\u0000')) {
+      return false
+    }
+    if (a.source_ref !== b.source_ref || a.source_kind !== b.source_kind) return false
+  }
+  return true
+}
+
+// ponytail: structural compare — env/command/ports edits must not re-render ReactFlow
+const StackVisualizerMemo = memo(
+  StackVisualizer,
+  (prev, next) =>
+    graphServicesEqual(prev.services, next.services) &&
+    prev.highlightedIndex === next.highlightedIndex &&
+    prev.selectedIndex === next.selectedIndex &&
+    prev.onNodeClick === next.onNodeClick &&
+    prev.onDependencyChange === next.onDependencyChange,
+)
 
 function ServiceEditForm({
   service,
@@ -839,6 +867,17 @@ export default function StackBuilderPage() {
     []
   )
 
+  const handleVisualizerNodeClick = useCallback(
+    (index: number) => setSelectedIndex((prev) => (prev === index ? null : index)),
+    []
+  )
+
+  const handleDependencyChange = useCallback(
+    (serviceIndex: number, dependsOn: string[] | null) =>
+      updateService(serviceIndex, 'depends_on', dependsOn),
+    [updateService]
+  )
+
   const removeService = useCallback(
     (index: number) => {
       setServices((prev) => prev.filter((_, i) => i !== index))
@@ -1085,16 +1124,12 @@ export default function StackBuilderPage() {
 
           <div className="stacks-builder__graph-col">
             {services.length > 0 ? (
-              <StackVisualizer
+              <StackVisualizerMemo
                 services={services}
                 highlightedIndex={highlightIndex}
                 selectedIndex={selectedIndex}
-                onNodeClick={(index) =>
-                  setSelectedIndex((prev) => (prev === index ? null : index))
-                }
-                onDependencyChange={(serviceIndex, dependsOn) => {
-                  updateService(serviceIndex, 'depends_on', dependsOn)
-                }}
+                onNodeClick={handleVisualizerNodeClick}
+                onDependencyChange={handleDependencyChange}
               />
             ) : (
               <div className="stacks-visualizer">

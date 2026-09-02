@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Link, useNavigate, useParams } from 'react-router-dom'
+import { useNavigate, useParams } from 'react-router-dom'
 import {
   acceptProjectInvitation,
   cancelProjectInvitation,
@@ -20,20 +20,13 @@ import {
   updateProjectMemberRole,
 } from '../api/client'
 import ConfirmDialog from '../components/ConfirmDialog'
-import {
-  TeamDetailSkeleton,
-  TeamHintSectionSkeleton,
-  TeamInviteSectionSkeleton,
-  TeamsPageSkeleton,
-} from '../components/Skeleton'
+import { TeamsPageSkeleton } from '../components/Skeleton'
+import { teamDisplayName } from '../projects/teamDisplay'
+import { IncomingInvitations } from './teams/IncomingInvitations'
+import { TeamDetail } from './teams/TeamDetail'
+import { TeamsListPanel } from './teams/TeamsListPanel'
 
 type Banner = { tone: 'ok' | 'err'; text: string } | null
-
-import { teamDescription, teamDisplayName } from '../projects/teamDisplay'
-
-function formatRoleLabel(role: string): string {
-  return role.charAt(0).toUpperCase() + role.slice(1)
-}
 
 export default function TeamsPage() {
   const { projectId: routeProjectId } = useParams<{ projectId?: string }>()
@@ -220,58 +213,73 @@ export default function TeamsPage() {
     }
   }
 
-  async function onInvite(event: React.FormEvent) {
-    event.preventDefault()
-    if (!selectedProject || !isSelectedOwner) {
-      return
-    }
-    setBusy(true)
-    setBanner(null)
-    try {
-      await createProjectInvitation(selectedProject.id, {
-        email: inviteEmail.trim(),
-        role: inviteRole,
-      })
-      setInviteEmail('')
-      setBanner({
-        tone: 'ok',
-        text: 'Invitation sent — they must accept it on the Teams page.',
-      })
-      await refreshSelectedTeamDetail()
-    } catch (error) {
-      setBanner({ tone: 'err', text: formatApiError(error) })
-    } finally {
-      setBusy(false)
-    }
-  }
+  const onInvite = useCallback(
+    async (event: React.FormEvent) => {
+      event.preventDefault()
+      if (!selectedProject || !isSelectedOwner) {
+        return
+      }
+      setBusy(true)
+      setBanner(null)
+      try {
+        await createProjectInvitation(selectedProject.id, {
+          email: inviteEmail.trim(),
+          role: inviteRole,
+        })
+        setInviteEmail('')
+        setBanner({
+          tone: 'ok',
+          text: 'Invitation sent — they must accept it on the Teams page.',
+        })
+        await refreshSelectedTeamDetail()
+      } catch (error) {
+        setBanner({ tone: 'err', text: formatApiError(error) })
+      } finally {
+        setBusy(false)
+      }
+    },
+    [
+      selectedProject,
+      isSelectedOwner,
+      inviteEmail,
+      inviteRole,
+      refreshSelectedTeamDetail,
+    ],
+  )
 
-  async function onAcceptInvitation(invitationId: string) {
-    setBusy(true)
-    setBanner(null)
-    try {
-      const joined = await acceptProjectInvitation(invitationId)
-      setBanner({ tone: 'ok', text: `You joined ${joined.name}.` })
-      await refreshProjectsList()
-      navigate(`/teams/${joined.id}`)
-    } catch (error) {
-      setBanner({ tone: 'err', text: formatApiError(error) })
-    } finally {
-      setBusy(false)
-    }
-  }
+  const onAcceptInvitation = useCallback(
+    async (invitationId: string) => {
+      setBusy(true)
+      setBanner(null)
+      try {
+        const joined = await acceptProjectInvitation(invitationId)
+        setBanner({ tone: 'ok', text: `You joined ${joined.name}.` })
+        await refreshProjectsList()
+        navigate(`/teams/${joined.id}`)
+      } catch (error) {
+        setBanner({ tone: 'err', text: formatApiError(error) })
+      } finally {
+        setBusy(false)
+      }
+    },
+    [refreshProjectsList, navigate],
+  )
 
-  async function onRejectInvitation(invitationId: string) {
-    setBusy(true)
-    setBanner(null)
-    try {
-      await rejectProjectInvitation(invitationId)
-      await refreshProjectsList()
-    } catch (error) {
-      setBanner({ tone: 'err', text: formatApiError(error) })
-    } finally {
-      setBusy(false)
-    }
-  }
+  const onRejectInvitation = useCallback(
+    async (invitationId: string) => {
+      setBusy(true)
+      setBanner(null)
+      try {
+        await rejectProjectInvitation(invitationId)
+        await refreshProjectsList()
+      } catch (error) {
+        setBanner({ tone: 'err', text: formatApiError(error) })
+      } finally {
+        setBusy(false)
+      }
+    },
+    [refreshProjectsList],
+  )
 
   async function onCancelInvitation(invitationId: string) {
     if (!selectedProject) {
@@ -290,28 +298,44 @@ export default function TeamsPage() {
     }
   }
 
-  async function onChangeMemberRole(userId: string, role: 'viewer' | 'operator') {
-    if (!selectedProject) {
-      return
-    }
-    setBusy(true)
-    setBanner(null)
-    try {
-      await updateProjectMemberRole(selectedProject.id, userId, role)
-      await refreshSelectedTeamDetail()
-    } catch (error) {
-      setBanner({ tone: 'err', text: formatApiError(error) })
-    } finally {
-      setBusy(false)
-    }
-  }
+  const onChangeMemberRole = useCallback(
+    async (userId: string, role: 'viewer' | 'operator') => {
+      if (!selectedProject) {
+        return
+      }
+      setBusy(true)
+      setBanner(null)
+      try {
+        await updateProjectMemberRole(selectedProject.id, userId, role)
+        await refreshSelectedTeamDetail()
+      } catch (error) {
+        setBanner({ tone: 'err', text: formatApiError(error) })
+      } finally {
+        setBusy(false)
+      }
+    },
+    [selectedProject, refreshSelectedTeamDetail],
+  )
 
-  function onRemoveMember(userId: string, email: string) {
-    if (!selectedProject) {
+  const onRemoveMember = useCallback(
+    (userId: string, email: string) => {
+      if (!selectedProject) {
+        return
+      }
+      setPendingAction({ kind: 'remove-member', userId, email })
+    },
+    [selectedProject],
+  )
+
+  const onLeaveTeam = useCallback(() => {
+    if (!selectedProject || selectedProject.role === 'owner') {
       return
     }
-    setPendingAction({ kind: 'remove-member', userId, email })
-  }
+    setPendingAction({
+      kind: 'leave-team',
+      teamLabel: teamDisplayName(selectedProject),
+    })
+  }, [selectedProject])
 
   async function onConfirmRemoveMember() {
     const action = pendingAction
@@ -329,16 +353,6 @@ export default function TeamsPage() {
       setBusy(false)
       setPendingAction(null)
     }
-  }
-
-  function onLeaveTeam() {
-    if (!selectedProject || selectedProject.role === 'owner') {
-      return
-    }
-    setPendingAction({
-      kind: 'leave-team',
-      teamLabel: teamDisplayName(selectedProject),
-    })
   }
 
   async function onConfirmLeaveTeam() {
@@ -421,43 +435,12 @@ export default function TeamsPage() {
         </form>
       ) : null}
 
-      {incomingInvitations.length > 0 ? (
-        <section className="teams-page__invites-banner">
-          <h2 className="teams-page__invites-title">Incoming invitations</h2>
-          <ul className="teams-page__invites-list">
-            {incomingInvitations.map((invitation) => (
-              <li key={invitation.id} className="teams-page__invites-row">
-                <div>
-                  <strong>{invitation.project_name}</strong>
-                  <span className="teams-page__muted">
-                    {' '}
-                    from {invitation.inviter_email} as{' '}
-                    {formatRoleLabel(invitation.role)}
-                  </span>
-                </div>
-                <div className="teams-page__row-actions">
-                  <button
-                    type="button"
-                    className="btn btn--primary btn--sm"
-                    disabled={busy}
-                    onClick={() => void onAcceptInvitation(invitation.id)}
-                  >
-                    Accept
-                  </button>
-                  <button
-                    type="button"
-                    className="btn btn--ghost btn--sm"
-                    disabled={busy}
-                    onClick={() => void onRejectInvitation(invitation.id)}
-                  >
-                    Reject
-                  </button>
-                </div>
-              </li>
-            ))}
-          </ul>
-        </section>
-      ) : null}
+      <IncomingInvitations
+        invitations={incomingInvitations}
+        busy={busy}
+        onAccept={onAcceptInvitation}
+        onReject={onRejectInvitation}
+      />
 
       {loading ? (
         <TeamsPageSkeleton />
@@ -465,210 +448,29 @@ export default function TeamsPage() {
         <p className="teams-page__muted">No teams yet. Create one to get started.</p>
       ) : (
         <div className="teams-page__layout">
-          <aside className="teams-page__sidebar">
-            <h2 className="teams-page__sidebar-title">Your teams</h2>
-            <ul className="teams-page__team-list">
-              {projects.map((project) => {
-                const isActive = selectedProject?.id === project.id
-                return (
-                  <li key={project.id}>
-                    <Link
-                      to={`/teams/${project.id}`}
-                      className={
-                        isActive
-                          ? 'teams-page__team-link teams-page__team-link--active'
-                          : 'teams-page__team-link'
-                      }
-                    >
-                      <span className="teams-page__team-name">
-                        {teamDisplayName(project)}
-                      </span>
-                      <span className="teams-page__team-role">
-                        {formatRoleLabel(project.role)}
-                      </span>
-                    </Link>
-                  </li>
-                )
-              })}
-            </ul>
-          </aside>
+          <TeamsListPanel
+            projects={projects}
+            selectedProjectId={selectedProject?.id ?? null}
+          />
 
           {selectedProject ? (
-            <div className="teams-page__detail">
-              <div className="teams-page__detail-header">
-                <div>
-                  <h2 className="teams-page__detail-title">
-                    {teamDisplayName(selectedProject)}
-                  </h2>
-                  <p className="teams-page__muted">
-                    {teamDescription(selectedProject)}
-                  </p>
-                </div>
-                {selectedProject.role !== 'owner' ? (
-                  <button
-                    type="button"
-                    className="btn btn--ghost btn--sm teams-page__leave-btn"
-                    disabled={busy}
-                    onClick={() => void onLeaveTeam()}
-                  >
-                    Leave team
-                  </button>
-                ) : null}
-              </div>
-
-              {detailLoading ? (
-                <TeamDetailSkeleton>
-                  {isSelectedOwner ? (
-                    <TeamInviteSectionSkeleton />
-                  ) : (
-                    <TeamHintSectionSkeleton />
-                  )}
-                </TeamDetailSkeleton>
-              ) : (
-                <>
-                  <section className="teams-page__section">
-                    <h3 className="teams-page__section-title">Members</h3>
-                    {members.length === 0 ? (
-                      <p className="teams-page__muted">No members yet.</p>
-                    ) : (
-                      <ul className="teams-page__member-list">
-                        {members.map((member) => (
-                          <li key={member.user_id} className="teams-page__member-row">
-                            <span className="teams-page__member-email">
-                              {member.email}
-                            </span>
-                            {member.role === 'owner' ? (
-                              <span className="teams-page__role-badge">Owner</span>
-                            ) : isSelectedOwner ? (
-                              <div className="teams-page__member-controls">
-                                <select
-                                  className="teams-page__input teams-page__select--inline"
-                                  aria-label={`Role for ${member.email}`}
-                                  value={member.role}
-                                  disabled={busy}
-                                  onChange={(event) =>
-                                    void onChangeMemberRole(
-                                      member.user_id,
-                                      event.target.value as 'viewer' | 'operator',
-                                    )
-                                  }
-                                >
-                                  <option value="viewer">Viewer</option>
-                                  <option value="operator">Operator</option>
-                                </select>
-                                <button
-                                  type="button"
-                                  className="btn btn--ghost btn--sm"
-                                  disabled={busy}
-                                  onClick={() =>
-                                    void onRemoveMember(
-                                      member.user_id,
-                                      member.email,
-                                    )
-                                  }
-                                >
-                                  Remove
-                                </button>
-                              </div>
-                            ) : (
-                              <span className="teams-page__role-badge">
-                                {formatRoleLabel(member.role)}
-                              </span>
-                            )}
-                          </li>
-                        ))}
-                      </ul>
-                    )}
-                  </section>
-
-                  {isSelectedOwner ? (
-                    <>
-                      <section className="teams-page__section">
-                        <h3 className="teams-page__section-title">Invite member</h3>
-                        <form className="teams-page__invite-form" onSubmit={onInvite}>
-                          <label className="teams-page__field">
-                            Email
-                            <input
-                              type="email"
-                              className="teams-page__input"
-                              autoComplete="off"
-                              spellCheck={false}
-                              value={inviteEmail}
-                              disabled={busy}
-                              onChange={(event) => setInviteEmail(event.target.value)}
-                              placeholder="teammate@example.com…"
-                              required
-                            />
-                          </label>
-                          <label className="teams-page__field">
-                            Role
-                            <select
-                              className="teams-page__input"
-                              value={inviteRole}
-                              disabled={busy}
-                              onChange={(event) =>
-                                setInviteRole(
-                                  event.target.value as 'viewer' | 'operator',
-                                )
-                              }
-                            >
-                              <option value="viewer">Viewer</option>
-                              <option value="operator">Operator</option>
-                            </select>
-                          </label>
-                          <button
-                            type="submit"
-                            className="btn btn--primary"
-                            disabled={busy}
-                          >
-                            Invite
-                          </button>
-                        </form>
-                        <p className="teams-page__hint">
-                          Invites must be accepted before the user gets access.
-                        </p>
-                      </section>
-
-                      {pendingInvitations.length > 0 ? (
-                        <section className="teams-page__section">
-                          <h3 className="teams-page__section-title">
-                            Pending invitations
-                          </h3>
-                          <ul className="teams-page__member-list">
-                            {pendingInvitations.map((invitation) => (
-                              <li
-                                key={invitation.id}
-                                className="teams-page__member-row"
-                              >
-                                <span>
-                                  {invitation.email} ·{' '}
-                                  {formatRoleLabel(invitation.role)}
-                                </span>
-                                <button
-                                  type="button"
-                                  className="btn btn--ghost btn--sm"
-                                  disabled={busy}
-                                  onClick={() =>
-                                    setCancelInvitationTarget(invitation)
-                                  }
-                                >
-                                  Cancel
-                                </button>
-                              </li>
-                            ))}
-                          </ul>
-                        </section>
-                      ) : null}
-                    </>
-                  ) : (
-                    <p className="teams-page__muted">
-                      Your role: {formatRoleLabel(selectedProject.role)}. Only the
-                      owner can invite or manage members.
-                    </p>
-                  )}
-                </>
-              )}
-            </div>
+            <TeamDetail
+              project={selectedProject}
+              isSelectedOwner={isSelectedOwner}
+              busy={busy}
+              detailLoading={detailLoading}
+              members={members}
+              pendingInvitations={pendingInvitations}
+              inviteEmail={inviteEmail}
+              inviteRole={inviteRole}
+              onInviteEmailChange={setInviteEmail}
+              onInviteRoleChange={setInviteRole}
+              onInvite={onInvite}
+              onCancelInvitation={setCancelInvitationTarget}
+              onChangeMemberRole={onChangeMemberRole}
+              onRemoveMember={onRemoveMember}
+              onLeaveTeam={onLeaveTeam}
+            />
           ) : null}
         </div>
       )}

@@ -96,26 +96,26 @@ requires the clone (`git_source_analysis.py:599-613`, same shape in
 - [x] **Debounce `LogsPage` search** — `LogsPage.tsx:241 → 112-115` fires an
   API request per keystroke. Reuse the 320 ms debounce pattern from
   `useDeploySourceSelection.ts:93-96`.
-- [ ] **Memoize `WorkloadsTable` rows** — `WorkloadsTable.tsx:219-463` renders
-  rows as inline fragments; any table state change (`copiedRowId`,
-  `terminalContainerId`, `rowBusyId`, ...) re-renders every row with fresh
-  inline props. Extract a `React.memo` row component with per-row expand/
-  terminal state.
-- [ ] **Memoize StackBuilder graph derivation** — `StackBuilderPage.tsx:791-817,1088-1098`
-  and `StackVisualizer.tsx:195-228` rebuild the ReactFlow graph on every
-  keystroke in any service field. Derive nodes/edges from
-  `(name, depends_on)` only, via `useMemo`; memoize `ServiceEditForm`.
-- [ ] **Split `src/api/client.ts`** (1608 lines) into domain modules
-  (`api/containers.ts`, `api/stacks.ts`, `api/projects.ts`, `api/auth.ts`,
-  `api/images.ts`) over a shared core; keep re-exports so imports don't
-  churn. Delete dead `src/pages/containers/useContainerList.ts` (imported
-  nowhere).
-- [ ] **Small**: rAF-debounce the unthrottled `ResizeObserver` in
-  `ContainerTerminal.tsx:43-47`; module-level `TextEncoder` for the exec WS
-  string branch (`client.ts:719`, pattern already in
-  `ContainerLogPanel.tsx:12`).
-- [ ] **Split `TeamsPage.tsx`** (729 lines) into list / detail /
-  invitations subcomponents.
+- [x] **Memoize `WorkloadsTable` rows** — rows moved to
+  `WorkloadRow.tsx` (`memo`), per-row state passed as booleans, all
+  table handlers `useCallback`-stabilized.
+- [x] **Memoize StackBuilder graph derivation** — `StackVisualizer` wrapped
+  in `memo` with a structural comparator (name / depends_on / source
+  label bits); env/command/ports keystrokes no longer re-render
+  ReactFlow. `ServiceEditForm` left un-memoized: only one form renders at
+  a time (the selected service), so memo would only skip unrelated
+  re-renders for ~25 lines of prop-stabilization.
+- [x] **Split `src/api/client.ts`** (1608 lines) into 12 modules —
+  `core.ts` (helpers, TTL cache, dedup) + auth/containers/builds/images/
+  logs/notifications/projects/scaling/settings/stacks/audit; `client.ts`
+  is now a 194-line re-export surface, zero import churn. Deleted dead
+  `src/pages/containers/useContainerList.ts`.
+- [x] **Small**: rAF-debounced the `ResizeObserver` in
+  `ContainerTerminal.tsx`; module-level `TextEncoder` in `api/containers.ts`.
+- [x] **Split `TeamsPage.tsx`** (729 → 531 lines) into
+  `pages/teams/TeamsListPanel.tsx` / `TeamDetail.tsx` /
+  `IncomingInvitations.tsx`; `formatRoleLabel` moved to
+  `projects/teamDisplay.ts`.
 - [ ] **Product decision**: lists never refresh after mount (no polling
   anywhere in `src/`). Consider a visibility-aware 15–30 s poll or
   refetch-on-focus for the workloads list; skip if staleness is acceptable.

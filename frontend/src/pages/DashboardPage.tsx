@@ -24,35 +24,42 @@ export default function DashboardPage() {
 
   const { groups, listLoading, refresh } = useWorkloadGroups(reportListLoadError)
 
-  async function onStart(containerId: string) {
-    setRowBusy(containerId)
-    setBanner(null)
-    try {
-      await startContainer(containerId)
-      await refresh()
-    } catch (error) {
-      setBanner({ tone: 'err', text: formatApiError(error) })
-    } finally {
-      setRowBusy(null)
-    }
-  }
+  const onStart = useCallback(
+    async (containerId: string) => {
+      setRowBusy(containerId)
+      setBanner(null)
+      try {
+        await startContainer(containerId)
+        await refresh()
+      } catch (error) {
+        setBanner({ tone: 'err', text: formatApiError(error) })
+      } finally {
+        setRowBusy(null)
+      }
+    },
+    [refresh],
+  )
 
-  async function onStop(containerId: string) {
-    setRowBusy(containerId)
-    setBanner(null)
-    try {
-      await stopContainer(containerId)
-      await refresh()
-    } catch (error) {
-      setBanner({ tone: 'err', text: formatApiError(error) })
-    } finally {
-      setRowBusy(null)
-    }
-  }
+  const onStop = useCallback(
+    async (containerId: string) => {
+      setRowBusy(containerId)
+      setBanner(null)
+      try {
+        await stopContainer(containerId)
+        await refresh()
+      } catch (error) {
+        setBanner({ tone: 'err', text: formatApiError(error) })
+      } finally {
+        setRowBusy(null)
+      }
+    },
+    [refresh],
+  )
 
-  function onRemove(containerId: string) {
-    setPendingRemoveId(containerId)
-  }
+  const onRemove = useCallback(
+    (containerId: string) => setPendingRemoveId(containerId),
+    [],
+  )
 
   async function onConfirmRemove() {
     if (pendingRemoveId === null) return

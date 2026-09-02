@@ -40,14 +40,21 @@ export function ContainerTerminal({ containerId, onClose }: ContainerTerminalPro
 
     term.onData((inputData) => execWs.send(inputData))
 
+    let resizeFrame = 0
     const resizeObserver = new ResizeObserver(() => {
-      fit.fit()
-      execWs.send(JSON.stringify({ resize: { cols: term.cols, rows: term.rows } }))
+      if (resizeFrame) return
+      resizeFrame = requestAnimationFrame(() => {
+        resizeFrame = 0
+        if (disposed) return
+        fit.fit()
+        execWs.send(JSON.stringify({ resize: { cols: term.cols, rows: term.rows } }))
+      })
     })
     resizeObserver.observe(containerRef.current)
 
     return () => {
       disposed = true
+      if (resizeFrame) cancelAnimationFrame(resizeFrame)
       resizeObserver.disconnect()
       term.dispose()
       fit.dispose()
