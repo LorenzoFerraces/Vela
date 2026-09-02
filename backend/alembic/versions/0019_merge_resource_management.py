@@ -9,9 +9,6 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
-from alembic import op
-import sqlalchemy as sa
-
 
 revision: str = "0019_merge_resource_management"
 down_revision: str | Sequence[str] | None = (

@@ -49,7 +49,7 @@ from app.core.quotas import (
     format_gib,
     team_storage_quota_summary,
 )
-from app.db.models import Project, User
+from app.db.models import User
 
 router = APIRouter()
 
