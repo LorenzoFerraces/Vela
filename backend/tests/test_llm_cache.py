@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import shutil
+import sqlite3
 import subprocess
 import types
 from pathlib import Path
@@ -104,8 +105,93 @@ def test_delete_disabled_is_noop(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     }
 
 
+def test_legacy_json_is_imported_on_store_and_removed(tmp_path: Path) -> None:
+    legacy = tmp_path / "llm_analysis_stacks.json"
+    legacy.write_text(
+        json.dumps(
+            {
+                "v2:abc123": {"ts": 111.0, "payload": {"a": "legacy"}},
+                "v2:zzz999": {"ts": 222.0, "payload": {"z": 9}},
+            }
+        ),
+        encoding="utf-8",
+    )
+    cache_module.store_cached("stacks", "abc123", "v2", {"a": 1})
+    assert not legacy.exists()
+    assert cache_module.load_cached("stacks", "zzz999", "v2") == {"z": 9}
+    assert cache_module.load_cached("stacks", "abc123", "v2") == {"a": 1}
+
+
+def test_legacy_json_invalid_entries_are_skipped(tmp_path: Path) -> None:
+    legacy = tmp_path / "llm_analysis_stacks.json"
+    legacy.write_text(
+        json.dumps(
+            {
+                "v2:abc123": {"ts": 111.0, "payload": {"a": 1}},
+                "v2:bad-ts": {"ts": "soon", "payload": {"a": 2}},
+                "v2:bad-payload": {"ts": 222.0, "payload": "not-a-dict"},
+                "no-separator": {"ts": 333.0, "payload": {"a": 3}},
+            }
+        ),
+        encoding="utf-8",
+    )
+    assert cache_module.load_cached("stacks", "abc123", "v2") == {"a": 1}
+    assert not legacy.exists()
+    assert cache_module.load_cached("stacks", "bad-ts", "v2") is None
+    assert cache_module.load_cached("stacks", "bad-payload", "v2") is None
+
+
+def test_migration_imports_only_missing_keys(tmp_path: Path) -> None:
+    cache_module.store_cached("stacks", "abc123", "v2", {"a": "original"})
+    legacy = tmp_path / "llm_analysis_stacks.json"
+    legacy.write_text(
+        json.dumps(
+            {
+                "v2:abc123": {"ts": 1.0, "payload": {"a": "legacy"}},
+                "v2:zzz999": {"ts": 2.0, "payload": {"z": 9}},
+            }
+        ),
+        encoding="utf-8",
+    )
+    assert cache_module.load_cached("stacks", "abc123", "v2") == {"a": "original"}
+    assert cache_module.load_cached("stacks", "zzz999", "v2") == {"z": 9}
+    assert not legacy.exists()
+
+
+def test_eviction_at_500_is_per_kind(tmp_path: Path) -> None:
+    conn = sqlite3.connect(tmp_path / cache_module._DB_FILENAME)
+    try:
+        conn.execute(cache_module._CREATE_TABLE)
+        for index in range(501):
+            conn.execute(
+                "INSERT INTO llm_cache (kind, version, commit_sha, payload, ts) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (
+                    "stacks",
+                    "v2",
+                    f"commit{index}",
+                    json.dumps({"index": index}),
+                    float(index),
+                ),
+            )
+        conn.execute(
+            "INSERT INTO llm_cache (kind, version, commit_sha, payload, ts) "
+            "VALUES (?, ?, ?, ?, ?)",
+            ("other", "v2", "oldest", json.dumps({"index": -1}), 0.0),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    cache_module.store_cached("stacks", "newest", "v2", {"index": 501})
+    assert cache_module.load_cached("stacks", "commit0", "v2") is None
+    assert cache_module.load_cached("stacks", "commit1", "v2") is None
+    assert cache_module.load_cached("stacks", "commit2", "v2") == {"index": 2}
+    assert cache_module.load_cached("stacks", "newest", "v2") == {"index": 501}
+    assert cache_module.load_cached("other", "oldest", "v2") == {"index": -1}
+
+
 def test_git_source_cache_key_includes_requested_branch(
-    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     calls = 0
 
@@ -114,11 +200,64 @@ def test_git_source_cache_key_includes_requested_branch(
         calls += 1
         return dict(VALID_GIT_SOURCE_PAYLOAD)
 
+    async def fake_head_ref(
+        *, url: str, branch: str, access_token: str | None = None
+    ) -> str:
+        _ = url, branch, access_token
+        return "abc123"
+
+    monkeypatch.delenv("VELA_E2E", raising=False)
+    monkeypatch.setenv("VELA_GEMINI_API_KEY", "test-key")
+    monkeypatch.setattr(git_source_analysis, "git_head_ref", fake_head_ref)
     monkeypatch.setattr(git_source_analysis, "generate_json", fake_generate_json)
+    root = tmp_path / "repo"
+    root.mkdir()
+    builder = _StubImageBuilder(root)
     url = "https://github.com/org/repo.git"
-    asyncio.run(git_source_analysis._call_gemini("", url, "main", "", "abc123"))
-    asyncio.run(git_source_analysis._call_gemini("", url, "release-1.0", "", "abc123"))
-    asyncio.run(git_source_analysis._call_gemini("", url, "main", "", "abc123"))
+    for branch in ["main", "release-1.0", "main"]:
+        asyncio.run(
+            git_source_analysis.analyze_git_source(
+                builder,
+                git_url=url,
+                git_branch=branch,
+                access_token=None,
+            )
+        )
+    assert calls == 2
+
+
+def test_git_source_cache_key_isolates_distinct_repositories(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls = 0
+
+    async def fake_generate_json(*, prompt: str, schema: dict) -> dict:
+        nonlocal calls
+        calls += 1
+        return dict(VALID_GIT_SOURCE_PAYLOAD)
+
+    async def fake_head_ref(
+        *, url: str, branch: str, access_token: str | None = None
+    ) -> str:
+        _ = url, branch, access_token
+        return "abc123"
+
+    monkeypatch.delenv("VELA_E2E", raising=False)
+    monkeypatch.setenv("VELA_GEMINI_API_KEY", "test-key")
+    monkeypatch.setattr(git_source_analysis, "git_head_ref", fake_head_ref)
+    monkeypatch.setattr(git_source_analysis, "generate_json", fake_generate_json)
+    root = tmp_path / "repo"
+    root.mkdir()
+    builder = _StubImageBuilder(root)
+    for url in ["https://github.com/org/repo-a.git", "https://github.com/org/repo-b.git"]:
+        asyncio.run(
+            git_source_analysis.analyze_git_source(
+                builder,
+                git_url=url,
+                git_branch="main",
+                access_token=None,
+            )
+        )
     assert calls == 2
 
 
@@ -137,7 +276,11 @@ def test_git_source_invalid_payload_is_not_cached(
         )
     assert (
         cache_module.load_cached(
-            "git_source", "abc123:main", git_source_analysis.GIT_SOURCE_PROMPT_VERSION
+            "git_source",
+            git_source_analysis._git_source_cache_key(
+                "https://github.com/org/repo.git", "abc123", "main"
+            ),
+            git_source_analysis.GIT_SOURCE_PROMPT_VERSION,
         )
         is None
     )
@@ -173,6 +316,7 @@ def test_stacks_invalid_payload_is_not_cached(
 class _StubImageBuilder:
     def __init__(self, root: Path) -> None:
         self._root = root
+        self._counter = 0
 
     async def clone_repository(
         self,
@@ -182,7 +326,10 @@ class _StubImageBuilder:
         access_token: str | None = None,
     ) -> str:
         _ = git_url, branch, access_token
-        return str(self._root)
+        self._counter += 1
+        dest = self._root / f"clone-{self._counter}" / "repo"
+        dest.mkdir(parents=True, exist_ok=True)
+        return str(dest)
 
 
 def _disable_llm_env(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -198,7 +345,7 @@ def test_git_source_fallback_path_skips_commit_and_facts(
     def boom(*args: object, **kwargs: object) -> None:
         raise AssertionError("LLM-only work ran on the fallback path")
 
-    monkeypatch.setattr(git_source_analysis, "head_commit", boom)
+    monkeypatch.setattr(git_source_analysis, "git_head_ref", boom)
     monkeypatch.setattr(git_source_analysis, "_detected_facts_block", boom)
     _disable_llm_env(monkeypatch)
     root = tmp_path / "repo"

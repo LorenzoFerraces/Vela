@@ -51,6 +51,32 @@ VELA_ROUTE_PATH_PREFIX_LABEL = "vela.route_path_prefix"
 VELA_ROUTE_TLS_LABEL = "vela.route_tls"
 VELA_REPLICA_OF_LABEL = "vela.replica_of"
 _NS_PER_SEC = 1_000_000_000
+_MAX_BUILD_LOG_BYTES = 64 * 1024
+
+
+class _BuildLogTail:
+    """Keep only the trailing ``_MAX_BUILD_LOG_BYTES`` of a streamed build log."""
+
+    __slots__ = ("_parts", "_size")
+
+    def __init__(self) -> None:
+        self._parts: list[str] = []
+        self._size: int = 0
+
+    @property
+    def size(self) -> int:
+        return self._size
+
+    def append(self, text: str) -> None:
+        if len(text) > _MAX_BUILD_LOG_BYTES:
+            text = text[-_MAX_BUILD_LOG_BYTES:]
+        self._parts.append(text)
+        self._size += len(text)
+        while len(self._parts) > 1 and self._size > _MAX_BUILD_LOG_BYTES:
+            self._size -= len(self._parts.pop(0))
+
+    def text(self) -> str:
+        return "".join(self._parts)
 
 
 def _max_concurrent_log_streams() -> int:
@@ -201,6 +227,25 @@ def _ports_from_inspect(data: dict[str, Any]) -> list[PortMapping]:
     return result
 
 
+def _ports_from_list(data: dict[str, Any]) -> list[PortMapping]:
+    result: list[PortMapping] = []
+    for entry in data.get("Ports") or []:
+        if not isinstance(entry, dict):
+            continue
+        public_port = entry.get("PublicPort")
+        private_port = entry.get("PrivatePort")
+        if not public_port or private_port is None:
+            continue
+        result.append(
+            PortMapping(
+                host_port=int(public_port),
+                container_port=int(private_port),
+                protocol=entry.get("Type") or "tcp",
+            )
+        )
+    return result
+
+
 def _health_status_from_docker(raw: str | None) -> HealthStatus:
     s = (raw or "").lower()
     match s:
@@ -242,23 +287,40 @@ def _inspect_to_container_info(data: dict[str, Any]) -> ContainerInfo:
     else:
         names = data.get("Names") or []
         name = (names[0].lstrip("/") if names else "") or cid[:12]
-    state = data.get("State") or {}
-    status = _map_container_status(state.get("Status", ""))
-    health_raw = (state.get("Health") or {}).get("Status")
-    health = _health_status_from_docker(health_raw)
+    state = data.get("State")
+    if isinstance(state, str):
+        status = _map_container_status(state)
+        health = HealthStatus.NONE
+    else:
+        state = state or {}
+        status = _map_container_status(state.get("Status", ""))
+        health_raw = (state.get("Health") or {}).get("Status")
+        health = _health_status_from_docker(health_raw)
 
     cfg = data.get("Config") or {}
-    image_ref = cfg.get("Image", "")
-    labels = dict(cfg.get("Labels") or {})
+    image_ref = cfg.get("Image") or data.get("Image") or ""
+    labels = dict(data.get("Labels") or cfg.get("Labels") or {})
     source_kind, source_label = deploy_source_fields_from_labels(labels)
+
+    created_raw = data.get("Created")
+    if isinstance(created_raw, (int, float)):
+        created_at = datetime.fromtimestamp(created_raw, tz=timezone.utc)
+    else:
+        created_at = _parse_created(created_raw or "")
+
+    network_settings = data.get("NetworkSettings") or {}
+    if network_settings.get("Ports") is not None:
+        ports = _ports_from_inspect(data)
+    else:
+        ports = _ports_from_list(data)
 
     return ContainerInfo(
         id=cid,
         name=name,
         image=image_ref,
         status=status,
-        created_at=_parse_created(data.get("Created", "")),
-        ports=_ports_from_inspect(data),
+        created_at=created_at,
+        ports=ports,
         volumes=_volumes_from_inspect(data),
         labels=labels,
         health=health,
@@ -656,7 +718,6 @@ class DockerOrchestrator(ContainerOrchestrator):
                             continue
                     elif labels.get(VELA_OWNER_LABEL) != str(user_id):
                         continue
-                container.reload()
                 info = _inspect_to_container_info(container.attrs)
                 if status is None or info.status == status:
                     out.append(info)
@@ -763,12 +824,9 @@ class DockerOrchestrator(ContainerOrchestrator):
         finally:
             self._log_stream_semaphore.release()
 
-    def stream_exec(
-        self,
-        container_id: str,
-        cols: int = 80,
-        rows: int = 24,
-    ) -> tuple[AsyncIterator[bytes], Callable[[bytes], None], Callable[[], None], str]:
+    def _create_exec_session(
+        self, container_id: str, *, cols: int, rows: int
+    ) -> tuple[str, Any]:
         container = self._client.containers.get(container_id)
         self._assert_managed_labels(container.labels or {}, container_id)
         exec_id = self._client.api.exec_create(
@@ -782,6 +840,17 @@ class DockerOrchestrator(ContainerOrchestrator):
             environment=["TERM=xterm-256color", f"COLUMNS={cols}", f"LINES={rows}"],
         )["Id"]
         exec_runtime = self._client.api.exec_start(exec_id, socket=True, tty=True, demux=True)
+        return exec_id, exec_runtime
+
+    async def stream_exec(
+        self,
+        container_id: str,
+        cols: int = 80,
+        rows: int = 24,
+    ) -> tuple[AsyncIterator[bytes], Callable[[bytes], None], Callable[[], None], str]:
+        exec_id, exec_runtime = await asyncio.to_thread(
+            self._create_exec_session, container_id, cols=cols, rows=rows
+        )
 
         loop = asyncio.get_running_loop()
         queue: asyncio.Queue[bytes | None] = asyncio.Queue(maxsize=64)
@@ -982,7 +1051,7 @@ class DockerOrchestrator(ContainerOrchestrator):
         self, path: str, *, tag: str, dockerfile: str = "Dockerfile"
     ) -> str:
         def sync() -> str:
-            log_parts: list[str] = []
+            log_tail = _BuildLogTail()
             image_obj = None
             try:
                 # decode=False: ImageCollection.build() always runs json_stream() on the
@@ -998,19 +1067,19 @@ class DockerOrchestrator(ContainerOrchestrator):
                 log = getattr(e, "build_log", None) or []
                 for chunk in log:
                     if isinstance(chunk, dict) and "stream" in chunk:
-                        log_parts.append(str(chunk["stream"]))
-                raise ImageBuildError(str(e), build_log="".join(log_parts)) from e
+                        log_tail.append(str(chunk["stream"]))
+                raise ImageBuildError(str(e), build_log=log_tail.text()) from e
             except docker.errors.APIError as e:
-                raise ImageBuildError(str(e), build_log="".join(log_parts)) from e
+                raise ImageBuildError(str(e), build_log=log_tail.text()) from e
 
             for chunk in build_logs:
                 if not isinstance(chunk, dict):
                     continue
                 if "stream" in chunk:
-                    log_parts.append(str(chunk["stream"]))
+                    log_tail.append(str(chunk["stream"]))
                 if "error" in chunk:
                     msg = str(chunk["error"])
-                    raise ImageBuildError(msg, build_log="".join(log_parts))
+                    raise ImageBuildError(msg, build_log=log_tail.text())
                 aux = chunk.get("aux")
                 if isinstance(aux, dict) and "ID" in aux:
                     image_obj = self._client.images.get(aux["ID"])
@@ -1021,7 +1090,7 @@ class DockerOrchestrator(ContainerOrchestrator):
                 except docker.errors.ImageNotFound as e:
                     raise ImageBuildError(
                         "Build finished but image could not be resolved",
-                        build_log="".join(log_parts),
+                        build_log=log_tail.text(),
                     ) from e
 
             return image_obj.id

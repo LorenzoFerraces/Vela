@@ -87,13 +87,15 @@ class ContainerOrchestrator(ABC):
         """Yield log chunks from the runtime (blocking iterator wrapped for async consumption)."""
 
     @abstractmethod
-    def stream_exec(
+    async def stream_exec(
         self,
         container_id: str,
         cols: int = 80,
         rows: int = 24,
     ) -> tuple[AsyncIterator[bytes], Callable[[bytes], None], Callable[[], None], str]:
         """Open a PTY exec session inside a container.
+
+        The synchronous exec setup (exec_create/exec_start) runs off the event loop.
 
         Returns:
             A tuple of (stdout_async_iterator, stdin_write_func, close_func, exec_id).

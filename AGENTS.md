@@ -6,9 +6,48 @@ Conventions for tooling, dependencies, naming, and Python style. Follow this fil
 
 - **Keep the readme concise** when adding or updating the readme file.
 
-## Package management (pnpm / npm)
+## Commands
+
+```powershell
+# Backend
+cd backend
+python -m pytest tests -q                                    # all tests
+python -m pytest tests/test_auth.py -q                       # single file
+python -m pytest tests/test_auth.py::test_register -q        # single test
+ruff check .                                                  # lint
+mypy app/ tests/                                              # typecheck
+alembic upgrade head                                          # DB migrations
+
+# Frontend
+cd ..\frontend
+npm run dev                                                   # dev server (Vite proxy → :8000)
+npm run build                                                 # tsc -b && vite build
+npm run lint                                                  # eslint .
+npm run typecheck                                             # tsc -b
+npm run test:e2e                                              # Playwright suite
+npm run test:e2e -- e2e/auth.spec.ts                          # single spec
+npm run test:e2e -- -g "Settings page"                        # filter by name
+npm run test:e2e:headed                                       # headed (watch browser)
+$env:PW_API_SERVER_COMMAND = "..."; npm run test:e2e           # custom API command
+```
+
+## CI environment
+
+Not using these env vars locally will cause test failures or wait on Docker:
+
+```powershell
+$env:VELA_FAKE_ORCHESTRATOR = "1"       # replaces DockerOrchestrator with in-memory fake
+$env:VELA_DATABASE_URL = "sqlite+aiosqlite:///:memory:"   # no Postgres needed for pytest
+```
+
+CI runs pytest for `backend/` and Playwright for `frontend/` (with `VELA_E2E=1` SQLite via `playwright.config.ts`). No Docker or Postgres needed for tests.
+
+The E2E suite resets the database on API startup (`app/e2e_support.py` `ensure_e2e_database`).
+
+## Package management (npm)
 
 - **Exact versions only** in `package.json` — no `^` or `~`. `frontend/.npmrc` sets `save-exact=true`. After adding a dependency, verify the entry has no range prefix.
+- Project uses **npm** (not pnpm). Lockfile: `package-lock.json`.
 
 ## Backend setup
 
@@ -33,6 +72,14 @@ Conventions for tooling, dependencies, naming, and Python style. Follow this fil
 | `VELA_E2E_ALLOW_DB_RESET=1` | Required alongside `VELA_E2E` to permit schema drop+create |
 | `VELA_TRAFFIC_ROUTER` | `noop` (default), `traefik_file`, or `kubernetes` |
 | `VELA_OBJECT_STORAGE` | `memory` (default for dev/tests) or `r2` |
+
+## Db / engine quirks
+
+- **Runtime** uses `postgresql+asyncpg`. **Alembic** uses `postgresql+psycopg` (sync) because `asyncpg` + `asyncio` fails on some Windows + Docker Desktop setups.
+- On Windows, `localhost` → `127.0.0.1` is mapped automatically in `app/db/engine.py` (`_database_url_for_engine`).
+- `VELA_DATABASE_URL` for async is `postgresql+asyncpg://user:pass@host:port/db`. For Alembic the driver is swapped to `psycopg`.
+- `sqlalchemy.engine.url.URL` masks passwords in `str()` — use `render_as_string(hide_password=False)` when constructing live connection strings.
+- Test conftest overrides: `integration_app` (DB + orchestrator + builder + router + storage), `db_app` (DB only), `api_client` (authed), `make_authed_client` (per-test override builder).
 
 ## Backend structure (MVC)
 
@@ -96,6 +143,7 @@ After substantive agent-generated edits on a branch, run the **deslop** Cursor s
 - **Keep page and component files from growing too large.** Split out subviews, hooks, and shared UI into focused modules when a file becomes hard to scan or review.
 - **Reuse across pages** when the same UI or logic appears in more than one place — extract shared components or hooks rather than duplicating large blocks.
 - **`useEffect`**: Prefer deriving state during render, event handlers, or library patterns that avoid sync-on-mount when they suffice. Reserve effects for real side effects (subscriptions, imperative DOM, syncing with external systems) and avoid redundant or overly chained effects that are hard to reason about.
+- API client in `frontend/src/api/client.ts`: token in `localStorage` key `vela.access_token`, helpers `apiGet`/`apiPost`/`apiPatch`/`apiDelete`/`apiUploadFile`; `apiGet`/`apiPost`/`apiPut` accept an options object with `skipAuth` and an opt-in in-memory response cache (`cache: true`).
 
 ## UI and forms (user experience)
 
@@ -133,4 +181,5 @@ Verified against the ui-ux-pro-max skill; the codebase already follows these —
 ## Verification
 
 - **Always run both backend and E2E tests after substantive changes** before claiming work is complete. Run `python -m pytest` in `backend/` and the Playwright E2E suite in `frontend/e2e/`. Do not skip verification—tests are the only check that persists after the session ends.
+- **Verify the docker compose actually works** before considering a task complete. The pytest/lint gate runs against in-memory SQLite, so it will not surface a broken alembic migration, an env/port drift, or a failed healthcheck — changes can break the compose with nothing flagged up front. Run `docker compose -f docker-compose.yml config -q`, then `docker compose up -d --build` and confirm via `docker compose ps` that `migrate` completed and `api` reached `healthy`. Tear down with `docker compose down` when done.
 After substantive agent edits, clean the diff: remove unnecessary comments, abnormal `try`/`except` on trusted paths, `any` casts only to silence types, and deeply nested structure that doesn't match surrounding code — **without changing behavior** except for clear bugs.

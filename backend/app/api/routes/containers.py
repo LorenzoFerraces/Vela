@@ -22,6 +22,7 @@ from fastapi import (
     WebSocket,
     status,
 )
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.websockets import WebSocketDisconnect
 
@@ -72,7 +73,7 @@ from app.core.containers.volume_uploads import (
     volume_upload_max_bytes,
     volume_upload_user_quota_bytes,
 )
-from app.core.deploy.deploy_source_display import resolve_deploy_source_label
+from app.core.deploy.deploy_source_display import source_ref_looks_like_uuid
 from app.core.deploy.deploy_source_suggestions import (
     DeploySourcesResponse,
     collect_deploy_source_suggestions,
@@ -109,10 +110,9 @@ from app.core.models import (
 from app.core.oauth import decrypt_identity_token, get_github_identity
 from app.core.projects.access import (
     list_accessible_project_ids,
-    membership_role_for_container,
     require_container_access,
 )
-from app.core.projects.enums import can_write
+from app.core.projects.enums import ProjectRole, can_write
 from app.core.projects.repository import get_personal_project_id, require_membership
 from app.core.traffic.public_route_host import (
     apply_public_route_to_deploy_config,
@@ -120,7 +120,7 @@ from app.core.traffic.public_route_host import (
     read_public_route_settings,
 )
 from app.core.traffic.traffic_router import TrafficRouter
-from app.db.models import User
+from app.db.models import Dockerfile, ProjectMembership, User
 
 logger = logging.getLogger(__name__)
 
@@ -423,36 +423,119 @@ async def _persist_scaling_policy(
         )
 
 
+def _container_project_or_owner(
+    info: ContainerInfo,
+) -> tuple[uuid.UUID | None, uuid.UUID | None]:
+    """Return ``(project_id, owner_id)`` parsed from container labels (one may be None)."""
+    label_value = info.labels.get(VELA_PROJECT_LABEL)
+    if label_value:
+        try:
+            return uuid.UUID(label_value), None
+        except ValueError:
+            pass
+    owner_label = info.labels.get(VELA_OWNER_LABEL)
+    if not owner_label:
+        return None, None
+    try:
+        return None, uuid.UUID(owner_label)
+    except ValueError:
+        return None, None
+
+
 async def _enrich_container_source_labels(
     session: AsyncSession,
     user: User,
     containers: list[ContainerInfo],
+    project_ids: set[uuid.UUID],
 ) -> list[ContainerInfo]:
     """Fill ``source_label`` and ``access_role`` for listed containers."""
     history_by_container = await latest_source_by_container_ids(
         session,
         user.id,
         [row.id for row in containers],
+        project_ids=project_ids,
     )
-    enriched: list[ContainerInfo] = []
+
+    project_or_owner: dict[str, tuple[uuid.UUID | None, uuid.UUID | None]] = {}
     for info in containers:
-        role = await membership_role_for_container(session, user.id, info)
-        access_role = role.value if role is not None else None
+        project_or_owner[info.id] = _container_project_or_owner(info)
+    owner_ids = {
+        owner_id for _, owner_id in project_or_owner.values() if owner_id is not None
+    }
+
+    personal_project_by_owner: dict[uuid.UUID, uuid.UUID | None] = {}
+    if owner_ids:
+        result = await session.execute(select(User).where(User.id.in_(owner_ids)))
+        for owner in result.scalars():
+            personal_project_id = owner.personal_project_id
+            if personal_project_id is None:
+                personal_project_id = await get_personal_project_id(session, owner)
+            personal_project_by_owner[owner.id] = personal_project_id
+
+    project_id_by_container: dict[str, uuid.UUID | None] = {}
+    for info in containers:
+        project_id, owner_id = project_or_owner[info.id]
+        if project_id is None and owner_id is not None:
+            project_id = personal_project_by_owner.get(owner_id)
+        project_id_by_container[info.id] = project_id
+
+    role_by_project: dict[uuid.UUID, ProjectRole] = {}
+    candidate_projects = {
+        project_id
+        for project_id in project_id_by_container.values()
+        if project_id is not None
+    }
+    if candidate_projects:
+        membership_result = await session.execute(
+            select(ProjectMembership).where(
+                ProjectMembership.user_id == user.id,
+                ProjectMembership.project_id.in_(candidate_projects),
+            )
+        )
+        for membership in membership_result.scalars():
+            role_by_project[membership.project_id] = ProjectRole(membership.role)
+
+    source_by_container: dict[str, tuple[str | None, str]] = {}
+    template_ids: set[uuid.UUID] = set()
+    for info in containers:
         source_kind = info.source_kind or info.labels.get(VELA_SOURCE_KIND_LABEL)
         source_ref = info.source_label or info.labels.get(VELA_SOURCE_REF_LABEL) or ""
         if not source_ref and info.id in history_by_container:
             history_kind, history_ref = history_by_container[info.id]
             source_kind = source_kind or history_kind
             source_ref = history_ref
+        source_by_container[info.id] = (source_kind, source_ref)
+        if (
+            source_kind == "dockerfile_template"
+            and source_ref_looks_like_uuid(source_ref)
+        ):
+            template_ids.add(uuid.UUID(source_ref))
+
+    template_names: dict[uuid.UUID, str] = {}
+    if template_ids:
+        template_result = await session.execute(
+            select(Dockerfile).where(
+                Dockerfile.owner_id == user.id,
+                Dockerfile.id.in_(template_ids),
+            )
+        )
+        for row in template_result.scalars():
+            template_names[row.id] = row.name
+
+    enriched: list[ContainerInfo] = []
+    for info in containers:
+        project_id = project_id_by_container[info.id]
+        role = role_by_project.get(project_id) if project_id is not None else None
+        access_role = role.value if role is not None else None
+        source_kind, source_ref = source_by_container[info.id]
         if not source_kind or not source_ref:
             enriched.append(info.model_copy(update={"access_role": access_role}))
             continue
-        display_ref = await resolve_deploy_source_label(
-            session,
-            user.id,
-            source_kind=source_kind,
-            source_ref=source_ref,
-        )
+        display_ref = source_ref
+        if source_kind == "dockerfile_template" and source_ref_looks_like_uuid(
+            source_ref
+        ):
+            display_ref = template_names.get(uuid.UUID(source_ref), source_ref)
         enriched.append(
             info.model_copy(
                 update={
@@ -471,8 +554,8 @@ async def _list_user_containers(
     user: User,
     *,
     container_status: ContainerStatus | None,
+    project_ids: set[uuid.UUID],
 ) -> list[ContainerInfo]:
-    project_ids = await list_accessible_project_ids(session, user.id)
     return await orchestrator.list(
         status=container_status,
         project_ids=project_ids,
@@ -489,15 +572,23 @@ async def list_containers(
         ContainerStatus | None,
         Query(alias="status", description="Filter by container status"),
     ] = None,
+    # ponytail: default limit = max page so the un-paginated UI still gets every container
+    limit: Annotated[int, Query(ge=1, le=500)] = 500,
+    offset: Annotated[int, Query(ge=0)] = 0,
 ) -> list[ContainerInfo]:
     """List containers in projects the caller belongs to, optionally filtered by status."""
+    project_ids = await list_accessible_project_ids(session, current_user.id)
     containers = await _list_user_containers(
         orchestrator,
         session,
         current_user,
         container_status=container_status,
+        project_ids=project_ids,
     )
-    return await _enrich_container_source_labels(session, current_user, containers)
+    page = containers[offset : offset + limit]
+    return await _enrich_container_source_labels(
+        session, current_user, page, project_ids
+    )
 
 
 @router.get("/image/availability", response_model=ImageAvailabilityResponse)
@@ -1222,10 +1313,7 @@ async def container_exec_ws(
             pass
 
         try:
-            # ponytail: exec_create/exec_start block the loop (3 HTTP calls per
-            # session); making stream_exec async would change the orchestrator
-            # interface for little gain
-            stdout_iter, stdin_write, exec_close_fn, exec_id = orchestrator.stream_exec(
+            stdout_iter, stdin_write, exec_close_fn, exec_id = await orchestrator.stream_exec(
                 container_id, cols=cols, rows=rows
             )
         except Exception as exc:

@@ -11,6 +11,7 @@ import { ContainerLogPanel } from '../components/workloads/ContainerLogPanel'
 import './logs/logs.css'
 
 const LIMIT = 100
+const SEARCH_DEBOUNCE_MS = 320
 
 export default function LogsPage() {
   const [searchParams, setSearchParams] = useSearchParams()
@@ -22,6 +23,9 @@ export default function LogsPage() {
   const fetchRequestRef = useRef(0)
 
   const search = searchParams.get('q') ?? ''
+  const [debouncedSearch, setDebouncedSearch] = useState(
+    () => searchParams.get('q') ?? '',
+  )
   const levelFilter = searchParams.get('level') ?? ''
   const containerFilter = searchParams.get('container_id') ?? ''
   const startRaw = searchParams.get('start') ?? ''
@@ -45,6 +49,14 @@ export default function LogsPage() {
     }
   }, [])
 
+  useEffect(() => {
+    const timer = window.setTimeout(
+      () => setDebouncedSearch(search),
+      SEARCH_DEBOUNCE_MS,
+    )
+    return () => window.clearTimeout(timer)
+  }, [search])
+
   function setFilterParam(name: string, value: string) {
     const next = new URLSearchParams(searchParams)
     if (value) {
@@ -67,13 +79,13 @@ export default function LogsPage() {
   }
 
   const buildParams = useCallback(
-    (includeOffset: boolean): LogQueryParams => {
+    (includeOffset: boolean, searchValue: string): LogQueryParams => {
       const params: LogQueryParams = {
         container_id: containerFilter.trim(),
         limit: LIMIT,
       }
       if (includeOffset) params.offset = offset
-      if (search) params.q = search
+      if (searchValue) params.q = searchValue
       if (levelFilter) params.level = levelFilter
       const startDate = startRaw ? new Date(startRaw) : null
       if (startDate && !Number.isNaN(startDate.getTime())) {
@@ -85,14 +97,14 @@ export default function LogsPage() {
       }
       return params
     },
-    [search, levelFilter, containerFilter, startRaw, endRaw, offset],
+    [levelFilter, containerFilter, startRaw, endRaw, offset],
   )
 
   const fetchLogs = useCallback(async () => {
     const requestId = fetchRequestRef.current + 1
     fetchRequestRef.current = requestId
     try {
-      const res = await getLogs(buildParams(true))
+      const res = await getLogs(buildParams(true, debouncedSearch))
       if (fetchRequestRef.current === requestId) {
         setEntries(res.entries)
         setTotal(res.total)
@@ -107,7 +119,7 @@ export default function LogsPage() {
         setLoading(false)
       }
     }
-  }, [buildParams])
+  }, [buildParams, debouncedSearch])
 
   useEffect(() => {
     if (!hasContainer) return
@@ -117,7 +129,7 @@ export default function LogsPage() {
   const handleExport = async () => {
     if (!hasContainer) return
     try {
-      await exportLogs(buildParams(false))
+      await exportLogs(buildParams(false, search))
     } catch (err) {
       setError(formatApiError(err))
     }

@@ -10,6 +10,7 @@ from contextlib import asynccontextmanager, suppress
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.gzip import GZipMiddleware
 
 from app.api.errors import register_exception_handlers
 from app.api.routes import (
@@ -104,6 +105,8 @@ def create_app() -> FastAPI:
         version="0.1.0",
         lifespan=_lifespan,
     )
+
+    application.add_middleware(GZipMiddleware)
 
     application.add_middleware(
         CORSMiddleware,

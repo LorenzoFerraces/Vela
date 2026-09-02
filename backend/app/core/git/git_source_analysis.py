@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import hashlib
 import re
 from pathlib import Path
 
@@ -15,14 +17,15 @@ from app.core.exceptions import (
     LlmCallError,
     LlmNotConfiguredError,
 )
-from app.core.git.git_ops import head_commit
+from app.core.git.git_ops import _CREDENTIALS_IN_URL, git_head_ref, rm_tree
 from app.core.git.project_analysis import analyze_project
+from app.core.models import ProjectInfo
 from app.core.llm import generate_json, resolve_llm_config
 from app.core.llm.cache import delete_cached, load_cached, store_cached
 from app.e2e_support import e2e_git_source_analysis_if_enabled
 MAX_FILE_BYTES = 12_000
 MAX_TOTAL_BYTES = 48_000
-GIT_SOURCE_PROMPT_VERSION = "v1"  # ponytail: bump when the git-source prompt text changes
+GIT_SOURCE_PROMPT_VERSION = "v2"  # ponytail: bumped for the full-result cache format change
 
 _README_CANDIDATES = ("README.md", "README", "readme.md", "Readme.md")
 
@@ -228,7 +231,10 @@ def _append_excerpt(
     return total + len(chunk)
 
 
-def _collect_context_excerpts(project_root: Path) -> str:
+def _collect_context_excerpts(
+    project_root: Path,
+    info: ProjectInfo | None = None,
+) -> str:
     parts: list[str] = []
     total = 0
 
@@ -286,7 +292,7 @@ def _collect_context_excerpts(project_root: Path) -> str:
         )
 
     if not parts:
-        info = analyze_project(project_root)
+        info = info or analyze_project(project_root)
         parts.append(
             f"=== analysis ===\nlanguage={info.language}\n"
             f"has_dockerfile={info.has_dockerfile}\n"
@@ -366,9 +372,13 @@ def _dockerfile_facts(text: str) -> str | None:
     return " ".join(facts)
 
 
-def _detected_facts_block(root: Path, context: str) -> str:
+def _detected_facts_block(
+    root: Path,
+    context: str,
+    info: ProjectInfo | None = None,
+) -> str:
     lines: list[str] = []
-    info = analyze_project(root)
+    info = info or analyze_project(root)
     if info.language is not SupportedLanguage.UNKNOWN:
         language_line = f"language={info.language}"
         if info.framework:
@@ -436,9 +446,8 @@ def _merge_env_fallback(
 
 def _enrich_with_local_detection(
     analysis: GitSourceAnalysis,
-    project_root: Path,
+    info: ProjectInfo,
 ) -> GitSourceAnalysis:
-    info = analyze_project(project_root)
     needs_manual = (
         not info.has_dockerfile and info.language is SupportedLanguage.UNKNOWN
     )
@@ -516,12 +525,8 @@ async def _call_gemini(
             "\n\nDetected facts (already verified by deterministic scans; "
             f"prefer them over re-deriving):\n{facts}"
         )
-    cache_key = f"{commit}:{git_branch}" if commit else ""
     try:
-        parsed = load_cached("git_source", cache_key, GIT_SOURCE_PROMPT_VERSION)
-        if parsed is None:
-            parsed = await generate_json(prompt=prompt, schema=_analysis_json_schema())
-            store_cached("git_source", cache_key, GIT_SOURCE_PROMPT_VERSION, parsed)
+        parsed = await generate_json(prompt=prompt, schema=_analysis_json_schema())
     except LlmNotConfiguredError as exc:
         raise GitSourceAnalysisError("AI analysis is not configured on this server.") from exc
     except LlmCallError as exc:
@@ -540,14 +545,17 @@ async def _call_gemini(
             return analysis.model_copy(update={"container_name": sanitized_name})
         return analysis
     except (TypeError, ValidationError) as exc:
-        delete_cached("git_source", cache_key, GIT_SOURCE_PROMPT_VERSION)
         raise GitSourceAnalysisError(
             "AI analysis returned an invalid response. Try again or fill the form manually."
         ) from exc
 
 
-def _fallback_analysis(project_root: Path, git_branch: str) -> GitSourceAnalysis:
-    info = analyze_project(project_root)
+def _fallback_analysis(
+    project_root: Path,
+    git_branch: str,
+    info: ProjectInfo | None = None,
+) -> GitSourceAnalysis:
+    info = info or analyze_project(project_root)
     port = 80
     if info.language in {"typescript", "javascript"}:
         port = 5173
@@ -585,6 +593,16 @@ def _fallback_analysis(project_root: Path, git_branch: str) -> GitSourceAnalysis
     )
 
 
+def _git_source_cache_key(git_url: str, commit: str, git_branch: str) -> str:
+    if not commit:
+        return ""
+    normalized = _CREDENTIALS_IN_URL.sub(r"\1", git_url.strip()).rstrip("/")
+    if normalized.lower().endswith(".git"):
+        normalized = normalized[: -len(".git")]
+    digest = hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+    return f"{digest}:{commit}:{git_branch}"
+
+
 async def analyze_git_source(
     image_builder: DefaultImageBuilder,
     *,
@@ -596,6 +614,35 @@ async def analyze_git_source(
     if fixture is not None:
         return fixture
 
+    if resolve_llm_config() is None:
+        # No LLM: deterministic fallback. No commit resolution, no cache.
+        project_path = await image_builder.clone_repository(
+            git_url,
+            branch=git_branch,
+            access_token=access_token,
+        )
+        root = Path(project_path)
+        parent = root.parent
+        try:
+            info = analyze_project(root)
+            context = await asyncio.to_thread(_collect_context_excerpts, root, info)
+            return _merge_env_fallback(_fallback_analysis(root, git_branch, info), context)
+        finally:
+            rm_tree(parent)
+
+    # LLM path: cheap commit resolution (no clone) so a full-result cache hit skips the clone.
+    commit = await git_head_ref(url=git_url, branch=git_branch, access_token=access_token) or ""
+    cache_key = _git_source_cache_key(git_url, commit, git_branch)
+    # ponytail: full-result cache hit returns the stored GitSourceAnalysis and skips the clone
+    if cache_key:
+        cached = load_cached("git_source", cache_key, GIT_SOURCE_PROMPT_VERSION)
+        if cached is not None:
+            try:
+                return GitSourceAnalysis.model_validate(cached)
+            except ValidationError:
+                delete_cached("git_source", cache_key, GIT_SOURCE_PROMPT_VERSION)
+
+    # Cache miss: clone + full analysis (single analyze_project, off-loop FS walks).
     project_path = await image_builder.clone_repository(
         git_url,
         branch=git_branch,
@@ -604,17 +651,16 @@ async def analyze_git_source(
     root = Path(project_path)
     parent = root.parent
     try:
-        context = _collect_context_excerpts(root)
-        if resolve_llm_config() is None:
-            return _merge_env_fallback(_fallback_analysis(root, git_branch), context)
-        commit = head_commit(root) or ""
-        facts = _detected_facts_block(root, context)
+        info = analyze_project(root)
+        context = await asyncio.to_thread(_collect_context_excerpts, root, info)
+        facts = await asyncio.to_thread(_detected_facts_block, root, context, info)
         analysis = await _call_gemini(context, git_url, git_branch, facts, commit)
-        enriched = _enrich_with_local_detection(analysis, root)
-        return _merge_env_fallback(enriched, context)
+        enriched = _enrich_with_local_detection(analysis, info)
+        result = _merge_env_fallback(enriched, context)
+        if cache_key:
+            store_cached("git_source", cache_key, GIT_SOURCE_PROMPT_VERSION, result.model_dump(mode="json"))
+        return result
     finally:
-        from app.core.git.git_ops import rm_tree
-
         rm_tree(parent)
 
 

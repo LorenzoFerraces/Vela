@@ -98,7 +98,7 @@ def test_exec_ws_semaphore_timeout_rejects(
 def test_exec_ws_surfaces_start_failure(
     make_authed_client, fake_orchestrator, auth_token: str
 ) -> None:
-    def broken_stream_exec(*args: object, **kwargs: object) -> object:
+    async def broken_stream_exec(*args: object, **kwargs: object) -> object:
         raise RuntimeError("OCI runtime exec failed: sh not found")
 
     fake_orchestrator.stream_exec = broken_stream_exec
