@@ -1,3 +1,4 @@
+import { useEffect, useMemo, useState } from 'react'
 import type { RefObject } from 'react'
 import type { DeploySourceSuggestion } from '../../api/client'
 import type { ImageRefCheckState } from './types'
@@ -22,6 +23,7 @@ type DeploySourceComboboxProps = {
   onPickSuggestion: (suggestion: DeploySourceSuggestion) => void
   onRequestImageCheck: (ref: string) => void
   onCommitPastedGithubRepo?: () => void
+  onListClose: () => void
 }
 
 /**
@@ -74,6 +76,32 @@ function suggestionOptionLabel(suggestion: DeploySourceSuggestion): string {
       return suggestion.name
   }
 }
+
+function isOptionSelected(
+  selection: DeploySourceSelection | null,
+  suggestion: DeploySourceSuggestion,
+): boolean {
+  if (!selection) {
+    return false
+  }
+  switch (suggestion.kind) {
+    case 'image':
+      return selection.kind === 'image' && selection.ref === suggestion.ref
+    case 'git':
+      return selection.kind === 'git' && selection.url === suggestion.url
+    case 'dockerfile_template':
+      return (
+        selection.kind === 'dockerfile_template' &&
+        selection.templateId === suggestion.id
+      )
+  }
+}
+
+const GROUPED_KINDS: DeploySourceSuggestion['kind'][] = [
+  'image',
+  'git',
+  'dockerfile_template',
+]
 
 const SKELETON_GROUP_WIDTHS = ['4.5rem', '5.75rem'] as const
 const SKELETON_OPTION_WIDTHS = ['92%', '78%', '85%'] as const
@@ -148,13 +176,86 @@ export function DeploySourceCombobox({
   onPickSuggestion,
   onRequestImageCheck,
   onCommitPastedGithubRepo,
+  onListClose,
 }: DeploySourceComboboxProps) {
   const registryCheckEnabled = selectionNeedsRegistryCheck(selection)
-  const groupedKinds: DeploySourceSuggestion['kind'][] = [
-    'image',
-    'git',
-    'dockerfile_template',
-  ]
+  const options = useMemo(() => {
+    const rowsByKind: Record<
+      DeploySourceSuggestion['kind'],
+      DeploySourceSuggestion[]
+    > = {
+      image: [],
+      git: [],
+      dockerfile_template: [],
+    }
+    for (const row of suggestions) {
+      rowsByKind[row.kind].push(row)
+    }
+    return GROUPED_KINDS.flatMap((kind) => rowsByKind[kind])
+  }, [suggestions])
+  const [activeIndex, setActiveIndex] = useState(-1)
+  const activeOptionIndex =
+    activeIndex >= 0 ? Math.min(activeIndex, options.length - 1) : -1
+
+  useEffect(() => {
+    if (activeOptionIndex < 0) {
+      return
+    }
+    const option = options[activeOptionIndex]
+    if (!option) {
+      return
+    }
+    document
+      .getElementById(`deploy-source-option-${suggestionKey(option)}`)
+      ?.scrollIntoView({ block: 'nearest' })
+  }, [activeOptionIndex, options])
+
+  function handleKeyDown(event: React.KeyboardEvent<HTMLInputElement>) {
+    if (listOpen && options.length > 0) {
+      if (event.key === 'ArrowDown') {
+        event.preventDefault()
+        setActiveIndex((index) => Math.min(index + 1, options.length - 1))
+        return
+      }
+      if (event.key === 'ArrowUp') {
+        event.preventDefault()
+        setActiveIndex((index) =>
+          index < 0 ? options.length - 1 : index - 1,
+        )
+        return
+      }
+      if (event.key === 'Home') {
+        event.preventDefault()
+        setActiveIndex(0)
+        return
+      }
+      if (event.key === 'End') {
+        event.preventDefault()
+        setActiveIndex(options.length - 1)
+        return
+      }
+    }
+    if (event.key === 'Escape' && listOpen) {
+      event.preventDefault()
+      onListClose()
+      return
+    }
+    if (event.key === 'Enter' && listOpen && activeOptionIndex >= 0) {
+      event.preventDefault()
+      setActiveIndex(-1)
+      onPickSuggestion(options[activeOptionIndex])
+      return
+    }
+    if (
+      event.key === 'Enter' &&
+      listOpen &&
+      pastedGithubRepoPending &&
+      onCommitPastedGithubRepo
+    ) {
+      event.preventDefault()
+      onCommitPastedGithubRepo()
+    }
+  }
 
   return (
     <>
@@ -168,23 +269,25 @@ export function DeploySourceCombobox({
           aria-controls={listboxId}
           aria-autocomplete="list"
           autoComplete="off"
+          aria-activedescendant={
+            activeOptionIndex >= 0
+              ? `deploy-source-option-${suggestionKey(options[activeOptionIndex])}`
+              : undefined
+          }
           placeholder="Search images, GitHub repos, or Dockerfiles…"
           value={displayValue}
-          onChange={(event) => onInputChange(event.target.value)}
-          onFocus={onInputFocus}
-          onKeyDown={(event) => {
-            if (event.key === 'Enter' && onCommitPastedGithubRepo) {
-              event.preventDefault()
-              onCommitPastedGithubRepo()
-            }
+          onChange={(event) => {
+            setActiveIndex(-1)
+            onInputChange(event.target.value)
           }}
+          onFocus={onInputFocus}
+          onKeyDown={handleKeyDown}
           onBlur={() => {
             onCommitPastedGithubRepo?.()
             if (selection?.kind === 'image') {
               void onRequestImageCheck(selection.ref)
             }
           }}
-          aria-label="Deploy source"
           aria-invalid={
             registryCheckEnabled &&
             imageRefCheck.status === 'unavailable' &&
@@ -218,7 +321,7 @@ export function DeploySourceCombobox({
               </li>
             ) : null}
             {!searchLoading
-              ? groupedKinds.map((kind) => {
+              ? GROUPED_KINDS.map((kind) => {
               const rows = suggestions.filter((row) => row.kind === kind)
               if (rows.length === 0) {
                 return null
@@ -231,15 +334,16 @@ export function DeploySourceCombobox({
                   <ul role="group">
                     {rows.map((row) => (
                       <li key={suggestionKey(row)} role="presentation">
-                        <button
-                          type="button"
+                        <div
+                          id={`deploy-source-option-${suggestionKey(row)}`}
                           className="deploy-source-combobox__option"
                           role="option"
+                          aria-selected={isOptionSelected(selection, row)}
                           onMouseDown={(event) => event.preventDefault()}
                           onClick={() => onPickSuggestion(row)}
                         >
                           {suggestionOptionLabel(row)}
-                        </button>
+                        </div>
                       </li>
                     ))}
                   </ul>
@@ -254,6 +358,7 @@ export function DeploySourceCombobox({
         <p
           id="deploy-source-status"
           className="containers-source-check containers-source-check--muted"
+          role="status"
         >
           Checking registry…
         </p>
@@ -262,6 +367,7 @@ export function DeploySourceCombobox({
         <p
           id="deploy-source-status"
           className="containers-source-check containers-source-check--ok"
+          role="status"
         >
           Image reference found.
         </p>

@@ -7,18 +7,20 @@ import {
 } from '../../api/client'
 import { groupContainers, type WorkloadGroup } from './workloadGrouping'
 
+const POLL_INTERVAL_MS = 30_000
+
 export function useWorkloadGroups(reportLoadError: (detail: string) => void) {
   const [groups, setGroups] = useState<WorkloadGroup[]>([])
   const [listLoading, setListLoading] = useState(true)
   const refreshGenerationRef = useRef(0)
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (options: { revalidate?: boolean } = {}) => {
     const generation = ++refreshGenerationRef.current
     setListLoading(true)
     try {
       let containers
       try {
-        containers = await listContainers()
+        containers = await listContainers(options)
       } catch (error) {
         if (generation === refreshGenerationRef.current) {
           reportLoadError(formatApiError(error))
@@ -46,6 +48,42 @@ export function useWorkloadGroups(reportLoadError: (detail: string) => void) {
 
   useEffect(() => {
     void refresh()
+  }, [refresh])
+
+  useEffect(() => {
+    let pollTimer: number | undefined
+
+    const stopPolling = () => {
+      if (pollTimer !== undefined) {
+        window.clearInterval(pollTimer)
+        pollTimer = undefined
+      }
+    }
+
+    const startPolling = () => {
+      stopPolling()
+      pollTimer = window.setInterval(() => {
+        void refresh({ revalidate: true })
+      }, POLL_INTERVAL_MS)
+    }
+
+    function onVisibilityChange() {
+      if (document.visibilityState === 'visible') {
+        void refresh({ revalidate: true })
+        startPolling()
+      } else {
+        stopPolling()
+      }
+    }
+
+    if (document.visibilityState === 'visible') {
+      startPolling()
+    }
+    document.addEventListener('visibilitychange', onVisibilityChange)
+    return () => {
+      stopPolling()
+      document.removeEventListener('visibilitychange', onVisibilityChange)
+    }
   }, [refresh])
 
   return { groups, listLoading, refresh }

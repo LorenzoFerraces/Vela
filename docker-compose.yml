@@ -6,8 +6,8 @@
 # The API drives the HOST Docker daemon through a bind-mounted socket, so
 # workload containers run on the host engine and join the `vela-workloads`
 # network. Traefik is attached to that same network, which is what lets public
-# routes reach workloads. If you run this from Windows (not WSL2) and the
-# socket mount fails, run compose from a WSL2 distro instead.
+# routes reach workloads. Works from Windows (Docker Desktop) or WSL2: the api
+# entrypoint aligns the socket's group with its in-image docker group on start.
 
 name: vela
 

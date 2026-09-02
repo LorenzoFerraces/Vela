@@ -1,5 +1,6 @@
 import { useState } from 'react'
-import type { DockerfileTemplate } from '../../api/client'
+import type { DockerfileTemplate } from '../api/client'
+import ConfirmDialog from './ConfirmDialog'
 
 const DEFAULT_NEW_DOCKERFILE = `FROM alpine:3.20
 WORKDIR /app
@@ -20,6 +21,7 @@ type DockerfileTemplatesSectionProps = {
   onCreate: (name: string, contents: string) => Promise<boolean>
   onSave: () => void
   onRemove: (templateId: string) => void
+  leadText: string
 }
 
 export function DockerfileTemplatesSection({
@@ -36,9 +38,23 @@ export function DockerfileTemplatesSection({
   onCreate,
   onSave,
   onRemove,
+  leadText,
 }: DockerfileTemplatesSectionProps) {
   const [newName, setNewName] = useState('')
   const [newContents, setNewContents] = useState(DEFAULT_NEW_DOCKERFILE)
+  const [discardDialogOpen, setDiscardDialogOpen] = useState(false)
+  const [removeTargetId, setRemoveTargetId] = useState<string | null>(null)
+
+  const selectedTemplate = selectedId
+    ? rows.find((row) => row.id === selectedId)
+    : undefined
+  const hasUnsavedChanges =
+    selectedTemplate !== undefined &&
+    (editName !== selectedTemplate.name ||
+      editContents !== selectedTemplate.contents)
+  const removeTarget = removeTargetId
+    ? rows.find((row) => row.id === removeTargetId)
+    : undefined
 
   async function handleCreate(event: React.FormEvent) {
     event.preventDefault()
@@ -58,7 +74,7 @@ export function DockerfileTemplatesSection({
         Dockerfile templates
       </h2>
       <p className="containers-muted images-section__lead">
-        Name and edit Dockerfile snippets stored in your account.
+        {leadText}
       </p>
 
       <form
@@ -72,9 +88,10 @@ export function DockerfileTemplatesSection({
           id="new-template-name"
           className="containers-form__input"
           type="text"
-          placeholder="my-service"
+          placeholder="my-service…"
           value={newName}
           onChange={(event) => setNewName(event.target.value)}
+          autoComplete="off"
         />
         <label className="containers-form__label" htmlFor="new-template-contents">
           Contents
@@ -129,6 +146,7 @@ export function DockerfileTemplatesSection({
                 type="text"
                 value={editName}
                 onChange={(event) => onEditNameChange(event.target.value)}
+                autoComplete="off"
               />
               <label
                 className="containers-form__label"
@@ -157,7 +175,11 @@ export function DockerfileTemplatesSection({
                   type="button"
                   className="btn btn--ghost"
                   disabled={busy}
-                  onClick={onClearSelection}
+                  onClick={
+                    hasUnsavedChanges
+                      ? () => setDiscardDialogOpen(true)
+                      : onClearSelection
+                  }
                 >
                   Close
                 </button>
@@ -165,15 +187,7 @@ export function DockerfileTemplatesSection({
                   type="button"
                   className="btn btn--danger"
                   disabled={busy}
-                  onClick={() => {
-                    if (
-                      window.confirm(
-                        `Delete Dockerfile template ${editName}?`
-                      )
-                    ) {
-                      void onRemove(selectedId)
-                    }
-                  }}
+                  onClick={() => setRemoveTargetId(selectedId)}
                 >
                   Delete
                 </button>
@@ -186,6 +200,36 @@ export function DockerfileTemplatesSection({
           )}
         </div>
       )}
+
+      <ConfirmDialog
+        open={discardDialogOpen}
+        title="Discard changes?"
+        message="Your unsaved changes to this Dockerfile template will be lost."
+        confirmLabel="Discard"
+        onConfirm={() => {
+          setDiscardDialogOpen(false)
+          onClearSelection()
+        }}
+        onClose={() => setDiscardDialogOpen(false)}
+      />
+
+      <ConfirmDialog
+        open={removeTargetId !== null}
+        title="Delete Dockerfile template?"
+        message={
+          removeTarget
+            ? `"${removeTarget.name}" will be permanently deleted.`
+            : 'This Dockerfile template will be permanently deleted.'
+        }
+        confirmLabel="Delete"
+        onConfirm={() => {
+          if (removeTargetId) {
+            onRemove(removeTargetId)
+          }
+          setRemoveTargetId(null)
+        }}
+        onClose={() => setRemoveTargetId(null)}
+      />
     </section>
   )
 }

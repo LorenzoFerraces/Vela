@@ -1,10 +1,10 @@
 import { useCallback, useState } from 'react'
-import { DockerfileTemplatesSection } from './images/DockerfileTemplatesSection'
 import { ImagesMessageBanner } from './images/ImagesMessageBanner'
 import { SavedImagesSection } from './images/SavedImagesSection'
 import type { ImagesBanner } from './images/types'
-import { useDockerfileTemplates } from './images/useDockerfileTemplates'
 import { useSavedImages } from './images/useSavedImages'
+import { DockerfileTemplatesSection } from '../components/DockerfileTemplatesSection'
+import { useDockerfileTemplates } from '../components/useDockerfileTemplates'
 
 export default function ImagesPage() {
   const [banner, setBanner] = useState<ImagesBanner>(null)
@@ -47,6 +47,7 @@ export default function ImagesPage() {
         onCreate={dockerfiles.createTemplate}
         onSave={() => void dockerfiles.saveSelected()}
         onRemove={(templateId) => void dockerfiles.removeTemplate(templateId)}
+        leadText="Name and edit Dockerfile snippets stored in your account."
       />
     </section>
   )

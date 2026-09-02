@@ -30,6 +30,8 @@ MAX_LINES_PER_POLL = int(os.getenv("VELA_LOG_MAX_LINES_PER_POLL", "2000"))
 COLLECTOR_ENABLED = os.getenv("VELA_LOG_COLLECTOR_ENABLED", "1") != "0"
 # ponytail: cap overlap scanning at 1024 lines per container per poll
 _OVERLAP_CAP = 1024
+# ponytail: bound parallel log fetches per poll so a large fleet can't hammer the provider API
+_LOG_FETCH_CONCURRENCY = 8
 
 
 async def batch_insert_logs(session, logs: list[ContainerLog]) -> None:
@@ -91,6 +93,7 @@ class LogCollector:
         # in wall-clock time by every runtime, so the cursor stays valid across container restarts
         self._seen: dict[str, deque[str]] = {}
         self._cursor: dict[str, float] = {}
+        self._fetch_semaphore = asyncio.Semaphore(_LOG_FETCH_CONCURRENCY)
 
     async def start(self) -> None:
         if not COLLECTOR_ENABLED or not self._enabled:
@@ -132,18 +135,20 @@ class LogCollector:
         if not self._enabled:
             return
         containers = await self._orchestrator.list()
+        running = [c for c in containers if c.status == "running"]
         all_logs: list[ContainerLog] = []
         now = datetime.now(timezone.utc)
 
-        for container in containers:
-            if container.status != "running":
-                continue
-            try:
-                await self._collect_container(container, now, all_logs)
-            except Exception:
-                logger.exception(
-                    "Failed to collect logs for container %s", container.id
-                )
+        async def _bounded_collect(container: Any) -> None:
+            async with self._fetch_semaphore:
+                try:
+                    await self._collect_container(container, now, all_logs)
+                except Exception:
+                    logger.exception(
+                        "Failed to collect logs for container %s", container.id
+                    )
+
+        await asyncio.gather(*(_bounded_collect(container) for container in running))
 
         if not all_logs:
             return

@@ -25,6 +25,10 @@ class RestartPolicy(StrEnum):
     UNLESS_STOPPED = "unless_stopped"
 
 
+class EscalationPolicy(StrEnum):
+    NONE = "none"
+
+
 class BuildStrategy(StrEnum):
     DOCKERFILE_EXISTS = "dockerfile_exists"
     GENERATED_DOCKERFILE = "generated_dockerfile"

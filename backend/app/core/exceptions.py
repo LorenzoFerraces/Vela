@@ -153,6 +153,14 @@ class GitSourceAnalysisError(BuilderError):
     """Gemini or repository analysis for deploy pre-fill failed."""
 
 
+class LlmNotConfiguredError(VelaError):
+    """No supported LLM provider is configured."""
+
+
+class LlmCallError(VelaError):
+    """An LLM provider request or response failed."""
+
+
 class DockerfileGenerationError(BuilderError):
     def __init__(self, language: str, message: str) -> None:
         self.language = language
@@ -406,10 +414,8 @@ class StackCompositionCycleError(StackError):
         super().__init__(f"Cycle detected in stack composition: {' → '.join(stack_names)}")
 
 
-class ComposeImportError(StackError):
-    def __init__(self, message: str, *, warnings: list[str] | None = None) -> None:
-        self.warnings = warnings or []
-        super().__init__(message)
+class ManifestParseError(StackError):
+    """Uploaded/checked-in manifest could not be recognized or parsed."""
 
 
 class DuplicateStackNameError(StackError):

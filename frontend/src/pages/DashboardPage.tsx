@@ -6,7 +6,8 @@ import {
   startContainer,
   stopContainer,
 } from '../api/client'
-import { WorkloadsTable } from '../components/workloads/WorkloadsTable'
+import ConfirmDialog from '../components/ConfirmDialog'
+import { DashboardWorkloadsTable } from '../components/workloads/WorkloadsTable'
 import { useWorkloadGroups } from './containers/useWorkloadGroups'
 import { DeploymentHistorySection } from './containers/DeploymentHistorySection'
 import { ResourceUsagePanel } from './containers/ResourceUsagePanel'
@@ -17,6 +18,7 @@ export default function DashboardPage() {
     null,
   )
   const [rowBusy, setRowBusy] = useState<string | null>(null)
+  const [pendingRemoveId, setPendingRemoveId] = useState<string | null>(null)
   const [historyRefreshSignal, setHistoryRefreshSignal] = useState(0)
   const [usageRefreshSignal, setUsageRefreshSignal] = useState(0)
 
@@ -30,36 +32,47 @@ export default function DashboardPage() {
     navigate(`/containers/${containerId}/resources`)
   }, [navigate])
 
-  async function onStart(containerId: string) {
-    setRowBusy(containerId)
-    setBanner(null)
-    try {
-      await startContainer(containerId)
-      await refresh()
-      setUsageRefreshSignal((signal) => signal + 1)
-    } catch (error) {
-      setBanner({ tone: 'err', text: formatApiError(error) })
-    } finally {
-      setRowBusy(null)
-    }
-  }
+  const onStart = useCallback(
+    async (containerId: string) => {
+      setRowBusy(containerId)
+      setBanner(null)
+      try {
+        await startContainer(containerId)
+        await refresh()
+      } catch (error) {
+        setBanner({ tone: 'err', text: formatApiError(error) })
+      } finally {
+        setRowBusy(null)
+      }
+    },
+    [refresh],
+  )
 
-  async function onStop(containerId: string) {
-    setRowBusy(containerId)
-    setBanner(null)
-    try {
-      await stopContainer(containerId)
-      await refresh()
-      setUsageRefreshSignal((signal) => signal + 1)
-    } catch (error) {
-      setBanner({ tone: 'err', text: formatApiError(error) })
-    } finally {
-      setRowBusy(null)
-    }
-  }
+  const onStop = useCallback(
+    async (containerId: string) => {
+      setRowBusy(containerId)
+      setBanner(null)
+      try {
+        await stopContainer(containerId)
+        await refresh()
+        setUsageRefreshSignal((signal) => signal + 1)
+      } catch (error) {
+        setBanner({ tone: 'err', text: formatApiError(error) })
+      } finally {
+        setRowBusy(null)
+      }
+    },
+    [refresh],
+  )
 
-  async function onRemove(containerId: string) {
-    if (!window.confirm('Remove this container?')) return
+  const onRemove = useCallback(
+    (containerId: string) => setPendingRemoveId(containerId),
+    [],
+  )
+
+  async function onConfirmRemove() {
+    if (pendingRemoveId === null) return
+    const containerId = pendingRemoveId
     setRowBusy(containerId)
     setBanner(null)
     try {
@@ -70,6 +83,7 @@ export default function DashboardPage() {
       setBanner({ tone: 'err', text: formatApiError(error) })
     } finally {
       setRowBusy(null)
+      setPendingRemoveId(null)
     }
   }
 
@@ -77,7 +91,7 @@ export default function DashboardPage() {
     <section className="dashboard-page">
       <h1 className="dashboard-page__title">Dashboard</h1>
       <p className="dashboard-page__lead">
-        Monitor workloads: live logs, resource stats per instance, and grouped
+        Monitor workloads: logs, resource stats per instance, and grouped
         replicas for auto-scaled deployments. Containers that are stopped,
         restarting, or failing health checks are listed first.
       </p>
@@ -92,7 +106,7 @@ export default function DashboardPage() {
       ) : null}
 
       <h2 className="dashboard-page__subtitle">Running workloads</h2>
-      <WorkloadsTable
+      <DashboardWorkloadsTable
         listLoading={listLoading}
         groups={groups}
         rowBusyId={rowBusy}
@@ -100,8 +114,6 @@ export default function DashboardPage() {
         onStop={onStop}
         onRemove={onRemove}
         onViewResources={onViewResources}
-        prioritizeProblemWorkloads
-        showStatsColumn
       />
 
       <ResourceUsagePanel refreshSignal={usageRefreshSignal} />
@@ -122,6 +134,16 @@ export default function DashboardPage() {
           Refresh
         </button>
       </div>
+
+      <ConfirmDialog
+        open={pendingRemoveId !== null}
+        title="Remove container?"
+        message={`${pendingRemoveId ?? ''} will be removed.`}
+        confirmLabel={rowBusy === pendingRemoveId ? 'Removing…' : 'Remove'}
+        busy={rowBusy === pendingRemoveId}
+        onConfirm={() => void onConfirmRemove()}
+        onClose={() => setPendingRemoveId(null)}
+      />
     </section>
   )
 }

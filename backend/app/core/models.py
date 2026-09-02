@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 from app.core.enums import (
     BuildStrategy,
     ContainerStatus,
+    EscalationPolicy,
     HealthStatus,
     RestartPolicy,
     ScalingMetric,
@@ -112,6 +113,7 @@ class DeployConfig(BaseModel):
     memory_limit: int | None = Field(
         default=None, gt=0, description="Memory limit in MB."
     )
+    escalation_policy: EscalationPolicy = EscalationPolicy.NONE
     restart_policy: RestartPolicy = RestartPolicy.NEVER
     labels: dict[str, str] = Field(default_factory=dict)
     command: list[str] | None = None

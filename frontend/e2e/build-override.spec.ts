@@ -68,10 +68,9 @@ test.describe('Build override modal', () => {
 
     await authenticatedPage.getByRole('button', { name: 'Save Stack' }).click()
     await expect(authenticatedPage).toHaveURL(/\/stacks$/, { timeout: 15_000 })
-    await expect(authenticatedPage.getByText(stackName)).toBeVisible()
-
-    const row = authenticatedPage.locator('tr').filter({ hasText: stackName })
-    await row.getByRole('button', { name: 'Edit' }).click()
+    const card = authenticatedPage.locator('.stacks-card').filter({ hasText: stackName })
+    await expect(card).toBeVisible()
+    await card.getByRole('link', { name: stackName }).click()
     await expect(authenticatedPage).toHaveURL(/\/stacks\/[^/]+/)
     await expect(
       authenticatedPage.getByRole('heading', { name: 'Edit Stack', level: 1 }),

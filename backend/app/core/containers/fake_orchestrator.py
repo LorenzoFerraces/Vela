@@ -302,7 +302,7 @@ class FakeContainerOrchestrator(ContainerOrchestrator):
         self._require_container(container_id)
         yield self._fake_log_text(container_id, tail=tail, since=None).encode()
 
-    def stream_exec(
+    async def stream_exec(
         self,
         container_id: str,
         cols: int = 80,

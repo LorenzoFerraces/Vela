@@ -819,24 +819,28 @@ class StackPublic(BaseModel):
     child_stack_ids: list[uuid.UUID] = []
 
 
-class ComposeImportRequest(BaseModel):
-    name: str = Field(min_length=1, max_length=128)
-    project_id: uuid.UUID | None = None
+class ManifestParseRequest(BaseModel):
     yaml_content: str
 
 
-class ComposeImportResponse(BaseModel):
-    stack: StackPublic
-    warnings: list[str] = []
-
-
-class ComposeParseRequest(BaseModel):
-    yaml_content: str
-
-
-class ComposeParseResponse(BaseModel):
+class ManifestParseResponse(BaseModel):
     services: list[StackServiceCreate]
     warnings: list[str] = []
+    manifest_kind: Literal["compose", "k8s"]
+
+
+class AnalyzeRepoRequest(BaseModel):
+    git_url: str = Field(min_length=1, max_length=2048)
+    git_branch: str = Field(default="main", max_length=256)
+
+
+class AnalyzeRepoResponse(BaseModel):
+    services: list[StackServiceCreate]
+    warnings: list[str] = []
+    manifest_kind: Literal["compose", "k8s", "llm"]
+    manifest_path: str | None = None
+    summary_hint: str | None = None
+
 
 
 # ---------------------------------------------------------------------------

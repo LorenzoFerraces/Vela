@@ -261,7 +261,7 @@ export function ContainersRunScalingFields({
             Minimum seconds between scale-up or scale-down actions.
           </p>
           {validationError ? (
-            <p className="containers-form__error" role="alert">
+            <p className="containers-banner containers-banner--err" role="alert">
               {validationError}
             </p>
           ) : null}
