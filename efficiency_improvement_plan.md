@@ -1,169 +1,166 @@
-# Vela Application Efficiency Improvement Plan
+# Vela Efficiency Improvement Plan
 
-This document outlines the specific development work needed to improve the efficiency of the Vela application across both frontend and backend components.
+Last updated: 2026-09-01 (branch `f/performance-improvements`, re-baselined against dev).
+Status markers: `[ ]` pending, `[x]` done, `[~]` partial.
 
-## 1. Frontend Optimization Implementation
+Findings were re-verified against the current codebase on 2026-09-01; line numbers
+reference that state and will drift as tasks land.
 
-### 1.1 API Client Modularization
+## 1. Backend
 
-**File to modify**: `src/api/client.ts`
+### 1.1 Container list path (highest impact, small diffs)
 
-**Changes needed**:
-- Split the monolithic API client into smaller modules by domain:
-  - `src/api/auth.ts` - Authentication endpoints
-  - `src/api/containers.ts` - Container management endpoints  
-  - `src/api/projects.ts` - Project management endpoints
-  - `src/api/images.ts` - Image and Dockerfile endpoints
-  - `src/api/users.ts` - User management endpoints
+The list path is hit by `GET /containers/`, the 15 s monitor loop
+(`container_monitor.py:185`), and the 5 s log collector (`collector.py:134`) —
+so its per-container cost runs continuously, not just on user action.
 
-**Implementation steps**:
-1. Create new files for each domain
-2. Move relevant functions to appropriate modules
-3. Maintain backward compatibility with imports
-4. Add caching layer to reduce duplicate requests
+- [x] **Drop `container.reload()` from `list()`** — `docker_orchestrator.py:659`
+  does a full `docker inspect` per container (N+1 Docker API calls). Serve
+  status/image/ports from the `/containers/json` list payload; health already
+  has a per-container endpoint (`GET /{id}/health`). Other `reload()` call
+  sites (lines 497, 533, 561, 581, 1065) are single-container paths and can
+  stay.
+- [x] **Batch `_enrich_container_source_labels`** — `containers.py:426-465`
+  does 2+ DB round-trips per listed container (membership role, optional
+  user, template name), and `latest_source_by_container_ids` re-runs
+  `list_project_ids_for_user` even though the caller just ran it. Replace
+  per-container awaits with one batched `SELECT` for
+  `(container_id → project_id, role)` plus one for template names.
+- [x] **Paginate `GET /containers/`** — `containers.py:483-500` returns an
+  unbounded list. `/logs/` and `/deployments/` already paginate; match them.
+  Also bound the log collector's sequential per-container `logs()` calls
+  (`collector.py:142,163`) with `asyncio.gather` + a small semaphore.
+- [x] **Index `deployment_records.container_id`** — `models.py:287` has no
+  index; it is the filter in `deployment_history.py:107-114` (hot `IN (...)`)
+  and `container_monitor.py:225-231`. One alembic migration, composite
+  `(container_id, created_at desc)`.
 
-### 1.2 Component Splitting
+### 1.2 LLM / git analysis pipeline
 
-**Files to modify**: 
-- `src/pages/TeamsPage.tsx` (split into multiple smaller components)
-- `src/components/workloads/WorkloadsTable.tsx` (refactor for virtualization)
+The commit-keyed cache (`app/core/llm/cache.py`) only caches the LLM HTTP
+call. A "hit" still pays git clone + full tree scan + `analyze_project`
+(2–3×) + prompt build, because the cache key requires the head commit, which
+requires the clone (`git_source_analysis.py:599-613`, same shape in
+`stacks/repo_analysis.py:342-388`).
 
-**Changes needed**:
-1. Split TeamsPage into:
-   - `TeamsList.tsx` - Project listing
-   - `TeamsDetail.tsx` - Project detail view
-   - `TeamsInvitations.tsx` - Invitation management
-2. Implement virtualized rendering for large container lists in WorkloadsTable
+- [ ] **Cheap commit resolution**: `git ls-remote <url> <branch>` instead of
+  cloning to find the sha.
+- [ ] **Cache the full result** (including the deterministic extraction —
+  context summary + detected facts) keyed on `(url, branch, sha)`; a hit
+  returns without clone/scan. Clone only when the LLM call is actually made.
+- [ ] **Compute `analyze_project` once** per request and thread the
+  `ProjectInfo` through `_collect_context_excerpts` (line 289),
+  `_detected_facts_block` (371), `_enrich_with_local_detection` (441).
+- [ ] **Move sync work off the event loop** (clone is already in
+  `asyncio.to_thread`; these were missed):
+  - `head_commit` subprocess — `git_ops.py:106-119`
+  - context building / FS walks — `git_source_analysis.py:168-295`
+  - LLM cache file I/O — `cache.py:29-84`
+- [ ] **Stop rewriting the whole cache file per store** — `cache.py:63-84`
+  reads, mutates, and `json.dumps` the entire 500-entry dict per store.
+  One SQLite table (or per-key files) replaces it; also fixes the
+  single-writer assumption flagged in the existing ponytail comment.
+- [ ] **Shared `httpx.AsyncClient`** — module-level client for
+  `llm/client.py:28` and `registry_image_suggestions.py:46` (currently a new
+  TCP+TLS handshake per call).
 
-### 1.3 Performance Optimization
+### 1.3 Misc backend
 
-**Files to modify**:
-- `src/components/workloads/WorkloadsTable.tsx`
-- `src/pages/ContainersPage.tsx`
+- [ ] **GZipMiddleware** — one line in `create_app` (`app.py:108`, currently
+  CORS only); list/log/JSON payloads ship uncompressed.
+- [ ] **`stream_exec` setup off the loop** — `exec_create`/`exec_start`
+  (`docker_orchestrator.py:774-784`) are 3 blocking Docker HTTP calls per
+  terminal open; wrap in `asyncio.to_thread` (reader-thread model already
+  exists, only the setup calls move). See ponytail comment at
+  `containers.py:1225`.
+- [ ] **Cap build log in memory on the error path** —
+  `docker_orchestrator.py:984-1027` accumulates the full build stream in
+  `log_parts` and joins it on failure; keep the trailing N KB instead.
 
-**Changes needed**:
-1. Add `React.memo` to frequently rendered components
-2. Implement `useMemo` and `useCallback` for expensive computations
-3. Add virtualized lists for large data tables
-4. Implement request deduplication and caching
+## 2. Frontend
 
-## 2. Backend Optimization Implementation
+- [x] **Batch `ContainerLogPanel` WS flush** — `ContainerLogPanel.tsx:88-101,122-131,178-197`
+  re-renders per WS message: re-splits the 256 KB buffer and diffs up to
+  1500 keyed `<span>` lines. Accumulate in a ref, flush to state on rAF /
+  ~100 ms. Worst jank surface in the app.
+- [x] **Lazy-load `ContainerTerminal`** — `WorkloadsTable.tsx:10,453` pulls
+  xterm into a ~286 KB chunk shared by ContainersPage + DashboardPage for an
+  opt-in per-row feature. `React.lazy(() => import('./ContainerTerminal'))`
+  removes it from the critical path.
+- [x] **Turn the existing request cache on** — the TTL cache + in-flight
+  dedup in `src/api/client.ts` (lines 7-10, 162-232) had **zero call sites**.
+  Enabled `cache: true` inside `listContainers`/`listProjects`/
+  `listScalingPolicies`; added **write invalidation** (any successful non-GET
+  clears the read cache) so start/stop/delete never shows a stale list. A
+  Dashboard→Containers→Teams loop now fetches each list once.
+- [x] **Debounce `LogsPage` search** — `LogsPage.tsx:241 → 112-115` fires an
+  API request per keystroke. Reuse the 320 ms debounce pattern from
+  `useDeploySourceSelection.ts:93-96`.
+- [ ] **Memoize `WorkloadsTable` rows** — `WorkloadsTable.tsx:219-463` renders
+  rows as inline fragments; any table state change (`copiedRowId`,
+  `terminalContainerId`, `rowBusyId`, ...) re-renders every row with fresh
+  inline props. Extract a `React.memo` row component with per-row expand/
+  terminal state.
+- [ ] **Memoize StackBuilder graph derivation** — `StackBuilderPage.tsx:791-817,1088-1098`
+  and `StackVisualizer.tsx:195-228` rebuild the ReactFlow graph on every
+  keystroke in any service field. Derive nodes/edges from
+  `(name, depends_on)` only, via `useMemo`; memoize `ServiceEditForm`.
+- [ ] **Split `src/api/client.ts`** (1608 lines) into domain modules
+  (`api/containers.ts`, `api/stacks.ts`, `api/projects.ts`, `api/auth.ts`,
+  `api/images.ts`) over a shared core; keep re-exports so imports don't
+  churn. Delete dead `src/pages/containers/useContainerList.ts` (imported
+  nowhere).
+- [ ] **Small**: rAF-debounce the unthrottled `ResizeObserver` in
+  `ContainerTerminal.tsx:43-47`; module-level `TextEncoder` for the exec WS
+  string branch (`client.ts:719`, pattern already in
+  `ContainerLogPanel.tsx:12`).
+- [ ] **Split `TeamsPage.tsx`** (729 lines) into list / detail /
+  invitations subcomponents.
+- [ ] **Product decision**: lists never refresh after mount (no polling
+  anywhere in `src/`). Consider a visibility-aware 15–30 s poll or
+  refetch-on-focus for the workloads list; skip if staleness is acceptable.
 
-### 2.1 Caching Strategy Enhancement
+## 3. Roadmap
 
-**Files to modify**: 
-- `app/core/containers/` - Container orchestration logic
-- `app/core/build/` - Build logic
-- `app/core/deploy/` - Deploy logic
+Ordered by impact-per-diff; each item is independently shippable and testable.
 
-**Changes needed**:
-1. Implement caching for frequently accessed data:
-   - User and project data
-   - Build results
-   - Registry lookups
-2. Add TTL-based caching with Redis for production
-3. Implement proper cache invalidation
+1. **Container list path** (1.1, all four) — biggest runtime win, smallest
+   diffs. The 15 s / 5 s background loops benefit even with no users.
+2. **Frontend quick wins** (log panel batching, lazy terminal, enable cache,
+   debounce logs search) — user-visible jank and duplicate requests.
+3. **LLM cache rework** (1.2) — its own task; touches the analysis pipeline
+   end to end (cheap sha, full-result cache, single `analyze_project`,
+   thread offload, storage).
+4. **Rendering memoization + client.ts split + TeamsPage split** — change
+   isolation and smoothness.
+5. **Misc** (GZip, stream_exec, build-log cap, small frontend items).
 
-### 2.2 Database Query Optimization
+## 4. Dropped (re-evaluated 2026-09-01)
 
-**Files to modify**:
-- `app/core/containers/` 
-- `app/api/routes/containers.py`
+- **react-window / react-virtual** — no list is large enough: logs 100/page,
+  audit 50/page, workloads bounded by pagination (1.1). The only DOM strain
+  is the 1500-span log panel, fixed by batching (§2 item 1). Revisit if a
+  genuinely unbounded list appears.
+- **Redis / backend service caching** — YAGNI. The hotspots are Docker N+1,
+  DB N+1, and the un-cached clone, none of which Redis fixes. Revisit for a
+  multi-node deploy.
+- **Vague "performance monitoring" phase** — replaced by the concrete
+  verification targets below.
+- **Denormalization** — no evidence of a relationship hot enough to warrant
+  it; batched queries (1.1) cover the cost.
 
-**Changes needed**:
-1. Implement pagination for container listing
-2. Optimize database queries with proper indexing
-3. Add query batching for bulk operations
-4. Implement denormalized data for frequently accessed relationships
+## 5. Verification
 
-### 2.3 Memory Management
+Per repo convention: `python -m pytest` (backend) and the Playwright E2E suite
+after each task; lint + typecheck on both sides.
 
-**Files to modify**:
-- `app/core/containers/` - Container operations
-- `app/core/build/` - Build operations
+Measurable targets (before/after, same fixture):
 
-**Changes needed**:
-1. Add memory limits for log streaming operations
-2. Implement better garbage collection strategies
-3. Add monitoring for memory usage patterns
-4. Optimize Docker API calls with connection pooling
-
-### 2.4 API Response Optimization
-
-**Files to modify**:
-- `app/api/schemas/` - API response models
-- `app/api/routes/` - API endpoint handlers
-
-**Changes needed**:
-1. Implement response compression
-2. Add pagination for large result sets
-3. Add optional fields for API responses
-4. Optimize database queries to reduce payload size
-
-## 3. Implementation Roadmap
-
-### Phase 1: Immediate Improvements (Week 1-2)
-- Implement API client modularization
-- Add caching to frontend API calls
-- Split large components (TeamsPage, WorkloadsTable)
-- Add React.memo optimizations
-
-### Phase 2: Medium-term Improvements (Week 3-4)
-- Implement virtualized lists for large data tables
-- Optimize database queries with pagination
-- Add request deduplication in frontend
-- Implement caching for backend services
-
-### Phase 3: Advanced Optimizations (Week 5-6)
-- Implement Redis caching for backend
-- Add comprehensive performance monitoring
-- Optimize memory management in container operations
-- Add API response compression
-
-## 4. Technical Specifications
-
-### Frontend Technical Requirements:
-- Use React.memo for components with expensive renders
-- Implement useMemo/useCallback for props and state calculations
-- Use virtualized lists for large tables (react-window or react-virtual)
-- Add caching layer in API client for repeated requests
-- Implement request deduplication
-
-### Backend Technical Requirements:
-- Add Redis connection for caching
-- Implement TTL-based cache invalidation
-- Optimize database queries with proper indexing
-- Add pagination to large result sets
-- Implement response compression middleware
-- Add memory monitoring for container operations
-
-## 5. Testing and Validation
-
-### Frontend Testing:
-- Unit tests for modularized API functions
-- Performance tests for virtualized lists
-- Load tests for API client with caching
-- Memory usage monitoring
-
-### Backend Testing:
-- Database query optimization tests
-- Cache hit/miss ratio testing
-- Memory usage monitoring tests
-- Response size reduction validation
-
-## 6. Success Metrics
-
-### Performance Improvements:
-- Frontend bundle size reduction: 30%
-- API response time reduction: 40%
-- Memory usage reduction: 25%
-- Container list rendering time: 50% faster
-- Database query time: 30% faster
-
-### User Experience:
-- Page load time reduction: 30%
-- Interactive response time: <100ms
-- Concurrent users supported: 50% increase
-- Error rate reduction: 25%
-
-This plan provides a structured approach to improving the efficiency of the Vela application with clear implementation steps and measurable success criteria.
+- Docker API calls per `GET /containers/` at N containers: N+2 → 2 (no
+  `reload()` per container).
+- DB round-trips per `GET /containers/`: ~3N → O(1) batched queries.
+- Repeated LLM analysis of an unchanged repo: no clone on cache hit.
+- Request count across a Dashboard→Containers→Teams navigation loop:
+  3× containers / 2× projects / 2× policies → 1× each.
+- Containers/Dashboard first-load JS: xterm out of the initial chunks.
+- Log panel renders under sustained output: per-WS-message → per-frame.

@@ -181,4 +181,5 @@ Verified against the ui-ux-pro-max skill; the codebase already follows these —
 ## Verification
 
 - **Always run both backend and E2E tests after substantive changes** before claiming work is complete. Run `python -m pytest` in `backend/` and the Playwright E2E suite in `frontend/e2e/`. Do not skip verification—tests are the only check that persists after the session ends.
+- **Verify the docker compose actually works** before considering a task complete. The pytest/lint gate runs against in-memory SQLite, so it will not surface a broken alembic migration, an env/port drift, or a failed healthcheck — changes can break the compose with nothing flagged up front. Run `docker compose -f docker-compose.yml config -q`, then `docker compose up -d --build` and confirm via `docker compose ps` that `migrate` completed and `api` reached `healthy`. Tear down with `docker compose down` when done.
 After substantive agent edits, clean the diff: remove unnecessary comments, abnormal `try`/`except` on trusted paths, `any` casts only to silence types, and deeply nested structure that doesn't match surrounding code — **without changing behavior** except for clear bugs.
