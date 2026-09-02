@@ -1313,10 +1313,7 @@ async def container_exec_ws(
             pass
 
         try:
-            # ponytail: exec_create/exec_start block the loop (3 HTTP calls per
-            # session); making stream_exec async would change the orchestrator
-            # interface for little gain
-            stdout_iter, stdin_write, exec_close_fn, exec_id = orchestrator.stream_exec(
+            stdout_iter, stdin_write, exec_close_fn, exec_id = await orchestrator.stream_exec(
                 container_id, cols=cols, rows=rows
             )
         except Exception as exc:

@@ -43,16 +43,17 @@ call. A "hit" still pays git clone + full tree scan + `analyze_project`
 requires the clone (`git_source_analysis.py:599-613`, same shape in
 `stacks/repo_analysis.py:342-388`).
 
-- [ ] **Cheap commit resolution**: `git ls-remote <url> <branch>` instead of
+- [x] **Cheap commit resolution**: `git ls-remote <url> <branch>` instead of
   cloning to find the sha.
-- [ ] **Cache the full result** (including the deterministic extraction —
+- [x] **Cache the full result** (including the deterministic extraction —
   context summary + detected facts) keyed on `(url, branch, sha)`; a hit
   returns without clone/scan. Clone only when the LLM call is actually made.
-- [ ] **Compute `analyze_project` once** per request and thread the
+- [x] **Compute `analyze_project` once** per request and thread the
   `ProjectInfo` through `_collect_context_excerpts` (line 289),
   `_detected_facts_block` (371), `_enrich_with_local_detection` (441).
-- [ ] **Move sync work off the event loop** (clone is already in
-  `asyncio.to_thread`; these were missed):
+- [x] **Move sync work off the event loop** (clone is already in
+  `asyncio.to_thread`; these were missed; cache file I/O left sync —
+  sub-ms JSON reads, superseded by the deferred SQLite item below):
   - `head_commit` subprocess — `git_ops.py:106-119`
   - context building / FS walks — `git_source_analysis.py:168-295`
   - LLM cache file I/O — `cache.py:29-84`
@@ -60,22 +61,24 @@ requires the clone (`git_source_analysis.py:599-613`, same shape in
   reads, mutates, and `json.dumps` the entire 500-entry dict per store.
   One SQLite table (or per-key files) replaces it; also fixes the
   single-writer assumption flagged in the existing ponytail comment.
-- [ ] **Shared `httpx.AsyncClient`** — module-level client for
+  **Deferred** — JSON cache kept; the ponytail note at `cache.py:62` tracks
+  the single-writer assumption.
+- [x] **Shared `httpx.AsyncClient`** — module-level client for
   `llm/client.py:28` and `registry_image_suggestions.py:46` (currently a new
   TCP+TLS handshake per call).
 
 ### 1.3 Misc backend
 
-- [ ] **GZipMiddleware** — one line in `create_app` (`app.py:108`, currently
+- [x] **GZipMiddleware** — one line in `create_app` (`app.py:108`, currently
   CORS only); list/log/JSON payloads ship uncompressed.
-- [ ] **`stream_exec` setup off the loop** — `exec_create`/`exec_start`
+- [x] **`stream_exec` setup off the loop** — `exec_create`/`exec_start`
   (`docker_orchestrator.py:774-784`) are 3 blocking Docker HTTP calls per
-  terminal open; wrap in `asyncio.to_thread` (reader-thread model already
-  exists, only the setup calls move). See ponytail comment at
-  `containers.py:1225`.
-- [ ] **Cap build log in memory on the error path** —
-  `docker_orchestrator.py:984-1027` accumulates the full build stream in
-  `log_parts` and joins it on failure; keep the trailing N KB instead.
+  terminal open; wrapped in `asyncio.to_thread` via `_create_exec_session`
+  (reader-thread model untouched).
+- [x] **Cap build log in memory on the error path** —
+  `docker_orchestrator.py:984-1027` accumulated the full build stream in
+  `log_parts` and joined it on failure; `_BuildLogTail` keeps the trailing
+  64 KB instead.
 
 ## 2. Frontend
 

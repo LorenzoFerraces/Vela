@@ -51,6 +51,30 @@ VELA_ROUTE_PATH_PREFIX_LABEL = "vela.route_path_prefix"
 VELA_ROUTE_TLS_LABEL = "vela.route_tls"
 VELA_REPLICA_OF_LABEL = "vela.replica_of"
 _NS_PER_SEC = 1_000_000_000
+_MAX_BUILD_LOG_BYTES = 64 * 1024
+
+
+class _BuildLogTail:
+    """Keep only the trailing ``_MAX_BUILD_LOG_BYTES`` of a streamed build log."""
+
+    __slots__ = ("_parts", "_size")
+
+    def __init__(self) -> None:
+        self._parts: list[str] = []
+        self._size: int = 0
+
+    @property
+    def size(self) -> int:
+        return self._size
+
+    def append(self, text: str) -> None:
+        self._parts.append(text)
+        self._size += len(text)
+        while len(self._parts) > 1 and self._size > _MAX_BUILD_LOG_BYTES:
+            self._size -= len(self._parts.pop(0))
+
+    def text(self) -> str:
+        return "".join(self._parts)
 
 
 def _max_concurrent_log_streams() -> int:
@@ -793,12 +817,9 @@ class DockerOrchestrator(ContainerOrchestrator):
         finally:
             self._log_stream_semaphore.release()
 
-    def stream_exec(
-        self,
-        container_id: str,
-        cols: int = 80,
-        rows: int = 24,
-    ) -> tuple[AsyncIterator[bytes], Callable[[bytes], None], Callable[[], None], str]:
+    def _create_exec_session(
+        self, container_id: str, *, cols: int, rows: int
+    ) -> tuple[str, Any]:
         container = self._client.containers.get(container_id)
         self._assert_managed_labels(container.labels or {}, container_id)
         exec_id = self._client.api.exec_create(
@@ -812,6 +833,17 @@ class DockerOrchestrator(ContainerOrchestrator):
             environment=["TERM=xterm-256color", f"COLUMNS={cols}", f"LINES={rows}"],
         )["Id"]
         exec_runtime = self._client.api.exec_start(exec_id, socket=True, tty=True, demux=True)
+        return exec_id, exec_runtime
+
+    async def stream_exec(
+        self,
+        container_id: str,
+        cols: int = 80,
+        rows: int = 24,
+    ) -> tuple[AsyncIterator[bytes], Callable[[bytes], None], Callable[[], None], str]:
+        exec_id, exec_runtime = await asyncio.to_thread(
+            self._create_exec_session, container_id, cols=cols, rows=rows
+        )
 
         loop = asyncio.get_running_loop()
         queue: asyncio.Queue[bytes | None] = asyncio.Queue(maxsize=64)
@@ -1012,7 +1044,7 @@ class DockerOrchestrator(ContainerOrchestrator):
         self, path: str, *, tag: str, dockerfile: str = "Dockerfile"
     ) -> str:
         def sync() -> str:
-            log_parts: list[str] = []
+            log_tail = _BuildLogTail()
             image_obj = None
             try:
                 # decode=False: ImageCollection.build() always runs json_stream() on the
@@ -1028,19 +1060,19 @@ class DockerOrchestrator(ContainerOrchestrator):
                 log = getattr(e, "build_log", None) or []
                 for chunk in log:
                     if isinstance(chunk, dict) and "stream" in chunk:
-                        log_parts.append(str(chunk["stream"]))
-                raise ImageBuildError(str(e), build_log="".join(log_parts)) from e
+                        log_tail.append(str(chunk["stream"]))
+                raise ImageBuildError(str(e), build_log=log_tail.text()) from e
             except docker.errors.APIError as e:
-                raise ImageBuildError(str(e), build_log="".join(log_parts)) from e
+                raise ImageBuildError(str(e), build_log=log_tail.text()) from e
 
             for chunk in build_logs:
                 if not isinstance(chunk, dict):
                     continue
                 if "stream" in chunk:
-                    log_parts.append(str(chunk["stream"]))
+                    log_tail.append(str(chunk["stream"]))
                 if "error" in chunk:
                     msg = str(chunk["error"])
-                    raise ImageBuildError(msg, build_log="".join(log_parts))
+                    raise ImageBuildError(msg, build_log=log_tail.text())
                 aux = chunk.get("aux")
                 if isinstance(aux, dict) and "ID" in aux:
                     image_obj = self._client.images.get(aux["ID"])
@@ -1051,7 +1083,7 @@ class DockerOrchestrator(ContainerOrchestrator):
                 except docker.errors.ImageNotFound as e:
                     raise ImageBuildError(
                         "Build finished but image could not be resolved",
-                        build_log="".join(log_parts),
+                        build_log=log_tail.text(),
                     ) from e
 
             return image_obj.id
