@@ -38,6 +38,9 @@ export function ContainerLogPanel({
   const [errorText, setErrorText] = useState<string | null>(null)
   const [highlightErrors, setHighlightErrors] = useState(false)
   const decoderRef = useRef(new TextDecoder())
+  const pendingRef = useRef('')
+  const flushScheduledRef = useRef(false)
+  const frameRef = useRef<number | null>(null)
 
   const refreshSnapshot = useCallback(async () => {
     try {
@@ -48,6 +51,30 @@ export function ContainerLogPanel({
       setErrorText(formatApiError(error))
     }
   }, [containerId])
+
+  const flushPending = useCallback(() => {
+    if (!flushScheduledRef.current) {
+      return
+    }
+    flushScheduledRef.current = false
+    const pending = pendingRef.current
+    if (pending === '') {
+      return
+    }
+    pendingRef.current = ''
+    setLogText((previous) => appendWithLimit(previous, pending))
+  }, [])
+
+  // ponytail: rAF pauses in background tabs; pending buffer capped at MAX_LOG_BUFFER_CHARS
+  const scheduleFlush = useCallback(() => {
+    if (flushScheduledRef.current) {
+      return
+    }
+    flushScheduledRef.current = true
+    frameRef.current = requestAnimationFrame(() => {
+      flushPending()
+    })
+  }, [flushPending])
 
   useEffect(() => {
     if (!isActive || isRunning) {
@@ -97,7 +124,11 @@ export function ContainerLogPanel({
         return
       }
       const piece = decoderRef.current.decode(chunk, { stream: true })
-      setLogText((previous) => appendWithLimit(previous, piece))
+      if (piece === '') {
+        return
+      }
+      pendingRef.current = appendWithLimit(pendingRef.current, piece)
+      scheduleFlush()
     }
     websocket.onerror = () => {
       queueMicrotask(() => {
@@ -107,6 +138,7 @@ export function ContainerLogPanel({
     }
     websocket.onclose = () => {
       queueMicrotask(() => {
+        flushPending()
         setStreamStatus((previous) => (previous === 'err' ? previous : 'ended'))
       })
     }
@@ -115,9 +147,14 @@ export function ContainerLogPanel({
       websocket.onmessage = null
       websocket.onerror = null
       websocket.onclose = null
+      if (frameRef.current !== null) {
+        cancelAnimationFrame(frameRef.current)
+        frameRef.current = null
+      }
+      flushPending()
       websocket.close()
     }
-  }, [containerId, isActive, isRunning])
+  }, [containerId, isActive, isRunning, flushPending, scheduleFlush])
 
   const { visibleLines, hasHiddenLines } = useMemo(() => {
     const all = logText.split('\n')

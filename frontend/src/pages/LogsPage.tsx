@@ -11,6 +11,7 @@ import { ContainerLogPanel } from '../components/workloads/ContainerLogPanel'
 import './logs/logs.css'
 
 const LIMIT = 100
+const SEARCH_DEBOUNCE_MS = 320
 
 export default function LogsPage() {
   const [searchParams, setSearchParams] = useSearchParams()
@@ -22,6 +23,9 @@ export default function LogsPage() {
   const fetchRequestRef = useRef(0)
 
   const search = searchParams.get('q') ?? ''
+  const [debouncedSearch, setDebouncedSearch] = useState(
+    () => searchParams.get('q') ?? '',
+  )
   const levelFilter = searchParams.get('level') ?? ''
   const containerFilter = searchParams.get('container_id') ?? ''
   const startRaw = searchParams.get('start') ?? ''
@@ -44,6 +48,14 @@ export default function LogsPage() {
       active = false
     }
   }, [])
+
+  useEffect(() => {
+    const timer = window.setTimeout(
+      () => setDebouncedSearch(search),
+      SEARCH_DEBOUNCE_MS,
+    )
+    return () => window.clearTimeout(timer)
+  }, [search])
 
   function setFilterParam(name: string, value: string) {
     const next = new URLSearchParams(searchParams)
@@ -73,7 +85,7 @@ export default function LogsPage() {
         limit: LIMIT,
       }
       if (includeOffset) params.offset = offset
-      if (search) params.q = search
+      if (debouncedSearch) params.q = debouncedSearch
       if (levelFilter) params.level = levelFilter
       const startDate = startRaw ? new Date(startRaw) : null
       if (startDate && !Number.isNaN(startDate.getTime())) {
@@ -85,7 +97,7 @@ export default function LogsPage() {
       }
       return params
     },
-    [search, levelFilter, containerFilter, startRaw, endRaw, offset],
+    [debouncedSearch, levelFilter, containerFilter, startRaw, endRaw, offset],
   )
 
   const fetchLogs = useCallback(async () => {

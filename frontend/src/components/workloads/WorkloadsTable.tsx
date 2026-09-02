@@ -1,4 +1,4 @@
-import { Fragment, useMemo, useState } from 'react'
+import { Fragment, lazy, Suspense, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import type { ContainerInfo } from '../../api/client'
@@ -7,8 +7,14 @@ import { deploySourceImageLabel } from '../../pages/containers/deploySourceDispl
 import type { WorkloadGroup } from '../../pages/containers/workloadGrouping'
 import { workloadInstances } from '../../pages/containers/workloadGrouping'
 import { ContainerStatsPanel } from './ContainerStatsPanel'
-import { ContainerTerminal } from './ContainerTerminal'
 import { ReplicaInstancesPanel } from './ReplicaInstancesPanel'
+
+// ponytail: lazy so xterm stays out of the first-paint chunk (terminal is opt-in per row)
+const ContainerTerminal = lazy(() =>
+  import('./ContainerTerminal').then((module) => ({
+    default: module.ContainerTerminal,
+  })),
+)
 
 const VIEWER_ACTION_DISABLED_TITLE =
   'Insufficient permissions to modify this workload (viewer role).'
@@ -450,10 +456,16 @@ export function WorkloadsTable({
                             id={`workloads-terminal-${containerRow.id}`}
                             className="workloads-table__expand-inner"
                           >
-                            <ContainerTerminal
-                              containerId={containerRow.id}
-                              onClose={() => setTerminalContainerId(null)}
-                            />
+                            <Suspense
+                              fallback={
+                                <div className="skeleton" style={{ minHeight: 320 }} />
+                              }
+                            >
+                              <ContainerTerminal
+                                containerId={containerRow.id}
+                                onClose={() => setTerminalContainerId(null)}
+                              />
+                            </Suspense>
                           </div>
                         </td>
                       </tr>

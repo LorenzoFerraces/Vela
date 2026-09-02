@@ -185,6 +185,7 @@ export async function apiRequest<T>(
   const url = `${getApiBaseUrl()}${path.startsWith('/') ? path : `/${path}`}`
   const skipAuth = options.skipAuth === true
   const shouldCache = options.cache === true
+  const method = (init.method ?? 'GET').toUpperCase()
   
   // Request deduplication
   const cacheKey = `${url}-${JSON.stringify(init)}`
@@ -222,6 +223,8 @@ export async function apiRequest<T>(
     // Cache result if enabled
     if (shouldCache) {
       cache.set(cacheKey, { data, timestamp: Date.now() })
+    } else if (method !== 'GET') {
+      cache.clear()
     }
     
     return data
@@ -587,11 +590,11 @@ export async function getImageSuggestions(
 }
 
 export async function listContainers(): Promise<ContainerInfo[]> {
-  return apiGet<ContainerInfo[]>('/api/containers/')
+  return apiGet<ContainerInfo[]>('/api/containers/', { cache: true })
 }
 
 export async function listScalingPolicies(): Promise<ScalingPolicyInfo[]> {
-  return apiGet<ScalingPolicyInfo[]>('/api/scaling/policies')
+  return apiGet<ScalingPolicyInfo[]>('/api/scaling/policies', { cache: true })
 }
 
 export async function getContainerStats(containerId: string): Promise<ContainerStats> {
@@ -961,7 +964,7 @@ export type IncomingProjectInvitation = {
 }
 
 export async function listProjects(): Promise<Project[]> {
-  return apiGet<Project[]>('/api/projects/')
+  return apiGet<Project[]>('/api/projects/', { cache: true })
 }
 
 export async function createProject(name: string): Promise<Project> {
