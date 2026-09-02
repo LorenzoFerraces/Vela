@@ -248,6 +248,72 @@ def test_run_from_image_resource_limits_optional(api_client: TestClient) -> None
     assert response.status_code == 200
 
 
+def test_run_resource_limits_pass_through_all_source_kinds(
+    api_client: TestClient,
+    fake_orchestrator: FakeContainerOrchestrator,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("VELA_PUBLIC_ROUTE_DOMAIN", "apps.example.com")
+    monkeypatch.setenv("VELA_PUBLIC_URL_SCHEME", "https")
+    monkeypatch.setattr(
+        "app.core.build.default_image_builder.git_shallow_clone",
+        _stub_git_shallow_clone,
+    )
+
+    image_response = api_client.post(
+        "/api/containers/run",
+        json={
+            "source_kind": "image",
+            "image_ref": "nginx:alpine",
+            "cpu_limit": 0.5,
+            "memory_limit": 256,
+        },
+    )
+    assert image_response.status_code == 200
+    assert fake_orchestrator.last_deploy_config is not None
+    assert fake_orchestrator.last_deploy_config.cpu_limit == 0.5
+    assert fake_orchestrator.last_deploy_config.memory_limit == 256
+
+    create = api_client.post(
+        "/api/dockerfiles/",
+        json={"name": "limits-tpl", "contents": "FROM alpine:3.20\n"},
+    )
+    assert create.status_code == 201
+    template_id = create.json()["id"]
+
+    template_response = api_client.post(
+        "/api/containers/run",
+        json={
+            "source_kind": "dockerfile_template",
+            "dockerfile_template_id": template_id,
+            "public_route": True,
+            "container_port": 80,
+            "cpu_limit": 1.0,
+            "memory_limit": 512,
+        },
+    )
+    assert template_response.status_code == 200
+    assert fake_orchestrator.last_deploy_config is not None
+    assert fake_orchestrator.last_deploy_config.cpu_limit == 1.0
+    assert fake_orchestrator.last_deploy_config.memory_limit == 512
+
+    git_response = api_client.post(
+        "/api/containers/run",
+        json={
+            "source": "https://github.com/org/repo.git",
+            "git_branch": "develop",
+            "public_route": True,
+            "container_port": 80,
+            "cpu_limit": 2.0,
+            "memory_limit": 1024,
+        },
+    )
+    assert git_response.status_code == 200
+    assert fake_orchestrator.last_deploy_config is not None
+    assert fake_orchestrator.last_deploy_config.cpu_limit == 2.0
+    assert fake_orchestrator.last_deploy_config.memory_limit == 1024
+
+
 def test_run_rejects_empty_env_key(api_client: TestClient) -> None:
     response = api_client.post(
         "/api/containers/run",
