@@ -57,12 +57,11 @@ requires the clone (`git_source_analysis.py:599-613`, same shape in
   - `head_commit` subprocess — `git_ops.py:106-119`
   - context building / FS walks — `git_source_analysis.py:168-295`
   - LLM cache file I/O — `cache.py:29-84`
-- [ ] **Stop rewriting the whole cache file per store** — `cache.py:63-84`
-  reads, mutates, and `json.dumps` the entire 500-entry dict per store.
-  One SQLite table (or per-key files) replaces it; also fixes the
-  single-writer assumption flagged in the existing ponytail comment.
-  **Deferred** — JSON cache kept; the ponytail note at `cache.py:62` tracks
-  the single-writer assumption.
+- [x] **Stop rewriting the whole cache file per store** — `cache.py:63-84`
+  read, mutated, and `json.dumps`ed the entire 500-entry dict per store.
+  Now one SQLite table (`llm_cache.db`, stdlib `sqlite3`, per-op
+  connections) with one-time import of the legacy JSON files; fixes the
+  single-writer assumption (SQLite locking covers cross-process writes).
 - [x] **Shared `httpx.AsyncClient`** — module-level client for
   `llm/client.py:28` and `registry_image_suggestions.py:46` (currently a new
   TCP+TLS handshake per call).
@@ -119,9 +118,11 @@ requires the clone (`git_source_analysis.py:599-613`, same shape in
   `pages/teams/TeamsListPanel.tsx` / `TeamDetail.tsx` /
   `IncomingInvitations.tsx`; `formatRoleLabel` moved to
   `projects/teamDisplay.ts`.
-- [ ] **Product decision**: lists never refresh after mount (no polling
-  anywhere in `src/`). Consider a visibility-aware 15–30 s poll or
-  refetch-on-focus for the workloads list; skip if staleness is acceptable.
+- [x] **Product decision**: lists never refresh after mount (no polling
+  anywhere in `src/`). Shipped as a visibility-aware 30 s poll in
+  `useWorkloadGroups.ts` (covers ContainersPage + Dashboard), with a
+  `revalidate` option on the api client so poll ticks bypass the TTL cache;
+  refetch-on-focus is the immediate refresh when the tab becomes visible.
 
 ## 3. Roadmap
 

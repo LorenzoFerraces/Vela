@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import shutil
+import sqlite3
 import subprocess
 import types
 from pathlib import Path
@@ -102,6 +103,91 @@ def test_delete_disabled_is_noop(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     assert json.loads(path.read_text(encoding="utf-8")) == {
         "v2:abc123": {"ts": 1, "payload": {"a": 1}}
     }
+
+
+def test_legacy_json_is_imported_on_store_and_removed(tmp_path: Path) -> None:
+    legacy = tmp_path / "llm_analysis_stacks.json"
+    legacy.write_text(
+        json.dumps(
+            {
+                "v2:abc123": {"ts": 111.0, "payload": {"a": "legacy"}},
+                "v2:zzz999": {"ts": 222.0, "payload": {"z": 9}},
+            }
+        ),
+        encoding="utf-8",
+    )
+    cache_module.store_cached("stacks", "abc123", "v2", {"a": 1})
+    assert not legacy.exists()
+    assert cache_module.load_cached("stacks", "zzz999", "v2") == {"z": 9}
+    assert cache_module.load_cached("stacks", "abc123", "v2") == {"a": 1}
+
+
+def test_legacy_json_invalid_entries_are_skipped(tmp_path: Path) -> None:
+    legacy = tmp_path / "llm_analysis_stacks.json"
+    legacy.write_text(
+        json.dumps(
+            {
+                "v2:abc123": {"ts": 111.0, "payload": {"a": 1}},
+                "v2:bad-ts": {"ts": "soon", "payload": {"a": 2}},
+                "v2:bad-payload": {"ts": 222.0, "payload": "not-a-dict"},
+                "no-separator": {"ts": 333.0, "payload": {"a": 3}},
+            }
+        ),
+        encoding="utf-8",
+    )
+    assert cache_module.load_cached("stacks", "abc123", "v2") == {"a": 1}
+    assert not legacy.exists()
+    assert cache_module.load_cached("stacks", "bad-ts", "v2") is None
+    assert cache_module.load_cached("stacks", "bad-payload", "v2") is None
+
+
+def test_migration_imports_only_missing_keys(tmp_path: Path) -> None:
+    cache_module.store_cached("stacks", "abc123", "v2", {"a": "original"})
+    legacy = tmp_path / "llm_analysis_stacks.json"
+    legacy.write_text(
+        json.dumps(
+            {
+                "v2:abc123": {"ts": 1.0, "payload": {"a": "legacy"}},
+                "v2:zzz999": {"ts": 2.0, "payload": {"z": 9}},
+            }
+        ),
+        encoding="utf-8",
+    )
+    assert cache_module.load_cached("stacks", "abc123", "v2") == {"a": "original"}
+    assert cache_module.load_cached("stacks", "zzz999", "v2") == {"z": 9}
+    assert not legacy.exists()
+
+
+def test_eviction_at_500_is_per_kind(tmp_path: Path) -> None:
+    conn = sqlite3.connect(tmp_path / cache_module._DB_FILENAME)
+    try:
+        conn.execute(cache_module._CREATE_TABLE)
+        for index in range(501):
+            conn.execute(
+                "INSERT INTO llm_cache (kind, version, commit_sha, payload, ts) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (
+                    "stacks",
+                    "v2",
+                    f"commit{index}",
+                    json.dumps({"index": index}),
+                    float(index),
+                ),
+            )
+        conn.execute(
+            "INSERT INTO llm_cache (kind, version, commit_sha, payload, ts) "
+            "VALUES (?, ?, ?, ?, ?)",
+            ("other", "v2", "oldest", json.dumps({"index": -1}), 0.0),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    cache_module.store_cached("stacks", "newest", "v2", {"index": 501})
+    assert cache_module.load_cached("stacks", "commit0", "v2") is None
+    assert cache_module.load_cached("stacks", "commit1", "v2") is None
+    assert cache_module.load_cached("stacks", "commit2", "v2") == {"index": 2}
+    assert cache_module.load_cached("stacks", "newest", "v2") == {"index": 501}
+    assert cache_module.load_cached("other", "oldest", "v2") == {"index": -1}
 
 
 def test_git_source_cache_key_includes_requested_branch(
