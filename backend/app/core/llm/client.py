@@ -10,6 +10,15 @@ from app.core.llm.provider import resolve_llm_config
 
 logger = logging.getLogger(__name__)
 
+_client: httpx.AsyncClient | None = None
+
+
+def _get_client() -> httpx.AsyncClient:
+    global _client
+    if _client is None:
+        _client = httpx.AsyncClient(timeout=60.0)
+    return _client
+
 
 async def generate_json(*, prompt: str, schema: dict) -> dict:
     config = resolve_llm_config()
@@ -25,14 +34,13 @@ async def generate_json(*, prompt: str, schema: dict) -> dict:
         },
     }
     try:
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            response = await client.post(
-                config.url,
-                headers=config.headers,
-                params=config.params,
-                json=payload,
-            )
-            response.raise_for_status()
+        response = await _get_client().post(
+            config.url,
+            headers=config.headers,
+            params=config.params,
+            json=payload,
+        )
+        response.raise_for_status()
     except httpx.HTTPError as exc:
         response_detail = ""
         if isinstance(exc, httpx.HTTPStatusError) and exc.response is not None:

@@ -119,5 +119,32 @@ def head_commit(root: Path) -> str | None:
     return proc.stdout.strip() or None
 
 
+async def git_head_ref(*, url: str, branch: str, access_token: str | None = None) -> str | None:
+    """Resolve the head commit sha of ``branch`` in ``url`` via ``git ls-remote`` (no clone)."""
+    # ponytail: ref pattern assumes a branch name (full refs pass through via the startswith check)
+    ref = branch if branch.startswith("refs/") else f"refs/heads/{branch}"
+    cmd: list[str] = ["git"]
+    if access_token and url.lower().startswith("https://"):
+        token_pair = f"x-access-token:{access_token}".encode("utf-8")
+        encoded = base64.b64encode(token_pair).decode("ascii")
+        cmd.extend(["-c", f"http.extraheader=Authorization: Basic {encoded}"])
+    cmd.extend(["ls-remote", url, ref])
+
+    def _run() -> str | None:
+        try:
+            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=30, check=False)
+        except (FileNotFoundError, OSError, subprocess.TimeoutExpired):
+            return None
+        if proc.returncode != 0:
+            return None
+        for line in (proc.stdout or "").splitlines():
+            parts = line.split("\t", 1)
+            if len(parts) == 2 and parts[1].strip() == ref:
+                return parts[0].strip() or None
+        return None
+
+    return await asyncio.to_thread(_run)
+
+
 def rm_tree(path: Path) -> None:
     shutil.rmtree(path, ignore_errors=True)

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
@@ -376,7 +377,7 @@ async def analyze_repo_stack(
         else:
             relative_path = None
 
-        commit = head_commit(root) or ""
+        commit = await asyncio.to_thread(head_commit, root) or ""
         services, summary_hint = await _generate_services(
             context=_collect_context_excerpts(root),
             manifest=manifest_excerpt,
