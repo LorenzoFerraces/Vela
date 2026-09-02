@@ -36,13 +36,13 @@ Add `test_run_resource_limits_pass_through_all_source_kinds` to `backend/tests/t
 
 Use distinct limit values per path (as above) so a stale `last_deploy_config` from a previous sub-step cannot mask a failure. Fixtures: `api_client`, `fake_orchestrator`, `monkeypatch` (all exist in `backend/tests/conftest.py`). Match the file's existing test style (type-annotated args, plain asserts).
 
-- [ ] Add the test
+- [x] Add the test
 
 ### Step 1.2: Verify
 
-- [ ] Run `python -m pytest tests/test_api_integration.py -q` — new test passes, no regressions in the file
-- [ ] Run `python -m pytest tests -q` — full suite green before committing
-- [ ] Commit: `test: resource limit passthrough for all run source kinds`
+- [x] Run `python -m pytest tests/test_api_integration.py -q` — new test passes, no regressions in the file
+- [x] Run `python -m pytest tests -q` — full suite green before committing
+- [x] Commit: `test: resource limit passthrough for all run source kinds`
 
 ---
 
@@ -64,10 +64,10 @@ Use distinct limit values per path (as above) so a stale `last_deploy_config` fr
 
 ### Step 2.3: Verify
 
-- [ ] Run `ruff check .` from `backend/` — no findings in `0019_merge_resource_management.py` or `projects.py`; total finding count ≤ 25
-- [ ] Run `F:\lolo\fac\Vela\.venv\Scripts\python.exe -m alembic heads` from `backend/` — still a single head `0019_merge_resource_management` (import removal must not break the migration module)
-- [ ] Run `python -m pytest tests/test_projects_api.py -q` (or the closest project-route test file if that name doesn't exist — check `backend/tests/`) to confirm `projects.py` still imports cleanly
-- [ ] Commit: `fix: remove unused imports flagged by ruff`
+- [x] Run `ruff check .` from `backend/` — no findings in `0019_merge_resource_management.py` or `projects.py`; total finding count ≤ 25
+- [x] Run `F:\lolo\fac\Vela\.venv\Scripts\python.exe -m alembic heads` from `backend/` — still a single head `0019_merge_resource_management` (import removal must not break the migration module)
+- [x] Run `python -m pytest tests/test_projects_api.py -q` (or the closest project-route test file if that name doesn't exist — check `backend/tests/`) to confirm `projects.py` still imports cleanly
+- [x] Commit: `fix: remove unused imports flagged by ruff`
 
 ---
 
@@ -136,10 +136,10 @@ In the repo-root `AGENTS.md`, UI standards section, the sentence listing hex exc
 
 ### Step 3.6: Verify
 
-- [ ] `npm run build` — clean (tsc -b + vite)
-- [ ] `npm run lint` — no new findings (one pre-existing `react-hooks/exhaustive-deps` warning in `UserMenu.tsx` may remain)
-- [ ] Grep the three touched components for `borderRadius` and hex color literals in JSX `style` props — none remain (MetricChart hex allowed per Step 3.5)
-- [ ] Commit: `fix: resource UI design tokens and network tx chart`
+- [x] `npm run build` — clean (tsc -b + vite)
+- [x] `npm run lint` — no new findings (one pre-existing `react-hooks/exhaustive-deps` warning in `UserMenu.tsx` may remain)
+- [x] Grep the three touched components for `borderRadius` and hex color literals in JSX `style` props — none remain (MetricChart hex allowed per Step 3.5)
+- [x] Commit: `fix: resource UI design tokens and network tx chart`
 
 ---
 
@@ -181,8 +181,8 @@ In `docs/superpowers/plans/2026-08-16-team-storage-quota.md`: check every remain
 
 Check the `- [ ]` step checkboxes in this file as the tasks complete (do this last, after Task 5 verification).
 
-- [ ] Steps 4.1–4.4 done
-- [ ] Commit: `docs: mark resource plans complete, document metrics env vars`
+- [x] Steps 4.1–4.4 done
+- [x] Commit: `docs: mark resource plans complete, document metrics env vars`
 
 ---
 
@@ -192,19 +192,19 @@ Check the `- [ ]` step checkboxes in this file as the tasks complete (do this la
 
 ### Step 5.1: Backend
 
-- [ ] `python -m pytest tests -q` from `backend/` (venv python) — all pass
-- [ ] `ruff check .` — no findings in `0019_merge_resource_management.py` / `projects.py`; total ≤ 25
-- [ ] `mypy app/ tests/` — only the 12 pre-existing findings (missing docker/yaml/boto3 stubs + conftest packaging)
+- [x] `python -m pytest tests -q` from `backend/` (venv python) — all pass
+- [x] `ruff check .` — no findings in `0019_merge_resource_management.py` / `projects.py`; total ≤ 25
+- [x] `mypy app/ tests/` — only the 12 pre-existing findings (missing docker/yaml/boto3 stubs + conftest packaging)
 
 ### Step 5.2: Frontend
 
-- [ ] `npm run build` clean; `npm run lint` — only the pre-existing `UserMenu.tsx` warning
-- [ ] Ensure ports 8000/5173 are free, then `npm run test:e2e` — full suite green
+- [x] `npm run build` clean; `npm run lint` — only the pre-existing `UserMenu.tsx` warning
+- [x] Ensure ports 8000/5173 are free, then `npm run test:e2e` — full suite green
 
 ### Step 5.3: Compose
 
-- [ ] `docker compose -f docker-compose.yml config -q` from repo root
-- [ ] If the Docker daemon is available: `docker compose up -d --build`, confirm via `docker compose ps` that `migrate` completed and `api` is `healthy`, then `docker compose down`. If Docker is unavailable in this environment, say so explicitly in the report (do not fail the task on environment limits).
+- [x] `docker compose -f docker-compose.yml config -q` from repo root
+- [x] If the Docker daemon is available: `docker compose up -d --build`, confirm via `docker compose ps` that `migrate` completed and `api` is `healthy`, then `docker compose down`. If Docker is unavailable in this environment, say so explicitly in the report (do not fail the task on environment limits).
 
 ### Step 5.4: Report
 
