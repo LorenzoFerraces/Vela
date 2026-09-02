@@ -201,6 +201,25 @@ def _ports_from_inspect(data: dict[str, Any]) -> list[PortMapping]:
     return result
 
 
+def _ports_from_list(data: dict[str, Any]) -> list[PortMapping]:
+    result: list[PortMapping] = []
+    for entry in data.get("Ports") or []:
+        if not isinstance(entry, dict):
+            continue
+        public_port = entry.get("PublicPort")
+        private_port = entry.get("PrivatePort")
+        if not public_port or private_port is None:
+            continue
+        result.append(
+            PortMapping(
+                host_port=int(public_port),
+                container_port=int(private_port),
+                protocol=entry.get("Type") or "tcp",
+            )
+        )
+    return result
+
+
 def _health_status_from_docker(raw: str | None) -> HealthStatus:
     s = (raw or "").lower()
     match s:
@@ -248,17 +267,29 @@ def _inspect_to_container_info(data: dict[str, Any]) -> ContainerInfo:
     health = _health_status_from_docker(health_raw)
 
     cfg = data.get("Config") or {}
-    image_ref = cfg.get("Image", "")
-    labels = dict(cfg.get("Labels") or {})
+    image_ref = cfg.get("Image") or data.get("Image") or ""
+    labels = dict(data.get("Labels") or cfg.get("Labels") or {})
     source_kind, source_label = deploy_source_fields_from_labels(labels)
+
+    created_raw = data.get("Created")
+    if isinstance(created_raw, (int, float)):
+        created_at = datetime.fromtimestamp(created_raw, tz=timezone.utc)
+    else:
+        created_at = _parse_created(created_raw or "")
+
+    network_settings = data.get("NetworkSettings") or {}
+    if network_settings.get("Ports") is not None:
+        ports = _ports_from_inspect(data)
+    else:
+        ports = _ports_from_list(data)
 
     return ContainerInfo(
         id=cid,
         name=name,
         image=image_ref,
         status=status,
-        created_at=_parse_created(data.get("Created", "")),
-        ports=_ports_from_inspect(data),
+        created_at=created_at,
+        ports=ports,
         volumes=_volumes_from_inspect(data),
         labels=labels,
         health=health,
@@ -656,7 +687,6 @@ class DockerOrchestrator(ContainerOrchestrator):
                             continue
                     elif labels.get(VELA_OWNER_LABEL) != str(user_id):
                         continue
-                container.reload()
                 info = _inspect_to_container_info(container.attrs)
                 if status is None or info.status == status:
                     out.append(info)

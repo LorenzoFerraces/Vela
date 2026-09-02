@@ -284,7 +284,7 @@ class DeploymentRecord(Base):
         nullable=True,
         index=True,
     )
-    container_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    container_id: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
     container_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
     source_kind: Mapped[str] = mapped_column(String(32), nullable=False)
     source_ref: Mapped[str] = mapped_column(String(2048), nullable=False)
