@@ -33,7 +33,7 @@
 **Interfaces:**
 - Produces: `Project.storage_quota_bytes: int | None` (ORM column); `AlertHistory.container_id` becomes `str | None`.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Create `backend/tests/test_storage_quota.py`:
 
@@ -117,12 +117,12 @@ async def test_alert_history_container_id_nullable(quota_db: AsyncSession) -> No
     assert loaded.container_id is None
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `cd backend && python -m pytest tests/test_storage_quota.py -q`
 Expected: FAIL — invalid keyword `storage_quota_bytes` and/or NOT NULL violation for `container_id`.
 
-- [ ] **Step 3: Implement the model changes**
+- [x] **Step 3: Implement the model changes**
 
 In `backend/app/db/models.py`, add `BigInteger` to the `sqlalchemy` import block (alphabetical):
 
@@ -210,17 +210,17 @@ def downgrade() -> None:
     op.drop_column("projects", "storage_quota_bytes")
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `cd backend && python -m pytest tests/test_storage_quota.py -q`
 Expected: PASS (2 tests).
 
-- [ ] **Step 5: Verify the migration round-trips (local dev Postgres)**
+- [x] **Step 5: Verify the migration round-trips (local dev Postgres)**
 
 Run: `cd backend && python -m alembic upgrade head && python -m alembic downgrade -1 && python -m alembic upgrade head`
 Expected: no errors. Skip only if the dev Postgres (`docker compose -f docker-compose.dev.yml up -d`) is not running; note it in the final report.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add backend/app/db/models.py backend/alembic/versions/0018_project_storage_quota.py backend/tests/test_storage_quota.py
@@ -240,7 +240,7 @@ git commit -m "feat: add project storage quota column and nullable alert contain
 **Interfaces:**
 - Produces: `ContainerInfo.disk_bytes: int` (writable-layer size in bytes; default 0); `FakeContainerOrchestrator.set_disk_bytes(container_id: str, size_bytes: int) -> None`. `DockerOrchestrator.list()` rows carry live `SizeRw` (its `list()` already calls `container.reload()` before mapping).
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Append to `backend/tests/test_storage_quota.py` (add the import next to the top-of-file imports):
 
@@ -266,12 +266,12 @@ def test_inspect_mapping_defaults_disk_bytes_to_zero() -> None:
     assert info.disk_bytes == 0
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `cd backend && python -m pytest tests/test_storage_quota.py -q`
 Expected: the 2 new tests FAIL (`AttributeError: 'ContainerInfo' object has no attribute 'disk_bytes'`); the 2 Task 1 tests still pass.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 In `backend/app/core/models.py`, add to `ContainerInfo` (after `volumes`):
 
@@ -295,12 +295,12 @@ In `backend/app/core/containers/fake_orchestrator.py`, add a method to `FakeCont
         )
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `cd backend && python -m pytest tests/test_storage_quota.py tests/test_api_integration.py -q`
 Expected: all PASS (the integration suite guards against `ContainerInfo` regressions).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add backend/app/core/models.py backend/app/core/containers/docker_orchestrator.py backend/app/core/containers/fake_orchestrator.py backend/tests/test_storage_quota.py
@@ -331,7 +331,7 @@ git commit -m "feat: track container writable-layer size (disk_bytes)"
   - `check_team_storage_quotas(session, orchestrator, email_provider) -> None` (alert dispatch lands in Task 6)
   - `reset_over_quota_state() -> None`, `currently_over_quota_projects() -> frozenset[uuid.UUID]`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Append to `backend/tests/test_storage_quota.py` (extend the top-of-file imports):
 
@@ -510,12 +510,12 @@ def _reset_over_quota_state() -> None:
     storage_quota.reset_over_quota_state()
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `cd backend && python -m pytest tests/test_storage_quota.py -q`
 Expected: the new tests FAIL (`ModuleNotFoundError: No module named 'app.core.quotas'`); earlier tasks' tests still pass.
 
-- [ ] **Step 3: Add the exceptions**
+- [x] **Step 3: Add the exceptions**
 
 In `backend/app/core/exceptions.py`, after `VolumeUploadQuotaExceededError`:
 
@@ -528,7 +528,7 @@ class TeamStorageQuotaError(VelaError):
     """Invalid team storage quota value (e.g. above the platform limit)."""
 ```
 
-- [ ] **Step 4: Implement the quotas package**
+- [x] **Step 4: Implement the quotas package**
 
 Create `backend/app/core/quotas/storage_quota.py`:
 
@@ -812,12 +812,12 @@ __all__ = [
 
 NOTE: `check_team_storage_quotas` calls `AlertService.send_project_storage_alert`, which only exists after Task 6 Step 3. In this task the module still imports cleanly (the call resolves at runtime); `usage_from_containers` is kept public on purpose so the dashboard-usage integration (Task 10) can reuse it.
 
-- [ ] **Step 5: Run tests to verify they pass**
+- [x] **Step 5: Run tests to verify they pass**
 
 Run: `cd backend && python -m pytest tests/test_storage_quota.py -q`
 Expected: all PASS. (The `check_team_storage_quotas` rising-edge test arrives in Task 6.)
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add backend/app/core/quotas backend/app/core/exceptions.py backend/tests/test_storage_quota.py
@@ -836,7 +836,7 @@ git commit -m "feat: add team storage quota core (resolution, usage, enforcement
 - Consumes: `enforce_team_storage_capacity(session, orchestrator, project_id)`, `team_storage_usage(...)`, `effective_quota_bytes(project)`, `format_gib(...)` (Task 3); `get_personal_project_id(session, user)` from `app.core.projects.repository` (already imported in containers.py).
 - Produces: `POST /api/containers/run` and `POST /api/containers/deploy` return 400 with a `detail` containing the team name and "storage quota" when the team is at/over quota; `POST /api/containers/volume-uploads` returns 400 when the upload would push the caller's personal team over quota. All other request behavior unchanged.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Append to `backend/tests/test_storage_quota.py`:
 
@@ -916,12 +916,12 @@ def test_upload_blocked_when_team_storage_quota_exceeded(
     assert "storage quota" in second.json()["detail"]
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `cd backend && python -m pytest tests/test_storage_quota.py -q`
 Expected: the 4 new tests FAIL (they get 200 — no enforcement wired yet).
 
-- [ ] **Step 3: Wire enforcement into the routes**
+- [x] **Step 3: Wire enforcement into the routes**
 
 In `backend/app/api/routes/containers.py`:
 
@@ -985,12 +985,12 @@ and after the per-file `for upload in files:` loop, before `save_volume_upload(.
             )
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `cd backend && python -m pytest tests/test_storage_quota.py tests/test_api_integration.py -q`
 Expected: all PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add backend/app/api/routes/containers.py backend/tests/test_storage_quota.py
@@ -1014,7 +1014,7 @@ git commit -m "feat: enforce team storage quota on run, deploy, and uploads"
   - `PATCH /api/projects/{project_id}/storage-quota` body `{"storage_quota_bytes": int | null}` → 200 updated `ProjectStorageQuotaPublic`; 403 non-owner; 400 when the value exceeds the platform default (`TeamStorageQuotaError`).
   - `ProjectPublic.storage_quota_bytes: int | None` (present in project list/create/detail/accept responses).
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Append to `backend/tests/test_storage_quota.py` (add `from typing import Any` to the imports):
 
@@ -1149,12 +1149,12 @@ def test_patch_storage_quota_forbidden_for_non_owner(db_app: Any) -> None:
         assert response.status_code == 403
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `cd backend && python -m pytest tests/test_storage_quota.py -q`
 Expected: the 5 new tests FAIL (404 on `/storage-quota`; project responses lack `storage_quota_bytes`).
 
-- [ ] **Step 3: Add the schemas**
+- [x] **Step 3: Add the schemas**
 
 In `backend/app/api/schemas.py`, extend `ProjectPublic`:
 
@@ -1184,7 +1184,7 @@ class ProjectStorageQuotaUpdate(BaseModel):
     storage_quota_bytes: int | None = Field(default=None, ge=1)
 ```
 
-- [ ] **Step 4: Register the 400 handler for `TeamStorageQuotaError`**
+- [x] **Step 4: Register the 400 handler for `TeamStorageQuotaError`**
 
 In `backend/app/api/errors.py`, add `TeamStorageQuotaError` to the `app.core.exceptions` import list and add a handler next to the other 400 handlers (e.g. right after `unsupported_project_handler`):
 
@@ -1199,7 +1199,7 @@ In `backend/app/api/errors.py`, add `TeamStorageQuotaError` to the `app.core.exc
         )
 ```
 
-- [ ] **Step 5: Implement the routes**
+- [x] **Step 5: Implement the routes**
 
 In `backend/app/api/routes/projects.py`, extend the imports (merge into existing blocks):
 
@@ -1309,12 +1309,12 @@ async def update_project_storage_quota(
 
 (`TeamStorageQuotaSummary` goes in the `app.core.quotas` import list. If `ProjectAccessDeniedError` / `require_membership` / `require_project` are already imported in this file, merge — do not duplicate.)
 
-- [ ] **Step 6: Run tests to verify they pass**
+- [x] **Step 6: Run tests to verify they pass**
 
 Run: `cd backend && python -m pytest tests/test_storage_quota.py tests/test_projects_api.py -q`
 Expected: all PASS.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add backend/app/api/schemas.py backend/app/api/routes/projects.py backend/app/api/errors.py backend/tests/test_storage_quota.py
@@ -1334,7 +1334,7 @@ git commit -m "feat: add team storage quota settings endpoints"
 - Consumes: `AlertService._resolve_effective_preferences` / `_should_send_alert` / `_hash_event` (existing); `AlertHistory` with nullable `container_id` (Task 1); `check_team_storage_quotas` (Task 3).
 - Produces: `AlertService.send_project_storage_alert(user_id: uuid.UUID, project_id: uuid.UUID, project_name: str, used_bytes: int, quota_bytes: int) -> bool` — emails the member when alerts are enabled (independent of the `alert_types` list), dedupes via the standard 10-minute window, and writes one `AlertHistory` row per member with `event_type="storage"`, `container_id=None`. The monitoring loop runs `check_team_storage_quotas` every 20 passes (~5 min at the default 15s interval).
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Append to `backend/tests/test_storage_quota.py` (imports for `AlertService`, `ConsoleProvider`, `EmailPreference` — merge into the existing import blocks):
 
@@ -1504,12 +1504,12 @@ async def test_project_storage_alert_respects_disabled_notifications(
     assert rows == []
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `cd backend && python -m pytest tests/test_storage_quota.py -q`
 Expected: the 3 new tests FAIL (`AttributeError: 'AlertService' object has no attribute 'send_project_storage_alert'`). Note the rising-edge test monkeypatches that same method, so it fails at the patch target lookup for the same reason.
 
-- [ ] **Step 3: Implement `send_project_storage_alert`**
+- [x] **Step 3: Implement `send_project_storage_alert`**
 
 In `backend/app/core/notifications/alert_service.py`, add after `send_container_alert` (same structure — `try/except`, preferences gating without the `alert_types` filter, 10-minute dedup via the existing helper):
 
@@ -1577,7 +1577,7 @@ In `backend/app/core/notifications/alert_service.py`, add after `send_container_
             return False
 ```
 
-- [ ] **Step 4: Hook the check into the monitoring loop**
+- [x] **Step 4: Hook the check into the monitoring loop**
 
 In `backend/app/core/notifications/container_monitor.py`:
 
@@ -1613,12 +1613,12 @@ In `run_monitoring_loop`, add a counter before the `while True:` and run the che
 
 (Keep the existing `except` clauses unchanged — the check has its own `try` around the container list, and the loop's broad `except Exception` covers the rest.) The hook is 4 lines of cadence logic and is not unit-tested; `check_team_storage_quotas` itself is covered above.
 
-- [ ] **Step 5: Run tests to verify they pass**
+- [x] **Step 5: Run tests to verify they pass**
 
 Run: `cd backend && python -m pytest tests/test_storage_quota.py tests/test_email_alerts.py -q`
 Expected: all PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add backend/app/core/notifications/alert_service.py backend/app/core/notifications/container_monitor.py backend/tests/test_storage_quota.py
@@ -1638,7 +1638,7 @@ git commit -m "feat: alert team members when storage quota is exceeded"
 - Consumes: `GET`/`PATCH /api/projects/{id}/storage-quota` (Task 5); `apiGet`/`apiPatch` from client.ts.
 - Produces: `Project.storage_quota_bytes: number | null`; `type ProjectStorageQuota`; `getProjectStorageQuota(projectId: string): Promise<ProjectStorageQuota>`; `updateProjectStorageQuota(projectId: string, storageQuotaBytes: number | null): Promise<ProjectStorageQuota>`; a "Storage" section on the selected team's detail (usage line + progress bar + over-quota warning + owner-only GB form).
 
-- [ ] **Step 1: Extend `client.ts`**
+- [x] **Step 1: Extend `client.ts`**
 
 Update the `Project` type:
 
@@ -1688,7 +1688,7 @@ export async function updateProjectStorageQuota(
 }
 ```
 
-- [ ] **Step 2: Update `TeamsPage.tsx`**
+- [x] **Step 2: Update `TeamsPage.tsx`**
 
 Imports: add `getProjectStorageQuota`, `updateProjectStorageQuota`, and `type ProjectStorageQuota` to the existing `../api/client` import block.
 
@@ -1830,7 +1830,7 @@ New section JSX — insert inside the `<>` after `detailLoading` resolves, BEFOR
                   </section>
 ```
 
-- [ ] **Step 3: Add CSS**
+- [x] **Step 3: Add CSS**
 
 In `frontend/src/index.css`, next to the existing `.teams-page__*` rules:
 
@@ -1864,12 +1864,12 @@ In `frontend/src/index.css`, next to the existing `.teams-page__*` rules:
 }
 ```
 
-- [ ] **Step 4: Build and lint**
+- [x] **Step 4: Build and lint**
 
 Run: `cd frontend && npm run build && npm run lint`
 Expected: both succeed with no new errors.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add frontend/src/api/client.ts frontend/src/pages/TeamsPage.tsx frontend/src/index.css
@@ -1886,7 +1886,7 @@ git commit -m "feat: show and edit team storage quota on the Teams page"
 **Interfaces:**
 - Consumes: the `authenticatedPage` fixture (`frontend/e2e/fixtures.ts`); the Storage section from Task 7; the E2E backend does NOT set `VELA_TEAM_STORAGE_QUOTA_BYTES` (so the platform default is "unlimited").
 
-- [ ] **Step 1: Write the spec**
+- [x] **Step 1: Write the spec**
 
 Create `frontend/e2e/teams.spec.ts`:
 
@@ -1913,12 +1913,12 @@ test.describe('teams page', () => {
 })
 ```
 
-- [ ] **Step 2: Run the spec**
+- [x] **Step 2: Run the spec**
 
 Ensure nothing else is using ports 8000/5173, then run: `cd frontend && npm run test:e2e -- e2e/teams.spec.ts`
 Expected: PASS (1 test).
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add frontend/e2e/teams.spec.ts
@@ -1932,7 +1932,7 @@ git commit -m "test: e2e coverage for the team storage section"
 **Files:**
 - Modify: `README.md` (env var table next to the `VELA_CONTAINER_MONITOR_INTERVAL_SECONDS` row, ~line 92)
 
-- [ ] **Step 1: Document the env var**
+- [x] **Step 1: Document the env var**
 
 In `README.md`, add a row to the env var table:
 
@@ -1940,22 +1940,22 @@ In `README.md`, add a row to the env var table:
 | `VELA_TEAM_STORAGE_QUOTA_BYTES` | Per-team storage quota in bytes (unset = unlimited; a team setting can only restrict it) |
 ```
 
-- [ ] **Step 2: Run the backend suite**
+- [x] **Step 2: Run the backend suite**
 
 Run: `cd backend && python -m pytest -q`
 Expected: full suite PASS.
 
-- [ ] **Step 3: Run the frontend gates**
+- [x] **Step 3: Run the frontend gates**
 
 Run: `cd frontend && npm run build && npm run lint`
 Expected: PASS.
 
-- [ ] **Step 4: Run the full E2E suite**
+- [x] **Step 4: Run the full E2E suite**
 
 Run: `cd frontend && npm run test:e2e`
 Expected: all specs PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add README.md
@@ -1978,7 +1978,7 @@ git commit -m "docs: document VELA_TEAM_STORAGE_QUOTA_BYTES"
 - Consumes: `usage_from_containers(session, containers, project_id)`, `effective_quota_bytes(project)` (Task 3); `ProjectUsage` schema and usage endpoint from the dashboard plan.
 - Produces: `ProjectUsage` gains `storage_quota_bytes: int | null`, `storage_used_bytes: int`, `storage_over_quota: bool`; the dashboard usage panel shows per-team storage quota lines.
 
-- [ ] **Step 1: Extend `ProjectUsage`**
+- [x] **Step 1: Extend `ProjectUsage`**
 
 In `backend/app/api/schemas.py`, on the `ProjectUsage` schema created by the dashboard plan, add:
 
@@ -1988,7 +1988,7 @@ In `backend/app/api/schemas.py`, on the `ProjectUsage` schema created by the das
     storage_over_quota: bool = False
 ```
 
-- [ ] **Step 2: Write the failing test**
+- [x] **Step 2: Write the failing test**
 
 Append to `backend/tests/test_storage_quota.py`:
 
@@ -2013,7 +2013,7 @@ def test_usage_endpoint_includes_storage_fields(
     assert personal["storage_over_quota"] is False
 ```
 
-- [ ] **Step 3: Implement the endpoint fields**
+- [x] **Step 3: Implement the endpoint fields**
 
 In the usage endpoint in `backend/app/api/routes/metrics.py`, fetch `containers = await orchestrator.list()` once, then fill the three fields per project:
 
@@ -2027,12 +2027,12 @@ In the usage endpoint in `backend/app/api/routes/metrics.py`, fetch `containers 
 
 and set `storage_quota_bytes=quota`, `storage_used_bytes=used`, `storage_over_quota=quota is not None and used >= quota` on each `ProjectUsage` row.
 
-- [ ] **Step 4: Run the test to verify it passes**
+- [x] **Step 4: Run the test to verify it passes**
 
 Run: `cd backend && python -m pytest tests/test_storage_quota.py -q`
 Expected: PASS. Commit: `git add backend/app/api/schemas.py backend/app/api/routes/metrics.py backend/tests/test_storage_quota.py && git commit -m "feat: include storage quota in the usage endpoint"`
 
-- [ ] **Step 5: Dashboard panel quota line**
+- [x] **Step 5: Dashboard panel quota line**
 
 In `frontend/src/pages/containers/ResourceUsagePanel.tsx` (created by the dashboard plan), on each team rollup card, render below the usage numbers (reuse the same `formatGib` shape as TeamsPage; if the file has no helper, add the two-line `formatGib`):
 
@@ -2050,7 +2050,7 @@ In `frontend/src/pages/containers/ResourceUsagePanel.tsx` (created by the dashbo
 
 Add a `.resource-usage__quota` CSS rule if the panel's class block does not define one.
 
-- [ ] **Step 6: Build + lint + commit**
+- [x] **Step 6: Build + lint + commit**
 
 Run: `cd frontend && npm run build && npm run lint`
 Expected: PASS.
@@ -2069,3 +2069,7 @@ git commit -m "feat: show team storage quota in the usage panel"
 **Type consistency:** `TeamStorageQuotaSummary` field names match `ProjectStorageQuotaPublic` (quota_bytes/used_bytes/container_disk_bytes/uploads_bytes/over_quota/source); `storage_quota_bytes` column name is identical on the ORM model, `ProjectPublic`, and the frontend `Project` type; `usage_from_containers` is public in `app.core.quotas` (Task 3 `__init__`) and reused by Tasks 4/10; `_GB` helper and `_make_info` are shared across appended test sections.
 
 **Known boundaries (accepted in design):** container disk counts the writable layer only (named/anonymous volumes untracked); image pulls uncounted (shared layer); per-member upload scan is O(team size) per check; quota state resets on API restart (re-alarms once if still over).
+
+## Status (2026-09-02)
+
+Fully implemented and verified on `f/resource-management` (pytest + E2E green at 2026-09-02 review).

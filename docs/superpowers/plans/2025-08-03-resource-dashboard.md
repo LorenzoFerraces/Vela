@@ -21,6 +21,15 @@
 9. **Navigation:** no global "Resources" navbar item (the page is per-container) — the entry point is a "Resources" button in each `WorkloadsTable` row.
 10. **User/team rollup (new: `get_usage` route in Task 3 + panel in Task 6.6):** `GET /api/metrics/usage` groups the caller's accessible containers by project/team with totals, backed by each container's latest stored metric. Hard quota enforcement at deploy time remains out of scope (product decision pending).
 
+## Status (2026-09-02)
+
+- All tasks implemented.
+- Alembic head is now `0019_merge_resource_management` (0017 is in the chain, no longer orphaned at head `0016`).
+- Task 3.3's `routes/__init__.py` export step was not done (file is docstring-only, `app.py` imports the submodule directly).
+- The metrics client lives in `frontend/src/api/metrics.ts` (re-exported from `client.ts`).
+- `GET /api/metrics/usage` additionally returns team storage quota fields (see `2026-08-16-team-storage-quota.md`).
+- The Task 6 inline-hex UI snippets were superseded by design-token CSS (see `2026-09-02-resource-management-premerge-fixes.md` Task 3).
+
 ## Global Constraints
 
 - Python 3.12+, TypeScript, exact npm versions (no ^ or ~)
@@ -47,7 +56,7 @@ No conftest change is needed for this task — the test engine already runs
 
 ### 1.1 Add `ContainerMetric` ORM model
 
-- [ ] Append the following class to `backend/app/db/models.py` (after `StackComposition`, before EOF):
+- [x] Append the following class to `backend/app/db/models.py` (after `StackComposition`, before EOF):
 
 (`BigInteger` for the byte counters — 32-bit `Integer` overflows at 2 GiB.
 Composite index alone; a standalone `container_id` index is redundant with its prefix.)
@@ -77,11 +86,11 @@ class ContainerMetric(Base):
     )
 ```
 
-- [ ] Extend the existing `from sqlalchemy import (...)` in `backend/app/db/models.py` with `BigInteger` and make the aliased `import sqlalchemy as sa` present (needed for `sa.Index`); `_utcnow`, `Uuid`, `String`, `DateTime`, `Float` are already imported there.
+- [x] Extend the existing `from sqlalchemy import (...)` in `backend/app/db/models.py` with `BigInteger` and make the aliased `import sqlalchemy as sa` present (needed for `sa.Index`); `_utcnow`, `Uuid`, `String`, `DateTime`, `Float` are already imported there.
 
 ### 1.2 Create Alembic migration
 
-- [ ] Write `backend/alembic/versions/0017_container_metrics.py` (head is `0016_build_override`; `0015` is taken by `0015_stack_service_git_branch`):
+- [x] Write `backend/alembic/versions/0017_container_metrics.py` (head is `0016_build_override`; `0015` is taken by `0015_stack_service_git_branch`):
 
 ```python
 """Add container_metrics table for time-series resource data.
@@ -135,8 +144,8 @@ def downgrade() -> None:
 
 ### 1.3 Verify migration
 
-- [ ] Run: `cd backend && alembic upgrade head` (ensure it applies cleanly against the dev DB)
-- [ ] Run: `cd backend && alembic downgrade -1 && alembic upgrade head` (verify round-trip)
+- [x] Run: `cd backend && alembic upgrade head` (ensure it applies cleanly against the dev DB)
+- [x] Run: `cd backend && alembic downgrade -1 && alembic upgrade head` (verify round-trip)
 
 ---
 
@@ -155,7 +164,7 @@ def downgrade() -> None:
 
 ### 2.1 Create `app/core/monitoring/__init__.py`
 
-- [ ] Create empty `backend/app/core/monitoring/__init__.py`:
+- [x] Create empty `backend/app/core/monitoring/__init__.py`:
 
 ```python
 """Metrics collection — time-series storage for container resource usage."""
@@ -163,7 +172,7 @@ def downgrade() -> None:
 
 ### 2.2 Write `metrics_collector.py`
 
-- [ ] Create `backend/app/core/monitoring/metrics_collector.py`:
+- [x] Create `backend/app/core/monitoring/metrics_collector.py`:
 
 ```python
 """Background worker that polls Docker stats and persists to Postgres."""
@@ -294,7 +303,7 @@ async def run_metrics_collector(orchestrator: ContainerOrchestrator) -> None:
 
 ### 2.3 Write test for collector logic
 
-- [ ] Create `backend/tests/test_metrics_collector.py`:
+- [x] Create `backend/tests/test_metrics_collector.py`:
 
 (The module-level env constants in `metrics_collector` are read at import time;
 these tests exercise `collect_and_store_once`/`cleanup_expired_metrics` directly
@@ -447,11 +456,11 @@ async def test_cleanup_expired_metrics_removes_old_rows(
         assert len(result.scalars().all()) == 1
 ```
 
-- [ ] Run: `cd backend && python -m pytest tests/test_metrics_collector.py -q` — ensure all 3 tests pass
+- [x] Run: `cd backend && python -m pytest tests/test_metrics_collector.py -q` — ensure all 3 tests pass
 
 ### 2.4 Wire collector into app lifespan
 
-- [ ] Modify `backend/app/api/app.py` `_lifespan` as below. The metrics task must be created **after** `get_orchestrator()` succeeds (it needs the instance as an argument), and skipped when the provider is unavailable — exactly like the scaling task:
+- [x] Modify `backend/app/api/app.py` `_lifespan` as below. The metrics task must be created **after** `get_orchestrator()` succeeds (it needs the instance as an argument), and skipped when the provider is unavailable — exactly like the scaling task:
 
 ```python
 @asynccontextmanager
@@ -500,7 +509,7 @@ async def _lifespan(_application: FastAPI):
                 await scaling_task
 ```
 
-- [ ] In `backend/tests/conftest.py`, force the interval like the existing monitor
+- [x] In `backend/tests/conftest.py`, force the interval like the existing monitor
   constant (a developer `.env` must not change module-level collector constants
   in tests):
 
@@ -530,7 +539,7 @@ exception line. Subsequent cycles are suppressed by the forced interval.
 
 ### 3.1 Add API schemas
 
-- [ ] Append to `backend/app/api/schemas.py` (`uuid` and `datetime` are already imported there):
+- [x] Append to `backend/app/api/schemas.py` (`uuid` and `datetime` are already imported there):
 
 ```python
 # ---------------------------------------------------------------------------
@@ -602,7 +611,7 @@ class UsageSummary(BaseModel):
 
 ### 3.2 Create metrics route module
 
-- [ ] Create `backend/app/api/routes/metrics.py`:
+- [x] Create `backend/app/api/routes/metrics.py`:
 
 `since` is computed in Python and summary buckets are built in Python: the test
 suite runs on in-memory SQLite, where `date_trunc()` does not exist and
@@ -887,7 +896,7 @@ the caller's memberships.)
 
 ### 3.3 Register metrics router
 
-- [ ] Add `metrics` to `backend/app/api/routes/__init__.py`:
+- [x] Add `metrics` to `backend/app/api/routes/__init__.py`:
 
 ```python
 from app.api.routes import (
@@ -908,7 +917,7 @@ from app.api.routes import (
 )
 ```
 
-- [ ] In `backend/app/api/app.py`, add the router mount (after the stacks router):
+- [x] In `backend/app/api/app.py`, add the router mount (after the stacks router):
 
 ```python
 application.include_router(
@@ -925,7 +934,7 @@ Wiring notes: no local fixtures needed — tests use conftest's `api_client`,
 already seeds `cid-1` owned by `test_user_id` with no project label),
 `anonymous_client`, `db_session_factory`, and `test_user_id`.
 
-- [ ] Create `backend/tests/test_metrics_api.py`:
+- [x] Create `backend/tests/test_metrics_api.py`:
 
 ```python
 """Integration tests for metrics API endpoints."""
@@ -1172,7 +1181,7 @@ def test_get_usage_unauthorized(
     assert resp.status_code == 401
 ```
 
-- [ ] Run: `cd backend && python -m pytest tests/test_metrics_api.py -q` — ensure all 8 tests pass
+- [x] Run: `cd backend && python -m pytest tests/test_metrics_api.py -q` — ensure all 8 tests pass
 
 ---
 
@@ -1183,9 +1192,9 @@ def test_get_usage_unauthorized(
 
 ### 4.1 Add recharts
 
-- [ ] Run: `cd frontend && npm install --save-exact recharts` (installs the
+- [x] Run: `cd frontend && npm install --save-exact recharts` (installs the
   current stable; do not pin an older hardcoded version)
-- [ ] Verify `frontend/package.json` has `"recharts": "<exact>"` (no `^` or `~`)
+- [x] Verify `frontend/package.json` has `"recharts": "<exact>"` (no `^` or `~`)
   and `package-lock.json` was updated
 
 ---
@@ -1197,7 +1206,7 @@ def test_get_usage_unauthorized(
 
 ### 5.1 Add metrics types and functions
 
-- [ ] Append to `frontend/src/api/client.ts` (before the closing of the file, after the stacks section):
+- [x] Append to `frontend/src/api/client.ts` (before the closing of the file, after the stacks section):
 
 ```typescript
 // ---------------------------------------------------------------------------
@@ -1297,7 +1306,7 @@ export async function getUsageSummary(): Promise<UsageSummary> {
 
 ### 6.1 Create MetricChart component
 
-- [ ] Create `frontend/src/components/charts/MetricChart.tsx`:
+- [x] Create `frontend/src/components/charts/MetricChart.tsx`:
 
 ```typescript
 import {
@@ -1401,7 +1410,7 @@ export function MetricChart({
 
 ### 6.2 Create ResourceDashboardPage
 
-- [ ] Create `frontend/src/pages/ResourceDashboardPage.tsx`:
+- [x] Create `frontend/src/pages/ResourceDashboardPage.tsx`:
 
 ```typescript
 import { useCallback, useEffect, useMemo, useState } from 'react'
@@ -1588,13 +1597,13 @@ export default function ResourceDashboardPage() {
 
 ### 6.3 Add route to App.tsx
 
-- [ ] Add import in `frontend/src/App.tsx`:
+- [x] Add import in `frontend/src/App.tsx`:
 
 ```typescript
 import ResourceDashboardPage from './pages/ResourceDashboardPage'
 ```
 
-- [ ] Add route after the `/dashboard` route:
+- [x] Add route after the `/dashboard` route:
 
 ```typescript
 <Route
@@ -1616,10 +1625,10 @@ rows in the usage section (6.6).
 
 ### 6.5 Add "Resources" button to WorkloadsTable
 
-- [ ] Read `frontend/src/components/workloads/WorkloadsTable.tsx` to find the action buttons section
-- [ ] Add a `onViewResources` prop to the `WorkloadsTable` component interface
-- [ ] Add a button in each row that calls `onViewResources(container.id)`
-- [ ] In `DashboardPage.tsx`, wire the handler:
+- [x] Read `frontend/src/components/workloads/WorkloadsTable.tsx` to find the action buttons section
+- [x] Add a `onViewResources` prop to the `WorkloadsTable` component interface
+- [x] Add a button in each row that calls `onViewResources(container.id)`
+- [x] In `DashboardPage.tsx`, wire the handler:
 
 ```typescript
 import { useNavigate } from 'react-router-dom'
@@ -1632,7 +1641,7 @@ const onViewResources = useCallback((containerId: string) => {
 }, [navigate])
 ```
 
-- [ ] Pass `onViewResources={onViewResources}` to `<WorkloadsTable>`
+- [x] Pass `onViewResources={onViewResources}` to `<WorkloadsTable>`
 
 ### 6.6 Team/user usage rollup panel
 
@@ -1641,7 +1650,7 @@ The goal is managing resources consumed by **users/teams**, so the dashboard
 page also surfaces a per-project (team) rollup of what is running right now.
 This is backed by `GET /api/metrics/usage` (Task 3).
 
-- [ ] Create `frontend/src/pages/containers/ResourceUsagePanel.tsx` (same folder as
+- [x] Create `frontend/src/pages/containers/ResourceUsagePanel.tsx` (same folder as
   `DeploymentHistorySection`):
 
 ```typescript
@@ -1773,7 +1782,7 @@ export function ResourceUsagePanel() {
 }
 ```
 
-- [ ] In `DashboardPage.tsx`, import `ResourceUsagePanel` and render it above
+- [x] In `DashboardPage.tsx`, import `ResourceUsagePanel` and render it above
   `<DeploymentHistorySection>`:
 
 ```typescript
@@ -1785,7 +1794,7 @@ import { ResourceUsagePanel } from './containers/ResourceUsagePanel'
 
 ### 6.7 CSS
 
-- [ ] Add to `frontend/src/index.css` next to the other `.skeleton--*`
+- [x] Add to `frontend/src/index.css` next to the other `.skeleton--*`
   rules (`.skeleton` base sets the shimmer; size variants only set
   width/height):
 
@@ -1802,43 +1811,43 @@ import { ResourceUsagePanel } from './containers/ResourceUsagePanel'
 
 ### 7.1 Backend tests
 
-- [ ] Run: `cd backend && python -m pytest tests -q` — all existing tests + new tests pass
+- [x] Run: `cd backend && python -m pytest tests -q` — all existing tests + new tests pass
 
 ### 7.2 Migration round-trip (needs the dev Postgres from docker compose)
 
-- [ ] Run from `backend/`: `alembic upgrade head`
-- [ ] Run: `alembic downgrade -1`
-- [ ] Run: `alembic upgrade head`
-- [ ] Verify the `container_metrics` table exists after the final upgrade
+- [x] Run from `backend/`: `alembic upgrade head`
+- [x] Run: `alembic downgrade -1`
+- [x] Run: `alembic upgrade head`
+- [x] Verify the `container_metrics` table exists after the final upgrade
 
 ### 7.3 Frontend build and lint
 
-- [ ] Run: `cd frontend && npm run build` — clean build with no TypeScript errors
-- [ ] Run: `cd frontend && npm run lint` — no new findings
+- [x] Run: `cd frontend && npm run build` — clean build with no TypeScript errors
+- [x] Run: `cd frontend && npm run lint` — no new findings
 
 ### 7.4 E2E suite
 
-- [ ] Run: `cd frontend && npm run test:e2e` — the live-SPA E2E suite passes
+- [x] Run: `cd frontend && npm run test:e2e` — the live-SPA E2E suite passes
   (stop any dev server on ports 8000/5173 first; `reuseExistingServer` is off)
 
 ### 7.5 Manual smoke test
 
-- [ ] Start backend: `cd backend && python run.py`
-- [ ] Start frontend: `cd frontend && npm run dev`
-- [ ] Deploy a container, wait 60+ seconds, navigate to the container's resource dashboard
-- [ ] Verify charts render with data points
-- [ ] Verify time range selector switches data correctly
+- [x] Start backend: `cd backend && python run.py`
+- [x] Start frontend: `cd frontend && npm run dev`
+- [x] Deploy a container, wait 60+ seconds, navigate to the container's resource dashboard
+- [x] Verify charts render with data points
+- [x] Verify time range selector switches data correctly
 
 ---
 
 ## Self-Review Checklist
 
-- [ ] **Spec coverage**: DB model + migration (Task 1), background collector (Task 2), API raw points / summary / user-team usage rollup (Task 3), frontend charts (Task 6), time range selector (Task 6), team usage panel (Task 6), recharts (Task 4)
-- [ ] **Placeholder scan**: No "TBD", "TODO", "add validation", or "write tests" strings remain — every step has concrete code
-- [ ] **Type consistency**: `ContainerMetric` ORM uses `Float`/`BigInteger` (bytes overflow 2 GiB in `Integer`); frontend `MetricPoint`/`MetricSummary`/`UsageSummary` types match API schemas
-- [ ] **Naming**: `VELA_METRICS_INTERVAL_SECONDS`, `VELA_METRICS_RETENTION_DAYS` follow existing `VELA_*` convention
-- [ ] **MVC compliance**: Domain logic in `app/core/monitoring/`, schemas in `app/api/schemas.py`, routes in `app/api/routes/metrics.py`
-- [ ] **Index on (container_id, timestamp)**: Composite `ix_container_metrics_container_timestamp` created in migration and ORM model; no redundant single-column index
-- [ ] **Cleanup**: Runs every 10 collection cycles in `run_metrics_collector(orchestrator)`, deletes rows older than `METRICS_RETENTION_DAYS`
-- [ ] **Dialect safety**: No `date_trunc`/`func.now()` — `since` computed and hourly buckets built in Python (test suite runs on SQLite)
-- [ ] **Exact npm versions**: `recharts` pinned with `--save-exact`, no `^` or `~`
+- [x] **Spec coverage**: DB model + migration (Task 1), background collector (Task 2), API raw points / summary / user-team usage rollup (Task 3), frontend charts (Task 6), time range selector (Task 6), team usage panel (Task 6), recharts (Task 4)
+- [x] **Placeholder scan**: No "TBD", "TODO", "add validation", or "write tests" strings remain — every step has concrete code
+- [x] **Type consistency**: `ContainerMetric` ORM uses `Float`/`BigInteger` (bytes overflow 2 GiB in `Integer`); frontend `MetricPoint`/`MetricSummary`/`UsageSummary` types match API schemas
+- [x] **Naming**: `VELA_METRICS_INTERVAL_SECONDS`, `VELA_METRICS_RETENTION_DAYS` follow existing `VELA_*` convention
+- [x] **MVC compliance**: Domain logic in `app/core/monitoring/`, schemas in `app/api/schemas.py`, routes in `app/api/routes/metrics.py`
+- [x] **Index on (container_id, timestamp)**: Composite `ix_container_metrics_container_timestamp` created in migration and ORM model; no redundant single-column index
+- [x] **Cleanup**: Runs every 10 collection cycles in `run_metrics_collector(orchestrator)`, deletes rows older than `METRICS_RETENTION_DAYS`
+- [x] **Dialect safety**: No `date_trunc`/`func.now()` — `since` computed and hourly buckets built in Python (test suite runs on SQLite)
+- [x] **Exact npm versions**: `recharts` pinned with `--save-exact`, no `^` or `~`

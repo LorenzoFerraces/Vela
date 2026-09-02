@@ -14,6 +14,13 @@
 - `RunFromSourceRequest` fields are added after `build_override` (not `scaling_policy`); the 3 `_deploy_config_for_image` call sites are at lines ~697/~751/~824 in `routes/containers.py`.
 - Pair with `2025-08-03-resource-dashboard.md` for per-user/team usage visibility (`GET /api/metrics/usage`). Quota enforcement (hard ceilings at deploy time) is deliberately out of scope — add when a product policy exists.
 
+## Status (2026-09-02)
+
+- All tasks implemented on `f/resource-management`.
+- The Task 2 step 2.1 passthrough test was missing at first review and was added 2026-09-02 (see `2026-09-02-resource-management-premerge-fixes.md` Task 1).
+- `RunFromSourceRequest` now lives in `frontend/src/api/containers.ts` (API client refactor, re-exported from `client.ts`).
+- A `cpu_limit` finiteness validator was added per review findings.
+
 ## Global Constraints
 
 - Python 3.12+, TypeScript, exact npm versions (no ^ or ~)
@@ -71,8 +78,8 @@ def test_run_from_image_resource_limits_optional(api_client: TestClient) -> None
     assert response.status_code == 200
 ```
 
-- [ ] Write the two test functions to `backend/tests/test_api_integration.py`
-- [ ] Run `cd backend && python -m pytest tests/test_api_integration.py::test_run_from_image_with_resource_limits tests/test_api_integration.py::test_run_from_image_resource_limits_optional -q` — expect first test to fail (422 or field ignored), second to pass
+- [x] Write the two test functions to `backend/tests/test_api_integration.py`
+- [x] Run `cd backend && python -m pytest tests/test_api_integration.py::test_run_from_image_with_resource_limits tests/test_api_integration.py::test_run_from_image_resource_limits_optional -q` — expect first test to fail (422 or field ignored), second to pass
 
 ### Step 1.2: Add fields to `RunFromSourceRequest`
 
@@ -94,9 +101,9 @@ After the `build_override` field (line ~168; the last declared field of
     )
 ```
 
-- [ ] Add the two fields to `RunFromSourceRequest` in `backend/app/api/schemas.py`
-- [ ] Run the two tests again — both should pass
-- [ ] Run full test suite: `cd backend && python -m pytest tests -q` — ensure no regressions
+- [x] Add the two fields to `RunFromSourceRequest` in `backend/app/api/schemas.py`
+- [x] Run the two tests again — both should pass
+- [x] Run full test suite: `cd backend && python -m pytest tests -q` — ensure no regressions
 
 ---
 
@@ -138,8 +145,8 @@ def test_run_resource_limits_pass_through_all_source_kinds(
     assert cfg.memory_limit == 512
 ```
 
-- [ ] Add the test to `backend/tests/test_api_integration.py`
-- [ ] Run the test — expect failure (limits not passed through)
+- [x] Add the test to `backend/tests/test_api_integration.py`
+- [x] Run the test — expect failure (limits not passed through)
 
 ### Step 2.2: Update `_deploy_config_for_image` to accept resource limits
 
@@ -177,8 +184,8 @@ def _deploy_config_for_image(
     )
 ```
 
-- [ ] Update `_deploy_config_for_image` signature and return statement
-- [ ] Run the test — still fails (callers haven't been updated yet)
+- [x] Update `_deploy_config_for_image` signature and return statement
+- [x] Run the test — still fails (callers haven't been updated yet)
 
 ### Step 2.3: Pass limits from `run_from_user_source` callers
 
@@ -219,9 +226,9 @@ to:
 
 Apply the same `cpu_limit=body.cpu_limit, memory_limit=body.memory_limit` addition to the dockerfile_template call (line ~748) and the git call (line ~820).
 
-- [ ] Update all three `_deploy_config_for_image` calls in `run_from_user_source`
-- [ ] Run the test — expect pass
-- [ ] Run full test suite: `cd backend && python -m pytest tests -q`
+- [x] Update all three `_deploy_config_for_image` calls in `run_from_user_source`
+- [x] Run the test — expect pass
+- [x] Run full test suite: `cd backend && python -m pytest tests -q`
 
 ### Step 2.4: Fix the MB→bytes unit bug in the Docker orchestrator
 
@@ -247,8 +254,8 @@ And document the unit on `DeployConfig` in `backend/app/core/models.py`:
 
 `gt=0` also covers the direct `POST /api/containers/deploy` path, which takes `DeployConfig` unmediated.
 
-- [ ] Apply both edits
-- [ ] Run full test suite: `cd backend && python -m pytest tests -q`
+- [x] Apply both edits
+- [x] Run full test suite: `cd backend && python -m pytest tests -q`
 
 ---
 
@@ -274,8 +281,8 @@ After `build_override` (line ~457; the last field of the interface), add:
   memory_limit?: number | null
 ```
 
-- [ ] Add the two optional fields to `RunFromSourceRequest` interface
-- [ ] Run `cd frontend && npm run build` — expect success
+- [x] Add the two optional fields to `RunFromSourceRequest` interface
+- [x] Run `cd frontend && npm run build` — expect success
 
 ### Step 3.2: Add resource limit inputs to `ContainersRunAdvancedFields`
 
@@ -337,8 +344,8 @@ Add the input fields before the `ContainersRunScalingFields` component (before l
           </p>
 ```
 
-- [ ] Add props, destructuring, and input fields to `ContainersRunAdvancedFields.tsx`
-- [ ] Run `cd frontend && npm run build` — expect success
+- [x] Add props, destructuring, and input fields to `ContainersRunAdvancedFields.tsx`
+- [x] Run `cd frontend && npm run build` — expect success
 
 ### Step 3.3: Wire state in `ContainersPage`
 
@@ -375,9 +382,9 @@ Pass props to `<ContainersRunAdvancedFields>` (find the existing usage and add):
           onMemoryLimitChange={setMemoryLimit}
 ```
 
-- [ ] Add state, reset logic, request parsing, and prop wiring to `ContainersPage.tsx`
-- [ ] Run `cd frontend && npm run build` — expect success
-- [ ] Run `cd frontend && npm run lint` — expect success
+- [x] Add state, reset logic, request parsing, and prop wiring to `ContainersPage.tsx`
+- [x] Run `cd frontend && npm run build` — expect success
+- [x] Run `cd frontend && npm run lint` — expect success
 
 ---
 
@@ -409,9 +416,9 @@ submit path with limits included in the request.
 
 ### Step 4.2: Run the suite
 
-- [ ] Run `cd frontend && npm run test:e2e` — expect all tests to pass
+- [x] Run `cd frontend && npm run test:e2e` — expect all tests to pass
   (stop dev servers on ports 8000/5173 first; `reuseExistingServer` is off)
-- [ ] Manual smoke: open the containers page, expand "Advanced options",
+- [x] Manual smoke: open the containers page, expand "Advanced options",
   confirm both fields accept input and reset after a successful deploy
 
 ---
