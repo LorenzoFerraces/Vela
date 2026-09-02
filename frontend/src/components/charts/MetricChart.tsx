@@ -26,10 +26,12 @@ type MetricChartProps = {
 }
 
 // Recharts props cannot read CSS variables; keep these hex values in sync
-// with the dark theme tokens in index.css (grid: --border, ticks/tooltip:
-// --text-muted, reference line: --error).
+// with the dark theme tokens in index.css (grid: --border, ticks/tooltip
+// text: --text-muted, tooltip background: --bg-deep, tooltip border:
+// --border, reference line: --error).
 const CHART_GRID_STROKE = '#5a4b7a'
 const CHART_TEXT = '#9a8fb8'
+const CHART_TOOLTIP_BG = '#120e1e'
 const CHART_REFERENCE_STROKE = '#ef4444'
 
 export function MetricChart({
@@ -95,9 +97,13 @@ export function MetricChart({
           tickFormatter={formatValue}
         />
         <Tooltip
-          contentStyle={{ color: CHART_TEXT }}
+          contentStyle={{
+            backgroundColor: CHART_TOOLTIP_BG,
+            border: `1px solid ${CHART_GRID_STROKE}`,
+            color: CHART_TEXT,
+          }}
           labelFormatter={(label) => new Date(String(label)).toLocaleString()}
-          formatter={(value) => [formatTooltipValue(Number(value)), label]}
+          formatter={(value, name) => [formatTooltipValue(Number(value)), name]}
         />
         {series ? (
           series.map((s) => (
