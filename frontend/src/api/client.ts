@@ -67,6 +67,7 @@ export {
   cancelProjectInvitation,
   createProject,
   createProjectInvitation,
+  getProjectStorageQuota,
   leaveProject,
   listIncomingInvitations,
   listProjectInvitations,
@@ -75,6 +76,7 @@ export {
   removeProjectMember,
   rejectProjectInvitation,
   updateProjectMemberRole,
+  updateProjectStorageQuota,
 } from './projects'
 
 export {
@@ -108,6 +110,12 @@ export {
 export { exportLogs, getLogs } from './logs'
 
 export { getAuditLog } from './audit'
+
+export {
+  getMetricPoints,
+  getMetricSummary,
+  getUsageSummary,
+} from './metrics'
 
 export {
   analyzeRepo,
@@ -169,6 +177,7 @@ export type {
   Project,
   ProjectInvitation,
   ProjectMember,
+  ProjectStorageQuota,
 } from './projects'
 
 export type {
@@ -200,6 +209,14 @@ export type {
   LogQueryParams,
   LogQueryResponse,
 } from './logs'
+
+export type {
+  ContainerUsageEntry,
+  MetricPoint,
+  MetricSummary,
+  ProjectUsage,
+  UsageSummary,
+} from './metrics'
 
 export type {
   AuditLogEntry,

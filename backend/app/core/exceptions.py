@@ -83,6 +83,14 @@ class VolumeUploadQuotaExceededError(ResourceLimitError):
     """User has reached the total volume upload storage quota."""
 
 
+class TeamStorageQuotaExceededError(ResourceLimitError):
+    """A deployment or upload would push the team over its storage quota."""
+
+
+class TeamStorageQuotaError(VelaError):
+    """Invalid team storage quota value (e.g. above the platform limit)."""
+
+
 class VolumeUploadNotFoundError(VelaError):
     """Referenced volume upload does not exist for this user."""
 

@@ -21,6 +21,7 @@ os.environ.setdefault("VELA_FAKE_ORCHESTRATOR", "1")
 os.environ.setdefault("VELA_LOG_COLLECTOR_ENABLED", "0")
 # Force default so a developer .env cannot change module-level monitor constants.
 os.environ["VELA_CONTAINER_MONITOR_INTERVAL_SECONDS"] = "15"
+os.environ["VELA_METRICS_INTERVAL_SECONDS"] = "3600"
 os.environ.setdefault("VELA_OBJECT_STORAGE", "memory")
 
 import uuid
@@ -66,6 +67,7 @@ os.environ.setdefault("VELA_AUTH_ACCESS_TOKEN_TTL_MINUTES", "60")
 os.environ.setdefault("VELA_OBJECT_STORAGE", "memory")
 # ``engine.load_dotenv(override=True)`` may clobber the early set above.
 os.environ["VELA_CONTAINER_MONITOR_INTERVAL_SECONDS"] = "15"
+os.environ["VELA_METRICS_INTERVAL_SECONDS"] = "3600"
 
 
 def make_container_info(

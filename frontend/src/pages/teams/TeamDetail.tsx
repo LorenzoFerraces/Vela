@@ -1,5 +1,10 @@
 import type { FormEvent } from 'react'
-import type { Project, ProjectInvitation, ProjectMember } from '../../api/client'
+import type {
+  Project,
+  ProjectInvitation,
+  ProjectMember,
+  ProjectStorageQuota,
+} from '../../api/client'
 import {
   TeamDetailSkeleton,
   TeamHintSectionSkeleton,
@@ -11,15 +16,24 @@ import {
   teamDisplayName,
 } from '../../projects/teamDisplay'
 
+function formatGib(bytes: number): string {
+  return `${(bytes / 1024 ** 3).toFixed(1)} GiB`
+}
+
 type TeamDetailProps = {
   project: Project
   isSelectedOwner: boolean
   busy: boolean
   detailLoading: boolean
+  storageQuota: ProjectStorageQuota | null
+  quotaError: string | null
+  quotaInput: string
   members: ProjectMember[]
   pendingInvitations: ProjectInvitation[]
   inviteEmail: string
   inviteRole: 'viewer' | 'operator'
+  onQuotaInputChange: (value: string) => void
+  onSaveQuota: (event: FormEvent) => void
   onInviteEmailChange: (email: string) => void
   onInviteRoleChange: (role: 'viewer' | 'operator') => void
   onInvite: (event: FormEvent) => void
@@ -34,10 +48,15 @@ export function TeamDetail({
   isSelectedOwner,
   busy,
   detailLoading,
+  storageQuota,
+  quotaError,
+  quotaInput,
   members,
   pendingInvitations,
   inviteEmail,
   inviteRole,
+  onQuotaInputChange,
+  onSaveQuota,
   onInviteEmailChange,
   onInviteRoleChange,
   onInvite,
@@ -79,6 +98,78 @@ export function TeamDetail({
         </TeamDetailSkeleton>
       ) : (
         <>
+          <section className="teams-page__section">
+            <h3 className="teams-page__section-title">Storage</h3>
+            {storageQuota === null ? (
+              quotaError ? (
+                <p className="teams-page__hint teams-page__hint--err">
+                  {quotaError}
+                </p>
+              ) : (
+                <p className="teams-page__muted">Loading storage…</p>
+              )
+            ) : storageQuota.quota_bytes === null ? (
+              <p className="teams-page__muted">
+                {formatGib(storageQuota.used_bytes)} used · No limit
+              </p>
+            ) : (
+              <>
+                <p className="teams-page__muted">
+                  {formatGib(storageQuota.used_bytes)} of{' '}
+                  {formatGib(storageQuota.quota_bytes)} used
+                </p>
+                <div className="teams-page__storage-bar">
+                  <div
+                    className={
+                      storageQuota.over_quota
+                        ? 'teams-page__storage-bar-fill teams-page__storage-bar-fill--over'
+                        : 'teams-page__storage-bar-fill'
+                    }
+                    style={{
+                      width: `${Math.min(
+                        100,
+                        (storageQuota.used_bytes /
+                          storageQuota.quota_bytes) *
+                          100,
+                      )}%`,
+                    }}
+                  />
+                </div>
+                {storageQuota.over_quota ? (
+                  <p className="teams-page__hint teams-page__hint--err">
+                    Over quota — new deployments are blocked until
+                    storage drops below the limit.
+                  </p>
+                ) : null}
+              </>
+            )}
+            {isSelectedOwner ? (
+              <form className="teams-page__quota-form" onSubmit={onSaveQuota}>
+                <label className="teams-page__field">
+                  Limit (GiB)
+                  <input
+                    type="number"
+                    min="1"
+                    step="0.1"
+                    className="teams-page__input"
+                    value={quotaInput}
+                    disabled={busy}
+                    onChange={(event) =>
+                      onQuotaInputChange(event.target.value)
+                    }
+                    placeholder="Platform default"
+                  />
+                </label>
+                <button
+                  type="submit"
+                  className="btn btn--primary"
+                  disabled={busy}
+                >
+                  Save
+                </button>
+              </form>
+            ) : null}
+          </section>
           <section className="teams-page__section">
             <h3 className="teams-page__section-title">Members</h3>
             {members.length === 0 ? (

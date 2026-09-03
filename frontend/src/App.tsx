@@ -17,6 +17,7 @@ const LogsPage = lazy(() => import('./pages/LogsPage'))
 const AuditLogPage = lazy(() => import('./pages/AuditLogPage'))
 const StacksPage = lazy(() => import('./pages/StacksPage'))
 const StackBuilderPage = lazy(() => import('./pages/stacks/StackBuilderPage'))
+const ResourceDashboardPage = lazy(() => import('./pages/ResourceDashboardPage'))
 /**
  * Defines the application's client-side routes and layout.
  *
@@ -48,6 +49,14 @@ export default function App() {
             element={
               <RequireAuth>
                 <DashboardPage />
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/containers/:containerId/resources"
+            element={
+              <RequireAuth>
+                <ResourceDashboardPage />
               </RequireAuth>
             }
           />

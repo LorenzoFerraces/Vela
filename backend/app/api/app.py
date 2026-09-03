@@ -23,6 +23,7 @@ from app.api.routes import (
     github,
     images,
     logs,
+    metrics,
     projects,
     scaling,
     settings,
@@ -37,30 +38,39 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def _lifespan(_application: FastAPI):
-    """Startup/shutdown lifecycle: initialise DB, start background monitoring and scaling loops."""
     from app.api.deps import get_orchestrator, get_traffic_router
     from app.core.exceptions import ProviderConnectionError, TrafficRouterError
     from app.core.logging.collector import LogCollector, COLLECTOR_ENABLED
     from app.core.notifications.container_monitor import run_monitoring_loop
+    from app.core.monitoring.metrics_collector import run_metrics_collector
     from app.core.scaling.scaling_engine import run_scaling_loop
     from app.e2e_support import ensure_e2e_database
 
     await ensure_e2e_database()
 
     monitor_task = asyncio.create_task(run_monitoring_loop())
+    metrics_task: asyncio.Task[None] | None = None
     scaling_task: asyncio.Task[None] | None = None
     try:
         orchestrator = get_orchestrator()
-        traffic_router = get_traffic_router()
-    except (ProviderConnectionError, TrafficRouterError) as exc:
+    except ProviderConnectionError as exc:
         logger.warning(
-            "Scaling dependencies unavailable at startup (%s); auto-scaling loop will not run.",
+            "Container provider unavailable at startup (%s); metrics and scaling loops will not run.",
             exc,
         )
     else:
-        scaling_task = asyncio.create_task(
-            run_scaling_loop(orchestrator, traffic_router)
-        )
+        metrics_task = asyncio.create_task(run_metrics_collector(orchestrator))
+        try:
+            traffic_router = get_traffic_router()
+        except (ProviderConnectionError, TrafficRouterError) as exc:
+            logger.warning(
+                "Traffic router unavailable at startup (%s); scaling loop will not run.",
+                exc,
+            )
+        else:
+            scaling_task = asyncio.create_task(
+                run_scaling_loop(orchestrator, traffic_router)
+            )
 
     log_collector: LogCollector | None = None
     if COLLECTOR_ENABLED:
@@ -79,12 +89,17 @@ async def _lifespan(_application: FastAPI):
         yield
     finally:
         monitor_task.cancel()
+        if metrics_task is not None:
+            metrics_task.cancel()
         if scaling_task is not None:
             scaling_task.cancel()
         if log_collector is not None:
             await log_collector.stop()
         with suppress(asyncio.CancelledError):
             await monitor_task
+        if metrics_task is not None:
+            with suppress(asyncio.CancelledError):
+                await metrics_task
         if scaling_task is not None:
             with suppress(asyncio.CancelledError):
                 await scaling_task
@@ -205,6 +220,11 @@ def create_app() -> FastAPI:
         stacks.router,
         prefix=f"{API_PREFIX}/stacks",
         tags=["stacks"],
+    )
+    application.include_router(
+        metrics.router,
+        prefix=f"{API_PREFIX}/metrics",
+        tags=["metrics"],
     )
 
     @application.get(f"{API_PREFIX}/health", tags=["health"])

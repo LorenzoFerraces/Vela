@@ -8,7 +8,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_current_user, get_db
+from app.api.deps import get_current_user, get_db, get_orchestrator
 from app.api.schemas import (
     IncomingProjectInvitationPublic,
     MyProjectRolePublic,
@@ -18,13 +18,18 @@ from app.api.schemas import (
     ProjectMemberPublic,
     ProjectMemberUpdate,
     ProjectPublic,
+    ProjectStorageQuotaPublic,
+    ProjectStorageQuotaUpdate,
 )
+from app.core.containers.orchestrator import ContainerOrchestrator
+from app.core.exceptions import ProjectAccessDeniedError, TeamStorageQuotaError
 from app.core.projects import (
     ProjectRole,
     accept_invitation,
     cancel_invitation,
     create_invitation,
     create_shared_project,
+    get_membership,
     leave_project,
     list_incoming_invitations_for_user,
     list_members,
@@ -38,6 +43,12 @@ from app.core.projects import (
     update_member_role,
     owner_email_for_project,
 )
+from app.core.quotas import (
+    TeamStorageQuotaSummary,
+    environment_quota_bytes,
+    format_gib,
+    team_storage_quota_summary,
+)
 from app.db.models import User
 
 router = APIRouter()
@@ -50,6 +61,7 @@ def _project_public(
     is_personal: bool,
     role: str,
     owner_email: str,
+    storage_quota_bytes: int | None,
 ) -> ProjectPublic:
     return ProjectPublic(
         id=project_id,
@@ -57,6 +69,7 @@ def _project_public(
         is_personal=is_personal,
         role=role,
         owner_email=owner_email,
+        storage_quota_bytes=storage_quota_bytes,
     )
 
 
@@ -73,6 +86,7 @@ async def list_user_projects(
             is_personal=row.project.is_personal,
             role=row.role.value,
             owner_email=row.owner_email,
+            storage_quota_bytes=row.project.storage_quota_bytes,
         )
         for row in rows
     ]
@@ -95,6 +109,7 @@ async def create_user_project(
         is_personal=row.project.is_personal,
         role=row.role.value,
         owner_email=row.owner_email,
+        storage_quota_bytes=row.project.storage_quota_bytes,
     )
 
 
@@ -136,6 +151,7 @@ async def accept_project_invitation(
         is_personal=row.project.is_personal,
         role=row.role.value,
         owner_email=row.owner_email,
+        storage_quota_bytes=row.project.storage_quota_bytes,
     )
 
 
@@ -168,7 +184,73 @@ async def get_project(
         is_personal=project.is_personal,
         role=ProjectRole(membership.role).value,
         owner_email=owner_email,
+        storage_quota_bytes=project.storage_quota_bytes,
     )
+
+
+def _storage_quota_public(
+    summary: TeamStorageQuotaSummary,
+) -> ProjectStorageQuotaPublic:
+    return ProjectStorageQuotaPublic(
+        quota_bytes=summary.quota_bytes,
+        used_bytes=summary.used_bytes,
+        container_disk_bytes=summary.container_disk_bytes,
+        uploads_bytes=summary.uploads_bytes,
+        over_quota=summary.over_quota,
+        source=summary.source,
+    )
+
+
+@router.get("/{project_id}/storage-quota", response_model=ProjectStorageQuotaPublic)
+async def get_project_storage_quota(
+    project_id: uuid.UUID,
+    orchestrator: Annotated[ContainerOrchestrator, Depends(get_orchestrator)],
+    current_user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[AsyncSession, Depends(get_db)],
+) -> ProjectStorageQuotaPublic:
+    membership = await get_membership(
+        session, project_id=project_id, user_id=current_user.id
+    )
+    if membership is None:
+        raise ProjectAccessDeniedError(
+            "You must be a member of this team to view its storage quota."
+        )
+    project = await require_project(session, project_id)
+    summary = await team_storage_quota_summary(session, orchestrator, project)
+    return _storage_quota_public(summary)
+
+
+@router.patch(
+    "/{project_id}/storage-quota", response_model=ProjectStorageQuotaPublic
+)
+async def update_project_storage_quota(
+    project_id: uuid.UUID,
+    body: ProjectStorageQuotaUpdate,
+    orchestrator: Annotated[ContainerOrchestrator, Depends(get_orchestrator)],
+    current_user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[AsyncSession, Depends(get_db)],
+) -> ProjectStorageQuotaPublic:
+    membership = await require_membership(
+        session, project_id=project_id, user_id=current_user.id
+    )
+    if ProjectRole(membership.role) != ProjectRole.OWNER:
+        raise ProjectAccessDeniedError(
+            "Only the team owner can change the storage quota."
+        )
+    project = await require_project(session, project_id)
+    requested = body.storage_quota_bytes
+    if requested is not None:
+        platform_quota = environment_quota_bytes()
+        if platform_quota is not None and requested > platform_quota:
+            raise TeamStorageQuotaError(
+                "Team quota cannot exceed the platform limit "
+                f"of {format_gib(platform_quota)}."
+            )
+    project.storage_quota_bytes = requested
+    await session.commit()
+    await session.refresh(project)
+    summary = await team_storage_quota_summary(session, orchestrator, project)
+    return _storage_quota_public(summary)
 
 
 @router.get("/{project_id}/members", response_model=list[ProjectMemberPublic])

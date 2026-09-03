@@ -29,6 +29,10 @@ type ContainersRunAdvancedFieldsProps = {
   scalingPolicy: ScalingPolicyRequest | null
   onScalingPolicyChange: (policy: ScalingPolicyRequest | null) => void
   scalingValidationError?: string | null
+  cpuLimit: string
+  onCpuLimitChange: (value: string) => void
+  memoryLimit: string
+  onMemoryLimitChange: (value: string) => void
   volumeError?: string | null
 }
 
@@ -42,6 +46,10 @@ export function ContainersRunAdvancedFields({
   scalingPolicy,
   onScalingPolicyChange,
   scalingValidationError = null,
+  cpuLimit,
+  onCpuLimitChange,
+  memoryLimit,
+  onMemoryLimitChange,
   volumeError = null,
 }: ContainersRunAdvancedFieldsProps) {
   const [expanded, setExpanded] = useState(false)
@@ -313,6 +321,39 @@ export function ContainersRunAdvancedFields({
           />
           <p className="containers-muted containers-form__hint">
             Overrides the container CMD when set.
+          </p>
+
+          <label className="containers-form__label" htmlFor="cpu-limit-input">
+            CPU limit (cores)
+          </label>
+          <input
+            id="cpu-limit-input"
+            className="containers-form__input"
+            type="number"
+            step="any"
+            placeholder="e.g. 0.5"
+            value={cpuLimit}
+            onChange={(event) => onCpuLimitChange(event.target.value)}
+          />
+          <p className="containers-muted containers-form__hint">
+            Maximum CPU cores the container can use. Leave empty for no limit.
+          </p>
+
+          <label className="containers-form__label" htmlFor="memory-limit-input">
+            Memory limit (MB)
+          </label>
+          <input
+            id="memory-limit-input"
+            className="containers-form__input"
+            type="number"
+            step="1"
+            min="1"
+            placeholder="e.g. 256"
+            value={memoryLimit}
+            onChange={(event) => onMemoryLimitChange(event.target.value)}
+          />
+          <p className="containers-muted containers-form__hint">
+            Maximum memory in megabytes. Leave empty for no limit.
           </p>
 
           <ContainersRunScalingFields

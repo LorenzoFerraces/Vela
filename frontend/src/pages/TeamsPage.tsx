@@ -6,6 +6,7 @@ import {
   createProject,
   createProjectInvitation,
   formatApiError,
+  getProjectStorageQuota,
   leaveProject,
   listIncomingInvitations,
   listProjectInvitations,
@@ -15,9 +16,11 @@ import {
   type Project,
   type ProjectInvitation,
   type ProjectMember,
+  type ProjectStorageQuota,
   rejectProjectInvitation,
   removeProjectMember,
   updateProjectMemberRole,
+  updateProjectStorageQuota,
 } from '../api/client'
 import ConfirmDialog from '../components/ConfirmDialog'
 import { TeamsPageSkeleton } from '../components/Skeleton'
@@ -37,6 +40,11 @@ export default function TeamsPage() {
     IncomingProjectInvitation[]
   >([])
   const [members, setMembers] = useState<ProjectMember[]>([])
+  const [storageQuota, setStorageQuota] = useState<ProjectStorageQuota | null>(
+    null,
+  )
+  const [quotaInput, setQuotaInput] = useState('')
+  const [quotaError, setQuotaError] = useState<string | null>(null)
   const [pendingInvitations, setPendingInvitations] = useState<ProjectInvitation[]>(
     []
   )
@@ -85,6 +93,25 @@ export default function TeamsPage() {
     const requestId = detailRequestRef.current + 1
     detailRequestRef.current = requestId
     setDetailLoading(true)
+    setQuotaError(null)
+    void getProjectStorageQuota(project.id)
+      .then((quotaRow) => {
+        if (detailRequestRef.current !== requestId) {
+          return
+        }
+        setStorageQuota(quotaRow)
+        setQuotaInput(
+          quotaRow.source === 'team' && quotaRow.quota_bytes !== null
+            ? String(quotaRow.quota_bytes / 1024 ** 3)
+            : '',
+        )
+      })
+      .catch((error) => {
+        if (detailRequestRef.current !== requestId) {
+          return
+        }
+        setQuotaError(formatApiError(error))
+      })
     try {
       const memberPromise = listProjectMembers(project.id)
       const invitationPromise =
@@ -246,6 +273,42 @@ export default function TeamsPage() {
       refreshSelectedTeamDetail,
     ],
   )
+
+  async function onSaveQuota(event: React.FormEvent) {
+    event.preventDefault()
+    if (!selectedProject) {
+      return
+    }
+    setBanner(null)
+    const trimmed = quotaInput.trim()
+    let bytes: number | null
+    if (trimmed === '') {
+      bytes = null
+    } else {
+      const gib = Number(trimmed)
+      if (!Number.isFinite(gib) || gib < 1) {
+        setBanner({
+          tone: 'err',
+          text: 'Enter a limit of at least 1 GiB, or clear the field for the platform default.',
+        })
+        return
+      }
+      bytes = Math.round(gib * 1024 ** 3)
+    }
+    setBusy(true)
+    try {
+      const updated = await updateProjectStorageQuota(
+        selectedProject.id,
+        bytes,
+      )
+      setStorageQuota(updated)
+      setBanner({ tone: 'ok', text: 'Storage quota updated.' })
+    } catch (error) {
+      setBanner({ tone: 'err', text: formatApiError(error) })
+    } finally {
+      setBusy(false)
+    }
+  }
 
   const onAcceptInvitation = useCallback(
     async (invitationId: string) => {
@@ -459,6 +522,11 @@ export default function TeamsPage() {
               isSelectedOwner={isSelectedOwner}
               busy={busy}
               detailLoading={detailLoading}
+              storageQuota={storageQuota}
+              quotaError={quotaError}
+              quotaInput={quotaInput}
+              onQuotaInputChange={setQuotaInput}
+              onSaveQuota={onSaveQuota}
               members={members}
               pendingInvitations={pendingInvitations}
               inviteEmail={inviteEmail}

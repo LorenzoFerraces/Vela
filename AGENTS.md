@@ -6,6 +6,12 @@ Conventions for tooling, dependencies, naming, and Python style. Follow this fil
 
 - **Keep the readme concise** when adding or updating the readme file.
 
+## Subagent usage
+
+- **Prefer subagents for exploratory tasks** — codebase discovery, impact analysis, broad searches, full test runs, anything with large file reads or output. Keep the main session's context lean: dispatch, then read only short summaries or small report files, never large raw output (file dumps, full test logs, long diffs).
+- Multi-task plans are executed with **subagent-driven-development**: one implementer subagent per task plus a task reviewer after each. Hand artifacts (briefs, reports, review diffs) over as **file paths**, never pasted into the main conversation.
+- **One subagent per task, strictly sequential.** Dispatch a single subagent, wait for its result, then dispatch the next. Never run implementing subagents in parallel — they may touch overlapping files and can't see each other's in-flight edits. Keep the todo list current in the main session (mark the active task `in_progress`, mark it `completed` as soon as the subagent's result is verified).
+
 ## Commands
 
 ```powershell
@@ -160,7 +166,7 @@ After substantive agent-generated edits on a branch, run the **deslop** Cursor s
 
 Verified against the ui-ux-pro-max skill; the codebase already follows these — keep it that way.
 
-- **Design tokens**: `frontend/src/index.css` `:root` is the single source of color truth. Two themes ship: dark (default, `:root`) and light (`[data-theme='light']` override on `<html>`) — the purple tactical palette, visual reference in `docs/design/palette-examples.html`. Theme toggle: `src/hooks/useTheme.ts` + navbar button, persisted in `localStorage` under `vela.theme`, applied pre-paint by the inline script in `index.html`. No raw hex/rgba in components or inline styles — the only exceptions are library props that cannot consume CSS variables (xyflow in `StackVisualizer.tsx`, xterm theme in `ContainerTerminal.tsx`); keep those hex values in sync with the dark theme tokens.
+- **Design tokens**: `frontend/src/index.css` `:root` is the single source of color truth. Two themes ship: dark (default, `:root`) and light (`[data-theme='light']` override on `<html>`) — the purple tactical palette, visual reference in `docs/design/palette-examples.html`. Theme toggle: `src/hooks/useTheme.ts` + navbar button, persisted in `localStorage` under `vela.theme`, applied pre-paint by the inline script in `index.html`. No raw hex/rgba in components or inline styles — the only exceptions are library props that cannot consume CSS variables (xyflow in `StackVisualizer.tsx`, xterm theme in `ContainerTerminal.tsx`, recharts in `MetricChart.tsx`); keep those hex values in sync with the dark theme tokens.
 - **Brutalist rules**: 0 border-radius everywhere; flat surfaces (no gradients or drop shadows — CRT scanline/noise overlays and zero-offset status-dot glows excepted); JetBrains Mono base type with Archivo Black for macro titles; uppercase + wide tracking for micro type; `[ BRACKET ]` page titles. Terminal green `--status-live` is reserved for `running` status readouts only.
 - **Contrast**: body text ≥ 4.5:1 against its background. Current tokens pass; check any new token before use.
 - **Focus**: never remove a focus outline without a visible replacement. Inputs use `outline: none` + accent border + `box-shadow` ring; buttons/links use `:focus-visible` with a 2px `--accent` outline.

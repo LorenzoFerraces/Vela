@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import uuid
 from datetime import datetime
 
@@ -83,6 +84,13 @@ def default_listen_port_health_check(listen_port: int) -> HealthCheckConfig:
     )
 
 
+def validate_finite_number(value: float | None) -> float | None:
+    """Reject NaN/inf (``gt=0`` already rejects NaN but not infinities)."""
+    if value is not None and not math.isfinite(value):
+        raise ValueError("Value must be a finite number")
+    return value
+
+
 class DeployConfig(BaseModel):
     image: str
     name: str | None = None
@@ -99,8 +107,12 @@ class DeployConfig(BaseModel):
             "``container_port`` is used instead."
         ),
     )
-    cpu_limit: float | None = None
-    memory_limit: int | None = None
+    cpu_limit: float | None = Field(
+        default=None, gt=0, description="CPU limit in cores (e.g. 0.5 for half a core)."
+    )
+    memory_limit: int | None = Field(
+        default=None, gt=0, description="Memory limit in MB."
+    )
     escalation_policy: EscalationPolicy = EscalationPolicy.NONE
     restart_policy: RestartPolicy = RestartPolicy.NEVER
     labels: dict[str, str] = Field(default_factory=dict)
@@ -142,6 +154,11 @@ class DeployConfig(BaseModel):
             raise ValueError(msg)
         return value
 
+    @field_validator("cpu_limit")
+    @classmethod
+    def cpu_limit_must_be_finite(cls, value: float | None) -> float | None:
+        return validate_finite_number(value)
+
 
 class ContainerInfo(BaseModel):
     id: str
@@ -151,6 +168,10 @@ class ContainerInfo(BaseModel):
     created_at: datetime
     ports: list[PortMapping] = Field(default_factory=list)
     volumes: list[VolumeMount] = Field(default_factory=list)
+    disk_bytes: int = Field(
+        default=0,
+        description="Writable-layer size in bytes from container inspect (SizeRw).",
+    )
     labels: dict[str, str] = Field(default_factory=dict)
     health: HealthStatus = HealthStatus.NONE
     access_url: str | None = Field(

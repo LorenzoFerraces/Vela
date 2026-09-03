@@ -51,6 +51,9 @@ services:
         DOCKER_GROUP_ID: ${DOCKER_GROUP_ID:-999}
     image: vela/api
     container_name: vela-api
+    # Docker Desktop (Windows) exposes the socket as root:root 660, which the
+    # unprivileged user cannot connect to; set VELA_API_CONTAINER_USER=root there.
+    user: ${VELA_API_CONTAINER_USER:-vela}
     restart: unless-stopped
     env_file: .env
     environment:

@@ -68,6 +68,7 @@ type WorkloadRowProps = {
   onStart: (containerId: string) => void
   onStop: (containerId: string) => void
   onRemove: (containerId: string) => void
+  onViewResources?: (containerId: string) => void
 }
 
 function WorkloadRowBase({
@@ -90,6 +91,7 @@ function WorkloadRowBase({
   onStart,
   onStop,
   onRemove,
+  onViewResources,
 }: WorkloadRowProps) {
   const containerRow = group.base
   const accessUrl = containerRow.access_url?.trim() || ''
@@ -188,6 +190,15 @@ function WorkloadRowBase({
           </Link>
         </td>
         <td className="containers-table__actions">
+          {onViewResources ? (
+            <button
+              type="button"
+              className="btn btn--sm btn--ghost"
+              onClick={() => onViewResources(containerRow.id)}
+            >
+              Resources
+            </button>
+          ) : null}
           {containerRow.status === 'running' && canModify ? (
             <button
               type="button"

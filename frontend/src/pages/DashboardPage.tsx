@@ -1,4 +1,5 @@
 import { useCallback, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import {
   formatApiError,
   removeContainer,
@@ -9,20 +10,27 @@ import ConfirmDialog from '../components/ConfirmDialog'
 import { DashboardWorkloadsTable } from '../components/workloads/WorkloadsTable'
 import { useWorkloadGroups } from './containers/useWorkloadGroups'
 import { DeploymentHistorySection } from './containers/DeploymentHistorySection'
+import { ResourceUsagePanel } from './containers/ResourceUsagePanel'
 
 export default function DashboardPage() {
+  const navigate = useNavigate()
   const [banner, setBanner] = useState<{ tone: 'err'; text: string } | null>(
     null,
   )
   const [rowBusy, setRowBusy] = useState<string | null>(null)
   const [pendingRemoveId, setPendingRemoveId] = useState<string | null>(null)
   const [historyRefreshSignal, setHistoryRefreshSignal] = useState(0)
+  const [usageRefreshSignal, setUsageRefreshSignal] = useState(0)
 
   const reportListLoadError = useCallback((detail: string) => {
     setBanner({ tone: 'err', text: detail })
   }, [])
 
   const { groups, listLoading, refresh } = useWorkloadGroups(reportListLoadError)
+
+  const onViewResources = useCallback((containerId: string) => {
+    navigate(`/containers/${containerId}/resources`)
+  }, [navigate])
 
   const onStart = useCallback(
     async (containerId: string) => {
@@ -47,6 +55,7 @@ export default function DashboardPage() {
       try {
         await stopContainer(containerId)
         await refresh()
+        setUsageRefreshSignal((signal) => signal + 1)
       } catch (error) {
         setBanner({ tone: 'err', text: formatApiError(error) })
       } finally {
@@ -69,6 +78,7 @@ export default function DashboardPage() {
     try {
       await removeContainer(containerId, true)
       await refresh()
+      setUsageRefreshSignal((signal) => signal + 1)
     } catch (error) {
       setBanner({ tone: 'err', text: formatApiError(error) })
     } finally {
@@ -103,8 +113,10 @@ export default function DashboardPage() {
         onStart={onStart}
         onStop={onStop}
         onRemove={onRemove}
+        onViewResources={onViewResources}
       />
 
+      <ResourceUsagePanel refreshSignal={usageRefreshSignal} />
       <DeploymentHistorySection refreshSignal={historyRefreshSignal} />
 
       <div className="dashboard-page__actions">
@@ -115,6 +127,7 @@ export default function DashboardPage() {
             setBanner(null)
             void refresh()
             setHistoryRefreshSignal((signal) => signal + 1)
+            setUsageRefreshSignal((signal) => signal + 1)
           }}
           disabled={listLoading}
         >

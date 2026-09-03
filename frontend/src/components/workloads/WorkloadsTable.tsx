@@ -12,6 +12,8 @@ type WorkloadsTableProps = {
   onStart: (containerId: string) => void
   onStop: (containerId: string) => void
   onRemove: (containerId: string) => void
+  /** Open the per-container resource dashboard. */
+  onViewResources?: (containerId: string) => void
   statsCell?: (row: WorkloadStatsCellProps) => ReactNode
 }
 
@@ -90,6 +92,7 @@ export function WorkloadsTable({
   onStart,
   onStop,
   onRemove,
+  onViewResources,
   statsCell,
 }: WorkloadsTableProps) {
   const [expandedReplicaGroupId, setExpandedReplicaGroupId] = useState<
@@ -217,6 +220,7 @@ export function WorkloadsTable({
                     onStart={onStart}
                     onStop={onStop}
                     onRemove={onRemove}
+                    onViewResources={onViewResources}
                   />
                 )
               })}
@@ -237,6 +241,7 @@ export function DashboardWorkloadsTable({
   onStart,
   onStop,
   onRemove,
+  onViewResources,
 }: DashboardWorkloadsTableProps) {
   const displayGroups = useMemo(() => sortGroupsForDashboard(groups), [groups])
   const statsCell = useCallback(
@@ -251,6 +256,7 @@ export function DashboardWorkloadsTable({
       onStart={onStart}
       onStop={onStop}
       onRemove={onRemove}
+      onViewResources={onViewResources}
       statsCell={statsCell}
     />
   )

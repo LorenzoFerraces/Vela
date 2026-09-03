@@ -1398,6 +1398,12 @@ input[type="checkbox"]:disabled {
   margin-top: 1.25rem;
 }
 
+.resource-usage__quota {
+  margin: 0 0 0.65rem;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
 .stacks-page__actions {
   display: flex;
   flex-wrap: wrap;
@@ -2137,6 +2143,34 @@ input[type="checkbox"]:disabled {
   font-size: 0.85rem;
 }
 
+.teams-page__hint--err {
+  color: #dc2626;
+}
+
+.teams-page__storage-bar {
+  height: 8px;
+  border-radius: 4px;
+  background: #e5e7eb;
+  overflow: hidden;
+}
+
+.teams-page__storage-bar-fill {
+  height: 100%;
+  background: #4f46e5;
+  transition: width 0.2s ease;
+}
+
+.teams-page__storage-bar-fill--over {
+  background: #dc2626;
+}
+
+.teams-page__quota-form {
+  display: flex;
+  gap: 0.75rem;
+  align-items: flex-end;
+  margin-top: 1rem;
+}
+
 .teams-page__create {
   display: flex;
   align-items: flex-end;
@@ -2463,6 +2497,11 @@ input[type="checkbox"]:disabled {
 .skeleton--hint-line {
   width: min(20rem, 80%);
   height: 0.9rem;
+}
+
+.skeleton--metrics-chart {
+  width: 100%;
+  height: 240px;
 }
 
 @media (min-width: 641px) {

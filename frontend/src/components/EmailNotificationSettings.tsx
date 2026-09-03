@@ -9,10 +9,14 @@ import {
   getAlertHistory,
 } from '../api/client'
 
-const alertTypeLabels: Record<'stop' | 'failure' | 'unhealthy', string> = {
+const alertTypeLabels: Record<
+  'stop' | 'failure' | 'unhealthy' | 'storage',
+  string
+> = {
   stop: 'Container stopped',
   failure: 'Container failed',
   unhealthy: 'Container unhealthy',
+  storage: 'Storage over quota',
 }
 
 export function EmailNotificationSettingsCard() {
@@ -69,7 +73,9 @@ export function EmailNotificationSettingsCard() {
     await handleSave({ alerts_enabled: !preferences.alerts_enabled })
   }
 
-  async function toggleAlertType(type: 'stop' | 'failure' | 'unhealthy') {
+  async function toggleAlertType(
+    type: 'stop' | 'failure' | 'unhealthy' | 'storage',
+  ) {
     if (!preferences) return
     const newTypes = preferences.alert_types.includes(type)
       ? preferences.alert_types.filter((t) => t !== type)
@@ -142,7 +148,11 @@ export function EmailNotificationSettingsCard() {
                 >
                   <legend className="settings-form__label">Alert types</legend>
                   <ul className="settings-form__checkbox-list">
-                    {(Object.keys(alertTypeLabels) as Array<'stop' | 'failure' | 'unhealthy'>).map(
+                    {(
+                      Object.keys(alertTypeLabels) as Array<
+                        'stop' | 'failure' | 'unhealthy' | 'storage'
+                      >
+                    ).map(
                       (type) => (
                         <li key={type}>
                           <label className="settings-form__checkbox">

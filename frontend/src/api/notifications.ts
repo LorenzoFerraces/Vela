@@ -5,7 +5,7 @@ export type EmailNotificationPreferences = {
   user_id: string
   email: string
   alerts_enabled: boolean
-  alert_types: Array<'stop' | 'failure' | 'unhealthy'>
+  alert_types: Array<'stop' | 'failure' | 'unhealthy' | 'storage'>
   alert_frequency: 'immediate' | 'daily_digest' | 'weekly_summary'
   created_at: string
   updated_at: string
