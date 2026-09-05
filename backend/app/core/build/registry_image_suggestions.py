@@ -12,6 +12,15 @@ logger = logging.getLogger(__name__)
 
 HUB_SEARCH_URL = "https://hub.docker.com/v2/search/repositories/"
 
+_client: httpx.AsyncClient | None = None
+
+
+def _get_client() -> httpx.AsyncClient:
+    global _client
+    if _client is None:
+        _client = httpx.AsyncClient(timeout=5.0)
+    return _client
+
 _DEFAULT_POPULAR_REFS: tuple[str, ...] = (
     "nginx:alpine",
     "nginx:latest",
@@ -43,12 +52,11 @@ async def fetch_docker_hub_suggestions(query: str, *, page_size: int) -> list[tu
         return []
     bounded = min(max(page_size, 1), 100)
     try:
-        async with httpx.AsyncClient(timeout=5.0) as client:
-            response = await client.get(
-                HUB_SEARCH_URL,
-                params={"query": stripped, "page_size": str(bounded)},
-            )
-            response.raise_for_status()
+        response = await _get_client().get(
+            HUB_SEARCH_URL,
+            params={"query": stripped, "page_size": str(bounded)},
+        )
+        response.raise_for_status()
     except httpx.HTTPError as exc:
         logger.info("Docker Hub search failed: %s", exc)
         return []

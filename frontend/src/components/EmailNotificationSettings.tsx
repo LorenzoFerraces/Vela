@@ -8,6 +8,17 @@ import {
   type AlertHistoryEntry,
   getAlertHistory,
 } from '../api/client'
+import { Skeleton } from './Skeleton'
+
+const alertTypeLabels: Record<
+  'stop' | 'failure' | 'unhealthy' | 'storage',
+  string
+> = {
+  stop: 'Container stopped',
+  failure: 'Container failed',
+  unhealthy: 'Container unhealthy',
+  storage: 'Storage over quota',
+}
 
 export function EmailNotificationSettingsCard() {
   const [preferences, setPreferences] = useState<EmailNotificationPreferences | null>(null)
@@ -63,7 +74,9 @@ export function EmailNotificationSettingsCard() {
     await handleSave({ alerts_enabled: !preferences.alerts_enabled })
   }
 
-  async function toggleAlertType(type: 'stop' | 'failure' | 'unhealthy') {
+  async function toggleAlertType(
+    type: 'stop' | 'failure' | 'unhealthy' | 'storage',
+  ) {
     if (!preferences) return
     const newTypes = preferences.alert_types.includes(type)
       ? preferences.alert_types.filter((t) => t !== type)
@@ -76,12 +89,6 @@ export function EmailNotificationSettingsCard() {
     if (!showHistory) {
       void loadHistory()
     }
-  }
-
-  const alertTypeLabels: Record<'stop' | 'failure' | 'unhealthy', string> = {
-    stop: 'Container stopped',
-    failure: 'Container failed',
-    unhealthy: 'Container unhealthy',
   }
 
   return (
@@ -97,7 +104,11 @@ export function EmailNotificationSettingsCard() {
 
       <div className="settings-card__body">
         {loading ? (
-          <p className="settings-card__muted">Loading preferences…</p>
+          <div className="settings-form" aria-busy="true" aria-label="Loading email alert preferences">
+            <Skeleton className="skeleton--hint-line" />
+            <Skeleton className="skeleton--invite-field" />
+            <Skeleton className="skeleton--invite-role" />
+          </div>
         ) : null}
 
         {error ? (
@@ -136,10 +147,17 @@ export function EmailNotificationSettingsCard() {
                   </p>
                 </div>
 
-                <div className="settings-form__group">
-                  <span className="settings-form__label">Alert types</span>
+                <fieldset
+                  className="settings-form__group"
+                  style={{ border: '0', margin: '0', padding: '0' }}
+                >
+                  <legend className="settings-form__label">Alert types</legend>
                   <ul className="settings-form__checkbox-list">
-                    {(Object.keys(alertTypeLabels) as Array<'stop' | 'failure' | 'unhealthy'>).map(
+                    {(
+                      Object.keys(alertTypeLabels) as Array<
+                        'stop' | 'failure' | 'unhealthy' | 'storage'
+                      >
+                    ).map(
                       (type) => (
                         <li key={type}>
                           <label className="settings-form__checkbox">
@@ -155,7 +173,7 @@ export function EmailNotificationSettingsCard() {
                       ),
                     )}
                   </ul>
-                </div>
+                </fieldset>
 
                 <p className="settings-form__hint">
                   Alerts are sent immediately when an issue is detected.

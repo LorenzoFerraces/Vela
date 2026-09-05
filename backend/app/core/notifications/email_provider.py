@@ -66,6 +66,7 @@ class EmailProvider(ABC):
 
 def format_alert_email(alert: EmailAlert) -> tuple[str, str]:
     """Return (subject, plain-text body) for a container alert."""
+    label = "Team" if alert.event_type == "storage" else "Container"
     subject = f"[Vela Alert] {alert.container_name} - {alert.event_type.upper()}"
     details_line = f"Details: {alert.details}\n\n" if alert.details else ""
     logs_line = (
@@ -73,15 +74,20 @@ def format_alert_email(alert: EmailAlert) -> tuple[str, str]:
         if alert.container_logs
         else ""
     )
+    closing = (
+        "Please review the team storage usage and free space or raise the quota.\n"
+        if alert.event_type == "storage"
+        else "Please check your container status immediately.\n"
+    )
     body = (
-        "Container Alert Notification\n\n"
-        f"Container: {alert.container_name}\n"
+        f"{label} Alert Notification\n\n"
+        f"{label}: {alert.container_name}\n"
         f"Event: {alert.event_type}\n"
         f"Time: {alert.timestamp.isoformat()}\n\n"
         f"{details_line}"
         f"{logs_line}"
         "This is an automated alert from Vela container platform.\n"
-        "Please check your container status immediately."
+        + closing
     )
     return subject, body
 

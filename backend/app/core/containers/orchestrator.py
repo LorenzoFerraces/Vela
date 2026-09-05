@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import uuid
 from abc import ABC, abstractmethod
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
+from typing import List
 
 from app.core.enums import ContainerStatus
 from app.core.models import ContainerInfo, ContainerStats, DeployConfig, HealthResult
@@ -68,11 +69,24 @@ class ContainerOrchestrator(ABC):
         """List managed containers, optionally filtered by status, owner, or project access."""
 
     @abstractmethod
-    async def logs(self, container_id: str, *, tail: int = 100) -> str:
-        """Return the most recent log lines for a container."""
+    async def logs(
+        self,
+        container_id: str,
+        *,
+        tail: int | None = 100,
+        since: float | None = None,
+        timestamps: bool = False,
+    ) -> str:
+        """Return the most recent log lines for a container.
+
+        Args:
+            tail: Number of most recent lines to include; None for all lines.
+            since: Unix timestamp in seconds; only lines logged at or after it are returned.
+            timestamps: When True, prefix each line with its RFC3339 UTC emission timestamp.
+        """
 
     @abstractmethod
-    async def stream_logs(
+    def stream_logs(
         self,
         container_id: str,
         *,
@@ -80,6 +94,27 @@ class ContainerOrchestrator(ABC):
         follow: bool = True,
     ) -> AsyncIterator[bytes]:
         """Yield log chunks from the runtime (blocking iterator wrapped for async consumption)."""
+
+    @abstractmethod
+    async def stream_exec(
+        self,
+        container_id: str,
+        cols: int = 80,
+        rows: int = 24,
+    ) -> tuple[AsyncIterator[bytes], Callable[[bytes], None], Callable[[], None], str]:
+        """Open a PTY exec session inside a container.
+
+        The synchronous exec setup (exec_create/exec_start) runs off the event loop.
+
+        Returns:
+            A tuple of (stdout_async_iterator, stdin_write_func, close_func, exec_id).
+            Consume the iterator for output, call stdin_write to send input,
+            call close to tear down the session. exec_id is used for resize.
+        """
+
+    @abstractmethod
+    def resize_exec(self, container_id: str, exec_id: str, cols: int, rows: int) -> None:
+        """Resize an active exec session."""
 
     # ------------------------------------------------------------------
     # Telemetry
@@ -112,7 +147,7 @@ class ContainerOrchestrator(ABC):
         """
 
     @abstractmethod
-    async def list_images(self) -> list[str]:
+    async def list_images(self) -> List[str]:
         """List available image tags on the host."""
 
     @abstractmethod
@@ -130,7 +165,7 @@ class ContainerOrchestrator(ABC):
     # ------------------------------------------------------------------
 
     @abstractmethod
-    async def list_replicas(self, base_name: str) -> list[ContainerInfo]:
+    async def list_replicas(self, base_name: str) -> List[ContainerInfo]:
         """Return all running replica containers for a base service name.
 
         Replicas are identified by the ``vela.replica_of`` label matching ``base_name``.

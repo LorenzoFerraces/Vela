@@ -4,9 +4,13 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
+import pytest
+from pydantic import ValidationError
+
 from app.core.containers.fake_orchestrator import FakeContainerOrchestrator
 from app.core.enums import ContainerStatus
 from app.core.models import ContainerInfo, VolumeMount
+from app.core.scaling.models import ScalingPolicy
 from app.core.scaling.scaling_engine import _scale_up
 from app.core.traffic.traffic_models import BackendServer, RouteSpec
 from app.core.traffic.traffic_router import NoopTrafficRouter
@@ -51,3 +55,24 @@ async def test_scale_up_copies_base_container_volumes() -> None:
     assert orchestrator.last_deploy_config is not None
     assert orchestrator.last_deploy_config.name == f"{base_name}-r1"
     assert orchestrator.last_deploy_config.volumes == base_volumes
+
+
+def test_scaling_policy_min_equal_to_max_is_accepted() -> None:
+    policy = ScalingPolicy(
+        user_id="u1", target_cpu_min=70.0, max_instances=3, min_instances=3
+    )
+    assert policy.min_instances == 3
+
+
+def test_scaling_policy_min_greater_than_max_raises() -> None:
+    with pytest.raises(ValidationError):
+        ScalingPolicy(
+            user_id="u1", target_cpu_min=70.0, max_instances=2, min_instances=3
+        )
+
+
+def test_scaling_policy_min_instances_zero_raises() -> None:
+    with pytest.raises(ValidationError):
+        ScalingPolicy(
+            user_id="u1", target_cpu_min=70.0, max_instances=2, min_instances=0
+        )

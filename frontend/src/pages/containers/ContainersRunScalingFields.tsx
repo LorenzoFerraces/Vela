@@ -70,6 +70,7 @@ export function ContainersRunScalingFields({
               >
                 Min replicas
               </label>
+              {/* ponytail: clearing snaps back to the default (|| N); true empty-state editing is a product call */}
               <input
                 id="scaling-min-replicas"
                 className="containers-form__input containers-form__input--short"
@@ -261,7 +262,7 @@ export function ContainersRunScalingFields({
             Minimum seconds between scale-up or scale-down actions.
           </p>
           {validationError ? (
-            <p className="containers-form__error" role="alert">
+            <p className="containers-banner containers-banner--err" role="alert">
               {validationError}
             </p>
           ) : null}

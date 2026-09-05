@@ -19,7 +19,6 @@ from app.api.schemas import (
 from app.core.build.default_image_builder import DefaultImageBuilder, validate_local_build_context
 from app.core.git.git_source_analysis import analyze_git_source
 from app.core.models import BuildResult, ProjectInfo
-from app.core.oauth import decrypt_identity_token, get_github_identity
 from app.db.models import User
 
 router = APIRouter()
@@ -71,6 +70,6 @@ async def _github_token_for_analyze(
     user: User,
     git_url: str,
 ) -> str | None:
-    from app.api.routes.containers import _github_token_for_url
+    from app.core.deploy.github_auth import github_token_for_url
 
-    return await _github_token_for_url(session, user, git_url)
+    return await github_token_for_url(session, user, git_url)

@@ -1,5 +1,6 @@
 from app.core.build.image_not_found_payload import image_not_found_api_content
 from app.core.build.registry_access_payload import registry_access_denied_api_content
+from app.core.url_display import sanitize_url_for_display
 
 
 class VelaError(Exception):
@@ -83,6 +84,14 @@ class VolumeUploadQuotaExceededError(ResourceLimitError):
     """User has reached the total volume upload storage quota."""
 
 
+class TeamStorageQuotaExceededError(ResourceLimitError):
+    """A deployment or upload would push the team over its storage quota."""
+
+
+class TeamStorageQuotaError(VelaError):
+    """Invalid team storage quota value (e.g. above the platform limit)."""
+
+
 class VolumeUploadNotFoundError(VelaError):
     """Referenced volume upload does not exist for this user."""
 
@@ -131,8 +140,8 @@ class NeedsBuildOverrideError(BuilderError):
 
 class CloneError(BuilderError):
     def __init__(self, git_url: str, message: str) -> None:
-        self.git_url = git_url
-        super().__init__(f"Failed to clone {git_url}: {message}")
+        self.git_url = sanitize_url_for_display(git_url)
+        super().__init__(f"Failed to clone {self.git_url}: {message}")
 
 
 class AnalysisError(BuilderError):
@@ -143,6 +152,14 @@ class AnalysisError(BuilderError):
 
 class GitSourceAnalysisError(BuilderError):
     """Gemini or repository analysis for deploy pre-fill failed."""
+
+
+class LlmNotConfiguredError(VelaError):
+    """No supported LLM provider is configured."""
+
+
+class LlmCallError(VelaError):
+    """An LLM provider request or response failed."""
 
 
 class DockerfileGenerationError(BuilderError):
@@ -205,12 +222,12 @@ class NotAuthenticatedError(AuthError):
 
 
 # ---------------------------------------------------------------------------
-# User library (saved images, Dockerfile templates)
+# User library (Dockerfile templates)
 # ---------------------------------------------------------------------------
 
 
 class UserLibraryError(VelaError):
-    """Base exception for per-user saved image / Dockerfile template operations."""
+    """Base exception for per-user Dockerfile template operations."""
 
 
 class DockerfileTemplateNotFoundError(UserLibraryError):
@@ -398,10 +415,8 @@ class StackCompositionCycleError(StackError):
         super().__init__(f"Cycle detected in stack composition: {' → '.join(stack_names)}")
 
 
-class ComposeImportError(StackError):
-    def __init__(self, message: str, *, warnings: list[str] | None = None) -> None:
-        self.warnings = warnings or []
-        super().__init__(message)
+class ManifestParseError(StackError):
+    """Uploaded/checked-in manifest could not be recognized or parsed."""
 
 
 class DuplicateStackNameError(StackError):

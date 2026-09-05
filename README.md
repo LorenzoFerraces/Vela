@@ -27,6 +27,18 @@ FastAPI backend, Vite/React frontend, optional Traefik as an edge proxy, and Pos
 | `backend/alembic/` | Database migrations (Alembic) |
 | `frontend/` | UI (`npm run dev`) |
 | `docker-compose.dev.yml` | Optional local Postgres for development |
+| `docker-compose.yml` + `.env.example` | Full stack (API, SPA, Postgres, Traefik) in Docker |
+
+## Docker (full stack)
+
+```powershell
+cp .env.example .env   # fill in VELA_AUTH_SECRET and VELA_TOKEN_ENCRYPTION_KEY
+docker compose up -d --build
+```
+
+- **http://localhost** — SPA + public routes (Traefik, port 80); port **8081** reaches the SPA directly; Traefik dashboard at http://127.0.0.1:8080 (dev only).
+- The API drives the **host** Docker daemon via a bind-mounted socket, so workload containers run on the host engine. Works from Windows (Docker Desktop) or WSL2 — the api entrypoint grants its unprivileged user access to the socket on start.
+- All configuration lives in `.env` — see `.env.example` for the full annotated variable list.
 
 ## Backend
 
@@ -84,12 +96,21 @@ Create `backend/.env` as needed. Common variables:
 | `VELA_GITHUB_OAUTH_SCOPES` | Comma-separated scopes requested from GitHub (default `repo,read:user`) |
 | `VELA_TOKEN_ENCRYPTION_KEY` | Fernet key used to encrypt third-party access tokens at rest. Generate with `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"` |
 | `VELA_GEMINI_API_KEY` | Google Gemini API key for GitHub repo analysis (pre-fill on Containers). Optional; without it, analysis uses deterministic project detection |
-| `VELA_GEMINI_MODEL` | Optional Gemini model id (default `gemini-2.0-flash`) |
+| `VELA_GEMINI_MODEL` | Optional Gemini model id (default `gemini-3.5-flash`) |
+| `VELA_VERTEX_API_KEY` / `VELA_VERTEX_PROJECT_ID` | Optional Vertex AI key + project ID; when both are set, Vertex is used instead of direct Gemini |
+| `VELA_VERTEX_LOCATION` / `VELA_VERTEX_MODEL` | Optional Vertex location and model (defaults `us-central1`, `gemini-2.5-flash`) |
 | `BREVO_API_KEY` | Brevo transactional API key for container alert emails ([Python SDK](https://developers.brevo.com/guides/python); free tier ~300/day) |
 | `BREVO_SENDER_EMAIL` | Verified sender address in Brevo (required with `BREVO_API_KEY`) |
 | `BREVO_SENDER_NAME` | Optional From name (default `Vela`) |
 | `VELA_LOG_LEVEL` | App + uvicorn log level: `DEBUG`, `INFO`, `WARNING`, `ERROR` (default `INFO`) |
 | `VELA_CONTAINER_MONITOR_INTERVAL_SECONDS` | Container alert poll interval in seconds (default `15`) |
+| `VELA_TEAM_STORAGE_QUOTA_BYTES` | Per-team storage quota in bytes (unset = unlimited; a team setting can only restrict it) |
+| `VELA_METRICS_INTERVAL_SECONDS` | Background container-metrics collector poll interval in seconds (default `30`) |
+| `VELA_METRICS_RETENTION_DAYS` | Days to retain stored container metrics (default `30`) |
+| `VELA_LOG_COLLECTOR_ENABLED` | Background log collector; set `0` to disable (default: enabled) |
+| `VELA_LOG_COLLECTOR_INTERVAL_SECONDS` | Log collector poll interval in seconds (default `5`) |
+| `VELA_LOG_MAX_LINES_PER_POLL` | Max log lines pulled per container per poll (default `2000`) |
+| `VELA_EXEC_MAX_SESSION_SECONDS` | Max live exec terminal session length in seconds (default `3600`) |
 
 ```powershell
 python run.py
