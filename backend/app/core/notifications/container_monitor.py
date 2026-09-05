@@ -234,8 +234,8 @@ async def get_container_owner(session: AsyncSession, container_id: str) -> User 
         if not record:
             return None
 
-        stmt = select(User).where(User.id == record.user_id)
-        user = await session.scalar(stmt)
+        user_stmt = select(User).where(User.id == record.user_id)
+        user = await session.scalar(user_stmt)
         return user
     except Exception as e:
         logger.exception("Failed to get container owner: %s", e)

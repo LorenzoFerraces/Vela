@@ -46,14 +46,10 @@ export { listScalingPolicies } from './scaling'
 export {
   deleteDockerfileTemplate,
   createDockerfileTemplate,
-  deleteSavedImage,
-  createSavedImage,
   getImageAvailability,
   getImageSuggestions,
   listDockerfileTemplates,
-  listSavedImages,
   updateDockerfileTemplate,
-  updateSavedImage,
 } from './images'
 
 export {
@@ -160,7 +156,6 @@ export type {
   ImageAvailabilityResponse,
   ImageSuggestion,
   ImageSuggestionSource,
-  SavedImage,
 } from './images'
 
 export type {

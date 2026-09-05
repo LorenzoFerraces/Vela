@@ -23,6 +23,7 @@ from pathlib import Path
 
 import pytest
 
+from app.core.build.default_image_builder import DefaultImageBuilder
 from app.core.git.git_source_analysis import (
     _collect_context_excerpts,
     _extract_env_vars_from_context,
@@ -63,7 +64,8 @@ FIXTURES: list[dict] = [
                 "# Demo\n\nNode service. See `.env.example` for configuration. "
                 "Start with `npm start`.\n"
             ),
-            ".env.example": "PORT=3000\nAPI_KEY=changeme\nSESSION_SECRET=\n",
+            # ponytail: APP_ID instead of a secret-looking key so the pinned value survives prompt redaction
+            ".env.example": "PORT=3000\nAPP_ID=demo-123\nSESSION_SECRET=\n",
             "package.json": (
                 '{"name": "demo", "version": "1.0.0", "scripts": {"start": "node server.js"}}\n'
             ),
@@ -71,8 +73,8 @@ FIXTURES: list[dict] = [
         "services": [
             {"aliases": ["app", "web", "demo", "node"], "kind": "git", "port": 3000},
         ],
-        "required_env": ["PORT", "API_KEY", "SESSION_SECRET"],
-        "pinned_env": {"API_KEY": "changeme", "PORT": "3000"},
+        "required_env": ["PORT", "APP_ID", "SESSION_SECRET"],
+        "pinned_env": {"APP_ID": "demo-123", "PORT": "3000"},
     },
     {
         "name": "monorepo-3svc",
@@ -192,7 +194,7 @@ STUB_PAYLOAD = {
 }
 
 
-class _EvalImageBuilder:
+class _EvalImageBuilder(DefaultImageBuilder):
     def __init__(self, root: Path) -> None:
         self._root = root
 

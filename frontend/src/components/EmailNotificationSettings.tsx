@@ -8,6 +8,7 @@ import {
   type AlertHistoryEntry,
   getAlertHistory,
 } from '../api/client'
+import { Skeleton } from './Skeleton'
 
 const alertTypeLabels: Record<
   'stop' | 'failure' | 'unhealthy' | 'storage',
@@ -103,7 +104,11 @@ export function EmailNotificationSettingsCard() {
 
       <div className="settings-card__body">
         {loading ? (
-          <p className="settings-card__muted">Loading preferences…</p>
+          <div className="settings-form" aria-busy="true" aria-label="Loading email alert preferences">
+            <Skeleton className="skeleton--hint-line" />
+            <Skeleton className="skeleton--invite-field" />
+            <Skeleton className="skeleton--invite-role" />
+          </div>
         ) : null}
 
         {error ? (

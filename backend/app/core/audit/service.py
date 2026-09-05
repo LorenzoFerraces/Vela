@@ -50,22 +50,28 @@ async def emit_audit_log(
     target_id: str,
     details: dict | None = None,
 ) -> None:
-    """Append a single audit log entry. Flushes only; the caller's commit persists it."""
+    """Append a single audit log entry. Flushes only; the caller's commit persists it.
+
+    Best effort: if the flush fails the entry is dropped and the error logged;
+    the savepoint keeps the caller's transaction usable.
+    """
     try:
-        entry = AuditLog(
-            user_id=user_id,
-            action=action,
-            target_type=target_type,
-            target_id=target_id,
-            details=details,
-        )
-        session.add(entry)
-        await session.flush()
+        async with session.begin_nested():
+            entry = AuditLog(
+                user_id=user_id,
+                action=action,
+                target_type=target_type,
+                target_id=target_id,
+                details=details,
+            )
+            session.add(entry)
+            await session.flush()
     except Exception:
         logger.exception(
-            "Failed to emit audit log: action=%s target=%s", action, target_id
+            "Failed to emit audit log; entry dropped: action=%s target=%s",
+            action,
+            target_id,
         )
-        raise
 
 
 async def list_audit_logs(

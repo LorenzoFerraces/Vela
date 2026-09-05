@@ -36,7 +36,9 @@ services:
     image: vela/api
     command: ["alembic", "upgrade", "head"]
     container_name: vela-migrate
-    env_file: .env
+    env_file:
+      - path: .env
+        required: false
     environment:
       VELA_DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-vela}:${POSTGRES_PASSWORD:-vela}@postgres:5432/${POSTGRES_DB:-Vela}
     depends_on:
@@ -55,7 +57,9 @@ services:
     # unprivileged user cannot connect to; set VELA_API_CONTAINER_USER=root there.
     user: ${VELA_API_CONTAINER_USER:-vela}
     restart: unless-stopped
-    env_file: .env
+    env_file:
+      - path: .env
+        required: false
     environment:
       VELA_DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-vela}:${POSTGRES_PASSWORD:-vela}@postgres:5432/${POSTGRES_DB:-Vela}
       VELA_TRAEFIK_DYNAMIC_FILE: /etc/traefik/dynamic/traefik-http.json
@@ -104,7 +108,7 @@ services:
       - --api.insecure=true
     ports:
       - "80:80"
-      - "8080:8080"
+      - "127.0.0.1:8080:8080"
     volumes:
       - traefik_dynamic:/etc/traefik/dynamic
       - ./traefik/static:/etc/traefik/static:ro
@@ -112,7 +116,8 @@ services:
       - default
       - workloads
     depends_on:
-      - web
+      web:
+        condition: service_healthy
 
 volumes:
   postgres_data:

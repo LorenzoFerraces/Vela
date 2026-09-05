@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from typing import Annotated
+from typing import Annotated, cast
 
 from fastapi import APIRouter, Depends, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import get_current_user, get_db, get_orchestrator
 from app.api.schemas import (
     IncomingProjectInvitationPublic,
+    InvitableRoleLiteral,
     MyProjectRolePublic,
     ProjectCreate,
     ProjectInvitationCreate,
@@ -18,6 +19,7 @@ from app.api.schemas import (
     ProjectMemberPublic,
     ProjectMemberUpdate,
     ProjectPublic,
+    ProjectRoleLiteral,
     ProjectStorageQuotaPublic,
     ProjectStorageQuotaUpdate,
 )
@@ -67,7 +69,7 @@ def _project_public(
         id=project_id,
         name=name,
         is_personal=is_personal,
-        role=role,
+        role=cast(ProjectRoleLiteral, role),
         owner_email=owner_email,
         storage_quota_bytes=storage_quota_bytes,
     )
@@ -125,7 +127,7 @@ async def list_incoming_invitations(
             project_id=row.project_id,
             project_name=row.project_name,
             inviter_email=row.inviter_email,
-            role=row.role.value,
+            role=cast(InvitableRoleLiteral, row.role.value),
             created_at=row.created_at,
         )
         for row in rows
@@ -361,7 +363,7 @@ async def list_project_invitations(
             id=row.invitation_id,
             invitee_user_id=row.invitee_user_id,
             email=row.email,
-            role=row.role.value,
+            role=cast(InvitableRoleLiteral, row.role.value),
             created_at=row.created_at,
         )
         for row in rows
@@ -390,7 +392,7 @@ async def create_project_invitation(
         id=row.invitation_id,
         invitee_user_id=row.invitee_user_id,
         email=row.email,
-        role=row.role.value,
+        role=cast(InvitableRoleLiteral, row.role.value),
         created_at=row.created_at,
     )
 

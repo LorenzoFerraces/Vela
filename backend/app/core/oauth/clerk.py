@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import binascii
 import logging
 import os
 import time
@@ -42,7 +43,13 @@ def clerk_frontend_api_host(publishable_key: str) -> str:
         )
     encoded = parts[2]
     padded = encoded + "=" * (-len(encoded) % 4)
-    domain = base64.urlsafe_b64decode(padded).decode("utf-8")
+    try:
+        domain = base64.urlsafe_b64decode(padded).decode("utf-8")
+    except (binascii.Error, ValueError) as exc:
+        raise IntegrationConfigurationError(
+            "VELA_CLERK_PUBLISHABLE_KEY is malformed (expected a valid Clerk "
+            "publishable key)."
+        ) from exc
     return domain.rstrip("$")
 
 
@@ -98,6 +105,22 @@ def _allowed_origins() -> frozenset[str]:
     return frozenset(origin.strip() for origin in raw.split(",") if origin.strip())
 
 
+_azp_warning_logged = False
+
+
+def _warn_if_azp_unenforced() -> None:
+    """Warn once when Clerk is configured but azp enforcement is disabled."""
+    global _azp_warning_logged
+    if _azp_warning_logged:
+        return
+    _azp_warning_logged = True
+    has_clerk = bool(os.environ.get("VELA_CLERK_PUBLISHABLE_KEY", "").strip())
+    if has_clerk and not _allowed_origins():
+        logger.warning(
+            "VELA_ALLOWED_ORIGINS is empty; Clerk token azp claims are not enforced."
+        )
+
+
 def _secret_key() -> str:
     return os.environ.get("VELA_CLERK_SECRET_KEY", "").strip()
 
@@ -127,6 +150,8 @@ async def _fetch_clerk_email(external_id: str) -> str:
         raise IntegrationConfigurationError(
             "Clerk rejected VELA_CLERK_SECRET_KEY (check the key)."
         )
+    if resp.status_code == 404:
+        raise ClerkTokenError("Clerk account no longer exists.")
     if resp.status_code >= 400:
         raise ProviderConnectionError("Clerk is temporarily unavailable.")
     # The user endpoint returns the user object directly (no "data" wrapper).
@@ -149,14 +174,16 @@ async def _fetch_clerk_email(external_id: str) -> str:
 async def verify_clerk_token(token: str) -> ClerkClaims:
     """Verify a Clerk frontend JWT and return extracted claims.
 
-    Clerk's default session tokens carry no ``aud`` claim, so the token is
-    bound to the app via its issuer (and the JWKS signature) instead. When the
-    token also lacks an ``email`` claim, the account's email is resolved via
-    Clerk's Users API using ``VELA_CLERK_SECRET_KEY``.
+    Clerk's default session tokens carry no ``aud`` claim, so those are bound
+    to the app via their issuer (and the JWKS signature). A token that does
+    carry an ``aud`` claim must include the publishable key. When the token
+    also lacks an ``email`` claim, the account's email is resolved via Clerk's
+    Users API using ``VELA_CLERK_SECRET_KEY``.
 
-    Raises ``ClerkTokenError`` on invalid signature, expiry, issuer, azp,
-    or missing required claims.
+    Raises ``ClerkTokenError`` on invalid signature, expiry, issuer, audience,
+    azp, or missing required claims.
     """
+    _warn_if_azp_unenforced()
     publishable_key = _publishable_key()
     jwks = await _get_jwks()
 
@@ -193,6 +220,13 @@ async def verify_clerk_token(token: str) -> ClerkClaims:
         raise ClerkTokenError(
             "Clerk token is invalid (signature, expiry, audience, or issuer)."
         ) from exc
+
+    # Signature is verified, so manual comparison of the claim is safe.
+    aud = payload.get("aud")
+    if aud is not None:
+        aud_values = aud if isinstance(aud, list) else [aud]
+        if publishable_key not in aud_values:
+            raise ClerkTokenError("Clerk token audience does not match this app.")
 
     external_id = payload.get("sub")
     if not isinstance(external_id, str) or not external_id:

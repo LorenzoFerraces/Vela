@@ -1,5 +1,6 @@
 from app.core.build.image_not_found_payload import image_not_found_api_content
 from app.core.build.registry_access_payload import registry_access_denied_api_content
+from app.core.url_display import sanitize_url_for_display
 
 
 class VelaError(Exception):
@@ -139,8 +140,8 @@ class NeedsBuildOverrideError(BuilderError):
 
 class CloneError(BuilderError):
     def __init__(self, git_url: str, message: str) -> None:
-        self.git_url = git_url
-        super().__init__(f"Failed to clone {git_url}: {message}")
+        self.git_url = sanitize_url_for_display(git_url)
+        super().__init__(f"Failed to clone {self.git_url}: {message}")
 
 
 class AnalysisError(BuilderError):
@@ -221,12 +222,12 @@ class NotAuthenticatedError(AuthError):
 
 
 # ---------------------------------------------------------------------------
-# User library (saved images, Dockerfile templates)
+# User library (Dockerfile templates)
 # ---------------------------------------------------------------------------
 
 
 class UserLibraryError(VelaError):
-    """Base exception for per-user saved image / Dockerfile template operations."""
+    """Base exception for per-user Dockerfile template operations."""
 
 
 class DockerfileTemplateNotFoundError(UserLibraryError):

@@ -489,17 +489,14 @@ class ContainerLog(Base):
         DateTime(timezone=True), nullable=False, default=_utcnow
     )
 
+    # GIN trgm full-text index (ix_container_logs_fts) is migration-only
+    # (0016, Postgres + pg_trgm) so create_all works on Postgres without the
+    # extension.
     __table_args__ = (
         Index(
             "ix_container_logs_container_timestamp",
             "container_id",
             "timestamp",
-        ),
-        Index(
-            "ix_container_logs_fts",
-            "message",
-            postgresql_using="gin",
-            postgresql_ops={"message": "gin_trgm_ops"},
         ),
     )
 

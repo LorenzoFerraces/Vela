@@ -31,3 +31,8 @@ test-results/
 blob-report/
 
 .gradle/
+
+# local tooling
+opencode.json
+opencode_requests.log
+.zed/

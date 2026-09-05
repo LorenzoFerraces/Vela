@@ -12,6 +12,7 @@ from pathlib import Path
 
 import pytest
 
+from app.core.build.default_image_builder import DefaultImageBuilder
 from app.core.exceptions import GitSourceAnalysisError, LlmCallError
 from app.core.git import git_source_analysis
 from app.core.git.git_ops import head_commit
@@ -38,26 +39,30 @@ def isolated_cache_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("VELA_LLM_CACHE", raising=False)
 
 
-def test_store_then_load_returns_same_payload() -> None:
+@pytest.mark.asyncio
+async def test_store_then_load_returns_same_payload() -> None:
     payload = {"services": [], "summary_hint": "ok"}
-    cache_module.store_cached("stacks", "abc123", "v2", payload)
-    assert cache_module.load_cached("stacks", "abc123", "v2") == payload
+    await cache_module.store_cached("stacks", "abc123", "v2", payload)
+    assert await cache_module.load_cached("stacks", "abc123", "v2") == payload
 
 
-def test_wrong_commit_or_version_returns_none() -> None:
-    cache_module.store_cached("stacks", "abc123", "v2", {"a": 1})
-    assert cache_module.load_cached("stacks", "def456", "v2") is None
-    assert cache_module.load_cached("stacks", "abc123", "v1") is None
+@pytest.mark.asyncio
+async def test_wrong_commit_or_version_returns_none() -> None:
+    await cache_module.store_cached("stacks", "abc123", "v2", {"a": 1})
+    assert await cache_module.load_cached("stacks", "def456", "v2") is None
+    assert await cache_module.load_cached("stacks", "abc123", "v1") is None
 
 
-def test_disabled_cache_noops(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.asyncio
+async def test_disabled_cache_noops(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("VELA_LLM_CACHE", "0")
-    cache_module.store_cached("stacks", "abc123", "v2", {"a": 1})
+    await cache_module.store_cached("stacks", "abc123", "v2", {"a": 1})
     assert list(tmp_path.glob("llm_analysis_*.json")) == []
-    assert cache_module.load_cached("stacks", "abc123", "v2") is None
+    assert await cache_module.load_cached("stacks", "abc123", "v2") is None
 
 
-def test_eviction_keeps_newest_entries(
+@pytest.mark.asyncio
+async def test_eviction_keeps_newest_entries(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(cache_module, "_MAX_ENTRIES", 3)
@@ -66,46 +71,51 @@ def test_eviction_keeps_newest_entries(
         cache_module, "time", types.SimpleNamespace(time=lambda: next(stamps))
     )
     for index in range(5):
-        cache_module.store_cached("stacks", f"commit{index}", "v2", {"index": index})
+        await cache_module.store_cached("stacks", f"commit{index}", "v2", {"index": index})
     for index in range(2):
-        assert cache_module.load_cached("stacks", f"commit{index}", "v2") is None
+        assert await cache_module.load_cached("stacks", f"commit{index}", "v2") is None
     for index in range(2, 5):
         assert (
-            cache_module.load_cached("stacks", f"commit{index}", "v2")
+            await cache_module.load_cached("stacks", f"commit{index}", "v2")
             == {"index": index}
         )
 
 
-def test_empty_commit_is_not_cached() -> None:
-    cache_module.store_cached("stacks", "", "v2", {"a": 1})
-    assert cache_module.load_cached("stacks", "", "v2") is None
+@pytest.mark.asyncio
+async def test_empty_commit_is_not_cached() -> None:
+    await cache_module.store_cached("stacks", "", "v2", {"a": 1})
+    assert await cache_module.load_cached("stacks", "", "v2") is None
 
 
-def test_delete_removes_entry() -> None:
-    cache_module.store_cached("stacks", "abc123", "v2", {"a": 1})
-    cache_module.delete_cached("stacks", "abc123", "v2")
-    assert cache_module.load_cached("stacks", "abc123", "v2") is None
+@pytest.mark.asyncio
+async def test_delete_removes_entry() -> None:
+    await cache_module.store_cached("stacks", "abc123", "v2", {"a": 1})
+    await cache_module.delete_cached("stacks", "abc123", "v2")
+    assert await cache_module.load_cached("stacks", "abc123", "v2") is None
 
 
-def test_delete_missing_key_or_file_is_noop(tmp_path: Path) -> None:
-    cache_module.store_cached("stacks", "abc123", "v2", {"a": 1})
-    cache_module.delete_cached("stacks", "def456", "v2")
-    cache_module.delete_cached("git_source", "abc123", "v1")
-    assert cache_module.load_cached("stacks", "abc123", "v2") == {"a": 1}
+@pytest.mark.asyncio
+async def test_delete_missing_key_or_file_is_noop(tmp_path: Path) -> None:
+    await cache_module.store_cached("stacks", "abc123", "v2", {"a": 1})
+    await cache_module.delete_cached("stacks", "def456", "v2")
+    await cache_module.delete_cached("git_source", "abc123", "v1")
+    assert await cache_module.load_cached("stacks", "abc123", "v2") == {"a": 1}
     assert not (tmp_path / "llm_analysis_git_source.json").exists()
 
 
-def test_delete_disabled_is_noop(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.asyncio
+async def test_delete_disabled_is_noop(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("VELA_LLM_CACHE", "0")
     path = tmp_path / "llm_analysis_stacks.json"
     path.write_text('{"v2:abc123": {"ts": 1, "payload": {"a": 1}}}', encoding="utf-8")
-    cache_module.delete_cached("stacks", "abc123", "v2")
+    await cache_module.delete_cached("stacks", "abc123", "v2")
     assert json.loads(path.read_text(encoding="utf-8")) == {
         "v2:abc123": {"ts": 1, "payload": {"a": 1}}
     }
 
 
-def test_legacy_json_is_imported_on_store_and_removed(tmp_path: Path) -> None:
+@pytest.mark.asyncio
+async def test_legacy_json_is_imported_on_store_and_removed(tmp_path: Path) -> None:
     legacy = tmp_path / "llm_analysis_stacks.json"
     legacy.write_text(
         json.dumps(
@@ -116,13 +126,14 @@ def test_legacy_json_is_imported_on_store_and_removed(tmp_path: Path) -> None:
         ),
         encoding="utf-8",
     )
-    cache_module.store_cached("stacks", "abc123", "v2", {"a": 1})
+    await cache_module.store_cached("stacks", "abc123", "v2", {"a": 1})
     assert not legacy.exists()
-    assert cache_module.load_cached("stacks", "zzz999", "v2") == {"z": 9}
-    assert cache_module.load_cached("stacks", "abc123", "v2") == {"a": 1}
+    assert await cache_module.load_cached("stacks", "zzz999", "v2") == {"z": 9}
+    assert await cache_module.load_cached("stacks", "abc123", "v2") == {"a": 1}
 
 
-def test_legacy_json_invalid_entries_are_skipped(tmp_path: Path) -> None:
+@pytest.mark.asyncio
+async def test_legacy_json_invalid_entries_are_skipped(tmp_path: Path) -> None:
     legacy = tmp_path / "llm_analysis_stacks.json"
     legacy.write_text(
         json.dumps(
@@ -135,14 +146,25 @@ def test_legacy_json_invalid_entries_are_skipped(tmp_path: Path) -> None:
         ),
         encoding="utf-8",
     )
-    assert cache_module.load_cached("stacks", "abc123", "v2") == {"a": 1}
+    assert await cache_module.load_cached("stacks", "abc123", "v2") == {"a": 1}
     assert not legacy.exists()
-    assert cache_module.load_cached("stacks", "bad-ts", "v2") is None
-    assert cache_module.load_cached("stacks", "bad-payload", "v2") is None
+    assert await cache_module.load_cached("stacks", "bad-ts", "v2") is None
+    assert await cache_module.load_cached("stacks", "bad-payload", "v2") is None
 
 
-def test_migration_imports_only_missing_keys(tmp_path: Path) -> None:
-    cache_module.store_cached("stacks", "abc123", "v2", {"a": "original"})
+@pytest.mark.asyncio
+async def test_migration_imports_only_missing_keys(tmp_path: Path) -> None:
+    conn = sqlite3.connect(tmp_path / cache_module._DB_FILENAME)
+    try:
+        conn.execute(cache_module._CREATE_TABLE)
+        conn.execute(
+            "INSERT INTO llm_cache (kind, version, commit_sha, payload, ts) "
+            "VALUES (?, ?, ?, ?, ?)",
+            ("stacks", "v2", "abc123", json.dumps({"a": "original"}), 1.0),
+        )
+        conn.commit()
+    finally:
+        conn.close()
     legacy = tmp_path / "llm_analysis_stacks.json"
     legacy.write_text(
         json.dumps(
@@ -153,12 +175,13 @@ def test_migration_imports_only_missing_keys(tmp_path: Path) -> None:
         ),
         encoding="utf-8",
     )
-    assert cache_module.load_cached("stacks", "abc123", "v2") == {"a": "original"}
-    assert cache_module.load_cached("stacks", "zzz999", "v2") == {"z": 9}
+    assert await cache_module.load_cached("stacks", "abc123", "v2") == {"a": "original"}
+    assert await cache_module.load_cached("stacks", "zzz999", "v2") == {"z": 9}
     assert not legacy.exists()
 
 
-def test_eviction_at_500_is_per_kind(tmp_path: Path) -> None:
+@pytest.mark.asyncio
+async def test_eviction_at_500_is_per_kind(tmp_path: Path) -> None:
     conn = sqlite3.connect(tmp_path / cache_module._DB_FILENAME)
     try:
         conn.execute(cache_module._CREATE_TABLE)
@@ -182,12 +205,12 @@ def test_eviction_at_500_is_per_kind(tmp_path: Path) -> None:
         conn.commit()
     finally:
         conn.close()
-    cache_module.store_cached("stacks", "newest", "v2", {"index": 501})
-    assert cache_module.load_cached("stacks", "commit0", "v2") is None
-    assert cache_module.load_cached("stacks", "commit1", "v2") is None
-    assert cache_module.load_cached("stacks", "commit2", "v2") == {"index": 2}
-    assert cache_module.load_cached("stacks", "newest", "v2") == {"index": 501}
-    assert cache_module.load_cached("other", "oldest", "v2") == {"index": -1}
+    await cache_module.store_cached("stacks", "newest", "v2", {"index": 501})
+    assert await cache_module.load_cached("stacks", "commit0", "v2") is None
+    assert await cache_module.load_cached("stacks", "commit1", "v2") is None
+    assert await cache_module.load_cached("stacks", "commit2", "v2") == {"index": 2}
+    assert await cache_module.load_cached("stacks", "newest", "v2") == {"index": 501}
+    assert await cache_module.load_cached("other", "oldest", "v2") == {"index": -1}
 
 
 def test_git_source_cache_key_includes_requested_branch(
@@ -261,7 +284,8 @@ def test_git_source_cache_key_isolates_distinct_repositories(
     assert calls == 2
 
 
-def test_git_source_invalid_payload_is_not_cached(
+@pytest.mark.asyncio
+async def test_git_source_invalid_payload_is_not_cached(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     async def bad_generate_json(*, prompt: str, schema: dict) -> dict:
@@ -269,13 +293,11 @@ def test_git_source_invalid_payload_is_not_cached(
 
     monkeypatch.setattr(git_source_analysis, "generate_json", bad_generate_json)
     with pytest.raises(GitSourceAnalysisError):
-        asyncio.run(
-            git_source_analysis._call_gemini(
-                "", "https://github.com/org/repo.git", "main", "", "abc123"
-            )
+        await git_source_analysis._call_gemini(
+            "", "https://github.com/org/repo.git", "main", "", "abc123"
         )
     assert (
-        cache_module.load_cached(
+        await cache_module.load_cached(
             "git_source",
             git_source_analysis._git_source_cache_key(
                 "https://github.com/org/repo.git", "abc123", "main"
@@ -286,7 +308,8 @@ def test_git_source_invalid_payload_is_not_cached(
     )
 
 
-def test_stacks_invalid_payload_is_not_cached(
+@pytest.mark.asyncio
+async def test_stacks_invalid_payload_is_not_cached(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     async def bad_generate_json(*, prompt: str, schema: dict) -> dict:
@@ -294,26 +317,24 @@ def test_stacks_invalid_payload_is_not_cached(
 
     monkeypatch.setattr(repo_analysis, "generate_json", bad_generate_json)
     with pytest.raises(LlmCallError):
-        asyncio.run(
-            repo_analysis._generate_services(
-                context="",
-                manifest=None,
-                git_url="https://github.com/org/repo.git",
-                git_branch="main",
-                warnings=[],
-                root=tmp_path,
-                commit="abc123",
-            )
+        await repo_analysis._generate_services(
+            context="",
+            manifest=None,
+            git_url="https://github.com/org/repo.git",
+            git_branch="main",
+            warnings=[],
+            root=tmp_path,
+            commit="abc123",
         )
     assert (
-        cache_module.load_cached(
+        await cache_module.load_cached(
             "stacks", "abc123", repo_analysis.STACKS_PROMPT_VERSION
         )
         is None
     )
 
 
-class _StubImageBuilder:
+class _StubImageBuilder(DefaultImageBuilder):
     def __init__(self, root: Path) -> None:
         self._root = root
         self._counter = 0

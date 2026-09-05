@@ -45,8 +45,8 @@ export default function ServiceReviewStep({
         <div className="containers-banner containers-banner--ok stacks-modal__warnings">
           <p className="containers-banner__text">Parse warnings:</p>
           <ul className="containers-banner__list">
-            {warnings.map((warning) => (
-              <li key={warning}>{warning}</li>
+            {warnings.map((warning, index) => (
+              <li key={`${warning}-${index}`}>{warning}</li>
             ))}
           </ul>
         </div>
@@ -105,6 +105,7 @@ export default function ServiceReviewStep({
                     >
                       Container port
                     </label>
+                    {/* ponytail: clearing snaps back to the default (|| N); true empty-state editing is a product call */}
                     <input
                       id={`review-svc-${index}-port`}
                       type="number"

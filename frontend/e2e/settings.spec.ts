@@ -1,10 +1,6 @@
+import { bearerToken } from './auth-helpers'
+import { apiBase } from './constants'
 import { expect, fakeUser, test } from './fixtures'
-
-const profileUser = {
-  ...fakeUser,
-  display_name: 'E2E User',
-  pronouns: 'they/them',
-}
 
 test.describe('Settings page', () => {
   test('shows the profile section with account info from the signed-in user', async ({
@@ -26,31 +22,23 @@ test.describe('Settings page', () => {
   test('saves display name and pronouns via PATCH /api/users/me', async ({
     authenticatedPage,
   }) => {
-    await authenticatedPage.route('**/api/users/me', async (route) => {
-      if (route.request().method() === 'PATCH') {
-        await route.fulfill({
-          status: 200,
-          contentType: 'application/json',
-          body: JSON.stringify(profileUser),
-        })
-        return
-      }
-      await route.continue()
-    })
-
-    await authenticatedPage.route('**/api/auth/me', async (route) => {
-      await route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify(profileUser),
-      })
-    })
-
     await authenticatedPage.goto('/settings')
     await authenticatedPage.getByLabel('Display name').fill('E2E User')
     await authenticatedPage.getByLabel('Pronouns').fill('they/them')
     await authenticatedPage.getByRole('button', { name: 'Save profile' }).click()
     await expect(authenticatedPage.getByText('Profile saved.')).toBeVisible()
+
+    // Reset the profile so later specs still see display_name null (the user
+    // menu trigger falls back to the email address).
+    const token = await bearerToken(authenticatedPage)
+    const resetResponse = await authenticatedPage.request.patch(
+      `${apiBase}/api/users/me`,
+      {
+        headers: { Authorization: `Bearer ${token}` },
+        data: { display_name: null, pronouns: null },
+      },
+    )
+    expect(resetResponse.ok()).toBeTruthy()
   })
 
   test('renders the disconnected GitHub card with a Connect button', async ({
@@ -117,8 +105,8 @@ test.describe('Settings page', () => {
     })
     const initiallyChecked = await alerts.isChecked()
     await alerts.click()
-    await expect(alerts).toBeChecked(!initiallyChecked)
+    await expect(alerts).toBeChecked({ checked: !initiallyChecked })
     await alerts.click()
-    await expect(alerts).toBeChecked(initiallyChecked)
+    await expect(alerts).toBeChecked({ checked: initiallyChecked })
   })
 })

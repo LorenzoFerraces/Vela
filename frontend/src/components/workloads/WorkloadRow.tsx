@@ -206,7 +206,11 @@ function WorkloadRowBase({
               title="Open terminal"
               aria-label="Open terminal"
               aria-expanded={isTerminalOpen}
-              aria-controls={`workloads-terminal-${containerRow.id}`}
+              aria-controls={
+                isTerminalOpen
+                  ? `workloads-terminal-${containerRow.id}`
+                  : undefined
+              }
               onClick={() => onToggleTerminal(containerRow.id)}
             >
               {'>'}
@@ -269,7 +273,11 @@ function WorkloadRowBase({
               type="button"
               className="workloads-table__expand-toggle"
               aria-expanded={isReplicaExpanded}
-              aria-controls={`workloads-replicas-${containerRow.id}`}
+              aria-controls={
+                isReplicaExpanded
+                  ? `workloads-replicas-${containerRow.id}`
+                  : undefined
+              }
               aria-label={
                 isReplicaExpanded
                   ? `Hide ${instances.length} instances`

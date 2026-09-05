@@ -8,8 +8,9 @@ import sys
 import threading
 import uuid
 from collections.abc import AsyncIterator, Callable
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
-from typing import Any, TypeVar
+from typing import Any, List, TypeVar
 
 import docker
 import docker.errors
@@ -739,14 +740,23 @@ class DockerOrchestrator(ContainerOrchestrator):
         except docker.errors.DockerException as e:
             raise ProviderConnectionError(str(e)) from e
 
-    async def logs(self, container_id: str, *, tail: int | None = 100, since: float | None = None) -> str:
+    async def logs(
+        self,
+        container_id: str,
+        *,
+        tail: int | None = 100,
+        since: float | None = None,
+        timestamps: bool = False,
+    ) -> str:
         def sync() -> str:
             try:
                 c = self._client.containers.get(container_id)
             except docker.errors.NotFound as e:
                 raise ContainerNotFoundError(container_id) from e
             self._assert_managed_labels(c.labels or {}, container_id)
-            raw = c.logs(tail=tail, since=since, stdout=True, stderr=True)
+            raw = c.logs(
+                tail=tail, since=since, stdout=True, stderr=True, timestamps=timestamps
+            )
             if isinstance(raw, bytes):
                 return raw.decode(errors="replace")
             return str(raw)
@@ -864,6 +874,10 @@ class DockerOrchestrator(ContainerOrchestrator):
         loop = asyncio.get_running_loop()
         queue: asyncio.Queue[bytes | None] = asyncio.Queue(maxsize=64)
         closed = threading.Event()
+        # Single worker thread keeps stdin writes in submission order
+        executor = ThreadPoolExecutor(
+            max_workers=1, thread_name_prefix="vela-exec-writer"
+        )
 
         def _reader() -> None:
             try:
@@ -890,17 +904,32 @@ class DockerOrchestrator(ContainerOrchestrator):
 
         threading.Thread(target=_reader, daemon=True, name="vela-exec-reader").start()
 
+        def _write_blocking(data: bytes) -> None:
+            try:
+                exec_runtime.write(data)
+            except Exception as exc:
+                logger.warning("exec write error for %s: %s", container_id, exc)
+
         def _write(data: bytes) -> None:
-            if not closed.is_set():
-                try:
-                    exec_runtime.write(data)
-                except Exception as exc:
-                    logger.warning("exec write error for %s: %s", container_id, exc)
+            if closed.is_set():
+                return
+            try:
+                executor.submit(_write_blocking, data)
+            except RuntimeError:
+                logger.warning("exec write rejected for %s: session closed", container_id)
+
+        def _close_blocking() -> None:
+            try:
+                exec_runtime.close()
+            except Exception as exc:
+                logger.warning("exec close error for %s: %s", container_id, exc)
 
         def _close() -> None:
-            if not closed.is_set():
-                closed.set()
-                exec_runtime.close()
+            if closed.is_set():
+                return
+            closed.set()
+            executor.submit(_close_blocking)
+            executor.shutdown(wait=False)
 
         async def _stdout_iterator() -> AsyncIterator[bytes]:
             try:
@@ -1113,8 +1142,8 @@ class DockerOrchestrator(ContainerOrchestrator):
         except docker.errors.DockerException as e:
             raise ProviderConnectionError(str(e)) from e
 
-    async def list_images(self) -> list[str]:
-        def sync() -> list[str]:
+    async def list_images(self) -> List[str]:
+        def sync() -> List[str]:
             tags: list[str] = []
             for img in self._client.images.list():
                 tags.extend(img.tags or [])
@@ -1127,13 +1156,13 @@ class DockerOrchestrator(ContainerOrchestrator):
         except docker.errors.DockerException as e:
             raise ProviderConnectionError(str(e)) from e
 
-    async def list_replicas(self, base_name: str) -> list[ContainerInfo]:
+    async def list_replicas(self, base_name: str) -> List[ContainerInfo]:
         label_filter = [
             f"{VELA_MANAGED_LABEL}={VELA_MANAGED_VALUE}",
             f"{VELA_REPLICA_OF_LABEL}={base_name}",
         ]
 
-        def sync() -> list[ContainerInfo]:
+        def sync() -> List[ContainerInfo]:
             containers = self._client.containers.list(
                 all=True,
                 filters={"label": label_filter},

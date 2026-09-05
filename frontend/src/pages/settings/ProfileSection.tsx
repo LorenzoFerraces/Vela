@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ChangeEvent, type FormEvent } from 'react'
 import type { UserPublic } from '../../api/client'
-import { TrashIcon} from '@phosphor-icons/react/Trash'
+import { TrashIcon } from '@phosphor-icons/react'
 import {
   deleteAvatar,
   formatApiError,

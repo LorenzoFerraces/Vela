@@ -7,7 +7,6 @@ import uuid
 from datetime import datetime, timezone, timedelta
 
 import pytest
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.audit.service import emit_audit_log, list_audit_logs
@@ -262,18 +261,31 @@ def test_emit_persists_after_caller_commit(
     asyncio.run(run())
 
 
-def test_emit_failed_flush_reraises(
+def test_emit_failed_flush_drops_entry_keeps_session_usable(
     db_session_factory: async_sessionmaker[AsyncSession],
+    user_a: uuid.UUID,
 ) -> None:
+    """A failed flush is logged and dropped; the caller's session stays usable."""
     async def run() -> None:
         async with db_session_factory() as session:
-            with pytest.raises(IntegrityError):
-                await emit_audit_log(
-                    session,
-                    user_id=None,
-                    action="container.deploy",
-                    target_type="container",
-                    target_id="cid-bad",
-                )
+            await emit_audit_log(
+                session,
+                user_id=None,  # type: ignore[arg-type]  # intentional None: exercises the NOT NULL constraint
+                action="container.deploy",
+                target_type="container",
+                target_id="cid-bad",
+            )
+            await emit_audit_log(
+                session,
+                user_id=user_a,
+                action="container.deploy",
+                target_type="container",
+                target_id="cid-good",
+            )
+            await session.commit()
+
+        entries = await _query(db_session_factory)
+        assert len(entries) == 1
+        assert entries[0].target_id == "cid-good"
 
     asyncio.run(run())

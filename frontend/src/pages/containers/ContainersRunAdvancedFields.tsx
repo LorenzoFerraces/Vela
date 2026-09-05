@@ -226,8 +226,8 @@ export function ContainersRunAdvancedFields({
           <p className="containers-form__label">Volumes (read-only)</p>
           <p className="containers-muted containers-form__hint">
             Choose a folder from your computer (up to{' '}
-            {volumeUploadLimitMegabytes(VOLUME_UPLOAD_MAX_BYTES)}\u00a0MB per folder,{' '}
-            {volumeUploadLimitMegabytes(VOLUME_UPLOAD_USER_QUOTA_BYTES)}\u00a0MB total
+            {volumeUploadLimitMegabytes(VOLUME_UPLOAD_MAX_BYTES)} MB per folder,{' '}
+            {volumeUploadLimitMegabytes(VOLUME_UPLOAD_USER_QUOTA_BYTES)} MB total
             per account). Mounts are read-only inside the container.
           </p>
           <ul className="containers-env-list">

@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import sqlite3
+import threading
 import time
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -32,17 +34,29 @@ def _enabled() -> bool:
     return os.environ.get("VELA_LLM_CACHE", "1").strip() != "0"
 
 
+_ensure_lock = threading.Lock()
+_ensured_root: Path | None = None
+
+
 def _ensure_db() -> Path:
+    # Runs once per process per cache root; re-runs only if the root changes (tests swap dirs)
+    global _ensured_root
     root = _cache_root()
-    root.mkdir(parents=True, exist_ok=True)
     db_path = root / _DB_FILENAME
-    conn = sqlite3.connect(db_path)
-    try:
-        conn.execute(_CREATE_TABLE)
-        _migrate_legacy_files(conn, root)
-        conn.commit()
-    finally:
-        conn.close()
+    if _ensured_root == root:
+        return db_path
+    with _ensure_lock:
+        if _ensured_root == root:
+            return db_path
+        root.mkdir(parents=True, exist_ok=True)
+        conn = sqlite3.connect(db_path)
+        try:
+            conn.execute(_CREATE_TABLE)
+            _migrate_legacy_files(conn, root)
+            conn.commit()
+        finally:
+            conn.close()
+        _ensured_root = root
     return db_path
 
 
@@ -84,7 +98,7 @@ def _migrate_legacy_files(conn: sqlite3.Connection, root: Path) -> None:
         path.unlink()
 
 
-def load_cached(kind: str, commit: str, version: str) -> dict | None:
+def _load_cached_sync(kind: str, commit: str, version: str) -> dict | None:
     if not _enabled() or not commit:
         return None
     try:
@@ -105,7 +119,11 @@ def load_cached(kind: str, commit: str, version: str) -> dict | None:
     return payload if isinstance(payload, dict) else None
 
 
-def delete_cached(kind: str, commit: str, version: str) -> None:
+async def load_cached(kind: str, commit: str, version: str) -> dict | None:
+    return await asyncio.to_thread(_load_cached_sync, kind, commit, version)
+
+
+def _delete_cached_sync(kind: str, commit: str, version: str) -> None:
     if not _enabled() or not commit:
         return
     try:
@@ -119,7 +137,11 @@ def delete_cached(kind: str, commit: str, version: str) -> None:
         return
 
 
-def store_cached(kind: str, commit: str, version: str, payload: dict) -> None:
+async def delete_cached(kind: str, commit: str, version: str) -> None:
+    await asyncio.to_thread(_delete_cached_sync, kind, commit, version)
+
+
+def _store_cached_sync(kind: str, commit: str, version: str, payload: dict) -> None:
     if not _enabled() or not commit:
         return
     try:
@@ -140,3 +162,7 @@ def store_cached(kind: str, commit: str, version: str, payload: dict) -> None:
             conn.commit()
     except (OSError, sqlite3.Error):
         return
+
+
+async def store_cached(kind: str, commit: str, version: str, payload: dict) -> None:
+    await asyncio.to_thread(_store_cached_sync, kind, commit, version, payload)

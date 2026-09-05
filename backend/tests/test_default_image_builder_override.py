@@ -135,7 +135,7 @@ async def test_resolve_service_image_passes_build_override(
         return None
 
     monkeypatch.setattr(
-        "app.api.routes.containers._github_token_for_url",
+        "app.core.deploy.github_auth.github_token_for_url",
         fake_github_token,
     )
 

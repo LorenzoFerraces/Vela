@@ -6,8 +6,10 @@ import asyncio
 import logging
 import os
 from datetime import datetime, timedelta, timezone
+from typing import cast
 
 from sqlalchemy import delete
+from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.containers.docker_orchestrator import VELA_MANAGED_LABEL
@@ -38,6 +40,8 @@ async def collect_and_store_once(
     orchestrator: ContainerOrchestrator, session: AsyncSession,
 ) -> None:
     """Poll stats for all Vela-managed containers and persist one row each."""
+    # ponytail: list() + per-container get_stats is O(total containers) Docker calls per poll tick; fine at
+    # current scale — add a short-TTL orchestrator list cache only if usage grows (stales the UI list, product call)
     try:
         containers = await orchestrator.list()
     except ProviderConnectionError:
@@ -85,8 +89,10 @@ async def collect_and_store_once(
 async def cleanup_expired_metrics(session: AsyncSession) -> None:
     """Delete metric rows older than METRICS_RETENTION_DAYS."""
     cutoff = datetime.now(timezone.utc) - timedelta(days=METRICS_RETENTION_DAYS)
-    result = await session.execute(
-        delete(ContainerMetric).where(ContainerMetric.timestamp < cutoff)
+    result = cast(
+        CursorResult, await session.execute(
+            delete(ContainerMetric).where(ContainerMetric.timestamp < cutoff)
+        )
     )
     await session.commit()
     if result.rowcount:

@@ -70,6 +70,7 @@ export function ContainersRunScalingFields({
               >
                 Min replicas
               </label>
+              {/* ponytail: clearing snaps back to the default (|| N); true empty-state editing is a product call */}
               <input
                 id="scaling-min-replicas"
                 className="containers-form__input containers-form__input--short"

@@ -37,6 +37,7 @@ from sqlalchemy.ext.asyncio import (
     async_sessionmaker,
     create_async_engine,
 )
+from sqlalchemy.pool import StaticPool
 
 from app.api.app import create_app
 from app.api.deps import (
@@ -164,7 +165,11 @@ def db_session_factory() -> Iterator[async_sessionmaker[AsyncSession]]:
     Returns:
         async_sessionmaker[AsyncSession]: A session factory producing AsyncSession instances backed by an in-memory SQLite engine. The fixture ensures Base.metadata.create_all() runs before yielding and disposes the underlying engine when the fixture is torn down.
     """
-    engine = create_async_engine("sqlite+aiosqlite:///:memory:", future=True)
+    # StaticPool keeps one shared connection so committed data survives
+    # across the per-request sessions handed to the app.
+    engine = create_async_engine(
+        "sqlite+aiosqlite:///:memory:", poolclass=StaticPool, future=True
+    )
     factory = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
 
     async def setup() -> None:
@@ -240,12 +245,11 @@ def _build_app_with_overrides(
 ) -> Any:
     app = create_app()
 
-    # Use a single persistent session so data survives across requests
-    # (needed because :memory: SQLite loses data when connections close)
-    persistent_session = db_session_factory()
-
+    # Fresh session per request (mirrors production get_db); the shared
+    # StaticPool connection keeps committed data alive across requests.
     async def _get_db_override() -> AsyncIterator[AsyncSession]:
-        yield persistent_session
+        async with db_session_factory() as session:
+            yield session
 
     app.dependency_overrides[get_db] = _get_db_override
     if orchestrator is not None:

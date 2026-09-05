@@ -10,6 +10,7 @@ import logging
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from typing import Literal
 
 from sqlalchemy import and_, desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -21,15 +22,17 @@ from app.db.models import AlertHistory, EmailPreference, User
 logger = logging.getLogger(__name__)
 
 DEDUP_WINDOW_MINUTES = 10
-DEFAULT_ALERT_TYPES: list[str] = ["stop", "failure", "unhealthy", "storage"]
-DEFAULT_ALERT_FREQUENCY = "immediate"
+AlertType = Literal["stop", "failure", "unhealthy", "storage"]
+AlertFrequency = Literal["immediate", "daily_digest", "weekly_summary"]
+DEFAULT_ALERT_TYPES: list[AlertType] = ["stop", "failure", "unhealthy", "storage"]
+DEFAULT_ALERT_FREQUENCY: AlertFrequency = "immediate"
 
 
 @dataclass(frozen=True)
 class EffectiveEmailPreferences:
     email: str
     alerts_enabled: bool
-    alert_types: list[str]
+    alert_types: list[AlertType]
     alert_frequency: str
 
 

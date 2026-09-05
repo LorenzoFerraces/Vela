@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
@@ -11,13 +12,16 @@ from pydantic import ValidationError
 from app.api.schemas import StackServiceCreate
 from app.core.build.default_image_builder import DefaultImageBuilder
 from app.core.exceptions import LlmCallError, ManifestParseError
-from app.core.git.git_ops import head_commit, rm_tree
+from app.core.git.git_ops import _CREDENTIALS_IN_URL, head_commit, rm_tree
 from app.core.git.git_source_analysis import (
+    _clean_command_list,
     _collect_context_excerpts,
     _detected_facts_block,
     _env_vars_from_payload,
     _extract_env_vars_from_context,
     _read_file_excerpt,
+    _redact_secret_values,
+    _validated_env_vars,
 )
 from app.core.llm import generate_json
 from app.core.llm.cache import delete_cached, load_cached, store_cached
@@ -34,7 +38,7 @@ _IGNORED_DIRECTORIES = frozenset(
 _COMPOSE_NAMES = ("docker-compose.yml", "docker-compose.yaml", "compose.yml", "compose.yaml")
 _COMPOSE_PATTERNS = ("docker-compose", "compose")
 _PREFERRED_DIRECTORIES = ("k8s", "kubernetes", "deploy", "manifests")
-STACKS_PROMPT_VERSION = "v2"  # ponytail: bump when the stacks prompt text changes
+STACKS_PROMPT_VERSION = "v3"  # ponytail: bumped for URL/secret redaction in the prompt
 
 
 @dataclass(frozen=True)
@@ -193,7 +197,7 @@ def _generation_schema() -> dict:
 
 
 def _payload_to_services(
-    payload: dict[str, object],
+    payload: Mapping[str, object],
     *,
     git_url: str,
     git_branch: str,
@@ -238,6 +242,12 @@ def _payload_to_services(
         env_vars = _env_vars_from_payload(raw_service)
         if source_kind == "git" and env_fallback:
             env_vars = {**env_fallback, **env_vars}
+        raw_command = raw_service.get("command")
+        command = _clean_command_list(raw_command)
+        if raw_command is not None and command is None:
+            warnings.append(
+                f"Service '{name.strip()}': command entries were invalid and dropped."
+            )
         data = {
             "service_name": name.strip(),
             "source_kind": source_kind,
@@ -245,7 +255,7 @@ def _payload_to_services(
             "git_branch": git_branch if source_kind == "git" else None,
             "container_port": port,
             "env_vars": env_vars,
-            "command": raw_service.get("command"),
+            "command": command,
             "public_route": raw_service.get("public_route", False),
             "depends_on": raw_service.get("depends_on"),
         }
@@ -286,6 +296,8 @@ async def _generate_services(
     root: Path,
     commit: str = "",
 ) -> tuple[list[StackService], str | None]:
+    # ponytail: prompt-only redaction; the raw url is still used as the git source_ref
+    redacted_url = _CREDENTIALS_IN_URL.sub(r"\1", git_url)
     prompt = (
         "Analyze this repository and produce the deployable services for a Vela stack. "
         "Every repository-built service must use source_kind: \"git\" and use the supplied "
@@ -299,7 +311,7 @@ async def _generate_services(
         "Do not use host paths, volume sources, or unsupported source kinds. "
         "Use an empty source_ref only when source_kind is git and the supplied repository URL "
         "will be used. Return only JSON matching the schema.\n\n"
-        f"Repository URL: {git_url}\nRequested branch: {git_branch}\n\n"
+        f"Repository URL: {redacted_url}\nRequested branch: {git_branch}\n\n"
         f"Repository context:\n{context}"
     )
     if manifest:
@@ -310,20 +322,20 @@ async def _generate_services(
             "\n\nDetected facts (already verified by deterministic scans; "
             f"prefer them over re-deriving):\n{facts}"
         )
-    payload = load_cached("stacks", commit, STACKS_PROMPT_VERSION)
+    payload = await load_cached("stacks", commit, STACKS_PROMPT_VERSION)
     if payload is None:
         payload = await generate_json(prompt=prompt, schema=_generation_schema())
-        store_cached("stacks", commit, STACKS_PROMPT_VERSION, payload)
+        await store_cached("stacks", commit, STACKS_PROMPT_VERSION, payload)
     try:
         services = _payload_to_services(
             payload,
             git_url=git_url,
             git_branch=git_branch,
             warnings=warnings,
-            env_fallback=_extract_env_vars_from_context(context),
+            env_fallback=_validated_env_vars(_extract_env_vars_from_context(context)),
         )
     except LlmCallError:
-        delete_cached("stacks", commit, STACKS_PROMPT_VERSION)
+        await delete_cached("stacks", commit, STACKS_PROMPT_VERSION)
         raise
     summary = payload.get("summary_hint")
     return services, summary.strip() if isinstance(summary, str) and summary.strip() else None
@@ -357,7 +369,7 @@ async def analyze_repo_stack(
             relative_path = manifest_path.relative_to(root).as_posix()
             warnings.append(f"Selected manifest '{relative_path}'.")
             manifest_content = manifest_path.read_text(encoding="utf-8", errors="replace")
-            manifest_excerpt = _read_file_excerpt(manifest_path)
+            manifest_excerpt = _redact_secret_values(_read_file_excerpt(manifest_path))
             try:
                 services, parser_warnings, parsed_kind = parse_manifest(manifest_content)
             except ManifestParseError:

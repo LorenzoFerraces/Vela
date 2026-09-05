@@ -1,3 +1,4 @@
+import { deployImageContainer, stopContainer } from './api-helpers'
 import { expect, test } from './fixtures'
 
 test.describe('Terminal', () => {
@@ -38,5 +39,35 @@ test.describe('Terminal', () => {
     await expect(pane.locator('.xterm')).toContainText('echo vela-e2e-ok', {
       timeout: 10_000,
     })
+  })
+
+  test('hides the terminal button for a stopped container', async ({
+    authenticatedPage,
+  }) => {
+    const containerName = `terminal-off-${Date.now()}`
+    const deployResponse = await deployImageContainer(
+      authenticatedPage,
+      'nginx:alpine',
+      containerName,
+    )
+    expect(deployResponse.ok()).toBeTruthy()
+    const deployBody = (await deployResponse.json()) as {
+      container: { id: string }
+    }
+    await stopContainer(authenticatedPage, deployBody.container.id)
+
+    await authenticatedPage.goto('/containers')
+    const row = authenticatedPage
+      .locator('table.workloads-table tbody tr')
+      .filter({
+        has: authenticatedPage.getByRole('cell', {
+          name: containerName,
+          exact: true,
+        }),
+      })
+    await expect(row).toBeVisible()
+    await expect(
+      row.getByRole('button', { name: 'Open terminal' }),
+    ).toHaveCount(0)
   })
 })

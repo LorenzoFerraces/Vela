@@ -6,7 +6,6 @@ import difflib
 import uuid
 from collections.abc import Collection
 from dataclasses import dataclass
-from datetime import datetime
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession

@@ -8,6 +8,7 @@ import threading
 import time
 import uuid
 from collections.abc import AsyncIterator, Callable
+from typing import List
 from datetime import datetime, timezone
 
 from app.core.containers.docker_orchestrator import (
@@ -273,22 +274,39 @@ class FakeContainerOrchestrator(ContainerOrchestrator):
         self._log_lines.setdefault(container_id, []).append((time.time(), line))
 
     def _fake_log_text(
-        self, container_id: str, *, tail: int | None, since: float | None
+        self,
+        container_id: str,
+        *,
+        tail: int | None,
+        since: float | None,
+        timestamps: bool = False,
     ) -> str:
         lines = self._log_lines.setdefault(container_id, [])
         if not lines:
             lines.append((time.time(), "log line 1"))
-        visible = [text for ts, text in lines if since is None or ts >= since]
+        visible = [(ts, text) for ts, text in lines if since is None or ts >= since]
         if tail is not None:
             visible = visible[-tail:]
-        return "".join(f"{text}\n" for text in visible)
+        if not timestamps:
+            return "".join(f"{text}\n" for _, text in visible)
+        return "".join(
+            f"{datetime.fromtimestamp(ts, tz=timezone.utc):%Y-%m-%dT%H:%M:%S.%fZ} {text}\n"
+            for ts, text in visible
+        )
 
     async def logs(
-        self, container_id: str, *, tail: int | None = 100, since: float | None = None
+        self,
+        container_id: str,
+        *,
+        tail: int | None = 100,
+        since: float | None = None,
+        timestamps: bool = False,
     ) -> str:
-        """Return fake log lines: one per call for a fresh container, honoring `tail` and `since`."""
+        """Return fake log lines: one per call for a fresh container, honoring `tail`, `since`, and `timestamps`."""
         self._require_container(container_id)
-        return self._fake_log_text(container_id, tail=tail, since=since)
+        return self._fake_log_text(
+            container_id, tail=tail, since=since, timestamps=timestamps
+        )
 
     async def stream_logs(
         self,
@@ -467,7 +485,7 @@ class FakeContainerOrchestrator(ContainerOrchestrator):
         self._built_tags.append(tag)
         return f"sha256:fake-{tag.replace(':', '-')}"
 
-    async def list_images(self) -> list[str]:
+    async def list_images(self) -> List[str]:
         """
         Get a sorted list of available image references.
 
@@ -476,7 +494,7 @@ class FakeContainerOrchestrator(ContainerOrchestrator):
         """
         return sorted(self._images)
 
-    async def list_replicas(self, base_name: str) -> list[ContainerInfo]:
+    async def list_replicas(self, base_name: str) -> List[ContainerInfo]:
         return [
             info
             for info in self._containers.values()

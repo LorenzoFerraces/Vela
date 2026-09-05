@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from app.core.git.git_source_analysis import (
+    _clean_command_list,
     _collect_context_excerpts,
     _detected_facts_block,
     _dockerfile_facts,
@@ -14,6 +15,8 @@ from app.core.git.git_source_analysis import (
     _extract_env_vars_from_context,
     _extract_readme_sections,
     _merge_env_fallback,
+    _payload_to_analysis,
+    _redact_secret_values,
     _repo_map,
     _select_readme_text,
     _subdir_marker_files,
@@ -270,3 +273,118 @@ def test_vela_repo_readme_yields_env_vars() -> None:
     assert "VELA_DATABASE_URL" in env_vars
     assert "VELA_AUTH_SECRET" in env_vars
     assert "frontend/.env.example" in context or "VITE_API_BASE_URL" in context
+
+
+def test_redact_secret_values_env_example_style() -> None:
+    text = (
+        "PORT=8080\n"
+        "DB_PASSWORD=hunter2\n"
+        "API_KEY=\"ghp_abcdef1234567890\"\n"
+        "SESSION_SECRET=\n"
+        "export WEBHOOK_TOKEN=sk-ant-live-abc123\n"
+        "GITHUB_TOKEN=x\n"
+        "DATABASE_URL=postgresql://app@db:5432/app\n"
+    )
+
+    redacted = _redact_secret_values(text)
+
+    assert redacted == (
+        "PORT=8080\n"
+        "DB_PASSWORD=[REDACTED]\n"
+        "API_KEY=[REDACTED]\n"
+        "SESSION_SECRET=\n"
+        "export WEBHOOK_TOKEN=[REDACTED]\n"
+        "GITHUB_TOKEN=[REDACTED]\n"
+        "DATABASE_URL=postgresql://app@db:5432/app\n"
+    )
+
+
+def test_redact_secret_values_dockerfile_forms() -> None:
+    text = (
+        "ENV APP_ENV production\n"
+        "ENV DB_PASSWORD supersecret\n"
+        "ARG REGISTRY_TOKEN=abc123\n"
+        "ARG PORT 8080\n"
+        "FROM python:3.12\n"
+    )
+
+    redacted = _redact_secret_values(text)
+
+    assert redacted == (
+        "ENV APP_ENV production\n"
+        "ENV DB_PASSWORD [REDACTED]\n"
+        "ARG REGISTRY_TOKEN=[REDACTED]\n"
+        "ARG PORT 8080\n"
+        "FROM python:3.12\n"
+    )
+
+
+def test_context_builder_redacts_secrets_before_prompt(tmp_path: Path) -> None:
+    (tmp_path / ".env.example").write_text(
+        "PORT=8000\nDB_PASSWORD=hunter2\n", encoding="utf-8"
+    )
+    (tmp_path / "Dockerfile").write_text(
+        "FROM python:3.12\nENV API_KEY=sk-ant-abc\n", encoding="utf-8"
+    )
+    (tmp_path / "README.md").write_text(
+        "## Environment\n\n| Variable | Notes |\n|---|---|\n"
+        "| `WEB_PORT` | `8080` |\n",
+        encoding="utf-8",
+    )
+
+    context = _collect_context_excerpts(tmp_path)
+    facts = _detected_facts_block(tmp_path, context)
+
+    assert "hunter2" not in context
+    assert "sk-ant-abc" not in context
+    assert "DB_PASSWORD=[REDACTED]" in context
+    assert "ENV API_KEY=[REDACTED]" in context
+    assert "PORT=8000" in context
+    assert "DB_PASSWORD=[REDACTED]" in facts
+    assert "WEB_PORT=8080" in facts
+
+
+def test_env_vars_from_payload_drops_invalid_entries() -> None:
+    env_vars = _env_vars_from_payload(
+        {
+            "env_var_entries": [
+                {"key": "GOOD_KEY", "value": "ok"},
+                {"key": "BAD KEY!", "value": "x"},
+                {"key": "LONG_VALUE", "value": "v" * 600},
+                {"key": "", "value": "x"},
+                {"key": "A" * 200, "value": "x"},
+            ]
+        }
+    )
+
+    assert env_vars == {"GOOD_KEY": "ok"}
+
+
+def test_clean_command_list_drops_invalid_entries() -> None:
+    assert _clean_command_list(None) is None
+    assert _clean_command_list("not-a-list") is None
+    assert _clean_command_list([]) is None
+    assert _clean_command_list(["   ", 7, "x" * 300]) is None
+    assert _clean_command_list(["  uvicorn ", "main:app", ""]) == [
+        "uvicorn",
+        "main:app",
+    ]
+
+
+def test_payload_to_analysis_validates_start_command() -> None:
+    payload = {
+        "git_branch": "main",
+        "container_port": 8000,
+        "container_name": "repo",
+        "env_var_entries": [],
+        "start_command": ["npm", "start"],
+        "language": "python",
+        "framework": None,
+        "has_dockerfile": False,
+        "build_strategy": "generated_dockerfile",
+        "summary_hint": "ok",
+    }
+
+    analysis = _payload_to_analysis(dict(payload, start_command=["npm", "start"]))
+    assert analysis.start_command == ["npm", "start"]
+    assert _payload_to_analysis(dict(payload, start_command=["x" * 300, "   "])).start_command is None

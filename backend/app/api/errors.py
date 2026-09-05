@@ -8,8 +8,6 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
-logger = logging.getLogger(__name__)
-
 from app.core.exceptions import (
     AnalysisError,
     AuthError,
@@ -67,6 +65,8 @@ from app.core.exceptions import (
     VolumeUploadNotFoundError,
     InvalidVolumeUploadPathError,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def _project_error_payload(exc: ProjectError, error_code: str) -> dict[str, str]:

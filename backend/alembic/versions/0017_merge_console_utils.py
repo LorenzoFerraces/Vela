@@ -9,8 +9,6 @@ from __future__ import annotations
 
 from typing import Sequence
 
-from alembic import op
-import sqlalchemy as sa
 
 
 revision: str = "0017_merge_console_utils"

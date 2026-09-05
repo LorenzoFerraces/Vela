@@ -1,3 +1,5 @@
+import { bearerToken } from './auth-helpers'
+import { apiBase } from './constants'
 import { expect, test } from './fixtures'
 
 test.describe('Audit log page', () => {
@@ -42,6 +44,31 @@ test.describe('Audit log page', () => {
     ).toBeVisible()
     await expect(
       authenticatedPage.getByLabel('From date'),
+    ).toBeVisible()
+  })
+
+  test('audit entries are strictly per-user', async ({
+    authenticatedPage,
+    authenticatedPageNoGithub,
+  }) => {
+    const token = await bearerToken(authenticatedPage)
+    const seedResponse = await authenticatedPage.request.patch(
+      `${apiBase}/api/users/me`,
+      {
+        headers: { Authorization: `Bearer ${token}` },
+        data: { pronouns: 'they/them' },
+      },
+    )
+    expect(seedResponse.ok()).toBeTruthy()
+
+    await authenticatedPage.goto('/audit')
+    await expect(
+      authenticatedPage.getByText('Updated profile'),
+    ).toBeVisible()
+
+    await authenticatedPageNoGithub.goto('/audit')
+    await expect(
+      authenticatedPageNoGithub.getByText('No audit entries found'),
     ).toBeVisible()
   })
 })

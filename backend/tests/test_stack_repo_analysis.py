@@ -4,11 +4,15 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
+from typing import cast
 
+import httpx
 import pytest
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from app.api.deps import get_image_builder
+from app.core.build.default_image_builder import DefaultImageBuilder
 from app.core.exceptions import LlmCallError
 from app.core.git.git_source_analysis import _collect_context_excerpts
 from app.core.stacks import repo_analysis
@@ -188,7 +192,7 @@ def test_payload_to_services_empty_result_raises() -> None:
         )
 
 
-class StubImageBuilder:
+class StubImageBuilder(DefaultImageBuilder):
     def __init__(self, root: Path) -> None:
         self._root = root
 
@@ -206,8 +210,9 @@ class StubImageBuilder:
 def _post_analyze_repo(
     api_client: TestClient,
     stub_root: Path,
-) -> object:
-    api_client.app.dependency_overrides[get_image_builder] = lambda: StubImageBuilder(
+) -> httpx.Response:
+    fastapi_app = cast(FastAPI, api_client.app)
+    fastapi_app.dependency_overrides[get_image_builder] = lambda: StubImageBuilder(
         stub_root
     )
     try:
@@ -216,7 +221,7 @@ def _post_analyze_repo(
             json={"git_url": "https://github.com/org/repo.git", "git_branch": "main"},
         )
     finally:
-        api_client.app.dependency_overrides.pop(get_image_builder, None)
+        fastapi_app.dependency_overrides.pop(get_image_builder, None)
 
 
 def test_analyze_repo_e2e_fixture(api_client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -325,6 +330,97 @@ def test_generate_services_prompt_contains_detected_facts(
     )
     assert "Detected facts" in captured["prompt"]
     assert "DATABASE_URL" in captured["prompt"]
+
+
+def test_generate_services_prompt_redacts_git_url_credentials(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = tmp_path / "repo"
+    root.mkdir()
+    (root / "README.md").write_text("No markers.\n", encoding="utf-8")
+
+    captured: dict[str, str] = {}
+
+    async def fake_generate_json(*, prompt: str, schema: dict) -> dict:
+        captured["prompt"] = prompt
+        return LLM_PAYLOAD
+
+    monkeypatch.setattr(repo_analysis, "generate_json", fake_generate_json)
+    asyncio.run(
+        _generate_services(
+            context=_collect_context_excerpts(root),
+            manifest=None,
+            git_url="https://deploy-token:ghp_abc123@github.com/org/repo.git",
+            git_branch="main",
+            warnings=[],
+            root=root,
+        )
+    )
+    assert "deploy-token" not in captured["prompt"]
+    assert "ghp_abc123" not in captured["prompt"]
+    assert "Repository URL: https://github.com/org/repo.git" in captured["prompt"]
+
+
+def test_payload_to_services_drops_invalid_env_and_command_entries() -> None:
+    warnings: list[str] = []
+    payload = {
+        "services": [
+            {
+                "service_name": "web",
+                "source_kind": "git",
+                "source_ref": "",
+                "container_port": 8000,
+                "env_var_entries": [
+                    {"key": "GOOD_KEY", "value": "ok"},
+                    {"key": "BAD KEY!", "value": "x"},
+                    {"key": "LONG_VALUE", "value": "v" * 600},
+                ],
+                "command": ["uvicorn", "main:app", "x" * 300],
+                "public_route": True,
+                "depends_on": None,
+            }
+        ],
+        "summary_hint": "ok",
+    }
+    services = _payload_to_services(
+        payload,
+        git_url="https://github.com/org/repo.git",
+        git_branch="main",
+        warnings=warnings,
+    )
+    web = services[0]
+    assert web.env_vars == {"GOOD_KEY": "ok"}
+    assert web.command == ["uvicorn", "main:app"]
+    assert warnings == []
+
+
+def test_payload_to_services_all_invalid_command_becomes_none() -> None:
+    warnings: list[str] = []
+    payload = {
+        "services": [
+            {
+                "service_name": "web",
+                "source_kind": "git",
+                "source_ref": "",
+                "container_port": 8000,
+                "env_var_entries": [],
+                "command": ["   ", "x" * 300],
+                "public_route": False,
+                "depends_on": None,
+            }
+        ],
+        "summary_hint": "ok",
+    }
+    services = _payload_to_services(
+        payload,
+        git_url="https://github.com/org/repo.git",
+        git_branch="main",
+        warnings=warnings,
+    )
+    assert services[0].command is None
+    assert len(warnings) == 1
+    assert "command" in warnings[0]
 
 
 def test_analyze_repo_k8s_manifest(

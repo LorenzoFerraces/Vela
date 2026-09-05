@@ -22,7 +22,7 @@ def test_deploy_creates_audit_entry(api_client: TestClient) -> None:
     )
     assert response.status_code == 200
     logs = _get_audit_logs(api_client)
-    deploy_logs = [l for l in logs if l["action"] == "container.deploy"]
+    deploy_logs = [entry for entry in logs if entry["action"] == "container.deploy"]
     assert len(deploy_logs) >= 1
     last = deploy_logs[-1]
     assert last["target_type"] == "container"
@@ -34,28 +34,28 @@ def test_start_creates_audit_entry(api_client: TestClient) -> None:
     response = api_client.post("/api/containers/cid-1/start")
     assert response.status_code == 200
     logs = _get_audit_logs(api_client)
-    assert any(l["action"] == "container.start" for l in logs)
+    assert any(entry["action"] == "container.start" for entry in logs)
 
 
 def test_stop_creates_audit_entry(api_client: TestClient) -> None:
     response = api_client.post("/api/containers/cid-1/stop")
     assert response.status_code == 200
     logs = _get_audit_logs(api_client)
-    assert any(l["action"] == "container.stop" for l in logs)
+    assert any(entry["action"] == "container.stop" for entry in logs)
 
 
 def test_restart_creates_audit_entry(api_client: TestClient) -> None:
     response = api_client.post("/api/containers/cid-1/restart")
     assert response.status_code == 200
     logs = _get_audit_logs(api_client)
-    assert any(l["action"] == "container.restart" for l in logs)
+    assert any(entry["action"] == "container.restart" for entry in logs)
 
 
 def test_remove_creates_audit_entry(api_client: TestClient) -> None:
     response = api_client.delete("/api/containers/cid-1")
     assert response.status_code == 204
     logs = _get_audit_logs(api_client)
-    assert any(l["action"] == "container.remove" for l in logs)
+    assert any(entry["action"] == "container.remove" for entry in logs)
 
 
 def test_exec_creates_audit_entry(
@@ -66,6 +66,6 @@ def test_exec_creates_audit_entry(
     ) as websocket:
         websocket.receive_bytes()
     logs = _get_audit_logs(api_client)
-    exec_logs = [l for l in logs if l["action"] == "container.exec"]
+    exec_logs = [entry for entry in logs if entry["action"] == "container.exec"]
     assert len(exec_logs) == 1
     assert exec_logs[0]["target_id"] == "cid-1"

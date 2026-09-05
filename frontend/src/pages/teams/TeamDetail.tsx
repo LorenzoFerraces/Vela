@@ -144,7 +144,11 @@ export function TeamDetail({
               </>
             )}
             {isSelectedOwner ? (
-              <form className="teams-page__quota-form" onSubmit={onSaveQuota}>
+              <form
+                className="teams-page__quota-form"
+                onSubmit={onSaveQuota}
+                noValidate
+              >
                 <label className="teams-page__field">
                   Limit (GiB)
                   <input

@@ -4,10 +4,17 @@ import asyncio
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
+import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from app.core.logging.collector import LogCollector, batch_insert_logs, cleanup_old_logs
+from app.core.logging.collector import (
+    LogCollector,
+    _int_setting,
+    _split_log_timestamp,
+    batch_insert_logs,
+    cleanup_old_logs,
+)
 from app.db.base import Base
 from app.db.models import ContainerLog, LogLevel, LogSource
 
@@ -137,20 +144,33 @@ class StubOrchestrator:
 
     Each line is stamped with the stub clock so `since` filtering is exact:
     a line is returned iff its timestamp is >= `since` (inclusive, like Docker).
+    Lines are emitted with an RFC3339 prefix only when constructed with
+    `timestamps=True` (and the line was added as prefixed).
     """
 
-    def __init__(self, clock: _StubClock) -> None:
+    def __init__(self, clock: _StubClock, timestamps: bool = False) -> None:
         self.clock = clock
-        self.lines: dict[str, list[tuple[float, str]]] = {}
+        self.timestamps = timestamps
+        self.lines: dict[str, list[tuple[float, str, bool]]] = {}
         self.log_calls: list[tuple[str, int | None, float | None]] = []
 
-    def add(self, container_id: str, *lines: str) -> None:
+    def add(self, container_id: str, *lines: str, prefixed: bool = True) -> None:
         for line in lines:
-            self.lines.setdefault(container_id, []).append((self.clock.now, line))
+            self.lines.setdefault(container_id, []).append(
+                (self.clock.now, line, prefixed)
+            )
             self.clock.advance(1.0)
 
     def restamp(self, container_id: str, ts: float) -> None:
-        self.lines[container_id] = [(ts, line) for _, line in self.lines[container_id]]
+        self.lines[container_id] = [
+            (ts, line, prefixed) for ts, line, prefixed in self.lines[container_id]
+        ]
+
+    @staticmethod
+    def _stamp(ts: float) -> str:
+        return datetime.fromtimestamp(ts, tz=timezone.utc).strftime(
+            "%Y-%m-%dT%H:%M:%S.%fZ"
+        )
 
     async def list(self) -> list[_StubContainer]:
         return [_StubContainer(id=cid) for cid in self.lines]
@@ -161,6 +181,7 @@ class StubOrchestrator:
         *,
         tail: int | None = 100,
         since: float | None = None,
+        timestamps: bool = False,
     ) -> str:
         self.log_calls.append((container_id, tail, since))
         entries = self.lines.get(container_id, [])
@@ -168,7 +189,13 @@ class StubOrchestrator:
             entries = [entry for entry in entries if entry[0] >= since]
         if tail is not None:
             entries = entries[-tail:]
-        return "".join(f"{line}\n" for _, line in entries)
+        parts = []
+        for ts, line, prefixed in entries:
+            if timestamps and self.timestamps and prefixed:
+                parts.append(f"{self._stamp(ts)} {line}\n")
+            else:
+                parts.append(f"{line}\n")
+        return "".join(parts)
 
 
 def _make_session_factory() -> async_sessionmaker[AsyncSession]:
@@ -190,6 +217,13 @@ def _log_rows(factory: async_sessionmaker[AsyncSession]) -> list[ContainerLog]:
             return list(result.scalars().all())
 
     return asyncio.run(run())
+
+
+def _naive_utc(value: datetime) -> datetime:
+    # ponytail: sqlite round-trips strip tzinfo (naive UTC wall time); Postgres returns aware
+    if value.tzinfo is not None:
+        value = value.astimezone(timezone.utc).replace(tzinfo=None)
+    return value
 
 
 def test_first_poll_seeds_without_insert() -> None:
@@ -361,3 +395,118 @@ def test_default_session_factory_inserts_logs(
 
     asyncio.run(run())
     assert [row.message for row in _log_rows(factory)] == ["l2"]
+
+
+def test_split_log_timestamp_prefix() -> None:
+    ts, message = _split_log_timestamp("2026-09-04T12:34:56.789012Z hello world")
+    assert ts == datetime(2026, 9, 4, 12, 34, 56, 789012, tzinfo=timezone.utc)
+    assert message == "hello world"
+
+    ts, message = _split_log_timestamp("2026-09-04T14:34:56+02:00 offset line")
+    assert ts == datetime(2026, 9, 4, 12, 34, 56, tzinfo=timezone.utc)
+    assert message == "offset line"
+
+    ts, message = _split_log_timestamp("2026-09-04T12:34:56.5Z short fraction")
+    assert ts == datetime(2026, 9, 4, 12, 34, 56, 500000, tzinfo=timezone.utc)
+    assert message == "short fraction"
+
+    assert _split_log_timestamp("plain line without prefix") == (
+        None,
+        "plain line without prefix",
+    )
+    assert _split_log_timestamp("2026-09-04T12:34:56.987654321Z nine digits") == (
+        datetime(2026, 9, 4, 12, 34, 56, 987654, tzinfo=timezone.utc),
+        "nine digits",
+    )
+    assert _split_log_timestamp("2026-13-45T99:99:99Z not a date") == (
+        None,
+        "2026-13-45T99:99:99Z not a date",
+    )
+    assert _split_log_timestamp("2026-09-04T12:34:56Z") == (
+        None,
+        "2026-09-04T12:34:56Z",
+    )
+
+
+def test_prefixed_lines_use_line_timestamps() -> None:
+    factory = _make_session_factory()
+    clock = _StubClock()
+    orchestrator = StubOrchestrator(clock, timestamps=True)
+    t0 = clock.now
+    orchestrator.add("c1", "a", "b", "c")
+    collector = LogCollector(
+        orchestrator,
+        session_factory=factory,
+        poll_interval=0,
+        max_lines_per_poll=50,
+        clock=clock,
+    )
+
+    async def run() -> None:
+        await collector.poll_once()
+        orchestrator.add("c1", "d")
+        await collector.poll_once()
+
+    asyncio.run(run())
+    rows = _log_rows(factory)
+    assert [row.message for row in rows] == ["d"]
+    assert _naive_utc(rows[0].timestamp) == datetime.fromtimestamp(
+        t0 + 3, tz=timezone.utc
+    ).replace(tzinfo=None)
+    assert orchestrator.log_calls[0][2] is None
+    assert orchestrator.log_calls[1][2] == t0 + 2
+
+
+def test_mixed_prefixed_and_unprefixed_lines() -> None:
+    factory = _make_session_factory()
+    clock = _StubClock()
+    orchestrator = StubOrchestrator(clock, timestamps=True)
+    t0 = clock.now
+    orchestrator.add("c1", "seed")
+    collector = LogCollector(
+        orchestrator,
+        session_factory=factory,
+        poll_interval=0,
+        max_lines_per_poll=50,
+        clock=clock,
+    )
+
+    async def run() -> None:
+        await collector.poll_once()
+        orchestrator.add("c1", "p1")
+        orchestrator.add("c1", "u1", prefixed=False)
+        orchestrator.add("c1", "p2")
+        await collector.poll_once()
+        orchestrator.add("c1", "p3")
+        await collector.poll_once()
+
+    asyncio.run(run())
+    rows = _log_rows(factory)
+    assert [row.message for row in rows] == ["p1", "u1", "p2", "p3"]
+    assert _naive_utc(rows[0].timestamp) == datetime.fromtimestamp(
+        t0 + 1, tz=timezone.utc
+    ).replace(tzinfo=None)
+    assert _naive_utc(rows[2].timestamp) == datetime.fromtimestamp(
+        t0 + 3, tz=timezone.utc
+    ).replace(tzinfo=None)
+    assert (
+        abs(
+            (_naive_utc(datetime.now(timezone.utc)) - _naive_utc(rows[1].timestamp))
+            .total_seconds()
+        )
+        < 60
+    )
+    assert orchestrator.log_calls[2][2] == t0 + 3
+
+
+def test_int_setting_falls_back_on_malformed_value(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("VELA_LOG_BATCH_SIZE", "abc")
+    assert _int_setting("VELA_LOG_BATCH_SIZE", 100) == 100
+    monkeypatch.setenv("VELA_LOG_RETENTION_DAYS", "7d")
+    assert _int_setting("VELA_LOG_RETENTION_DAYS", 7) == 7
+    monkeypatch.delenv("VELA_LOG_BATCH_SIZE", raising=False)
+    assert _int_setting("VELA_LOG_BATCH_SIZE", 100) == 100
+    monkeypatch.setenv("VELA_LOG_BATCH_SIZE", "42")
+    assert _int_setting("VELA_LOG_BATCH_SIZE", 100) == 42

@@ -49,33 +49,33 @@ def test_exec_ws_sends_carriage_return_and_gets_echo(
 def test_exec_ws_rejects_unauthenticated(
     anonymous_client: TestClient
 ) -> None:
-    with pytest.raises(WebSocketDisconnect) as exc:
-        with anonymous_client.websocket_connect(
-            "/api/containers/cid-1/exec/ws"
-        ):
-            pass
+    with anonymous_client.websocket_connect(
+        "/api/containers/cid-1/exec/ws"
+    ) as websocket:
+        with pytest.raises(WebSocketDisconnect) as exc:
+            websocket.receive_text()
     assert exc.value.code == 1008
 
 
 def test_exec_ws_rejects_invalid_token(
     api_client: TestClient
 ) -> None:
-    with pytest.raises(WebSocketDisconnect) as exc:
-        with api_client.websocket_connect(
-            "/api/containers/cid-1/exec/ws?access_token=not-a-jwt"
-        ):
-            pass
+    with api_client.websocket_connect(
+        "/api/containers/cid-1/exec/ws?access_token=not-a-jwt"
+    ) as websocket:
+        with pytest.raises(WebSocketDisconnect) as exc:
+            websocket.receive_text()
     assert exc.value.code == 1008
 
 
 def test_exec_ws_rejects_invalid_container(
     api_client: TestClient, auth_token: str
 ) -> None:
-    with pytest.raises(WebSocketDisconnect) as exc:
-        with api_client.websocket_connect(
-            f"/api/containers/nonexistent/exec/ws?access_token={auth_token}"
-        ):
-            pass
+    with api_client.websocket_connect(
+        f"/api/containers/nonexistent/exec/ws?access_token={auth_token}"
+    ) as websocket:
+        with pytest.raises(WebSocketDisconnect) as exc:
+            websocket.receive_text()
     assert exc.value.code == 1008
 
 
@@ -192,3 +192,69 @@ def test_exec_ws_valid_resize_swallowed(
                 break
     assert b"probe" in data
     assert b"resize" not in data
+
+
+def _recording_stream_exec(fake_orchestrator) -> tuple[dict, object]:
+    seen: dict[str, int] = {}
+    original = fake_orchestrator.stream_exec
+
+    async def recording(container_id: str, **kwargs: int) -> object:
+        seen.update(kwargs)
+        return await original(container_id, **kwargs)
+
+    return seen, recording
+
+
+def test_exec_ws_binary_init_frame(
+    make_authed_client, fake_orchestrator, auth_token: str
+) -> None:
+    seen, recording = _recording_stream_exec(fake_orchestrator)
+    fake_orchestrator.stream_exec = recording
+    with make_authed_client() as client:
+        with client.websocket_connect(
+            f"/api/containers/cid-1/exec/ws?access_token={auth_token}"
+        ) as websocket:
+            websocket.send_bytes(b'{"cols": 100, "rows": 30}')
+            websocket.send_text("probe\n")
+            data = b""
+            for _ in range(20):
+                data += websocket.receive_bytes()
+                if b"probe" in data:
+                    break
+    assert b"probe" in data
+    assert seen == {"cols": 100, "rows": 30}
+
+
+def test_exec_ws_init_out_of_range_falls_back_to_defaults(
+    make_authed_client, fake_orchestrator, auth_token: str
+) -> None:
+    seen, recording = _recording_stream_exec(fake_orchestrator)
+    fake_orchestrator.stream_exec = recording
+    with make_authed_client() as client:
+        with client.websocket_connect(
+            f"/api/containers/cid-1/exec/ws?access_token={auth_token}"
+        ) as websocket:
+            websocket.send_text(json.dumps({"cols": 999999, "rows": 42}))
+            websocket.receive_bytes()
+    assert seen == {"cols": 80, "rows": 42}
+
+
+def test_exec_ws_init_invalid_numbers_not_injected_to_shell(
+    make_authed_client, fake_orchestrator, auth_token: str
+) -> None:
+    seen, recording = _recording_stream_exec(fake_orchestrator)
+    fake_orchestrator.stream_exec = recording
+    with make_authed_client() as client:
+        with client.websocket_connect(
+            f"/api/containers/cid-1/exec/ws?access_token={auth_token}"
+        ) as websocket:
+            websocket.send_text(json.dumps({"cols": "garbage", "rows": 24}))
+            websocket.send_text("probe\n")
+            data = b""
+            for _ in range(20):
+                data += websocket.receive_bytes()
+                if b"probe" in data:
+                    break
+    assert b"probe" in data
+    assert b"garbage" not in data
+    assert seen == {"cols": 80, "rows": 24}

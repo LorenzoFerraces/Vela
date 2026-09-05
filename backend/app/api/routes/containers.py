@@ -9,7 +9,6 @@ import os
 import uuid
 from contextlib import suppress
 from typing import Annotated, Callable
-from urllib.parse import urlparse
 
 from fastapi import (
     APIRouter,
@@ -73,6 +72,11 @@ from app.core.containers.volume_uploads import (
     volume_upload_user_quota_bytes,
 )
 from app.core.deploy.deploy_source_display import source_ref_looks_like_uuid
+from app.core.deploy.github_auth import (
+    github_token_for_url,
+    is_github_https_url,
+    looks_like_auth_failure,
+)
 from app.core.deploy.deploy_source_suggestions import (
     DeploySourcesResponse,
     collect_deploy_source_suggestions,
@@ -107,7 +111,6 @@ from app.core.models import (
     ProjectSource,
     VolumeMount,
 )
-from app.core.oauth import decrypt_identity_token, get_github_identity
 from app.core.quotas import (
     effective_quota_bytes,
     enforce_team_storage_capacity,
@@ -126,6 +129,7 @@ from app.core.traffic.public_route_host import (
     read_public_route_settings,
 )
 from app.core.traffic.traffic_router import TrafficRouter
+from app.core.url_display import sanitize_url_for_display
 from app.db.models import Dockerfile, Project, ProjectMembership, User
 
 logger = logging.getLogger(__name__)
@@ -167,6 +171,25 @@ def _parse_resize_message(raw: str) -> tuple[int, int] | None:
     if not (1 <= cols <= _MAX_TERMINAL_DIMENSION and 1 <= rows <= _MAX_TERMINAL_DIMENSION):
         return None
     return cols, rows
+
+
+def _init_dimension(value: object, default: int) -> int:
+    """Return ``value`` if it is an int within terminal bounds, else ``default``."""
+    if type(value) is int and 1 <= value <= _MAX_TERMINAL_DIMENSION:
+        return value
+    return default
+
+
+async def _receive_terminal_text(websocket: WebSocket) -> str | None:
+    """Receive one frame as text, decoding binary frames (terminals may send keystrokes as bytes)."""
+    message = await websocket.receive()
+    text = message.get("text")
+    if text is not None:
+        return text
+    data = message.get("bytes")
+    if data is not None:
+        return data.decode("utf-8", errors="replace")
+    return None
 
 
 def _with_owner_label(config: DeployConfig, owner_id: str) -> DeployConfig:
@@ -262,46 +285,6 @@ def _infer_source_kind(source: str) -> tuple[str, str]:
     return "image", stripped
 
 
-def _is_github_https_url(source: str) -> bool:
-    """True for the HTTPS forms we can authenticate with a stored access token."""
-    try:
-        parsed = urlparse(source)
-    except ValueError:
-        return False
-    if parsed.scheme not in {"http", "https"}:
-        return False
-    host = (parsed.hostname or "").lower()
-    return host == "github.com" or host.endswith(".github.com")
-
-
-async def _github_token_for_url(
-    session: AsyncSession, user: User, source: str
-) -> str | None:
-    """Decrypt the user's GitHub token if ``source`` is a GitHub HTTPS URL."""
-    if not _is_github_https_url(source):
-        return None
-    identity = await get_github_identity(session, user.id)
-    if identity is None:
-        return None
-    return decrypt_identity_token(identity)
-
-
-def _looks_like_auth_failure(error_message: str) -> bool:
-    lowered = error_message.lower()
-    auth_markers = (
-        "authentication failed",
-        "could not read username",
-        "terminal prompts disabled",
-        "http 401",
-        "http 403",
-        "403",
-        "401",
-        "permission denied",
-        "repository not found",
-    )
-    return any(marker in lowered for marker in auth_markers)
-
-
 def _deploy_config_for_image(
     *,
     image: str,
@@ -354,16 +337,6 @@ def _route_updates_from_run_body(body: RunFromSourceRequest) -> dict[str, object
 
 
 _DEPLOYMENT_ENV_VALUE_REDACTED = "<REDACTED>"
-
-
-def _sanitize_url_for_audit(url: str) -> str:
-    """Remove userinfo, query, and fragment from URL for audit persistence."""
-    try:
-        parsed = urlparse(url)
-        clean = parsed._replace(netloc=parsed.hostname or "", query="", fragment="")
-        return clean.geturl()
-    except ValueError:
-        return url
 
 
 def _redacted_env_vars_for_history(env_vars: dict[str, str]) -> dict[str, str]:
@@ -1010,7 +983,8 @@ async def run_from_user_source(
         )
 
     git_url = (body.git_url or "").strip()
-    access_token = await _github_token_for_url(session, current_user, git_url)
+    sanitized_git_url = sanitize_url_for_display(git_url)
+    access_token = await github_token_for_url(session, current_user, git_url)
     tag = f"vela/gitbuild:{uuid.uuid4().hex[:12]}"
     try:
         build_result = await image_builder.build_from_source(
@@ -1022,8 +996,8 @@ async def run_from_user_source(
     except CloneError as exc:
         if (
             access_token is None
-            and _is_github_https_url(git_url)
-            and _looks_like_auth_failure(str(exc))
+            and is_github_https_url(git_url)
+            and looks_like_auth_failure(str(exc))
         ):
             raise CloneError(
                 git_url,
@@ -1047,7 +1021,9 @@ async def run_from_user_source(
             **_route_updates_from_run_body(body),
         }
     )
-    cfg = with_deploy_source_labels(cfg, source_kind="git", source_ref=git_url)
+    cfg = with_deploy_source_labels(
+        cfg, source_kind="git", source_ref=sanitized_git_url
+    )
     cfg = _apply_deploy_labels(
         cfg, owner_id=str(current_user.id), project_id=project_id
     )
@@ -1062,7 +1038,7 @@ async def run_from_user_source(
         info,
         project_id=project_id,
         source_kind="git",
-        source_ref=git_url,
+        source_ref=sanitized_git_url,
         image_tag=build_result.image_tag,
         dockerfile_snapshot=build_result.dockerfile_snapshot,
         public_url=public_url,
@@ -1078,7 +1054,7 @@ async def run_from_user_source(
         target_id=info.id,
         details={
             "source_kind": "git",
-            "source_ref": _sanitize_url_for_audit(git_url),
+            "source_ref": sanitized_git_url,
         },
     )
     await session.commit()
@@ -1290,6 +1266,11 @@ async def container_exec_ws(
     token = websocket.query_params.get("access_token")
 
     try:
+        await websocket.accept()
+    except WebSocketDisconnect:
+        return
+
+    try:
         if not token:
             raise NotAuthenticatedError()
         claims = decode_access_token(token)
@@ -1319,11 +1300,6 @@ async def container_exec_ws(
     await session.close()
 
     try:
-        await websocket.accept()
-    except WebSocketDisconnect:
-        return
-
-    try:
         await asyncio.wait_for(
             _exec_semaphore.acquire(), timeout=_EXEC_SEMAPHORE_ACQUIRE_TIMEOUT
         )
@@ -1338,18 +1314,21 @@ async def container_exec_ws(
         cols, rows = 80, 24
         pending_init: str | None = None
         try:
-            init_raw = await asyncio.wait_for(websocket.receive_text(), timeout=5.0)
+            init_raw = await asyncio.wait_for(
+                _receive_terminal_text(websocket), timeout=5.0
+            )
+        except asyncio.TimeoutError:
+            init_raw = None
+        if init_raw is not None:
             try:
                 init_msg = json.loads(init_raw)
-                if isinstance(init_msg, dict) and ("cols" in init_msg or "rows" in init_msg):
-                    cols = int(init_msg.get("cols", 80))
-                    rows = int(init_msg.get("rows", 24))
-                else:
-                    pending_init = init_raw
-            except (json.JSONDecodeError, ValueError, TypeError):
+            except (json.JSONDecodeError, TypeError):
+                init_msg = None
+            if isinstance(init_msg, dict) and ("cols" in init_msg or "rows" in init_msg):
+                cols = _init_dimension(init_msg.get("cols"), 80)
+                rows = _init_dimension(init_msg.get("rows"), 24)
+            else:
                 pending_init = init_raw
-        except asyncio.TimeoutError:
-            pass
 
         try:
             stdout_iter, stdin_write, exec_close_fn, exec_id = await orchestrator.stream_exec(
@@ -1379,7 +1358,9 @@ async def container_exec_ws(
         async def _forward_to_container() -> None:
             try:
                 while True:
-                    msg = await websocket.receive_text()
+                    msg = await _receive_terminal_text(websocket)
+                    if msg is None:
+                        continue
                     resize = _parse_resize_message(msg)
                     if resize is not None:
                         new_cols, new_rows = resize

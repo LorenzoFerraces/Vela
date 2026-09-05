@@ -62,9 +62,6 @@ export function volumesFromRows(
   const mounts: Array<{ upload_id: string; target: string }> = []
   for (const row of rows) {
     const target = row.target.trim()
-    if (!row.uploadId && !target) {
-      continue
-    }
     if (!row.uploadId || !target) {
       continue
     }

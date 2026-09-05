@@ -7,6 +7,7 @@ import {
   type DeploymentRecord,
 } from '../../api/client'
 import { deploySourceImageLabel } from './deploySourceDisplay'
+import { Skeleton } from '../../components/Skeleton'
 
 function formatWhen(iso: string): string {
   const date = new Date(iso)
@@ -172,7 +173,11 @@ export function DeploymentHistorySection({
       <>
       <div aria-live="polite" className="deployment-history__body">
         {loading && rows.length === 0 ? (
-          <p className="containers-muted">Loading deploy history…</p>
+          <div aria-busy="true" aria-label="Loading deploy history">
+            {[1, 2, 3].map((row) => (
+              <Skeleton key={row} className="skeleton--team-row" />
+            ))}
+          </div>
         ) : null}
         {error ? (
           <p className="containers-banner containers-banner--err" role="alert">

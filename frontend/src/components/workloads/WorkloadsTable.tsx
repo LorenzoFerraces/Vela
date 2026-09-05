@@ -4,6 +4,7 @@ import type { ContainerInfo } from '../../api/client'
 import type { WorkloadGroup } from '../../pages/containers/workloadGrouping'
 import { workloadInstances } from '../../pages/containers/workloadGrouping'
 import { WorkloadRow, type WorkloadStatsCellProps } from './WorkloadRow'
+import { Skeleton } from '../Skeleton'
 
 type WorkloadsTableProps = {
   listLoading: boolean
@@ -175,7 +176,11 @@ export function WorkloadsTable({
   return (
     <div className="workloads-table-wrap-outer">
       {listLoading && groups.length === 0 ? (
-        <p className="containers-muted">Loading…</p>
+        <div aria-busy="true" aria-label="Loading workloads">
+          {[1, 2, 3].map((row) => (
+            <Skeleton key={row} className="skeleton--team-row" />
+          ))}
+        </div>
       ) : groups.length === 0 ? (
         <p className="containers-muted">No Vela-managed containers yet.</p>
       ) : (

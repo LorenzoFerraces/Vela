@@ -147,7 +147,7 @@ def _parse_workload(
     ports = container.get("ports")
     if isinstance(ports, list) and ports and isinstance(ports[0], dict):
         try:
-            container_port = int(ports[0].get("containerPort"))
+            container_port = int(ports[0].get("containerPort"))  # type: ignore[arg-type]  # int(None) is the TypeError caught below
         except (TypeError, ValueError):
             pass
 

@@ -1,5 +1,6 @@
 import type { Project } from '../../api/client'
 import { teamDisplayName } from '../../projects/teamDisplay'
+import { Skeleton } from '../../components/Skeleton'
 
 type DeployProjectSelectProps = {
   projects: Project[]
@@ -18,9 +19,10 @@ export function DeployProjectSelect({
 }: DeployProjectSelectProps) {
   if (loading) {
     return (
-      <p className="containers-muted containers-form__hint" role="status">
-        Loading teams…
-      </p>
+      <div className="containers-form__stack" aria-busy="true" aria-label="Loading teams">
+        <Skeleton className="skeleton--hint-line" />
+        <Skeleton className="skeleton--invite-field" />
+      </div>
     )
   }
 

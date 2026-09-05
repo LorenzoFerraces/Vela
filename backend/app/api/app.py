@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import app.bootstrap_env  # noqa: F401 — loads backend/.env before other app imports.
+from app import bootstrap_env  # noqa: F401 — loads backend/.env before other app imports.
 
 import asyncio
 import logging

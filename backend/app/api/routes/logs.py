@@ -36,7 +36,7 @@ async def query_logs(
     source: LogSource | None = Query(None),
     start_time: datetime | None = Query(None),
     end_time: datetime | None = Query(None),
-    q: str | None = Query(None, description="Full-text search"),
+    q: str | None = Query(None, max_length=512, description="Full-text search"),
     limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0),
 ) -> dict:
@@ -100,7 +100,7 @@ async def export_logs(
     source: LogSource | None = Query(None),
     start_time: datetime | None = Query(None),
     end_time: datetime | None = Query(None),
-    q: str | None = Query(None, description="Full-text search"),
+    q: str | None = Query(None, max_length=512, description="Full-text search"),
     limit: int = Query(5000, ge=1, le=50000),
 ) -> StreamingResponse:
     # ponytail: materializes up to `limit` rows in memory — accepted ceiling for CSV export

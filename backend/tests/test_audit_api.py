@@ -7,7 +7,6 @@ from fastapi.testclient import TestClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.audit.service import emit_audit_log
-from app.db.models import AuditLog
 
 
 TEST_USER_ID = uuid.UUID("11111111-1111-1111-1111-111111111111")

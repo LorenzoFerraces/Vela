@@ -6,6 +6,7 @@ import asyncio
 import hashlib
 import re
 from pathlib import Path
+from typing import Literal
 
 from pydantic import ValidationError
 
@@ -25,7 +26,7 @@ from app.core.llm.cache import delete_cached, load_cached, store_cached
 from app.e2e_support import e2e_git_source_analysis_if_enabled
 MAX_FILE_BYTES = 12_000
 MAX_TOTAL_BYTES = 48_000
-GIT_SOURCE_PROMPT_VERSION = "v2"  # ponytail: bumped for the full-result cache format change
+GIT_SOURCE_PROMPT_VERSION = "v3"  # ponytail: bumped for URL/secret redaction in prompts and pre-filled values
 
 _README_CANDIDATES = ("README.md", "README", "readme.md", "Readme.md")
 
@@ -93,6 +94,33 @@ _ENV_VAR_TABLE_ROW = re.compile(
 _ENV_ASSIGNMENT = re.compile(
     r"^(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)=(.*)$",
 )
+
+# Key names and value prefixes that must never reach the LLM provider
+_SECRET_KEY_MARKERS = (
+    "PASSWORD",
+    "SECRET",
+    "TOKEN",
+    "APIKEY",
+    "API_KEY",
+    "AUTH",
+    "CREDENTIAL",
+    "PRIVATE_KEY",
+    "JWT",
+)
+_SECRET_KEY_SUFFIXES = ("_KEY", "_TOKEN", "_SECRET", "_PASSWORD")
+_SECRET_VALUE_PREFIX = re.compile(
+    r"^(?:ghp_|gho_|github_pat_|xox[baprs]-|sk-|AKIA[0-9A-Z]{16}"
+    r"|AIza[0-9A-Za-z_-]{20,}|-----BEGIN )"
+)
+_ENV_ASSIGNMENT_LINE = re.compile(
+    r"^(\s*(?:export\s+)?)([A-Za-z_][A-Za-z0-9_]*)(=)(.*)$"
+)
+_DOCKER_ENV_LINE = re.compile(r"^(\s*)(ENV|ARG)(\s+)(\S+)(\s+)?(.*)$")
+
+MAX_ENV_KEY_LENGTH = 128
+MAX_ENV_VALUE_LENGTH = 512
+MAX_COMMAND_TOKEN_LENGTH = 200
+_ENV_VAR_KEY = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 GIT_SOURCE_ANALYSIS_PROMPT_V1 = """You analyze Git repositories for deployment on Vela (Docker containers behind Traefik public routes).
 
@@ -217,6 +245,56 @@ def _subdir_marker_files(root: Path) -> list[tuple[str, str]]:
     return results
 
 
+def _is_secret_like_key(key: str) -> bool:
+    upper = key.upper()
+    return any(marker in upper for marker in _SECRET_KEY_MARKERS) or upper.endswith(
+        _SECRET_KEY_SUFFIXES
+    )
+
+
+def _unquote(value: str) -> str:
+    stripped = value.strip()
+    if len(stripped) >= 2 and stripped[0] == stripped[-1] and stripped[0] in {"'", '"'}:
+        return stripped[1:-1].strip()
+    return stripped
+
+
+def _should_redact_value(key: str, value: str) -> bool:
+    if not value.strip():
+        return False
+    if _is_secret_like_key(key):
+        return True
+    return _SECRET_VALUE_PREFIX.match(_unquote(value)) is not None
+
+
+def _redact_line(line: str) -> str:
+    assignment = _ENV_ASSIGNMENT_LINE.match(line)
+    if assignment is not None:
+        prefix, key, equals, value = assignment.groups()
+        if _should_redact_value(key, value):
+            return f"{prefix}{key}{equals}[REDACTED]"
+        return line
+    docker_env = _DOCKER_ENV_LINE.match(line)
+    if docker_env is not None:
+        indent, instruction, space, first, space2, rest = docker_env.groups()
+        if "=" in first:
+            key, _, value = first.partition("=")
+            if _should_redact_value(key, value):
+                suffix = f"{space2}{rest}" if space2 else ""
+                return f"{indent}{instruction}{space}{key}=[REDACTED]{suffix}"
+            return line
+        if rest and _should_redact_value(first, rest):
+            return f"{indent}{instruction}{space}{first}{space2}[REDACTED]"
+    return line
+
+
+def _redact_secret_values(text: str) -> str:
+    redacted = "\n".join(_redact_line(line) for line in text.splitlines())
+    if text.endswith("\n"):
+        redacted += "\n"
+    return redacted
+
+
 def _append_excerpt(
     parts: list[str],
     *,
@@ -224,7 +302,7 @@ def _append_excerpt(
     label: str,
     text: str,
 ) -> int:
-    chunk = f"=== {label} ===\n{text.strip()}\n"
+    chunk = f"=== {label} ===\n{_redact_secret_values(text.strip())}\n"
     if total + len(chunk) > MAX_TOTAL_BYTES:
         return total
     parts.append(chunk)
@@ -394,13 +472,27 @@ def _detected_facts_block(
     env_vars = _extract_env_vars_from_context(context)
     if env_vars:
         rendered = ", ".join(
-            f"{key}={value}" if value else key
+            f"{key}=[REDACTED]"
+            if value and _should_redact_value(key, value)
+            else (f"{key}={value}" if value else key)
             for key, value in list(env_vars.items())[:20]
         )
         if len(env_vars) > 20:
             rendered += " (more truncated)"
         lines.append(f"documented env vars: {rendered}")
     return "\n".join(f"- {line}" for line in lines)
+
+
+def _valid_env_key(key: str) -> bool:
+    return len(key) <= MAX_ENV_KEY_LENGTH and _ENV_VAR_KEY.fullmatch(key) is not None
+
+
+def _validated_env_vars(env_vars: dict[str, str]) -> dict[str, str]:
+    return {
+        key: value
+        for key, value in env_vars.items()
+        if _valid_env_key(key) and len(value) <= MAX_ENV_VALUE_LENGTH
+    }
 
 
 def _env_vars_from_payload(parsed: dict[str, object]) -> dict[str, str]:
@@ -421,7 +513,20 @@ def _env_vars_from_payload(parsed: dict[str, object]) -> dict[str, str]:
                 continue
             raw_value = entry.get("value")
             env_vars[key] = "" if raw_value is None else str(raw_value)
-    return env_vars
+    return _validated_env_vars(env_vars)
+
+
+def _clean_command_list(raw: object) -> list[str] | None:
+    if raw is None or not isinstance(raw, list):
+        return None
+    tokens = [
+        token.strip()
+        for token in raw
+        if isinstance(token, str)
+        and token.strip()
+        and len(token.strip()) <= MAX_COMMAND_TOKEN_LENGTH
+    ]
+    return tokens or None
 
 
 def _payload_to_analysis(parsed: dict[str, object]) -> GitSourceAnalysis:
@@ -429,6 +534,7 @@ def _payload_to_analysis(parsed: dict[str, object]) -> GitSourceAnalysis:
     payload = dict(parsed)
     payload["env_vars"] = env_vars
     payload.pop("env_var_entries", None)
+    payload["start_command"] = _clean_command_list(payload.get("start_command"))
     return GitSourceAnalysis.model_validate(payload)
 
 
@@ -514,9 +620,11 @@ async def _call_gemini(
     facts: str = "",
     commit: str = "",
 ) -> GitSourceAnalysis:
+    # ponytail: prompt-only redaction; the raw url is still used for clone and cache key
+    redacted_url = _CREDENTIALS_IN_URL.sub(r"\1", git_url)
     prompt = (
         f"{GIT_SOURCE_ANALYSIS_PROMPT_V1}\n\n"
-        f"Repository: {git_url}\n"
+        f"Repository: {redacted_url}\n"
         f"Requested branch: {git_branch}\n\n"
         f"{context}"
     )
@@ -563,7 +671,9 @@ def _fallback_analysis(
         port = 8000
     elif info.language == "go":
         port = 8080
-    strategy = "dockerfile_exists" if info.has_dockerfile else "generated_dockerfile"
+    strategy: Literal["dockerfile_exists", "generated_dockerfile"] = (
+        "dockerfile_exists" if info.has_dockerfile else "generated_dockerfile"
+    )
     hint = (
         "Dockerfile found in the repository."
         if info.has_dockerfile
@@ -635,12 +745,12 @@ async def analyze_git_source(
     cache_key = _git_source_cache_key(git_url, commit, git_branch)
     # ponytail: full-result cache hit returns the stored GitSourceAnalysis and skips the clone
     if cache_key:
-        cached = load_cached("git_source", cache_key, GIT_SOURCE_PROMPT_VERSION)
+        cached = await load_cached("git_source", cache_key, GIT_SOURCE_PROMPT_VERSION)
         if cached is not None:
             try:
                 return GitSourceAnalysis.model_validate(cached)
             except ValidationError:
-                delete_cached("git_source", cache_key, GIT_SOURCE_PROMPT_VERSION)
+                await delete_cached("git_source", cache_key, GIT_SOURCE_PROMPT_VERSION)
 
     # Cache miss: clone + full analysis (single analyze_project, off-loop FS walks).
     project_path = await image_builder.clone_repository(
@@ -658,7 +768,7 @@ async def analyze_git_source(
         enriched = _enrich_with_local_detection(analysis, info)
         result = _merge_env_fallback(enriched, context)
         if cache_key:
-            store_cached("git_source", cache_key, GIT_SOURCE_PROMPT_VERSION, result.model_dump(mode="json"))
+            await store_cached("git_source", cache_key, GIT_SOURCE_PROMPT_VERSION, result.model_dump(mode="json"))
         return result
     finally:
         rm_tree(parent)

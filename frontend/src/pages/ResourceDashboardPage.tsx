@@ -6,7 +6,7 @@ import {
   listContainers,
   type MetricPoint,
 } from '../api/client'
-import { MetricChart } from '../components/charts/MetricChart'
+import { CHART_COLORS, MetricChart } from '../components/charts/MetricChart'
 import { formatBytes } from '../utils/formatBytes'
 import { Skeleton } from '../components/Skeleton'
 import './resource-dashboard.css'
@@ -128,7 +128,7 @@ export default function ResourceDashboardPage() {
               data={chartData}
               dataKey="cpu"
               label="CPU %"
-              color="#bc7fed"
+              color={CHART_COLORS.accent}
               yAxisLabel="CPU %"
               formatValue={(v) => `${v.toFixed(1)}%`}
             />
@@ -140,7 +140,7 @@ export default function ResourceDashboardPage() {
               data={chartData}
               dataKey="memoryUsage"
               label="Memory"
-              color="#4ade80"
+              color={CHART_COLORS.ok}
               yAxisLabel="Memory"
               chartType="area"
               formatValue={formatBytes}
@@ -158,7 +158,7 @@ export default function ResourceDashboardPage() {
               data={chartData}
               dataKey="memoryPercent"
               label="Memory %"
-              color="#fbbf24"
+              color={CHART_COLORS.warn}
               yAxisLabel="Mem %"
               chartType="area"
               formatValue={(v) => `${v.toFixed(1)}%`}
@@ -173,8 +173,8 @@ export default function ResourceDashboardPage() {
               yAxisLabel="Bytes"
               formatValue={formatBytes}
               series={[
-                { dataKey: 'networkRx', label: 'Network Rx', color: '#9aa5b4' },
-                { dataKey: 'networkTx', label: 'Network Tx', color: '#bc7fed' },
+                { dataKey: 'networkRx', label: 'Network Rx', color: CHART_COLORS.info },
+                { dataKey: 'networkTx', label: 'Network Tx', color: CHART_COLORS.accent },
               ]}
             />
           </div>

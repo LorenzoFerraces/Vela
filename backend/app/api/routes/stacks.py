@@ -44,6 +44,7 @@ from app.core.stacks.repository import (
     update_stack,
 )
 from app.core.traffic.traffic_router import TrafficRouter
+from app.core.url_display import sanitize_url_for_display
 from app.db.models import Stack, StackService, User
 
 logger = logging.getLogger(__name__)
@@ -145,9 +146,9 @@ async def analyze_repo_route(
     session: Annotated[AsyncSession, Depends(get_db)],
     image_builder: Annotated[DefaultImageBuilder, Depends(get_image_builder)],
 ) -> AnalyzeRepoResponse:
-    from app.api.routes.containers import _github_token_for_url
+    from app.core.deploy.github_auth import github_token_for_url
 
-    access_token = await _github_token_for_url(session, current_user, body.git_url)
+    access_token = await github_token_for_url(session, current_user, body.git_url)
     analysis = await analyze_repo_stack(
         image_builder,
         git_url=body.git_url,
@@ -270,12 +271,12 @@ async def deploy_user_stack(
 
     child_stacks = []
     for comp in stack.compositions_parent:
-        result = await session.execute(
+        child_result = await session.execute(
             sa_select(Stack)
             .where(Stack.id == comp.child_stack_id)
             .options(selectinload(Stack.services))
         )
-        child = result.scalar_one_or_none()
+        child = child_result.scalar_one_or_none()
         if child:
             child_stacks.append(child)
 
@@ -314,8 +315,8 @@ def _orm_service_to_create(service: StackService) -> StackServiceCreate:
         public_route=bool(service.public_route),
         depends_on=service.depends_on,
         volumes=volumes or [],
-        scaling_policy=scaling,
-        build_override=service.build_override,
+        scaling_policy=scaling,  # type: ignore[arg-type]  # Pydantic v2 validates the JSON dict into the model field at runtime
+        build_override=service.build_override,  # type: ignore[arg-type]  # Pydantic v2 validates the JSON dict into the model field at runtime
     )
 
 
@@ -335,7 +336,7 @@ def _stack_to_public(
                 stack_id=s.stack_id,
                 service_name=s.service_name,
                 source_kind=s.source_kind,
-                source_ref=s.source_ref,
+                source_ref=sanitize_url_for_display(s.source_ref),
                 git_branch=s.git_branch,
                 container_port=s.container_port,
                 env_vars=s.env_vars,

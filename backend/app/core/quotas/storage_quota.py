@@ -25,6 +25,8 @@ logger = logging.getLogger(__name__)
 
 GIB = 1024 ** 3
 
+# ponytail: per-process dedup; shipped configs run a single uvicorn worker. Multi-worker would duplicate the
+# over-quota edge email; if `--workers N` is ever planned, move last-alert state into alert_history.
 _over_quota_project_ids: set[uuid.UUID] = set()
 
 
@@ -139,6 +141,8 @@ async def team_storage_usage(
     project_id: uuid.UUID,
 ) -> tuple[int, int]:
     """(container_disk_bytes, uploads_bytes) currently used by a team."""
+    # ponytail: unfiltered list() is O(total containers) Docker calls per team view; fine at current
+    # scale — add a short-TTL orchestrator list cache only if usage grows (stales the UI list, product call)
     containers = await orchestrator.list()
     return await usage_from_containers(session, containers, project_id)
 
@@ -203,6 +207,7 @@ async def check_team_storage_quotas(
 
     State resets on API restart: a team already over quota re-alarms once
     after a restart (same reset behavior as container state-change alerts).
+    Dedup state is per-process; all shipped configs run a single uvicorn worker.
     """
     from app.core.notifications.alert_service import AlertService
 

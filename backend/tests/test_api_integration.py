@@ -8,9 +8,13 @@ from __future__ import annotations
 
 import uuid
 from pathlib import Path
+from typing import cast
 
 import pytest
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.websockets import WebSocketDisconnect
 
 from app.api.app import create_app
@@ -28,7 +32,7 @@ from app.core.containers.volume_uploads import (
     VOLUME_UPLOAD_USER_QUOTA_BYTES,
 )
 from app.core.traffic.traffic_router import NoopTrafficRouter
-from app.db.models import User
+from app.db.models import Dockerfile, User
 from tests.conftest import make_container_info
 
 
@@ -576,6 +580,36 @@ def test_run_from_dockerfile_template(
     assert deployed["source_label"] == "minimal"
 
 
+def test_request_recovers_after_mid_transaction_db_error(
+    api_client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A handler that fails mid-DB-transaction must not poison later requests."""
+    import app.core.user_library as user_library_module
+
+    async def unguarded_create(
+        session: AsyncSession, owner_id: uuid.UUID, *, name: str, contents: str
+    ) -> None:
+        session.add(Dockerfile(owner_id=owner_id, name=name, contents=contents))
+        await session.flush()
+
+    created = api_client.post(
+        "/api/dockerfiles/", json={"name": "dup", "contents": "FROM alpine\n"}
+    )
+    assert created.status_code == 201
+
+    monkeypatch.setattr(
+        user_library_module, "create_dockerfile_template", unguarded_create
+    )
+    with pytest.raises(IntegrityError):
+        api_client.post(
+            "/api/dockerfiles/", json={"name": "dup", "contents": "FROM alpine\n"}
+        )
+
+    listed = api_client.get("/api/dockerfiles/")
+    assert listed.status_code == 200
+    assert [row["name"] for row in listed.json()] == ["dup"]
+
+
 def test_run_from_git_url(
     api_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
@@ -600,6 +634,68 @@ def test_run_from_git_url(
     body = response.json()
     assert body["kind"] == "git"
     assert body["image"].startswith("vela/gitbuild:")
+
+
+def test_run_from_git_url_strips_embedded_credentials(
+    api_client: TestClient,
+    db_session_factory,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A credential-bearing git URL must not leak into labels, records, or history."""
+    import asyncio
+
+    from sqlalchemy import select
+
+    from app.db.models import DeploymentRecord
+
+    monkeypatch.setenv("VELA_PUBLIC_ROUTE_DOMAIN", "apps.example.com")
+    monkeypatch.setenv("VELA_PUBLIC_URL_SCHEME", "https")
+    monkeypatch.setattr(
+        "app.core.build.default_image_builder.git_shallow_clone",
+        _stub_git_shallow_clone,
+    )
+
+    response = api_client.post(
+        "/api/containers/run",
+        json={
+            "source": "https://deployer:ghp_secrettoken123@github.com/org/repo.git",
+            "git_branch": "develop",
+            "public_route": True,
+            "container_port": 80,
+        },
+    )
+    assert response.status_code == 200
+    assert "ghp_secrettoken123" not in response.text
+
+    listed = api_client.get("/api/containers/")
+    assert listed.status_code == 200
+    deployed = next(
+        row
+        for row in listed.json()
+        if row["image"].startswith("vela/gitbuild:")
+    )
+    assert deployed["source_kind"] == "git"
+    assert deployed["source_label"] == "https://github.com/org/repo.git"
+
+    async def stored_source_ref() -> str:
+        async with db_session_factory() as session:
+            row = (
+                await session.execute(
+                    select(DeploymentRecord.source_ref).where(
+                        DeploymentRecord.source_kind == "git"
+                    )
+                )
+            ).scalar_one()
+        return row
+
+    assert asyncio.run(stored_source_ref()) == "https://github.com/org/repo.git"
+
+    history = api_client.get("/api/deployments/")
+    assert history.status_code == 200
+    git_rows = [row for row in history.json() if row["source_kind"] == "git"]
+    assert git_rows
+    assert git_rows[0]["source_ref"] == "https://github.com/org/repo.git"
+    assert all("ghp_secrettoken123" not in row["source_ref"] for row in git_rows)
 
 
 def test_run_public_route_requires_domain(
@@ -1499,8 +1595,9 @@ def test_stack_deploy_creates_network(api_client: TestClient) -> None:
     from app.core.containers.fake_orchestrator import FakeContainerOrchestrator
 
     # Get the orchestrator from the test client
+    fastapi_app = cast(FastAPI, api_client.app)
     orchestrator = None
-    for dep in api_client.app.dependency_overrides.values():
+    for dep in fastapi_app.dependency_overrides.values():
         result = dep()
         if isinstance(result, FakeContainerOrchestrator):
             orchestrator = result
@@ -1569,12 +1666,79 @@ def test_stack_deploy_dockerfile_template_by_name(api_client: TestClient) -> Non
     api_client.delete(f"/api/stacks/{stack_id}")
 
 
+def test_stack_deploy_git_strips_credentials_from_display(
+    api_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Stack git services keep credentials for the clone but not in displayed refs."""
+    recorded_urls: list[str] = []
+
+    async def _recording_clone(
+        *, url: str, branch: str, dest: Path, access_token: str | None = None
+    ) -> None:
+        recorded_urls.append(url)
+        await _stub_git_shallow_clone(
+            url=url, branch=branch, dest=dest, access_token=access_token
+        )
+
+    monkeypatch.setattr(
+        "app.core.build.default_image_builder.git_shallow_clone",
+        _recording_clone,
+    )
+
+    created = api_client.post(
+        "/api/stacks/",
+        json={
+            "name": "cred-stack",
+            "services": [
+                {
+                    "service_name": "web",
+                    "source_kind": "git",
+                    "source_ref": "https://deployer:ghp_stacktoken456@github.com/org/app.git",
+                    "git_branch": "main",
+                    "container_port": 80,
+                    "env_vars": {},
+                    "public_route": False,
+                }
+            ],
+        },
+    )
+    assert created.status_code == 201
+    stack_id = created.json()["id"]
+    assert (
+        created.json()["services"][0]["source_ref"]
+        == "https://github.com/org/app.git"
+    )
+
+    deployed = api_client.post(f"/api/stacks/{stack_id}/deploy")
+    assert deployed.status_code == 200
+    assert recorded_urls == [
+        "https://deployer:ghp_stacktoken456@github.com/org/app.git"
+    ]
+
+    fetched = api_client.get(f"/api/stacks/{stack_id}")
+    assert fetched.status_code == 200
+    assert (
+        fetched.json()["services"][0]["source_ref"]
+        == "https://github.com/org/app.git"
+    )
+
+    history = api_client.get("/api/deployments/")
+    assert history.status_code == 200
+    git_rows = [row for row in history.json() if row["source_kind"] == "git"]
+    assert git_rows
+    assert all("ghp_stacktoken456" not in row["source_ref"] for row in git_rows)
+
+    api_client.delete(f"/api/stacks/{stack_id}")
+
+
 def test_stack_delete_cleans_network(api_client: TestClient) -> None:
     """Delete should clean up the stack's Docker network."""
     from app.core.containers.fake_orchestrator import FakeContainerOrchestrator
 
+    fastapi_app = cast(FastAPI, api_client.app)
     orchestrator = None
-    for dep in api_client.app.dependency_overrides.values():
+    for dep in fastapi_app.dependency_overrides.values():
         result = dep()
         if isinstance(result, FakeContainerOrchestrator):
             orchestrator = result

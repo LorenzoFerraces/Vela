@@ -51,17 +51,15 @@ async def git_shallow_clone(
             )
         except FileNotFoundError as exc:
             raise CloneError(
-                _sanitize_url(url),
+                url,
                 "git executable not found — install Git and ensure it is on PATH.",
             ) from exc
         except subprocess.TimeoutExpired as exc:
-            raise CloneError(
-                _sanitize_url(url), "git clone timed out after 600s."
-            ) from exc
+            raise CloneError(url, "git clone timed out after 600s.") from exc
 
         if proc.returncode != 0:
             err = (proc.stderr or proc.stdout or "").strip() or f"exit {proc.returncode}"
-            raise CloneError(_sanitize_url(url), _sanitize_message(err))
+            raise CloneError(url, _sanitize_message(err))
 
     await asyncio.to_thread(_run)
 
@@ -92,11 +90,6 @@ def _build_clone_command(
         ]
     )
     return cmd
-
-
-def _sanitize_url(url: str) -> str:
-    """Mask any ``user:password@`` segment that callers might have embedded in the URL."""
-    return _CREDENTIALS_IN_URL.sub(r"\1***@", url)
 
 
 def _sanitize_message(message: str) -> str:

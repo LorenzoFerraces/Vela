@@ -34,6 +34,16 @@ const CHART_TEXT = '#9a8fb8'
 const CHART_TOOLTIP_BG = '#120e1e'
 const CHART_REFERENCE_STROKE = '#ef4444'
 
+// Series colors mirror the dark theme tokens (accent/ok/warn/info) — recharts
+// props cannot read CSS variables, keep in sync with index.css.
+// eslint-disable-next-line react-refresh/only-export-components
+export const CHART_COLORS = {
+  accent: '#bc7fed',
+  ok: '#4ade80',
+  warn: '#fbbf24',
+  info: '#9aa5b4',
+} as const
+
 export function MetricChart({
   data,
   dataKey,

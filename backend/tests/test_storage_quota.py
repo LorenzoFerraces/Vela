@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from collections.abc import Iterator
+from collections.abc import AsyncGenerator, Iterator
 from datetime import datetime, timezone
 from typing import Any
 
@@ -41,7 +41,7 @@ from app.db.models import (
 
 
 @pytest_asyncio.fixture
-async def quota_db() -> AsyncSession:
+async def quota_db() -> AsyncGenerator[AsyncSession, None]:
     """In-memory SQLite session with the full ORM schema."""
     engine = create_async_engine(
         "sqlite+aiosqlite:///:memory:",

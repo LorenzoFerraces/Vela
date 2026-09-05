@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import type { DockerfileTemplate } from '../api/client'
 import ConfirmDialog from './ConfirmDialog'
+import { Skeleton } from './Skeleton'
 
 const DEFAULT_NEW_DOCKERFILE = `FROM alpine:3.20
 WORKDIR /app
@@ -112,7 +113,11 @@ export function DockerfileTemplatesSection({
       </form>
 
       {listLoading && rows.length === 0 ? (
-        <p className="containers-muted">Loading…</p>
+        <div aria-busy="true" aria-label="Loading Dockerfile templates">
+          {[1, 2, 3].map((row) => (
+            <Skeleton key={row} className="skeleton--team-row" />
+          ))}
+        </div>
       ) : rows.length === 0 ? (
         <p className="containers-muted">No Dockerfile templates yet.</p>
       ) : (

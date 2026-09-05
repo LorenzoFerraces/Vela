@@ -37,7 +37,7 @@ export function ResourceUsagePanel({ refreshSignal = 0 }: ResourceUsagePanelProp
   if (error) {
     return (
       <section className="dashboard-page__section">
-        <p className="containers-banner containers-banner--err">{error}</p>
+        <p className="containers-banner containers-banner--err" role="alert">{error}</p>
       </section>
     )
   }
