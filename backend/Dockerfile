@@ -8,6 +8,10 @@ WORKDIR /app
 COPY . .
 RUN pip install --no-cache-dir .
 
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends git \
+    && rm -rf /var/lib/apt/lists/*
+
 # Runs as an unprivileged user. The user joins the host docker group that owns
 # /var/run/docker.sock (GID 999 on Debian/Ubuntu/WSL2 defaults) so the API can
 # still drive the host daemon; pass --build-arg DOCKER_GROUP_ID=<gid> if yours

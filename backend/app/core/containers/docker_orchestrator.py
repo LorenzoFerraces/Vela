@@ -136,6 +136,22 @@ def _docker_daemon_unreachable_message(exc: BaseException) -> str:
             "Docker Engine is not reachable. On Windows, start Docker Desktop and wait until "
             "it reports that the engine is running, then try again."
         )
+    low = msg.lower()
+    if "permission denied" in low:
+        return (
+            f"{msg}\n\n"
+            "The API container cannot open the Docker socket (permission denied). Check "
+            "the vela-api container logs for entrypoint socket-alignment output, and make "
+            "sure the socket's group GID is reachable (set DOCKER_GROUP_ID in .env if the "
+            "socket is root:root)."
+        )
+    if "no such file or directory" in low:
+        return (
+            f"{msg}\n\n"
+            "The Docker socket was not found inside the API container. Check that "
+            "DOCKER_SOCKET_PATH in .env points at the host daemon's socket and that the "
+            "container is (re)started after changing it."
+        )
     if "Error while fetching server API version" in msg:
         return (
             f"{msg}\n\n"
@@ -397,6 +413,7 @@ class DockerOrchestrator(ContainerOrchestrator):
             )
         else:
             self._default_network = default_network.strip() or None
+        self._default_network_ensured = False
         self._log_stream_semaphore = asyncio.Semaphore(_max_concurrent_log_streams())
 
     async def _to_thread(self, fn: Callable[[], T]) -> T:
@@ -504,6 +521,29 @@ class DockerOrchestrator(ContainerOrchestrator):
             msg = f"Container name already in use by a non-Vela container: {name}"
             raise OrchestratorError(msg)
 
+    def _ensure_default_network_sync(self) -> None:
+        """Create the default workload network once if the host engine lacks it.
+
+        Compose normally creates it, but a deleted or partially started stack
+        would otherwise surface as a misleading container 404 at deploy time.
+        """
+        name = self._default_network
+        if not name or self._default_network_ensured:
+            return
+        self._default_network_ensured = True
+        try:
+            existing = [
+                n
+                for n in self._client.networks.list(filters={"name": name})
+                if n.name == name
+            ]
+            if existing:
+                return
+            self._client.networks.create(name, driver="bridge")
+            logger.info("Created missing default Docker network %s", name)
+        except docker.errors.DockerException as e:
+            logger.warning("Could not ensure default Docker network %s: %s", name, e)
+
     async def deploy(self, config: DeployConfig) -> ContainerInfo:
         labels = self._merge_labels(config)
         ports = self._port_bindings_from_config(config)
@@ -523,6 +563,7 @@ class DockerOrchestrator(ContainerOrchestrator):
             try:
                 if config.name:
                     self._remove_managed_name_conflict_sync(config.name)
+                self._ensure_default_network_sync()
                 self._ensure_image_sync(config.image)
             except (OrchestratorError, docker.errors.ImageNotFound):
                 raise
@@ -571,7 +612,12 @@ class DockerOrchestrator(ContainerOrchestrator):
                     config.image, registry_message=_docker_registry_error_text(e)
                 ) from e
             except docker.errors.NotFound as e:
-                raise ContainerNotFoundError(str(e)) from e
+                msg = str(e)
+                if "network" in msg.lower() and "not found" in msg.lower():
+                    raise OrchestratorError(
+                        f"Docker network not found on the host engine: {msg}"
+                    ) from e
+                raise ContainerNotFoundError(msg) from e
             except requests.exceptions.RequestException as e:
                 raise ProviderConnectionError(str(e)) from e
             except docker.errors.APIError as e:
