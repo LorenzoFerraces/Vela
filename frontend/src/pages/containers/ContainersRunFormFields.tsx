@@ -113,6 +113,8 @@ type ContainersRunGitFieldsProps = ContainersRunFormFieldsProps & {
   onGitBranchChange: (value: string) => void
   gitAnalysisLoading: boolean
   gitAnalysisError: string | null
+  gitLlmFallbackAvailable: boolean
+  onRetryWithDefault: () => void
   onAnalyzeGit: () => void
 }
 
@@ -126,6 +128,8 @@ export function ContainersRunGitFields({
   onGitBranchChange,
   gitAnalysisLoading,
   gitAnalysisError,
+  gitLlmFallbackAvailable,
+  onRetryWithDefault,
   onAnalyzeGit,
 }: ContainersRunGitFieldsProps) {
   return (
@@ -181,6 +185,15 @@ export function ContainersRunGitFields({
         >
           {gitAnalysisError}
         </p>
+      ) : null}
+      {gitAnalysisError && gitLlmFallbackAvailable ? (
+        <button
+          type="button"
+          className="btn btn--ghost btn--sm"
+          onClick={onRetryWithDefault}
+        >
+          Retry with Vela default
+        </button>
       ) : null}
     </div>
   )

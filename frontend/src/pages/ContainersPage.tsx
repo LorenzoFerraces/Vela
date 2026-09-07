@@ -208,6 +208,8 @@ export default function ContainersPage() {
             onGitBranchChange={setGitBranch}
             gitAnalysisLoading={gitAnalysis.analysisLoading}
             gitAnalysisError={gitAnalysis.analysisError}
+            gitLlmFallbackAvailable={gitAnalysis.llmFallbackAvailable}
+            onRetryWithDefault={() => void onAnalyzeGitSource(true)}
             onAnalyzeGit={() => void onAnalyzeGitSource()}
           />
         ) : (

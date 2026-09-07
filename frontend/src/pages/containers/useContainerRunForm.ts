@@ -183,7 +183,7 @@ export function useContainerRunForm({
     setImageRefCheck({ status: 'idle' })
   }
 
-  async function onAnalyzeGitSource() {
+  async function onAnalyzeGitSource(useServerDefault = false) {
     const selection = deploySource.selection
     if (selection?.kind !== 'git') {
       return
@@ -191,6 +191,7 @@ export function useContainerRunForm({
     const analysis = await gitAnalysis.runAnalysis(
       selection.url,
       gitBranch.trim() || 'main',
+      useServerDefault,
     )
     if (analysis?.needs_manual_build_config) {
       openBuildConfigModal({
