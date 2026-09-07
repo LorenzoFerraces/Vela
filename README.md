@@ -273,7 +273,7 @@ The CI workflow (`.github/workflows/ci.yml`) installs Python + Node + Chromium a
 |-------|----------------|
 | Traefik JSON `is a directory` | Path must be a file, not a folder |
 | Traefik hot reload / stale routes | Set **`VELA_TRAEFIK_RELOAD_CONTAINER`** to the Traefik container name. Also prefer **mounting the parent directory** for the dynamic file; ensure `providers.file.watch` is true. |
-| API vs Docker | Docker running; socket reachable |
+| API vs Docker | Docker running; socket reachable. The api container starts as root so its entrypoint aligns the mounted socket's group (re-groups root:root sockets to `DOCKER_GROUP_ID`, or re-GIDs the in-image docker group to match a host docker group) before dropping to `vela`. Check `docker compose logs api` for `vela-entrypoint:` lines, and `DOCKER_SOCKET_PATH` in `.env` |
 | UI vs API | `VITE_API_BASE_URL`; backend on port 8000; CORS |
 | `401` on container or image routes | Register or log in; ensure requests send `Authorization: Bearer …` (the UI does this when a token is stored) |
 | Database connection errors | Postgres is running; `VELA_DATABASE_URL` matches your instance; run **`alembic upgrade head`** from `backend/` |

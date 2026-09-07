@@ -53,9 +53,12 @@ services:
         DOCKER_GROUP_ID: ${DOCKER_GROUP_ID:-999}
     image: vela/api
     container_name: vela-api
-    # Docker Desktop (Windows) exposes the socket as root:root 660, which the
-    # unprivileged user cannot connect to; set VELA_API_CONTAINER_USER=root there.
-    user: ${VELA_API_CONTAINER_USER:-vela}
+    # Starts as root so the entrypoint can align the mounted socket's group
+    # with the in-image docker group on any host layout (Docker Desktop
+    # root:root sockets, non-default docker GIDs), then drops to `vela`.
+    # Set VELA_API_CONTAINER_USER=vela to skip alignment (then the image's
+    # docker GID must already match the host socket's GID).
+    user: ${VELA_API_CONTAINER_USER:-root}
     restart: unless-stopped
     env_file:
       - path: .env
