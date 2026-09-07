@@ -17,6 +17,7 @@ from app.core.exceptions import GitSourceAnalysisError, LlmCallError
 from app.core.git import git_source_analysis
 from app.core.git.git_ops import head_commit
 from app.core.llm import cache as cache_module
+from app.core.llm.provider import LlmConfig
 from app.core.stacks import repo_analysis
 
 VALID_GIT_SOURCE_PAYLOAD = {
@@ -218,7 +219,9 @@ def test_git_source_cache_key_includes_requested_branch(
 ) -> None:
     calls = 0
 
-    async def fake_generate_json(*, prompt: str, schema: dict) -> dict:
+    async def fake_generate_json(
+        *, prompt: str, schema: dict, config: LlmConfig | None = None
+    ) -> dict:
         nonlocal calls
         calls += 1
         return dict(VALID_GIT_SOURCE_PAYLOAD)
@@ -254,7 +257,9 @@ def test_git_source_cache_key_isolates_distinct_repositories(
 ) -> None:
     calls = 0
 
-    async def fake_generate_json(*, prompt: str, schema: dict) -> dict:
+    async def fake_generate_json(
+        *, prompt: str, schema: dict, config: LlmConfig | None = None
+    ) -> dict:
         nonlocal calls
         calls += 1
         return dict(VALID_GIT_SOURCE_PAYLOAD)
@@ -288,9 +293,12 @@ def test_git_source_cache_key_isolates_distinct_repositories(
 async def test_git_source_invalid_payload_is_not_cached(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    async def bad_generate_json(*, prompt: str, schema: dict) -> dict:
+    async def bad_generate_json(
+        *, prompt: str, schema: dict, config: LlmConfig | None = None
+    ) -> dict:
         return {"container_port": "not-a-port"}
 
+    monkeypatch.setenv("VELA_GEMINI_API_KEY", "test-key")
     monkeypatch.setattr(git_source_analysis, "generate_json", bad_generate_json)
     with pytest.raises(GitSourceAnalysisError):
         await git_source_analysis._call_gemini(
