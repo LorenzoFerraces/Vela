@@ -11,6 +11,7 @@ from pydantic import (
     ConfigDict,
     EmailStr,
     Field,
+    ValidationInfo,
     field_validator,
     model_validator,
 )
@@ -453,8 +454,53 @@ class AiPrefillPreferencesUpdate(BaseModel):
     start_command: bool | None = None
 
 
+LlmProviderKind = Literal["openai_compatible", "gemini", "anthropic"]
+
+
+class LlmProviderGet(BaseModel):
+    provider: LlmProviderKind
+    base_url: str | None = None
+    model: str
+    has_key: bool = True
+
+
+class LlmProviderSet(BaseModel):
+    provider: LlmProviderKind
+    base_url: str | None = Field(default=None, max_length=1024, validate_default=True)
+    model: str = Field(min_length=1, max_length=255)
+    api_key: str | None = Field(default=None, min_length=1, max_length=2048)
+
+    @field_validator("base_url")
+    @classmethod
+    def _validate_base_url(
+        cls, value: str | None, info: ValidationInfo
+    ) -> str | None:
+        provider = info.data.get("provider")
+        if provider != "openai_compatible":
+            return None
+        if not value:
+            raise ValueError("Base URL is required for OpenAI-compatible providers.")
+        root = value.rstrip("/")
+        if not root.startswith(("http://", "https://")):
+            raise ValueError("Base URL must start with http:// or https://.")
+        return root
+
+
+class LlmProviderTestRequest(BaseModel):
+    provider: LlmProviderKind
+    base_url: str | None = Field(default=None, max_length=1024)
+    model: str = Field(min_length=1, max_length=255)
+    api_key: str = Field(min_length=1, max_length=2048)
+
+
+class LlmProviderTestResponse(BaseModel):
+    ok: bool = True
+    models: list[str] | None = None
+
+
 class GeminiConfigStatus(BaseModel):
     configured: bool
+    user_provider: LlmProviderGet | None = None
 
 
 # ---------------------------------------------------------------------------
