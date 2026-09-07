@@ -41,6 +41,8 @@ export {
   VELA_REPLICA_OF_LABEL,
 } from './containers'
 
+export { isLlmFallbackError } from './llmErrors'
+
 export { listScalingPolicies } from './scaling'
 
 export {
@@ -92,9 +94,13 @@ export {
 } from './auth'
 
 export {
+  deleteLlmProvider,
   getAiPrefillPreferences,
   getGeminiConfigStatus,
+  getLlmProvider,
   patchAiPrefillPreferences,
+  putLlmProvider,
+  testLlmProvider,
 } from './settings'
 
 export {
@@ -191,6 +197,12 @@ export type {
 export type {
   AiPrefillPreferences,
   AiPrefillPreferencesUpdate,
+  GeminiConfigStatus,
+  LlmProviderConfig,
+  LlmProviderKind,
+  LlmProviderTestRequest,
+  LlmProviderTestResult,
+  LlmProviderUpdate,
 } from './settings'
 
 export type {
