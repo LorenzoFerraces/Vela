@@ -3,6 +3,8 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 
+GEMINI_API_ROOT = "https://generativelanguage.googleapis.com/v1beta"
+
 
 @dataclass(frozen=True)
 class LlmConfig:
@@ -11,6 +13,8 @@ class LlmConfig:
     headers: dict[str, str]
     params: dict[str, str]
     model: str
+    origin: str = "server"
+    base_url: str | None = None
 
 
 def _env(name: str) -> str | None:
@@ -41,7 +45,7 @@ def resolve_llm_config() -> LlmConfig | None:
         model = _env("VELA_GEMINI_MODEL") or "gemini-3.5-flash"
         return LlmConfig(
             provider="gemini",
-            url=f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
+            url=f"{GEMINI_API_ROOT}/models/{model}:generateContent",
             headers={},
             params={"key": gemini_api_key},
             model=model,
