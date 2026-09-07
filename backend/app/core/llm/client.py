@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import logging
-
 from app.core.exceptions import (
     LlmCallError,
     LlmNotConfiguredError,
@@ -9,8 +7,6 @@ from app.core.exceptions import (
 )
 from app.core.llm.provider import LlmConfig, resolve_llm_config
 from app.core.llm.registry import get_provider
-
-logger = logging.getLogger(__name__)
 
 
 async def generate_json(
