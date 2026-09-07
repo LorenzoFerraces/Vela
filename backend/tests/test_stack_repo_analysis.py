@@ -15,6 +15,7 @@ from app.api.deps import get_image_builder
 from app.core.build.default_image_builder import DefaultImageBuilder
 from app.core.exceptions import LlmCallError
 from app.core.git.git_source_analysis import _collect_context_excerpts
+from app.core.llm.provider import LlmConfig
 from app.core.stacks import repo_analysis
 from app.core.stacks.repo_analysis import (
     _generate_services,
@@ -313,10 +314,13 @@ def test_generate_services_prompt_contains_detected_facts(
 
     captured: dict[str, str] = {}
 
-    async def fake_generate_json(*, prompt: str, schema: dict) -> dict:
+    async def fake_generate_json(
+        *, prompt: str, schema: dict, config: LlmConfig | None = None
+    ) -> dict:
         captured["prompt"] = prompt
         return LLM_PAYLOAD
 
+    monkeypatch.setenv("VELA_GEMINI_API_KEY", "test-key")
     monkeypatch.setattr(repo_analysis, "generate_json", fake_generate_json)
     asyncio.run(
         _generate_services(
@@ -342,10 +346,13 @@ def test_generate_services_prompt_redacts_git_url_credentials(
 
     captured: dict[str, str] = {}
 
-    async def fake_generate_json(*, prompt: str, schema: dict) -> dict:
+    async def fake_generate_json(
+        *, prompt: str, schema: dict, config: LlmConfig | None = None
+    ) -> dict:
         captured["prompt"] = prompt
         return LLM_PAYLOAD
 
+    monkeypatch.setenv("VELA_GEMINI_API_KEY", "test-key")
     monkeypatch.setattr(repo_analysis, "generate_json", fake_generate_json)
     asyncio.run(
         _generate_services(

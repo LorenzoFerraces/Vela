@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import uuid
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -8,10 +9,11 @@ from typing import Literal
 
 import yaml
 from pydantic import ValidationError
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.schemas import StackServiceCreate
 from app.core.build.default_image_builder import DefaultImageBuilder
-from app.core.exceptions import LlmCallError, ManifestParseError
+from app.core.exceptions import LlmCallError, LlmNotConfiguredError, ManifestParseError
 from app.core.git.git_ops import _CREDENTIALS_IN_URL, head_commit, rm_tree
 from app.core.git.git_source_analysis import (
     _clean_command_list,
@@ -25,6 +27,8 @@ from app.core.git.git_source_analysis import (
 )
 from app.core.llm import generate_json
 from app.core.llm.cache import delete_cached, load_cached, store_cached
+from app.core.llm.provider import LlmConfig, resolve_llm_config
+from app.core.llm.user_config import resolve_llm_config_for_user
 from app.core.stacks.k8s_parser import _file_has_workload_kind
 from app.core.stacks.manifest_parser import parse_manifest
 from app.db.models import StackService
@@ -295,6 +299,7 @@ async def _generate_services(
     warnings: list[str],
     root: Path,
     commit: str = "",
+    config: LlmConfig | None = None,
 ) -> tuple[list[StackService], str | None]:
     # ponytail: prompt-only redaction; the raw url is still used as the git source_ref
     redacted_url = _CREDENTIALS_IN_URL.sub(r"\1", git_url)
@@ -322,10 +327,15 @@ async def _generate_services(
             "\n\nDetected facts (already verified by deterministic scans; "
             f"prefer them over re-deriving):\n{facts}"
         )
-    payload = await load_cached("stacks", commit, STACKS_PROMPT_VERSION)
+    if config is None:
+        config = resolve_llm_config()
+    if config is None:
+        raise LlmNotConfiguredError("AI analysis is not configured on this server.")
+    cache_version = f"{STACKS_PROMPT_VERSION}:{config.provider}:{config.model}"
+    payload = await load_cached("stacks", commit, cache_version)
     if payload is None:
-        payload = await generate_json(prompt=prompt, schema=_generation_schema())
-        await store_cached("stacks", commit, STACKS_PROMPT_VERSION, payload)
+        payload = await generate_json(prompt=prompt, schema=_generation_schema(), config=config)
+        await store_cached("stacks", commit, cache_version, payload)
     try:
         services = _payload_to_services(
             payload,
@@ -335,7 +345,7 @@ async def _generate_services(
             env_fallback=_validated_env_vars(_extract_env_vars_from_context(context)),
         )
     except LlmCallError:
-        await delete_cached("stacks", commit, STACKS_PROMPT_VERSION)
+        await delete_cached("stacks", commit, cache_version)
         raise
     summary = payload.get("summary_hint")
     return services, summary.strip() if isinstance(summary, str) and summary.strip() else None
@@ -347,6 +357,9 @@ async def analyze_repo_stack(
     git_url: str,
     git_branch: str,
     access_token: str | None,
+    session: AsyncSession | None = None,
+    user_id: uuid.UUID | None = None,
+    use_server_default: bool = False,
 ) -> RepoStackAnalysis:
     fixture = e2e_stack_repo_analysis_if_enabled(git_url, git_branch)
     if fixture is not None:
@@ -390,6 +403,9 @@ async def analyze_repo_stack(
             relative_path = None
 
         commit = await asyncio.to_thread(head_commit, root) or ""
+        config = await resolve_llm_config_for_user(
+            session, user_id, force_server_default=use_server_default
+        )
         services, summary_hint = await _generate_services(
             context=_collect_context_excerpts(root),
             manifest=manifest_excerpt,
@@ -398,6 +414,7 @@ async def analyze_repo_stack(
             warnings=warnings,
             root=root,
             commit=commit,
+            config=config,
         )
         return RepoStackAnalysis(
             services=services,

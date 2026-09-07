@@ -320,9 +320,12 @@ async def test_git_source_invalid_payload_is_not_cached(
 async def test_stacks_invalid_payload_is_not_cached(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    async def bad_generate_json(*, prompt: str, schema: dict) -> dict:
+    async def bad_generate_json(
+        *, prompt: str, schema: dict, config: LlmConfig | None = None
+    ) -> dict:
         return {"services": []}
 
+    monkeypatch.setenv("VELA_GEMINI_API_KEY", "test-key")
     monkeypatch.setattr(repo_analysis, "generate_json", bad_generate_json)
     with pytest.raises(LlmCallError):
         await repo_analysis._generate_services(
@@ -336,7 +339,9 @@ async def test_stacks_invalid_payload_is_not_cached(
         )
     assert (
         await cache_module.load_cached(
-            "stacks", "abc123", repo_analysis.STACKS_PROMPT_VERSION
+            "stacks",
+            "abc123",
+            f"{repo_analysis.STACKS_PROMPT_VERSION}:gemini:gemini-3.5-flash",
         )
         is None
     )

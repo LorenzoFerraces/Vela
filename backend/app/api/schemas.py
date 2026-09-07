@@ -833,6 +833,7 @@ class ManifestParseResponse(BaseModel):
 class AnalyzeRepoRequest(BaseModel):
     git_url: str = Field(min_length=1, max_length=2048)
     git_branch: str = Field(default="main", max_length=256)
+    use_server_default: bool = False
 
 
 class AnalyzeRepoResponse(BaseModel):

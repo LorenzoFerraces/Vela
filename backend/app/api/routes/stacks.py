@@ -154,6 +154,9 @@ async def analyze_repo_route(
         git_url=body.git_url,
         git_branch=body.git_branch,
         access_token=access_token,
+        session=session,
+        user_id=current_user.id,
+        use_server_default=body.use_server_default,
     )
     return AnalyzeRepoResponse(
         services=[_orm_service_to_create(service) for service in analysis.services],
