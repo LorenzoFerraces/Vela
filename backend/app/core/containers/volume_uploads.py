@@ -47,6 +47,20 @@ def volume_uploads_root() -> Path:
     return (Path.cwd() / "data" / "volume-uploads").resolve()
 
 
+def volume_uploads_host_root() -> Path | None:
+    """Host-side mirror of the uploads root, as seen by the Docker daemon.
+
+    Workload containers are created through the host daemon (bind-mounted
+    socket), which resolves bind sources on the host, not inside the api
+    container. When the uploads root is a container-only path (e.g. a named
+    volume), the host mirror must be set so mount sources resolve on the host.
+    """
+    configured = os.environ.get("VELA_VOLUME_UPLOADS_HOST_DIR", "").strip()
+    if configured:
+        return Path(configured)
+    return None
+
+
 def user_uploads_root(user_id: uuid.UUID) -> Path:
     return volume_uploads_root() / str(user_id)
 
@@ -156,4 +170,7 @@ def resolve_volume_upload_path(user_id: uuid.UUID, upload_id: uuid.UUID) -> Path
     if not root.is_dir():
         msg = "Volume upload not found."
         raise VolumeUploadNotFoundError(msg)
+    host_root = volume_uploads_host_root()
+    if host_root is not None:
+        return host_root / root.relative_to(volume_uploads_root())
     return root

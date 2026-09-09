@@ -69,9 +69,14 @@ services:
       VELA_TRAEFIK_RELOAD_CONTAINER: vela-traefik
       VELA_DOCKER_NETWORK: vela-workloads
       VELA_VOLUME_UPLOADS_DIR: ${VELA_VOLUME_UPLOADS_DIR:-/data/volume-uploads}
+      VELA_VOLUME_UPLOADS_HOST_DIR: ${VELA_VOLUME_UPLOADS_HOST_DIR:-}
     volumes:
       - ${DOCKER_SOCKET_PATH:-/var/run/docker.sock}:/var/run/docker.sock
-      - uploads_data:/data
+      # Host bind (not a named volume): workloads are created through the
+      # host daemon, which resolves bind sources on the host. The host path
+      # must be visible to the daemon; on Docker Desktop set
+      # VELA_VOLUME_UPLOADS_HOST_DIR to a Windows path in .env.
+      - ${VELA_VOLUME_UPLOADS_HOST_DIR:-/data/volume-uploads}:${VELA_VOLUME_UPLOADS_DIR:-/data/volume-uploads}
       - traefik_dynamic:/etc/traefik/dynamic
     depends_on:
       postgres:
@@ -124,7 +129,6 @@ services:
 
 volumes:
   postgres_data:
-  uploads_data:
   traefik_dynamic:
 
 networks:
