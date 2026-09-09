@@ -4,6 +4,10 @@ export function projectWriteAllowed(role: ProjectRole): boolean {
   return role === 'owner' || role === 'operator'
 }
 
+export function formatRoleLabel(role: string): string {
+  return role.charAt(0).toUpperCase() + role.slice(1)
+}
+
 export function teamDisplayName(project: Project): string {
   if (project.is_personal && project.role === 'owner') {
     return 'Personal workspace'

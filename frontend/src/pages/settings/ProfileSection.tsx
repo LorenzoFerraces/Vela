@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ChangeEvent, type FormEvent } from 'react'
 import type { UserPublic } from '../../api/client'
-import { TrashIcon} from '@phosphor-icons/react/Trash'
+import { TrashIcon } from '@phosphor-icons/react'
 import {
   deleteAvatar,
   formatApiError,
@@ -8,6 +8,7 @@ import {
   uploadAvatar,
 } from '../../api/client'
 import UserAvatar from '../../components/UserAvatar'
+import ConfirmDialog from '../../components/ConfirmDialog'
 
 type ProfileBanner = { tone: 'ok' | 'err'; text: string } | null
 
@@ -35,6 +36,7 @@ export default function ProfileSection({
   const [pronouns, setPronouns] = useState(user.pronouns ?? '')
   const [profileBusy, setProfileBusy] = useState(false)
   const [avatarBusy, setAvatarBusy] = useState(false)
+  const [removeAvatarDialogOpen, setRemoveAvatarDialogOpen] = useState(false)
   const [banner, setBanner] = useState<ProfileBanner>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
@@ -79,9 +81,12 @@ export default function ProfileSection({
     }
   }
 
-  async function handleRemoveAvatar() {
+  function handleRemoveAvatar() {
     if (!user.avatar_url) return
-    if (!window.confirm('Remove your profile photo?')) return
+    setRemoveAvatarDialogOpen(true)
+  }
+
+  async function handleRemoveAvatarConfirm() {
     setAvatarBusy(true)
     setBanner(null)
     try {
@@ -92,6 +97,7 @@ export default function ProfileSection({
       setBanner({ tone: 'err', text: formatApiError(error) })
     } finally {
       setAvatarBusy(false)
+      setRemoveAvatarDialogOpen(false)
     }
   }
 
@@ -107,7 +113,7 @@ export default function ProfileSection({
               ? 'settings-banner settings-banner--ok'
               : 'settings-banner settings-banner--err'
           }
-          role={banner.tone === 'err' ? 'alert' : undefined}
+          role={banner.tone === 'err' ? 'alert' : 'status'}
         >
           {banner.text}
         </p>
@@ -159,6 +165,7 @@ export default function ProfileSection({
             <input
               id="profile-display-name"
               className="auth-form__input"
+              autoComplete="off"
               value={displayName}
               maxLength={120}
               onChange={(event) => setDisplayName(event.target.value)}
@@ -170,6 +177,7 @@ export default function ProfileSection({
             <input
               id="profile-pronouns"
               className="auth-form__input"
+              autoComplete="off"
               value={pronouns}
               maxLength={40}
               placeholder="e.g. they/them"
@@ -199,6 +207,16 @@ export default function ProfileSection({
           </form>
         </div>
       </div>
+
+      <ConfirmDialog
+        open={removeAvatarDialogOpen}
+        title="Remove profile photo?"
+        message="Your profile photo will be removed."
+        confirmLabel={avatarBusy ? 'Removing…' : 'Remove'}
+        busy={avatarBusy && removeAvatarDialogOpen}
+        onConfirm={() => void handleRemoveAvatarConfirm()}
+        onClose={() => setRemoveAvatarDialogOpen(false)}
+      />
     </>
   )
 }

@@ -1,14 +1,16 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import re
 import sys
 import threading
 import uuid
 from collections.abc import AsyncIterator, Callable
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
-from typing import Any, TypeVar
+from typing import Any, List, TypeVar
 
 import docker
 import docker.errors
@@ -37,6 +39,8 @@ from app.core.models import (
 )
 from app.core.traffic.public_route_host import build_public_url
 
+logger = logging.getLogger(__name__)
+
 VELA_MANAGED_LABEL = "vela.managed"
 VELA_MANAGED_VALUE = "true"
 VELA_OWNER_LABEL = "vela.owner_id"
@@ -48,6 +52,32 @@ VELA_ROUTE_PATH_PREFIX_LABEL = "vela.route_path_prefix"
 VELA_ROUTE_TLS_LABEL = "vela.route_tls"
 VELA_REPLICA_OF_LABEL = "vela.replica_of"
 _NS_PER_SEC = 1_000_000_000
+_MAX_BUILD_LOG_BYTES = 64 * 1024
+
+
+class _BuildLogTail:
+    """Keep only the trailing ``_MAX_BUILD_LOG_BYTES`` of a streamed build log."""
+
+    __slots__ = ("_parts", "_size")
+
+    def __init__(self) -> None:
+        self._parts: list[str] = []
+        self._size: int = 0
+
+    @property
+    def size(self) -> int:
+        return self._size
+
+    def append(self, text: str) -> None:
+        if len(text) > _MAX_BUILD_LOG_BYTES:
+            text = text[-_MAX_BUILD_LOG_BYTES:]
+        self._parts.append(text)
+        self._size += len(text)
+        while len(self._parts) > 1 and self._size > _MAX_BUILD_LOG_BYTES:
+            self._size -= len(self._parts.pop(0))
+
+    def text(self) -> str:
+        return "".join(self._parts)
 
 
 def _max_concurrent_log_streams() -> int:
@@ -105,6 +135,22 @@ def _docker_daemon_unreachable_message(exc: BaseException) -> str:
             f"{msg}\n\n"
             "Docker Engine is not reachable. On Windows, start Docker Desktop and wait until "
             "it reports that the engine is running, then try again."
+        )
+    low = msg.lower()
+    if "permission denied" in low:
+        return (
+            f"{msg}\n\n"
+            "The API container cannot open the Docker socket (permission denied). Check "
+            "the vela-api container logs for entrypoint socket-alignment output, and make "
+            "sure the socket's group GID is reachable (set DOCKER_GROUP_ID in .env if the "
+            "socket is root:root)."
+        )
+    if "no such file or directory" in low:
+        return (
+            f"{msg}\n\n"
+            "The Docker socket was not found inside the API container. Check that "
+            "DOCKER_SOCKET_PATH in .env points at the host daemon's socket and that the "
+            "container is (re)started after changing it."
         )
     if "Error while fetching server API version" in msg:
         return (
@@ -198,6 +244,25 @@ def _ports_from_inspect(data: dict[str, Any]) -> list[PortMapping]:
     return result
 
 
+def _ports_from_list(data: dict[str, Any]) -> list[PortMapping]:
+    result: list[PortMapping] = []
+    for entry in data.get("Ports") or []:
+        if not isinstance(entry, dict):
+            continue
+        public_port = entry.get("PublicPort")
+        private_port = entry.get("PrivatePort")
+        if not public_port or private_port is None:
+            continue
+        result.append(
+            PortMapping(
+                host_port=int(public_port),
+                container_port=int(private_port),
+                protocol=entry.get("Type") or "tcp",
+            )
+        )
+    return result
+
+
 def _health_status_from_docker(raw: str | None) -> HealthStatus:
     s = (raw or "").lower()
     match s:
@@ -239,24 +304,42 @@ def _inspect_to_container_info(data: dict[str, Any]) -> ContainerInfo:
     else:
         names = data.get("Names") or []
         name = (names[0].lstrip("/") if names else "") or cid[:12]
-    state = data.get("State") or {}
-    status = _map_container_status(state.get("Status", ""))
-    health_raw = (state.get("Health") or {}).get("Status")
-    health = _health_status_from_docker(health_raw)
+    state = data.get("State")
+    if isinstance(state, str):
+        status = _map_container_status(state)
+        health = HealthStatus.NONE
+    else:
+        state = state or {}
+        status = _map_container_status(state.get("Status", ""))
+        health_raw = (state.get("Health") or {}).get("Status")
+        health = _health_status_from_docker(health_raw)
 
     cfg = data.get("Config") or {}
-    image_ref = cfg.get("Image", "")
-    labels = dict(cfg.get("Labels") or {})
+    image_ref = cfg.get("Image") or data.get("Image") or ""
+    labels = dict(data.get("Labels") or cfg.get("Labels") or {})
     source_kind, source_label = deploy_source_fields_from_labels(labels)
+
+    created_raw = data.get("Created")
+    if isinstance(created_raw, (int, float)):
+        created_at = datetime.fromtimestamp(created_raw, tz=timezone.utc)
+    else:
+        created_at = _parse_created(created_raw or "")
+
+    network_settings = data.get("NetworkSettings") or {}
+    if network_settings.get("Ports") is not None:
+        ports = _ports_from_inspect(data)
+    else:
+        ports = _ports_from_list(data)
 
     return ContainerInfo(
         id=cid,
         name=name,
         image=image_ref,
         status=status,
-        created_at=_parse_created(data.get("Created", "")),
-        ports=_ports_from_inspect(data),
+        created_at=created_at,
+        ports=ports,
         volumes=_volumes_from_inspect(data),
+        disk_bytes=int(data.get("SizeRw") or 0),
         labels=labels,
         health=health,
         access_url=_access_url_from_route_labels(labels),
@@ -330,10 +413,18 @@ class DockerOrchestrator(ContainerOrchestrator):
             )
         else:
             self._default_network = default_network.strip() or None
+        self._default_network_ensured = False
         self._log_stream_semaphore = asyncio.Semaphore(_max_concurrent_log_streams())
 
     async def _to_thread(self, fn: Callable[[], T]) -> T:
         return await asyncio.to_thread(fn)
+
+    def _inspect_container_with_size(self, container_id: str) -> dict:
+        # docker-py's high-level inspect omits SizeRw; the raw endpoint supports ?size=1.
+        api = self._client.api
+        url = api._url("/containers/{0}/json", container_id)
+        response = api._get(url, params={"size": 1})
+        return api._result(response, True)
 
     def _assert_managed_labels(self, labels: dict[str, Any], container_id: str) -> None:
         if labels.get(VELA_MANAGED_LABEL) != VELA_MANAGED_VALUE:
@@ -430,6 +521,29 @@ class DockerOrchestrator(ContainerOrchestrator):
             msg = f"Container name already in use by a non-Vela container: {name}"
             raise OrchestratorError(msg)
 
+    def _ensure_default_network_sync(self) -> None:
+        """Create the default workload network once if the host engine lacks it.
+
+        Compose normally creates it, but a deleted or partially started stack
+        would otherwise surface as a misleading container 404 at deploy time.
+        """
+        name = self._default_network
+        if not name or self._default_network_ensured:
+            return
+        self._default_network_ensured = True
+        try:
+            existing = [
+                n
+                for n in self._client.networks.list(filters={"name": name})
+                if n.name == name
+            ]
+            if existing:
+                return
+            self._client.networks.create(name, driver="bridge")
+            logger.info("Created missing default Docker network %s", name)
+        except docker.errors.DockerException as e:
+            logger.warning("Could not ensure default Docker network %s: %s", name, e)
+
     async def deploy(self, config: DeployConfig) -> ContainerInfo:
         labels = self._merge_labels(config)
         ports = self._port_bindings_from_config(config)
@@ -449,6 +563,7 @@ class DockerOrchestrator(ContainerOrchestrator):
             try:
                 if config.name:
                     self._remove_managed_name_conflict_sync(config.name)
+                self._ensure_default_network_sync()
                 self._ensure_image_sync(config.image)
             except (OrchestratorError, docker.errors.ImageNotFound):
                 raise
@@ -468,7 +583,7 @@ class DockerOrchestrator(ContainerOrchestrator):
             if config.command is not None:
                 kwargs["command"] = config.command
             if config.memory_limit is not None:
-                kwargs["mem_limit"] = config.memory_limit
+                kwargs["mem_limit"] = config.memory_limit * 1024 * 1024
             if nano_cpus is not None:
                 kwargs["nano_cpus"] = nano_cpus
             if hc is not None:
@@ -491,14 +606,18 @@ class DockerOrchestrator(ContainerOrchestrator):
             try:
                 container = self._client.containers.create(config.image, **kwargs)
                 container.start()
-                container.reload()
-                data = container.attrs
+                data = self._inspect_container_with_size(container.id)
             except docker.errors.ImageNotFound as e:
                 raise ImageNotFoundError(
                     config.image, registry_message=_docker_registry_error_text(e)
                 ) from e
             except docker.errors.NotFound as e:
-                raise ContainerNotFoundError(str(e)) from e
+                msg = str(e)
+                if "network" in msg.lower() and "not found" in msg.lower():
+                    raise OrchestratorError(
+                        f"Docker network not found on the host engine: {msg}"
+                    ) from e
+                raise ContainerNotFoundError(msg) from e
             except requests.exceptions.RequestException as e:
                 raise ProviderConnectionError(str(e)) from e
             except docker.errors.APIError as e:
@@ -527,8 +646,8 @@ class DockerOrchestrator(ContainerOrchestrator):
                     pass
                 else:
                     raise
-            c.reload()
-            return _inspect_to_container_info(c.attrs)
+            data = self._inspect_container_with_size(container_id)
+            return _inspect_to_container_info(data)
 
         try:
             return await self._to_thread(sync)
@@ -555,8 +674,8 @@ class DockerOrchestrator(ContainerOrchestrator):
                 if "is not running" in str(e).lower():
                     raise ContainerNotRunningError(container_id) from e
                 raise
-            c.reload()
-            return _inspect_to_container_info(c.attrs)
+            data = self._inspect_container_with_size(container_id)
+            return _inspect_to_container_info(data)
 
         try:
             return await self._to_thread(sync)
@@ -575,8 +694,8 @@ class DockerOrchestrator(ContainerOrchestrator):
                 raise ContainerNotFoundError(container_id) from e
             self._assert_managed_labels(c.labels or {}, container_id)
             c.restart(timeout=timeout)
-            c.reload()
-            return _inspect_to_container_info(c.attrs)
+            data = self._inspect_container_with_size(container_id)
+            return _inspect_to_container_info(data)
 
         try:
             return await self._to_thread(sync)
@@ -612,7 +731,8 @@ class DockerOrchestrator(ContainerOrchestrator):
             except docker.errors.NotFound as e:
                 raise ContainerNotFoundError(container_id) from e
             self._assert_managed_labels(c.labels or {}, container_id)
-            return _inspect_to_container_info(c.attrs)
+            data = self._inspect_container_with_size(container_id)
+            return _inspect_to_container_info(data)
 
         try:
             return await self._to_thread(sync)
@@ -653,8 +773,8 @@ class DockerOrchestrator(ContainerOrchestrator):
                             continue
                     elif labels.get(VELA_OWNER_LABEL) != str(user_id):
                         continue
-                container.reload()
-                info = _inspect_to_container_info(container.attrs)
+                data = self._inspect_container_with_size(container.id)
+                info = _inspect_to_container_info(data)
                 if status is None or info.status == status:
                     out.append(info)
             return out
@@ -666,14 +786,23 @@ class DockerOrchestrator(ContainerOrchestrator):
         except docker.errors.DockerException as e:
             raise ProviderConnectionError(str(e)) from e
 
-    async def logs(self, container_id: str, *, tail: int = 100) -> str:
+    async def logs(
+        self,
+        container_id: str,
+        *,
+        tail: int | None = 100,
+        since: float | None = None,
+        timestamps: bool = False,
+    ) -> str:
         def sync() -> str:
             try:
                 c = self._client.containers.get(container_id)
             except docker.errors.NotFound as e:
                 raise ContainerNotFoundError(container_id) from e
             self._assert_managed_labels(c.labels or {}, container_id)
-            raw = c.logs(tail=tail, stdout=True, stderr=True)
+            raw = c.logs(
+                tail=tail, since=since, stdout=True, stderr=True, timestamps=timestamps
+            )
             if isinstance(raw, bytes):
                 return raw.decode(errors="replace")
             return str(raw)
@@ -759,6 +888,113 @@ class DockerOrchestrator(ContainerOrchestrator):
                     raise exc
         finally:
             self._log_stream_semaphore.release()
+
+    def _create_exec_session(
+        self, container_id: str, *, cols: int, rows: int
+    ) -> tuple[str, Any]:
+        container = self._client.containers.get(container_id)
+        self._assert_managed_labels(container.labels or {}, container_id)
+        exec_id = self._client.api.exec_create(
+            container_id,
+            cmd=["sh"],
+            stdin=True,
+            stdout=True,
+            stderr=True,
+            tty=True,
+            workdir="/",
+            environment=["TERM=xterm-256color", f"COLUMNS={cols}", f"LINES={rows}"],
+        )["Id"]
+        exec_runtime = self._client.api.exec_start(exec_id, socket=True, tty=True, demux=True)
+        return exec_id, exec_runtime
+
+    async def stream_exec(
+        self,
+        container_id: str,
+        cols: int = 80,
+        rows: int = 24,
+    ) -> tuple[AsyncIterator[bytes], Callable[[bytes], None], Callable[[], None], str]:
+        exec_id, exec_runtime = await asyncio.to_thread(
+            self._create_exec_session, container_id, cols=cols, rows=rows
+        )
+
+        loop = asyncio.get_running_loop()
+        queue: asyncio.Queue[bytes | None] = asyncio.Queue(maxsize=64)
+        closed = threading.Event()
+        # Single worker thread keeps stdin writes in submission order
+        executor = ThreadPoolExecutor(
+            max_workers=1, thread_name_prefix="vela-exec-writer"
+        )
+
+        def _reader() -> None:
+            try:
+                while not closed.is_set():
+                    chunk = exec_runtime.read(4096)
+                    if not chunk:
+                        break
+                    try:
+                        asyncio.run_coroutine_threadsafe(queue.put(chunk), loop).result(timeout=30)
+                    except (TimeoutError, RuntimeError):
+                        logger.warning(
+                            "exec reader stalled on backpressure for %s; closing reader",
+                            container_id,
+                        )
+                        break
+            except Exception as exc:
+                logger.warning("exec reader error for %s: %s", container_id, exc)
+            finally:
+                try:
+                    asyncio.run_coroutine_threadsafe(queue.put(None), loop).result(timeout=5)
+                except Exception:
+                    pass
+                exec_runtime.close()
+
+        threading.Thread(target=_reader, daemon=True, name="vela-exec-reader").start()
+
+        def _write_blocking(data: bytes) -> None:
+            try:
+                exec_runtime.write(data)
+            except Exception as exc:
+                logger.warning("exec write error for %s: %s", container_id, exc)
+
+        def _write(data: bytes) -> None:
+            if closed.is_set():
+                return
+            try:
+                executor.submit(_write_blocking, data)
+            except RuntimeError:
+                logger.warning("exec write rejected for %s: session closed", container_id)
+
+        def _close_blocking() -> None:
+            try:
+                exec_runtime.close()
+            except Exception as exc:
+                logger.warning("exec close error for %s: %s", container_id, exc)
+
+        def _close() -> None:
+            if closed.is_set():
+                return
+            closed.set()
+            executor.submit(_close_blocking)
+            executor.shutdown(wait=False)
+
+        async def _stdout_iterator() -> AsyncIterator[bytes]:
+            try:
+                while True:
+                    item = await queue.get()
+                    if item is None:
+                        break
+                    yield item
+            except asyncio.CancelledError:
+                _close()
+                raise
+
+        return _stdout_iterator(), _write, _close, exec_id
+
+    def resize_exec(self, container_id: str, exec_id: str, cols: int, rows: int) -> None:
+        try:
+            self._client.api.exec_resize(exec_id, height=rows, width=cols)
+        except Exception as exc:
+            logger.warning("exec resize error for %s: %s", container_id, exc)
 
     async def get_stats(self, container_id: str) -> ContainerStats:
         def sync() -> ContainerStats:
@@ -899,7 +1135,7 @@ class DockerOrchestrator(ContainerOrchestrator):
         self, path: str, *, tag: str, dockerfile: str = "Dockerfile"
     ) -> str:
         def sync() -> str:
-            log_parts: list[str] = []
+            log_tail = _BuildLogTail()
             image_obj = None
             try:
                 # decode=False: ImageCollection.build() always runs json_stream() on the
@@ -915,19 +1151,19 @@ class DockerOrchestrator(ContainerOrchestrator):
                 log = getattr(e, "build_log", None) or []
                 for chunk in log:
                     if isinstance(chunk, dict) and "stream" in chunk:
-                        log_parts.append(str(chunk["stream"]))
-                raise ImageBuildError(str(e), build_log="".join(log_parts)) from e
+                        log_tail.append(str(chunk["stream"]))
+                raise ImageBuildError(str(e), build_log=log_tail.text()) from e
             except docker.errors.APIError as e:
-                raise ImageBuildError(str(e), build_log="".join(log_parts)) from e
+                raise ImageBuildError(str(e), build_log=log_tail.text()) from e
 
             for chunk in build_logs:
                 if not isinstance(chunk, dict):
                     continue
                 if "stream" in chunk:
-                    log_parts.append(str(chunk["stream"]))
+                    log_tail.append(str(chunk["stream"]))
                 if "error" in chunk:
                     msg = str(chunk["error"])
-                    raise ImageBuildError(msg, build_log="".join(log_parts))
+                    raise ImageBuildError(msg, build_log=log_tail.text())
                 aux = chunk.get("aux")
                 if isinstance(aux, dict) and "ID" in aux:
                     image_obj = self._client.images.get(aux["ID"])
@@ -938,7 +1174,7 @@ class DockerOrchestrator(ContainerOrchestrator):
                 except docker.errors.ImageNotFound as e:
                     raise ImageBuildError(
                         "Build finished but image could not be resolved",
-                        build_log="".join(log_parts),
+                        build_log=log_tail.text(),
                     ) from e
 
             return image_obj.id
@@ -952,8 +1188,8 @@ class DockerOrchestrator(ContainerOrchestrator):
         except docker.errors.DockerException as e:
             raise ProviderConnectionError(str(e)) from e
 
-    async def list_images(self) -> list[str]:
-        def sync() -> list[str]:
+    async def list_images(self) -> List[str]:
+        def sync() -> List[str]:
             tags: list[str] = []
             for img in self._client.images.list():
                 tags.extend(img.tags or [])
@@ -966,21 +1202,21 @@ class DockerOrchestrator(ContainerOrchestrator):
         except docker.errors.DockerException as e:
             raise ProviderConnectionError(str(e)) from e
 
-    async def list_replicas(self, base_name: str) -> list[ContainerInfo]:
+    async def list_replicas(self, base_name: str) -> List[ContainerInfo]:
         label_filter = [
             f"{VELA_MANAGED_LABEL}={VELA_MANAGED_VALUE}",
             f"{VELA_REPLICA_OF_LABEL}={base_name}",
         ]
 
-        def sync() -> list[ContainerInfo]:
+        def sync() -> List[ContainerInfo]:
             containers = self._client.containers.list(
                 all=True,
                 filters={"label": label_filter},
             )
             out: list[ContainerInfo] = []
             for container in containers:
-                container.reload()
-                out.append(_inspect_to_container_info(container.attrs))
+                data = self._inspect_container_with_size(container.id)
+                out.append(_inspect_to_container_info(data))
             return out
 
         try:

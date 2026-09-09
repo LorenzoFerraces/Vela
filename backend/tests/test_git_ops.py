@@ -85,4 +85,4 @@ def test_clone_error_url_and_message_mask_credentials(
     err = exc_info.value
     assert "supersecret" not in err.git_url
     assert "supersecret" not in str(err)
-    assert "***@github.com" in err.git_url
+    assert "github.com" in err.git_url

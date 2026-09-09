@@ -8,6 +8,8 @@ import {
 
 const ERROR_LINE_PATTERN = /\b(error|exception|fatal|traceback)\b/i
 const MAX_LOG_BUFFER_CHARS = 256_000
+const RENDERED_LINE_LIMIT = 1500
+const textEncoder = new TextEncoder()
 
 function appendWithLimit(previous: string, piece: string): string {
   const next = previous + piece
@@ -36,6 +38,9 @@ export function ContainerLogPanel({
   const [errorText, setErrorText] = useState<string | null>(null)
   const [highlightErrors, setHighlightErrors] = useState(false)
   const decoderRef = useRef(new TextDecoder())
+  const pendingRef = useRef('')
+  const flushScheduledRef = useRef(false)
+  const frameRef = useRef<number | null>(null)
 
   const refreshSnapshot = useCallback(async () => {
     try {
@@ -46,6 +51,30 @@ export function ContainerLogPanel({
       setErrorText(formatApiError(error))
     }
   }, [containerId])
+
+  const flushPending = useCallback(() => {
+    if (!flushScheduledRef.current) {
+      return
+    }
+    flushScheduledRef.current = false
+    const pending = pendingRef.current
+    if (pending === '') {
+      return
+    }
+    pendingRef.current = ''
+    setLogText((previous) => appendWithLimit(previous, pending))
+  }, [])
+
+  // ponytail: rAF pauses in background tabs; pending buffer capped at MAX_LOG_BUFFER_CHARS
+  const scheduleFlush = useCallback(() => {
+    if (flushScheduledRef.current) {
+      return
+    }
+    flushScheduledRef.current = true
+    frameRef.current = requestAnimationFrame(() => {
+      flushPending()
+    })
+  }, [flushPending])
 
   useEffect(() => {
     if (!isActive || isRunning) {
@@ -89,13 +118,17 @@ export function ContainerLogPanel({
         payload instanceof ArrayBuffer
           ? new Uint8Array(payload)
           : typeof payload === 'string'
-            ? new TextEncoder().encode(payload)
+             ? textEncoder.encode(payload)
             : new Uint8Array()
       if (chunk.length === 0) {
         return
       }
       const piece = decoderRef.current.decode(chunk, { stream: true })
-      setLogText((previous) => appendWithLimit(previous, piece))
+      if (piece === '') {
+        return
+      }
+      pendingRef.current = appendWithLimit(pendingRef.current, piece)
+      scheduleFlush()
     }
     websocket.onerror = () => {
       queueMicrotask(() => {
@@ -105,6 +138,7 @@ export function ContainerLogPanel({
     }
     websocket.onclose = () => {
       queueMicrotask(() => {
+        flushPending()
         setStreamStatus((previous) => (previous === 'err' ? previous : 'ended'))
       })
     }
@@ -113,11 +147,25 @@ export function ContainerLogPanel({
       websocket.onmessage = null
       websocket.onerror = null
       websocket.onclose = null
+      if (frameRef.current !== null) {
+        cancelAnimationFrame(frameRef.current)
+        frameRef.current = null
+      }
+      flushPending()
       websocket.close()
     }
-  }, [containerId, isActive, isRunning])
+  }, [containerId, isActive, isRunning, flushPending, scheduleFlush])
 
-  const lines = useMemo(() => logText.split('\n'), [logText])
+  const { visibleLines, hasHiddenLines } = useMemo(() => {
+    const all = logText.split('\n')
+    if (all.length <= RENDERED_LINE_LIMIT) {
+      return { visibleLines: all, hasHiddenLines: false }
+    }
+    return {
+      visibleLines: all.slice(all.length - RENDERED_LINE_LIMIT),
+      hasHiddenLines: true,
+    }
+  }, [logText])
 
   return (
     <div className="workloads-log-panel">
@@ -159,7 +207,12 @@ export function ContainerLogPanel({
         tabIndex={0}
         aria-label="Container log output"
       >
-        {lines.map((line, index) => {
+        {hasHiddenLines ? (
+          <span className="workloads-log-panel__line">
+            Showing last {RENDERED_LINE_LIMIT} lines…
+          </span>
+        ) : null}
+        {visibleLines.map((line, index) => {
           const key = `${index}-${line.slice(0, 24)}`
           if (highlightErrors && ERROR_LINE_PATTERN.test(line)) {
             return (

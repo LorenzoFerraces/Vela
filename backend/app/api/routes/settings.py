@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 from typing import Annotated
 
 from fastapi import APIRouter, Depends
@@ -20,6 +19,7 @@ from app.api.schemas import (
     GeminiConfigStatus,
 )
 from app.core import user_preferences
+from app.core.llm import resolve_llm_config
 from app.core.notifications.alert_service import DEFAULT_ALERT_FREQUENCY, DEFAULT_ALERT_TYPES
 from app.core.notifications.container_monitor import (
     MONITOR_ENABLED,
@@ -56,7 +56,7 @@ async def patch_ai_prefill_settings(
 async def gemini_config_status(
     _current_user: Annotated[User, Depends(get_current_user)],
 ) -> GeminiConfigStatus:
-    configured = bool(os.environ.get("VELA_GEMINI_API_KEY", "").strip())
+    configured = resolve_llm_config() is not None
     return GeminiConfigStatus(configured=configured)
 
 

@@ -51,17 +51,15 @@ async def git_shallow_clone(
             )
         except FileNotFoundError as exc:
             raise CloneError(
-                _sanitize_url(url),
+                url,
                 "git executable not found — install Git and ensure it is on PATH.",
             ) from exc
         except subprocess.TimeoutExpired as exc:
-            raise CloneError(
-                _sanitize_url(url), "git clone timed out after 600s."
-            ) from exc
+            raise CloneError(url, "git clone timed out after 600s.") from exc
 
         if proc.returncode != 0:
             err = (proc.stderr or proc.stdout or "").strip() or f"exit {proc.returncode}"
-            raise CloneError(_sanitize_url(url), _sanitize_message(err))
+            raise CloneError(url, _sanitize_message(err))
 
     await asyncio.to_thread(_run)
 
@@ -94,13 +92,62 @@ def _build_clone_command(
     return cmd
 
 
-def _sanitize_url(url: str) -> str:
-    """Mask any ``user:password@`` segment that callers might have embedded in the URL."""
-    return _CREDENTIALS_IN_URL.sub(r"\1***@", url)
-
-
 def _sanitize_message(message: str) -> str:
     return _CREDENTIALS_IN_URL.sub(r"\1***@", message)
+
+
+def head_commit(root: Path) -> str | None:
+    try:
+        proc = subprocess.run(
+            ["git", "-C", str(root), "rev-parse", "HEAD"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if proc.returncode != 0:
+        return None
+    return proc.stdout.strip() or None
+
+
+async def git_head_ref(*, url: str, branch: str, access_token: str | None = None) -> str | None:
+    """Resolve the head commit sha of ``branch`` in ``url`` via ``git ls-remote`` (no clone)."""
+    # ponytail: ref pattern assumes a branch name (full refs pass through via the startswith check)
+    ref = branch if branch.startswith("refs/") else f"refs/heads/{branch}"
+    cmd: list[str] = ["git"]
+    if access_token and url.lower().startswith("https://"):
+        token_pair = f"x-access-token:{access_token}".encode("utf-8")
+        encoded = base64.b64encode(token_pair).decode("ascii")
+        cmd.extend(["-c", f"http.extraheader=Authorization: Basic {encoded}"])
+    cmd.extend(["ls-remote", url, ref])
+
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+    except OSError:
+        return None
+    try:
+        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=30)
+    except asyncio.TimeoutError:
+        proc.terminate()
+        await proc.wait()
+        return None
+    except asyncio.CancelledError:
+        proc.terminate()
+        await proc.wait()
+        raise
+    if proc.returncode != 0:
+        return None
+    for line in (stdout.decode(errors="replace") if stdout else "").splitlines():
+        parts = line.split("\t", 1)
+        if len(parts) == 2 and parts[1].strip() == ref:
+            return parts[0].strip() or None
+    return None
 
 
 def rm_tree(path: Path) -> None:

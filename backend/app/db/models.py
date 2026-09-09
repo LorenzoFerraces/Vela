@@ -5,11 +5,16 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 
+import enum
+
+import sqlalchemy as sa
 from sqlalchemy import (
+    BigInteger,
     Boolean,
     DateTime,
     Float,
     ForeignKey,
+    Index,
     Integer,
     LargeBinary,
     String,
@@ -174,6 +179,9 @@ class Project(Base):
         index=True,
     )
     name: Mapped[str] = mapped_column(String(255), nullable=False)
+    storage_quota_bytes: Mapped[int | None] = mapped_column(
+        BigInteger, nullable=True
+    )
     is_personal: Mapped[bool] = mapped_column(nullable=False, default=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=_utcnow
@@ -281,7 +289,7 @@ class DeploymentRecord(Base):
         nullable=True,
         index=True,
     )
-    container_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    container_id: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
     container_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
     source_kind: Mapped[str] = mapped_column(String(32), nullable=False)
     source_ref: Mapped[str] = mapped_column(String(2048), nullable=False)
@@ -323,7 +331,8 @@ class EmailPreference(Base):
     email: Mapped[str] = mapped_column(String(320), nullable=False)
     alerts_enabled: Mapped[bool] = mapped_column(nullable=False, default=True)
     alert_types: Mapped[list] = mapped_column(
-        JSON, nullable=False, default=lambda: ["stop", "failure", "unhealthy"]
+        JSON, nullable=False,
+        default=lambda: ["stop", "failure", "unhealthy", "storage"],
     )
     alert_frequency: Mapped[str] = mapped_column(
         String(32), nullable=False, default="immediate"
@@ -401,7 +410,9 @@ class AlertHistory(Base):
         nullable=False,
         index=True,
     )
-    container_id: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    container_id: Mapped[str | None] = mapped_column(
+        String(128), nullable=True, index=True
+    )
     event_type: Mapped[str] = mapped_column(String(32), nullable=False)
     alert_hash: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     sent_at: Mapped[datetime] = mapped_column(
@@ -411,6 +422,83 @@ class AlertHistory(Base):
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="sent")
 
     user: Mapped[User] = relationship()
+
+
+class AuditLog(Base):
+    __tablename__ = "audit_log"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    action: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    target_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    target_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    details: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utcnow, index=True
+    )
+
+    user: Mapped[User] = relationship()
+
+
+class LogSource(str, enum.Enum):
+    STDOUT = "stdout"
+    STDERR = "stderr"
+
+
+class LogLevel(str, enum.Enum):
+    INFO = "info"
+    WARN = "warn"
+    ERROR = "error"
+    DEBUG = "debug"
+
+
+class ContainerLog(Base):
+    __tablename__ = "container_logs"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    container_id: Mapped[str] = mapped_column(
+        String(128), nullable=False, index=True
+    )
+    container_name: Mapped[str | None] = mapped_column(
+        String(128), nullable=True, index=True
+    )
+    timestamp: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    source: Mapped[LogSource] = mapped_column(
+        String(16), nullable=False
+    )
+    level: Mapped[LogLevel] = mapped_column(
+        String(16), nullable=False, default=LogLevel.INFO
+    )
+    message: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utcnow
+    )
+
+    # GIN trgm full-text index (ix_container_logs_fts) is migration-only
+    # (0016, Postgres + pg_trgm) so create_all works on Postgres without the
+    # extension.
+    __table_args__ = (
+        Index(
+            "ix_container_logs_container_timestamp",
+            "container_id",
+            "timestamp",
+        ),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -501,4 +589,28 @@ class StackComposition(Base):
         Uuid(as_uuid=True),
         ForeignKey("stacks.id", ondelete="CASCADE"),
         nullable=False, primary_key=True,
+    )
+
+
+class ContainerMetric(Base):
+    __tablename__ = "container_metrics"
+    __table_args__ = (
+        sa.Index("ix_container_metrics_container_timestamp", "container_id", "timestamp"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4,
+    )
+    container_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    timestamp: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utcnow,
+    )
+    cpu_percent: Mapped[float] = mapped_column(Float, nullable=False)
+    memory_usage_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    memory_limit_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    memory_percent: Mapped[float] = mapped_column(Float, nullable=False)
+    network_rx_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    network_tx_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utcnow,
     )

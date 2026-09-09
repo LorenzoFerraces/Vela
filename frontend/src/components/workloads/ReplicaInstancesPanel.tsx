@@ -33,7 +33,15 @@ export function ReplicaInstancesPanel({ group }: ReplicaInstancesPanelProps) {
                 {index === 0 ? `${instance.name} (primary)` : instance.name}
               </td>
               <td>
-                <span className="containers-status">{instance.status}</span>
+                <span
+                  className={
+                    instance.status === 'running'
+                      ? 'containers-status containers-status--live'
+                      : 'containers-status'
+                  }
+                >
+                  {instance.status}
+                </span>
               </td>
               <td>{formatWorkloadHealth(instance.health)}</td>
             </tr>

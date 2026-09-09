@@ -1,0 +1,364 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>VELA — Purple Brutalist Palette Examples</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Archivo+Black&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'JetBrains Mono', ui-monospace, monospace; }
+  section.theme { padding: 3rem 2rem 4rem; position: relative; overflow: hidden; }
+
+  .wrap { max-width: 1000px; margin: 0 auto; position: relative; z-index: 1; }
+
+  /* ============ DARK / VIOLET TELEMETRY ============ */
+  .theme-dark {
+    --bg-deep: #120E1E;
+    --bg-elevated: #312654;
+    --bg-nav: #120E1E;
+    --border: #5A4B7A;
+    --text: #E9E4F2;
+    --text-muted: #9A8FB8;
+    --text-heading: #F1EDF9;
+    --accent: #BC7FED;
+    --accent-soft: rgba(153, 69, 217, 0.22);
+    --accent-line: #9945D9;
+    --status-live: #4AF626;
+    --warn: #FBBF24;
+    --error: #EF4444;
+    --ok: #4ADE80;
+    --accent-fill: #9945D9;
+    --on-accent: #FFFFFF;
+    background: var(--bg-deep);
+    color: var(--text);
+    color-scheme: dark;
+  }
+  .theme-dark::after {
+    content: '';
+    position: absolute; inset: 0;
+    pointer-events: none;
+    background: repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,0,0,0.16) 2px, rgba(0,0,0,0.16) 4px);
+  }
+  .theme-dark::before {
+    content: '';
+    position: absolute; inset: 0;
+    pointer-events: none; opacity: 0.05;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)'/%3E%3C/svg%3E");
+  }
+
+  /* ============ LIGHT / VIOLET SWISS PRINT ============ */
+  .theme-light {
+    --bg-deep: #EAE9ED;
+    --bg-elevated: #D2C6E4;
+    --bg-nav: #EAE9ED;
+    --border: #AD98CD;
+    --text: #312654;
+    --text-muted: #665C88;
+    --text-heading: #312654;
+    --accent: #9F36BF;
+    --accent-fill: #9945D9;
+    --accent-soft: rgba(153, 69, 217, 0.12);
+    --accent-line: #9945D9;
+    --status-live: #166534;
+    --warn: #B45309;
+    --error: #B91C1C;
+    --ok: #166534;
+    --on-accent: #FFFFFF;
+    background: var(--bg-deep);
+    color: var(--text);
+    color-scheme: light;
+  }
+  .theme-light .table-wrap { background: var(--bg-deep); }
+  .theme-light th { background: var(--bg-elevated); }
+  .theme-light .navbar__user,
+  .theme-light .hero__status { background: var(--bg-deep); }
+  .theme-light::after {
+    content: '';
+    position: absolute; inset: 0;
+    pointer-events: none; opacity: 0.5;
+    background-image: radial-gradient(circle, rgba(76, 29, 149, 0.10) 1px, transparent 1px);
+    background-size: 5px 5px;
+  }
+
+  /* ---------- shared brutalist components ---------- */
+  .spec-strip {
+    display: flex; flex-wrap: wrap; gap: 1px;
+    border: 1px solid var(--border);
+    background: var(--border);
+    margin-bottom: 2.5rem;
+  }
+  .spec {
+    flex: 1 1 90px; min-width: 90px;
+    background: var(--bg-deep);
+    padding: 0.5rem 0.6rem 0.7rem;
+  }
+  .spec .chip { display: block; height: 2.25rem; border: 1px solid var(--border); }
+  .spec .name { display: block; margin-top: 0.45rem; font-size: 0.625rem; letter-spacing: 0.08em; color: var(--text-muted); }
+  .spec .hex { display: block; font-size: 0.625rem; letter-spacing: 0.04em; color: var(--text); }
+
+  .navbar {
+    display: flex; align-items: center; justify-content: space-between; gap: 1.5rem;
+    height: 56px; padding: 0 1rem;
+    border: 1px solid var(--border);
+    background: var(--bg-nav);
+    margin-bottom: 2.5rem;
+  }
+  .navbar__brand { display: flex; align-items: center; gap: 0.5rem; text-decoration: none; color: var(--text-heading); }
+  .vela-mark {
+    width: 28px; height: 28px; display: inline-flex; align-items: center; justify-content: center;
+    border: 1px solid var(--border); background: var(--bg-elevated); color: var(--accent);
+    font-weight: 700; font-size: 0.875rem;
+  }
+  .navbar__title { font-family: 'Archivo Black', sans-serif; font-size: 1rem; letter-spacing: 0.1em; text-transform: uppercase; }
+  .navbar__list { display: flex; gap: 0.25rem; list-style: none; }
+  .navbar__link {
+    display: block; padding: 0.45rem 0.75rem; text-decoration: none;
+    color: var(--text-muted); font-size: 0.75rem; font-weight: 500;
+    letter-spacing: 0.1em; text-transform: uppercase;
+    border-bottom: 2px solid transparent;
+  }
+  .navbar__link--active { color: var(--accent); border-bottom-color: var(--accent); }
+  .navbar__user { font-size: 0.75rem; letter-spacing: 0.05em; color: var(--text-muted); border: 1px solid var(--border); padding: 0.3rem 0.6rem; background: var(--bg-elevated); }
+
+  .hero { text-align: center; padding: 2.5rem 0 2rem; }
+  .hero__eyebrow { font-size: 0.75rem; font-weight: 500; letter-spacing: 0.14em; text-transform: uppercase; color: var(--accent); margin-bottom: 0.9rem; }
+  .hero__title {
+    font-family: 'Archivo Black', sans-serif; font-weight: 400;
+    font-size: clamp(2.75rem, 8vw, 6.5rem);
+    line-height: 0.9; letter-spacing: -0.04em; text-transform: uppercase;
+    color: var(--text-heading);
+  }
+  .hero__status {
+    display: inline-flex; align-items: center; gap: 0.6rem; margin-top: 1.5rem;
+    padding: 0.5rem 1rem; font-size: 0.8125rem; letter-spacing: 0.05em;
+    color: var(--text-muted); border: 1px solid var(--border); background: var(--bg-elevated);
+  }
+  .dot { width: 8px; height: 8px; background: var(--status-live); box-shadow: 0 0 8px var(--status-live); }
+
+  .page-title {
+    font-family: 'Archivo Black', sans-serif; font-weight: 400;
+    font-size: clamp(1.5rem, 3vw, 2.25rem); line-height: 0.95; letter-spacing: -0.02em;
+    text-transform: uppercase; color: var(--text-heading);
+    margin: 2.5rem 0 0.5rem;
+  }
+  .page-title::before { content: '['; color: var(--accent-line); margin-right: 0.5rem; }
+  .page-title::after { content: ']'; color: var(--accent-line); margin-left: 0.5rem; }
+  .page-lead { max-width: 40rem; color: var(--text-muted); font-size: 0.9375rem; margin-bottom: 1.5rem; }
+
+  .row { display: flex; flex-wrap: wrap; gap: 0.75rem; margin-bottom: 1.5rem; }
+  .btn {
+    display: inline-flex; align-items: center; justify-content: center;
+    padding: 0.5rem 1rem; font-family: inherit; font-size: 0.8125rem; font-weight: 500;
+    letter-spacing: 0.05em; text-transform: uppercase;
+    border: 1px solid var(--border); background: var(--bg-elevated); color: var(--text-heading);
+    cursor: pointer;
+  }
+  .btn--primary { background: var(--accent-fill); border-color: var(--accent-fill); color: var(--on-accent); }
+  .btn--danger { color: var(--error); border-color: var(--error); background: transparent; }
+  .btn--sm { padding: 0.3rem 0.55rem; font-size: 0.75rem; }
+  .btn--ghost { background: transparent; }
+  .btn--ghost:hover { border-color: var(--accent); color: var(--accent); }
+
+  .form-row { display: flex; flex-wrap: wrap; gap: 1rem; margin-bottom: 1.5rem; }
+  .field { flex: 1 1 220px; }
+  .field label { display: block; margin-bottom: 0.35rem; font-size: 0.8125rem; font-weight: 500; color: var(--text-muted); }
+  .field input, .field select {
+    width: 100%; padding: 0.55rem 0.75rem; font-family: inherit; font-size: 0.9375rem;
+    color: var(--text-heading); background: var(--bg-deep); border: 1px solid var(--border);
+  }
+  .theme-light .field input, .theme-light .field select { background: var(--bg-deep); }
+  .field input:focus, .field select:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+  .field--focused input { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+
+  .table-wrap { border: 1px solid var(--border); background: var(--bg-elevated); margin-bottom: 1.5rem; overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 0.875rem; }
+  th, td { padding: 0.65rem 0.85rem; text-align: left; border-bottom: 1px solid var(--border); }
+  th {
+    font-weight: 500; color: var(--text-muted); font-size: 0.6875rem;
+    text-transform: uppercase; letter-spacing: 0.1em; border-bottom: 2px solid var(--border);
+  }
+  tr:last-child td { border-bottom: none; }
+  .status { text-transform: uppercase; letter-spacing: 0.06em; font-size: 0.8125rem; }
+  .status--live { color: var(--status-live); }
+  .mono { font-size: 0.8125rem; overflow-wrap: anywhere; }
+  .muted { color: var(--text-muted); white-space: nowrap; }
+
+  .banner { padding: 0.75rem 1rem; font-size: 0.875rem; letter-spacing: 0.03em; margin-bottom: 0.75rem; border: 1px solid; }
+  .banner--ok { border-color: var(--ok); color: var(--ok); background: var(--accent-soft); }
+  .banner--err { border-color: var(--error); color: var(--error); background: transparent; }
+
+
+  .foot {
+    display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+    margin-top: 2.5rem; padding-top: 1rem; border-top: 2px solid var(--accent-line);
+    font-size: 0.6875rem; letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-muted);
+  }
+  .barcode { display: flex; gap: 2px; }
+  .barcode i { display: block; width: 2px; height: 14px; background: var(--text-muted); }
+  .barcode i:nth-child(odd) { width: 4px; }
+
+  .theme-label {
+    position: absolute; top: 0.75rem; right: 1rem;
+    font-size: 0.625rem; letter-spacing: 0.12em; color: var(--text-muted);
+  }
+</style>
+</head>
+<body>
+
+<!-- ================= DARK ================= -->
+<section class="theme theme-dark">
+  <span class="theme-label">EXAMPLE 01 / DARK</span>
+  <div class="wrap">
+    <div class="spec-strip">
+      <div class="spec"><span class="chip" style="background:#120E1E"></span><span class="name">BG / DERIVED</span><span class="hex">#120E1E</span></div>
+      <div class="spec"><span class="chip" style="background:#312654"></span><span class="name">SURFACE = LT TEXT</span><span class="hex">#312654</span></div>
+      <div class="spec"><span class="chip" style="background:#9945D9"></span><span class="name">PRIMARY</span><span class="hex">#9945D9</span></div>
+      <div class="spec"><span class="chip" style="background:#BC7FED"></span><span class="name">SUPPORT / LIFTED</span><span class="hex">#BC7FED</span></div>
+      <div class="spec"><span class="chip" style="background:#E9E4F2"></span><span class="name">TEXT</span><span class="hex">#E9E4F2</span></div>
+      <div class="spec"><span class="chip" style="background:#5A4B7A"></span><span class="name">BORDER / DERIVED</span><span class="hex">#5A4B7A</span></div>
+      <div class="spec"><span class="chip" style="background:#4AF626"></span><span class="name">LIVE</span><span class="hex">#4AF626</span></div>
+      <div class="spec"><span class="chip" style="background:#EF4444"></span><span class="name">ERROR</span><span class="hex">#EF4444</span></div>
+    </div>
+
+    <nav class="navbar">
+      <a class="navbar__brand" href="#"><span class="vela-mark" aria-hidden="true">▲</span><span class="navbar__title">Vela</span></a>
+      <ul class="navbar__list">
+        <li><a class="navbar__link" href="#">Dashboard</a></li>
+        <li><a class="navbar__link navbar__link--active" href="#">Containers</a></li>
+        <li><a class="navbar__link" href="#">Stacks</a></li>
+        <li><a class="navbar__link" href="#">Builder</a></li>
+        <li><a class="navbar__link" href="#">Logs</a></li>
+      </ul>
+      <span class="navbar__user">OPERATOR@VELA</span>
+    </nav>
+
+    <div class="hero">
+      <p class="hero__eyebrow">/// Deployment Platform — Unit VELA-01</p>
+      <h1 class="hero__title">Run<br/>Everything</h1>
+      <span class="hero__status"><span class="dot" aria-hidden="true"></span> API: 127.0.0.1:8000 [ONLINE]</span>
+    </div>
+
+    <h2 class="page-title">Containers</h2>
+    <p class="page-lead">Deploy from Git, an image ref, or a Dockerfile. Public routes are provisioned automatically.</p>
+
+    <div class="row">
+      <button class="btn btn--primary">Deploy</button>
+      <button class="btn btn--ghost">Stop</button>
+      <button class="btn btn--danger">Destroy</button>
+      <button class="btn btn--sm btn--ghost">&gt; Terminal</button>
+    </div>
+
+    <div class="form-row">
+      <div class="field field--focused">
+        <label for="d-name">Container name</label>
+        <input id="d-name" value="vela-web" />
+      </div>
+      <div class="field">
+        <label for="d-image">Source</label>
+        <select id="d-image"><option>git@github.com:vela/web.git</option></select>
+      </div>
+    </div>
+
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Name</th><th>Image</th><th>Status</th><th>Ports</th></tr></thead>
+        <tbody>
+          <tr><td class="mono">vela-web</td><td class="mono">vela/web:latest</td><td><span class="status status--live">Running</span></td><td class="muted">8081:80/tcp</td></tr>
+          <tr><td class="mono">vela-api</td><td class="mono">vela/api:latest</td><td><span class="status status--live">2/2 Running</span></td><td class="muted">8000/tcp</td></tr>
+          <tr><td class="mono">worker</td><td class="mono">vela/worker:0.4</td><td><span class="status">Exited</span></td><td class="muted">—</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="banner banner--ok">DEPLOY COMPLETE — PUBLIC ROUTE ACTIVE: https://web.vela.local</div>
+    <div class="banner banner--err">BUILD FAILED: Dockerfile line 12 — command not found</div>
+
+    <div class="foot">
+      <span>Rev 2.7 // Tactical Telemetry — Violet</span>
+      <span class="barcode" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span>
+      <span>© VELA OS</span>
+    </div>
+  </div>
+</section>
+
+<!-- ================= LIGHT ================= -->
+<section class="theme theme-light">
+  <span class="theme-label">EXAMPLE 02 / LIGHT</span>
+  <div class="wrap">
+    <div class="spec-strip">
+      <div class="spec"><span class="chip" style="background:#EAE9ED"></span><span class="name">BACKGROUND</span><span class="hex">#EAE9ED</span></div>
+      <div class="spec"><span class="chip" style="background:#AD98CD"></span><span class="name">SURFACE</span><span class="hex">#AD98CD</span></div>
+      <div class="spec"><span class="chip" style="background:#9945D9"></span><span class="name">PRIMARY</span><span class="hex">#9945D9</span></div>
+      <div class="spec"><span class="chip" style="background:#9F36BF"></span><span class="name">SUPPORT</span><span class="hex">#9F36BF</span></div>
+      <div class="spec"><span class="chip" style="background:#312654"></span><span class="name">TEXT</span><span class="hex">#312654</span></div>
+      <div class="spec"><span class="chip" style="background:#665C88"></span><span class="name">MUTED / DERIVED</span><span class="hex">#665C88</span></div>
+      <div class="spec"><span class="chip" style="background:#166534"></span><span class="name">LIVE</span><span class="hex">#166534</span></div>
+      <div class="spec"><span class="chip" style="background:#B91C1C"></span><span class="name">ERROR</span><span class="hex">#B91C1C</span></div>
+    </div>
+
+    <nav class="navbar">
+      <a class="navbar__brand" href="#"><span class="vela-mark" aria-hidden="true">▲</span><span class="navbar__title">Vela</span></a>
+      <ul class="navbar__list">
+        <li><a class="navbar__link" href="#">Dashboard</a></li>
+        <li><a class="navbar__link navbar__link--active" href="#">Containers</a></li>
+        <li><a class="navbar__link" href="#">Stacks</a></li>
+        <li><a class="navbar__link" href="#">Builder</a></li>
+        <li><a class="navbar__link" href="#">Logs</a></li>
+      </ul>
+      <span class="navbar__user">OPERATOR@VELA</span>
+    </nav>
+
+    <div class="hero">
+      <p class="hero__eyebrow">/// Deployment Platform — Unit VELA-01</p>
+      <h1 class="hero__title">Run<br/>Everything</h1>
+      <span class="hero__status"><span class="dot" aria-hidden="true"></span> API: 127.0.0.1:8000 [ONLINE]</span>
+    </div>
+
+    <h2 class="page-title">Containers</h2>
+    <p class="page-lead">Deploy from Git, an image ref, or a Dockerfile. Public routes are provisioned automatically.</p>
+
+    <div class="row">
+      <button class="btn btn--primary">Deploy</button>
+      <button class="btn btn--ghost">Stop</button>
+      <button class="btn btn--danger">Destroy</button>
+      <button class="btn btn--sm btn--ghost">&gt; Terminal</button>
+    </div>
+
+    <div class="form-row">
+      <div class="field field--focused">
+        <label for="l-name">Container name</label>
+        <input id="l-name" value="vela-web" />
+      </div>
+      <div class="field">
+        <label for="l-image">Source</label>
+        <select id="l-image"><option>git@github.com:vela/web.git</option></select>
+      </div>
+    </div>
+
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Name</th><th>Image</th><th>Status</th><th>Ports</th></tr></thead>
+        <tbody>
+          <tr><td class="mono">vela-web</td><td class="mono">vela/web:latest</td><td><span class="status status--live">Running</span></td><td class="muted">8081:80/tcp</td></tr>
+          <tr><td class="mono">vela-api</td><td class="mono">vela/api:latest</td><td><span class="status status--live">2/2 Running</span></td><td class="muted">8000/tcp</td></tr>
+          <tr><td class="mono">worker</td><td class="mono">vela/worker:0.4</td><td><span class="status">Exited</span></td><td class="muted">—</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="banner banner--ok">DEPLOY COMPLETE — PUBLIC ROUTE ACTIVE: https://web.vela.local</div>
+    <div class="banner banner--err">BUILD FAILED: Dockerfile line 12 — command not found</div>
+
+    <div class="foot">
+      <span>Rev 2.7 // Swiss Industrial Print — Violet</span>
+      <span class="barcode" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span>
+      <span>© VELA OS</span>
+    </div>
+  </div>
+</section>
+
+</body>
+</html>

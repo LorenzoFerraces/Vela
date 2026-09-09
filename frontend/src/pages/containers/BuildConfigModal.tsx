@@ -48,13 +48,16 @@ export default function BuildConfigModal({
   const titleId = useId()
   const dialogRef = useRef<HTMLDivElement>(null)
   const [form, setForm] = useState<FormState>(() => formStateFromOverride(initial))
+  const [prevOpen, setPrevOpen] = useState(open)
+  const [prevInitial, setPrevInitial] = useState(initial)
 
-  useEffect(() => {
-    if (!open) {
-      return
+  if (open !== prevOpen || initial !== prevInitial) {
+    setPrevOpen(open)
+    setPrevInitial(initial)
+    if (open) {
+      setForm(formStateFromOverride(initial))
     }
-    setForm(formStateFromOverride(initial))
-  }, [open, initial])
+  }
 
   useEffect(() => {
     if (!open) {
@@ -129,7 +132,7 @@ export default function BuildConfigModal({
             </label>
             <select
               id="build-config-language"
-              className="containers-form__input containers-form__select"
+              className="containers-form__input"
               value={form.language}
               onChange={(event) => {
                 const value = event.target.value
@@ -179,7 +182,7 @@ export default function BuildConfigModal({
                 </label>
                 <select
                   id="build-config-package-manager"
-                  className="containers-form__input containers-form__select"
+                  className="containers-form__input"
                   value={form.packageManager}
                   onChange={(event) =>
                     setForm((previous) => ({

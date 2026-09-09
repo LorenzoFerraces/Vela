@@ -1,0 +1,12 @@
+http:
+  routers:
+    vela-spa:
+      rule: "PathPrefix(`/`)"
+      service: vela-spa-svc
+      entryPoints:
+        - web
+  services:
+    vela-spa-svc:
+      loadBalancer:
+        servers:
+          - url: "http://web:8080"

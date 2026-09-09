@@ -2,33 +2,35 @@
 
 from __future__ import annotations
 
-import json
-import logging
-import os
+import asyncio
+import hashlib
 import re
 from pathlib import Path
+from typing import Literal
 
-import httpx
 from pydantic import ValidationError
 
 from app.api.schemas import GitSourceAnalysis
 from app.core.build.default_image_builder import DefaultImageBuilder
 from app.core.enums import SupportedLanguage
-from app.core.exceptions import GitSourceAnalysisError
+from app.core.exceptions import (
+    GitSourceAnalysisError,
+    LlmCallError,
+    LlmNotConfiguredError,
+)
+from app.core.git.git_ops import _CREDENTIALS_IN_URL, git_head_ref, rm_tree
 from app.core.git.project_analysis import analyze_project
+from app.core.models import ProjectInfo
+from app.core.llm import generate_json, resolve_llm_config
+from app.core.llm.cache import delete_cached, load_cached, store_cached
 from app.e2e_support import e2e_git_source_analysis_if_enabled
-
-logger = logging.getLogger(__name__)
-
-GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta"
-DEFAULT_GEMINI_MODEL = "gemini-2.0-flash"
 MAX_FILE_BYTES = 12_000
 MAX_TOTAL_BYTES = 48_000
+GIT_SOURCE_PROMPT_VERSION = "v3"  # ponytail: bumped for URL/secret redaction in prompts and pre-filled values
 
 _README_CANDIDATES = ("README.md", "README", "readme.md", "Readme.md")
 
 _OTHER_CONTEXT_FILES = (
-    "Dockerfile",
     "package.json",
     "pyproject.toml",
     "requirements.txt",
@@ -42,6 +44,49 @@ _ENV_EXAMPLE_PATHS = (
     "backend/.env.example",
 )
 
+_README_SECTION_KEYWORDS = (
+    "env",
+    "config",
+    "deploy",
+    "docker",
+    "compose",
+    "k8s",
+    "port",
+    "install",
+    "setup",
+    "run",
+    "usage",
+    "start",
+    "requirement",
+)
+
+_MAP_IGNORED = frozenset(
+    {
+        ".git",
+        "node_modules",
+        "vendor",
+        "__pycache__",
+        ".venv",
+        "venv",
+        "dist",
+        "build",
+        "target",
+        ".next",
+        ".turbo",
+        "coverage",
+    }
+)
+
+_SUBDIR_MARKER_NAMES = (
+    "Dockerfile",
+    "package.json",
+    "pyproject.toml",
+    "requirements.txt",
+    "go.mod",
+    ".env.example",
+)
+_MAX_SUBDIR_FILES = 6
+
 _ENV_VAR_TABLE_ROW = re.compile(
     r"^\|\s*`?([A-Za-z_][A-Za-z0-9_]*)`?\s*\|",
     re.MULTILINE,
@@ -50,9 +95,36 @@ _ENV_ASSIGNMENT = re.compile(
     r"^(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)=(.*)$",
 )
 
+# Key names and value prefixes that must never reach the LLM provider
+_SECRET_KEY_MARKERS = (
+    "PASSWORD",
+    "SECRET",
+    "TOKEN",
+    "APIKEY",
+    "API_KEY",
+    "AUTH",
+    "CREDENTIAL",
+    "PRIVATE_KEY",
+    "JWT",
+)
+_SECRET_KEY_SUFFIXES = ("_KEY", "_TOKEN", "_SECRET", "_PASSWORD")
+_SECRET_VALUE_PREFIX = re.compile(
+    r"^(?:ghp_|gho_|github_pat_|xox[baprs]-|sk-|AKIA[0-9A-Z]{16}"
+    r"|AIza[0-9A-Za-z_-]{20,}|-----BEGIN )"
+)
+_ENV_ASSIGNMENT_LINE = re.compile(
+    r"^(\s*(?:export\s+)?)([A-Za-z_][A-Za-z0-9_]*)(=)(.*)$"
+)
+_DOCKER_ENV_LINE = re.compile(r"^(\s*)(ENV|ARG)(\s+)(\S+)(\s+)?(.*)$")
+
+MAX_ENV_KEY_LENGTH = 128
+MAX_ENV_VALUE_LENGTH = 512
+MAX_COMMAND_TOKEN_LENGTH = 200
+_ENV_VAR_KEY = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
 GIT_SOURCE_ANALYSIS_PROMPT_V1 = """You analyze Git repositories for deployment on Vela (Docker containers behind Traefik public routes).
 
-Given repository file excerpts, infer how the app should be deployed. The README excerpt (when present) is the primary source for ports, environment variables, and run/setup commands.
+Given repository file excerpts, infer how the app should be deployed. The README excerpt (when present) is the primary source for ports, environment variables, and run/setup commands. When a Detected facts block is supplied, treat it as ground truth for ports, environment variables, and build signals.
 - container_port: TCP port the app listens on inside the container (e.g. 5173 for Vite, 8000 for FastAPI, 8080 for Go). Prefer values documented in the README.
 - container_name: short DNS-safe name derived from the repo (lowercase, hyphens).
 - git_branch: keep the requested branch unless excerpts clearly indicate another default.
@@ -64,15 +136,6 @@ Given repository file excerpts, infer how the app should be deployed. The README
 - summary_hint: one short sentence for the UI (max 120 chars).
 
 Respond with JSON matching the schema exactly."""
-
-
-def _gemini_api_key() -> str | None:
-    key = os.environ.get("VELA_GEMINI_API_KEY", "").strip()
-    return key or None
-
-
-def _gemini_model() -> str:
-    return os.environ.get("VELA_GEMINI_MODEL", DEFAULT_GEMINI_MODEL).strip() or DEFAULT_GEMINI_MODEL
 
 
 def _read_file_excerpt(path: Path) -> str:
@@ -90,6 +153,148 @@ def _find_readme(project_root: Path) -> Path | None:
     return None
 
 
+def _select_readme_text(text: str) -> str:
+    if len(text.encode("utf-8")) <= MAX_FILE_BYTES:
+        return text
+    return _extract_readme_sections(text) or text[:MAX_FILE_BYTES]
+
+
+def _extract_readme_sections(text: str, max_bytes: int = 8_000) -> str:
+    lines = text.splitlines()
+    section_indices: list[int] = []
+    env_indices: set[int] = set()
+    in_kept_section = False
+    for index, line in enumerate(lines):
+        stripped = line.strip()
+        if line.startswith("#"):
+            in_kept_section = any(
+                keyword in line.lower() for keyword in _README_SECTION_KEYWORDS
+            )
+            if in_kept_section:
+                section_indices.append(index)
+            continue
+        if in_kept_section:
+            section_indices.append(index)
+        if _ENV_VAR_TABLE_ROW.match(line) or _ENV_ASSIGNMENT.match(stripped):
+            for context_index in range(index - 2, index + 3):
+                if 0 <= context_index < len(lines):
+                    env_indices.add(context_index)
+    section_text = "\n".join(lines[index] for index in section_indices)
+    if len(section_text) < 800:
+        section_indices = []
+    keep = sorted(set(section_indices) | env_indices)
+    if not keep:
+        return ""
+    kept_text = "\n".join(lines[index] for index in keep)
+    if len(kept_text.encode("utf-8")) > max_bytes:
+        kept_text = (
+            kept_text.encode("utf-8", errors="replace")[:max_bytes].decode(
+                "utf-8", errors="replace"
+            )
+            + "…"
+        )
+    return kept_text
+
+
+def _repo_map(root: Path, max_entries: int = 150) -> str:
+    entries: list[str] = []
+
+    def walk(directory: Path) -> None:
+        try:
+            children = sorted(directory.iterdir(), key=lambda item: item.name)
+        except OSError:
+            return
+        for child in children:
+            if child.name.startswith(".") or child.name in _MAP_IGNORED:
+                continue
+            if child.is_symlink():
+                continue
+            if child.is_dir():
+                walk(child)
+            else:
+                entries.append(child.relative_to(root).as_posix())
+
+    walk(root)
+    entries.sort()
+    if len(entries) > max_entries:
+        entries = entries[:max_entries] + ["…"]
+    return "\n".join(entries)
+
+
+def _subdir_marker_files(root: Path) -> list[tuple[str, str]]:
+    for name in _SUBDIR_MARKER_NAMES:
+        if (root / name).is_file():
+            return []
+    results: list[tuple[str, str]] = []
+    try:
+        children = sorted(root.iterdir(), key=lambda item: item.name)
+    except OSError:
+        return []
+    for child in children:
+        if not child.is_dir() or child.name.startswith(".") or child.name in _MAP_IGNORED:
+            continue
+        markers = sorted(
+            (child / name) for name in _SUBDIR_MARKER_NAMES if (child / name).is_file()
+        )
+        for marker in markers:
+            if len(results) >= _MAX_SUBDIR_FILES:
+                break
+            results.append((f"{child.name}/{marker.name}", _read_file_excerpt(marker)))
+        if len(results) >= _MAX_SUBDIR_FILES:
+            break
+    return results
+
+
+def _is_secret_like_key(key: str) -> bool:
+    upper = key.upper()
+    return any(marker in upper for marker in _SECRET_KEY_MARKERS) or upper.endswith(
+        _SECRET_KEY_SUFFIXES
+    )
+
+
+def _unquote(value: str) -> str:
+    stripped = value.strip()
+    if len(stripped) >= 2 and stripped[0] == stripped[-1] and stripped[0] in {"'", '"'}:
+        return stripped[1:-1].strip()
+    return stripped
+
+
+def _should_redact_value(key: str, value: str) -> bool:
+    if not value.strip():
+        return False
+    if _is_secret_like_key(key):
+        return True
+    return _SECRET_VALUE_PREFIX.match(_unquote(value)) is not None
+
+
+def _redact_line(line: str) -> str:
+    assignment = _ENV_ASSIGNMENT_LINE.match(line)
+    if assignment is not None:
+        prefix, key, equals, value = assignment.groups()
+        if _should_redact_value(key, value):
+            return f"{prefix}{key}{equals}[REDACTED]"
+        return line
+    docker_env = _DOCKER_ENV_LINE.match(line)
+    if docker_env is not None:
+        indent, instruction, space, first, space2, rest = docker_env.groups()
+        if "=" in first:
+            key, _, value = first.partition("=")
+            if _should_redact_value(key, value):
+                suffix = f"{space2}{rest}" if space2 else ""
+                return f"{indent}{instruction}{space}{key}=[REDACTED]{suffix}"
+            return line
+        if rest and _should_redact_value(first, rest):
+            return f"{indent}{instruction}{space}{first}{space2}[REDACTED]"
+    return line
+
+
+def _redact_secret_values(text: str) -> str:
+    redacted = "\n".join(_redact_line(line) for line in text.splitlines())
+    if text.endswith("\n"):
+        redacted += "\n"
+    return redacted
+
+
 def _append_excerpt(
     parts: list[str],
     *,
@@ -97,24 +302,38 @@ def _append_excerpt(
     label: str,
     text: str,
 ) -> int:
-    chunk = f"=== {label} ===\n{text.strip()}\n"
+    chunk = f"=== {label} ===\n{_redact_secret_values(text.strip())}\n"
     if total + len(chunk) > MAX_TOTAL_BYTES:
         return total
     parts.append(chunk)
     return total + len(chunk)
 
 
-def _collect_context_excerpts(project_root: Path) -> str:
+def _collect_context_excerpts(
+    project_root: Path,
+    info: ProjectInfo | None = None,
+) -> str:
     parts: list[str] = []
     total = 0
 
-    readme_path = _find_readme(project_root)
-    if readme_path is not None:
+    for relative_path in _ENV_EXAMPLE_PATHS:
+        path = project_root / relative_path
+        if not path.is_file():
+            continue
         total = _append_excerpt(
             parts,
             total=total,
-            label=readme_path.name,
-            text=_read_file_excerpt(readme_path),
+            label=relative_path,
+            text=_read_file_excerpt(path),
+        )
+
+    dockerfile_path = project_root / "Dockerfile"
+    if dockerfile_path.is_file():
+        total = _append_excerpt(
+            parts,
+            total=total,
+            label="Dockerfile",
+            text=_read_file_excerpt(dockerfile_path),
         )
 
     for name in _OTHER_CONTEXT_FILES:
@@ -127,24 +346,31 @@ def _collect_context_excerpts(project_root: Path) -> str:
             label=name,
             text=_read_file_excerpt(path),
         )
-        if total >= MAX_TOTAL_BYTES:
-            break
 
-    for relative_path in _ENV_EXAMPLE_PATHS:
-        if total >= MAX_TOTAL_BYTES:
-            break
-        path = project_root / relative_path
-        if not path.is_file():
-            continue
+    readme_path = _find_readme(project_root)
+    if readme_path is not None:
+        readme_text = readme_path.read_bytes().decode("utf-8", errors="replace")
         total = _append_excerpt(
             parts,
             total=total,
-            label=relative_path,
-            text=_read_file_excerpt(path),
+            label=readme_path.name,
+            text=_select_readme_text(readme_text),
+        )
+
+    for label, text in _subdir_marker_files(project_root):
+        total = _append_excerpt(parts, total=total, label=label, text=text)
+
+    map_text = _repo_map(project_root)
+    if map_text:
+        total = _append_excerpt(
+            parts,
+            total=total,
+            label="repo map",
+            text=map_text,
         )
 
     if not parts:
-        info = analyze_project(project_root)
+        info = info or analyze_project(project_root)
         parts.append(
             f"=== analysis ===\nlanguage={info.language}\n"
             f"has_dockerfile={info.has_dockerfile}\n"
@@ -190,6 +416,85 @@ def _extract_env_vars_from_context(context: str) -> dict[str, str]:
     return env_vars
 
 
+def _dockerfile_facts(text: str) -> str | None:
+    base: str | None = None
+    ports: list[str] = []
+    command: str | None = None
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        tokens = stripped.split()
+        instruction = tokens[0].upper()
+        if instruction == "FROM":
+            for token in tokens[1:]:
+                if not token.startswith("--"):
+                    base = token
+                    break
+        elif instruction == "EXPOSE":
+            for token in tokens[1:]:
+                port = token.split("/")[0]
+                if port.isdigit() and port not in ports:
+                    ports.append(port)
+        elif instruction in {"CMD", "ENTRYPOINT"}:
+            command = stripped[:120]
+    if base is None and not ports and command is None:
+        return None
+    facts: list[str] = []
+    if base is not None:
+        facts.append(f"base={base}")
+    if ports:
+        facts.append(f"expose={','.join(ports)}")
+    if command is not None:
+        facts.append(f"cmd={command}")
+    return " ".join(facts)
+
+
+def _detected_facts_block(
+    root: Path,
+    context: str,
+    info: ProjectInfo | None = None,
+) -> str:
+    lines: list[str] = []
+    info = info or analyze_project(root)
+    if info.language is not SupportedLanguage.UNKNOWN:
+        language_line = f"language={info.language}"
+        if info.framework:
+            language_line += f", framework={info.framework}"
+        lines.append(language_line)
+    if info.build_subdir:
+        lines.append(f"app markers live in '{info.build_subdir}/'")
+    dockerfile_path = root / "Dockerfile"
+    if dockerfile_path.is_file():
+        dockerfile_facts = _dockerfile_facts(_read_file_excerpt(dockerfile_path))
+        if dockerfile_facts is not None:
+            lines.append(f"dockerfile: {dockerfile_facts}")
+    env_vars = _extract_env_vars_from_context(context)
+    if env_vars:
+        rendered = ", ".join(
+            f"{key}=[REDACTED]"
+            if value and _should_redact_value(key, value)
+            else (f"{key}={value}" if value else key)
+            for key, value in list(env_vars.items())[:20]
+        )
+        if len(env_vars) > 20:
+            rendered += " (more truncated)"
+        lines.append(f"documented env vars: {rendered}")
+    return "\n".join(f"- {line}" for line in lines)
+
+
+def _valid_env_key(key: str) -> bool:
+    return len(key) <= MAX_ENV_KEY_LENGTH and _ENV_VAR_KEY.fullmatch(key) is not None
+
+
+def _validated_env_vars(env_vars: dict[str, str]) -> dict[str, str]:
+    return {
+        key: value
+        for key, value in env_vars.items()
+        if _valid_env_key(key) and len(value) <= MAX_ENV_VALUE_LENGTH
+    }
+
+
 def _env_vars_from_payload(parsed: dict[str, object]) -> dict[str, str]:
     """Gemini may return ``env_var_entries``; older payloads may use ``env_vars`` object."""
     env_vars: dict[str, str] = {}
@@ -208,7 +513,20 @@ def _env_vars_from_payload(parsed: dict[str, object]) -> dict[str, str]:
                 continue
             raw_value = entry.get("value")
             env_vars[key] = "" if raw_value is None else str(raw_value)
-    return env_vars
+    return _validated_env_vars(env_vars)
+
+
+def _clean_command_list(raw: object) -> list[str] | None:
+    if raw is None or not isinstance(raw, list):
+        return None
+    tokens = [
+        token.strip()
+        for token in raw
+        if isinstance(token, str)
+        and token.strip()
+        and len(token.strip()) <= MAX_COMMAND_TOKEN_LENGTH
+    ]
+    return tokens or None
 
 
 def _payload_to_analysis(parsed: dict[str, object]) -> GitSourceAnalysis:
@@ -216,6 +534,7 @@ def _payload_to_analysis(parsed: dict[str, object]) -> GitSourceAnalysis:
     payload = dict(parsed)
     payload["env_vars"] = env_vars
     payload.pop("env_var_entries", None)
+    payload["start_command"] = _clean_command_list(payload.get("start_command"))
     return GitSourceAnalysis.model_validate(payload)
 
 
@@ -233,9 +552,8 @@ def _merge_env_fallback(
 
 def _enrich_with_local_detection(
     analysis: GitSourceAnalysis,
-    project_root: Path,
+    info: ProjectInfo,
 ) -> GitSourceAnalysis:
-    info = analyze_project(project_root)
     needs_manual = (
         not info.has_dockerfile and info.language is SupportedLanguage.UNKNOWN
     )
@@ -295,83 +613,57 @@ def _analysis_json_schema() -> dict:
     }
 
 
-async def _call_gemini(context: str, git_url: str, git_branch: str) -> GitSourceAnalysis:
-    api_key = _gemini_api_key()
-    if api_key is None:
-        raise GitSourceAnalysisError(
-            "AI analysis is not configured on this server (missing VELA_GEMINI_API_KEY)."
+async def _call_gemini(
+    context: str,
+    git_url: str,
+    git_branch: str,
+    facts: str = "",
+    commit: str = "",
+) -> GitSourceAnalysis:
+    # ponytail: prompt-only redaction; the raw url is still used for clone and cache key
+    redacted_url = _CREDENTIALS_IN_URL.sub(r"\1", git_url)
+    prompt = (
+        f"{GIT_SOURCE_ANALYSIS_PROMPT_V1}\n\n"
+        f"Repository: {redacted_url}\n"
+        f"Requested branch: {git_branch}\n\n"
+        f"{context}"
+    )
+    if facts:
+        prompt += (
+            "\n\nDetected facts (already verified by deterministic scans; "
+            f"prefer them over re-deriving):\n{facts}"
         )
-
-    model = _gemini_model()
-    url = f"{GEMINI_API_BASE}/models/{model}:generateContent"
-    payload = {
-        "contents": [
-            {
-                "role": "user",
-                "parts": [
-                    {
-                        "text": (
-                            f"{GIT_SOURCE_ANALYSIS_PROMPT_V1}\n\n"
-                            f"Repository: {git_url}\n"
-                            f"Requested branch: {git_branch}\n\n"
-                            f"{context}"
-                        )
-                    }
-                ],
-            }
-        ],
-        "generationConfig": {
-            "responseMimeType": "application/json",
-            "responseSchema": _analysis_json_schema(),
-        },
-    }
     try:
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            response = await client.post(
-                url,
-                params={"key": api_key},
-                json=payload,
-            )
-            response.raise_for_status()
-    except httpx.HTTPError as exc:
-        response_detail = ""
-        if isinstance(exc, httpx.HTTPStatusError) and exc.response is not None:
-            response_detail = exc.response.text[:240]
-        logger.info(
-            "Gemini analysis request failed: %s %s",
-            exc,
-            response_detail,
-        )
+        parsed = await generate_json(prompt=prompt, schema=_analysis_json_schema())
+    except LlmNotConfiguredError as exc:
+        raise GitSourceAnalysisError("AI analysis is not configured on this server.") from exc
+    except LlmCallError as exc:
+        if str(exc) == "Could not complete AI analysis. Try again later.":
+            raise GitSourceAnalysisError(
+                "Could not complete AI repository analysis. Try again later."
+            ) from exc
         raise GitSourceAnalysisError(
-            "Could not complete AI repository analysis. Try again later."
+            "AI analysis returned an invalid response. Try again or fill the form manually."
         ) from exc
 
     try:
-        body = response.json()
-        text = body["candidates"][0]["content"]["parts"][0]["text"]
-        parsed = json.loads(text)
-        if not isinstance(parsed, dict):
-            raise TypeError("Gemini JSON root must be an object.")
         analysis = _payload_to_analysis(parsed)
         sanitized_name = sanitize_container_name(analysis.container_name)
         if sanitized_name != analysis.container_name:
             return analysis.model_copy(update={"container_name": sanitized_name})
         return analysis
-    except (
-        KeyError,
-        IndexError,
-        TypeError,
-        json.JSONDecodeError,
-        ValidationError,
-    ) as exc:
-        logger.info("Gemini analysis response parse failed: %s", exc)
+    except (TypeError, ValidationError) as exc:
         raise GitSourceAnalysisError(
             "AI analysis returned an invalid response. Try again or fill the form manually."
         ) from exc
 
 
-def _fallback_analysis(project_root: Path, git_branch: str) -> GitSourceAnalysis:
-    info = analyze_project(project_root)
+def _fallback_analysis(
+    project_root: Path,
+    git_branch: str,
+    info: ProjectInfo | None = None,
+) -> GitSourceAnalysis:
+    info = info or analyze_project(project_root)
     port = 80
     if info.language in {"typescript", "javascript"}:
         port = 5173
@@ -379,7 +671,9 @@ def _fallback_analysis(project_root: Path, git_branch: str) -> GitSourceAnalysis
         port = 8000
     elif info.language == "go":
         port = 8080
-    strategy = "dockerfile_exists" if info.has_dockerfile else "generated_dockerfile"
+    strategy: Literal["dockerfile_exists", "generated_dockerfile"] = (
+        "dockerfile_exists" if info.has_dockerfile else "generated_dockerfile"
+    )
     hint = (
         "Dockerfile found in the repository."
         if info.has_dockerfile
@@ -409,6 +703,16 @@ def _fallback_analysis(project_root: Path, git_branch: str) -> GitSourceAnalysis
     )
 
 
+def _git_source_cache_key(git_url: str, commit: str, git_branch: str) -> str:
+    if not commit:
+        return ""
+    normalized = _CREDENTIALS_IN_URL.sub(r"\1", git_url.strip()).rstrip("/")
+    if normalized.lower().endswith(".git"):
+        normalized = normalized[: -len(".git")]
+    digest = hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+    return f"{digest}:{commit}:{git_branch}"
+
+
 async def analyze_git_source(
     image_builder: DefaultImageBuilder,
     *,
@@ -420,6 +724,35 @@ async def analyze_git_source(
     if fixture is not None:
         return fixture
 
+    if resolve_llm_config() is None:
+        # No LLM: deterministic fallback. No commit resolution, no cache.
+        project_path = await image_builder.clone_repository(
+            git_url,
+            branch=git_branch,
+            access_token=access_token,
+        )
+        root = Path(project_path)
+        parent = root.parent
+        try:
+            info = analyze_project(root)
+            context = await asyncio.to_thread(_collect_context_excerpts, root, info)
+            return _merge_env_fallback(_fallback_analysis(root, git_branch, info), context)
+        finally:
+            rm_tree(parent)
+
+    # LLM path: cheap commit resolution (no clone) so a full-result cache hit skips the clone.
+    commit = await git_head_ref(url=git_url, branch=git_branch, access_token=access_token) or ""
+    cache_key = _git_source_cache_key(git_url, commit, git_branch)
+    # ponytail: full-result cache hit returns the stored GitSourceAnalysis and skips the clone
+    if cache_key:
+        cached = await load_cached("git_source", cache_key, GIT_SOURCE_PROMPT_VERSION)
+        if cached is not None:
+            try:
+                return GitSourceAnalysis.model_validate(cached)
+            except ValidationError:
+                await delete_cached("git_source", cache_key, GIT_SOURCE_PROMPT_VERSION)
+
+    # Cache miss: clone + full analysis (single analyze_project, off-loop FS walks).
     project_path = await image_builder.clone_repository(
         git_url,
         branch=git_branch,
@@ -428,15 +761,16 @@ async def analyze_git_source(
     root = Path(project_path)
     parent = root.parent
     try:
-        context = _collect_context_excerpts(root)
-        if _gemini_api_key() is None:
-            return _merge_env_fallback(_fallback_analysis(root, git_branch), context)
-        analysis = await _call_gemini(context, git_url, git_branch)
-        enriched = _enrich_with_local_detection(analysis, root)
-        return _merge_env_fallback(enriched, context)
+        info = analyze_project(root)
+        context = await asyncio.to_thread(_collect_context_excerpts, root, info)
+        facts = await asyncio.to_thread(_detected_facts_block, root, context, info)
+        analysis = await _call_gemini(context, git_url, git_branch, facts, commit)
+        enriched = _enrich_with_local_detection(analysis, info)
+        result = _merge_env_fallback(enriched, context)
+        if cache_key:
+            await store_cached("git_source", cache_key, GIT_SOURCE_PROMPT_VERSION, result.model_dump(mode="json"))
+        return result
     finally:
-        from app.core.git.git_ops import rm_tree
-
         rm_tree(parent)
 
 
