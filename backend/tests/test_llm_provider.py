@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from app.core.llm.provider import resolve_llm_config
+from app.core.llm.provider import DEFAULT_LLM_MODEL, resolve_llm_config
 
 _LLM_ENV_VARS = (
     "VELA_VERTEX_API_KEY",
@@ -31,7 +31,7 @@ def test_vertex_config(monkeypatch: pytest.MonkeyPatch) -> None:
     assert config.headers == {"x-goog-api-key": "vertex-key"}
     assert config.params == {}
     assert "locations/us-central1" in config.url
-    assert "gemini-2.5-flash:generateContent" in config.url
+    assert f"{DEFAULT_LLM_MODEL}:generateContent" in config.url
 
 
 def test_vertex_overrides_are_used(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -52,7 +52,7 @@ def test_gemini_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
     assert config.provider == "gemini"
     assert config.params == {"key": "gemini-key"}
     assert config.headers == {}
-    assert "gemini-3.5-flash:generateContent" in config.url
+    assert f"{DEFAULT_LLM_MODEL}:generateContent" in config.url
 
 
 def test_incomplete_vertex_config_falls_back_to_gemini(
