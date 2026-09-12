@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.exceptions import LlmProviderConfigError
 from app.core.llm import user_config
-from app.core.llm.provider import GEMINI_API_ROOT
+from app.core.llm.provider import DEFAULT_LLM_MODEL, GEMINI_API_ROOT
 from app.core.security.secrets import decrypt_secret, reset_token_cipher_for_tests
 from app.db.models import User
 
@@ -205,7 +205,7 @@ async def test_resolve_force_server_default_skips_user_row(
         )
         assert config is not None
         assert config.origin == "server"
-        assert config.model == "gemini-3.5-flash"
+        assert config.model == DEFAULT_LLM_MODEL
 
 
 def test_resolve_none_when_nothing_configured() -> None:

@@ -10,7 +10,7 @@ from app.core.build.default_image_builder import DefaultImageBuilder
 from app.core.exceptions import LlmNotConfiguredError, LlmProviderError
 from app.core.git import git_source_analysis
 from app.core.llm import cache as cache_module, user_config
-from app.core.llm.provider import LlmConfig
+from app.core.llm.provider import DEFAULT_LLM_MODEL, LlmConfig
 from app.core.stacks import repo_analysis
 from app.db.models import User
 
@@ -200,7 +200,7 @@ async def test_analyze_git_source_use_server_default_skips_user_row(
         )
     assert record["config"] is not None
     assert record["config"].origin == "server"
-    assert record["config"].model == "gemini-3.5-flash"
+    assert record["config"].model == DEFAULT_LLM_MODEL
 
 
 # ---------------------------------------------------------------------------
@@ -377,4 +377,4 @@ async def test_analyze_repo_stack_use_server_default_skips_user_row(
         )
     assert record["config"] is not None
     assert record["config"].origin == "server"
-    assert record["config"].model == "gemini-3.5-flash"
+    assert record["config"].model == DEFAULT_LLM_MODEL
