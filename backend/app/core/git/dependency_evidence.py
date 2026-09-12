@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -204,6 +205,50 @@ def _scan_python(text: str) -> tuple[set[str], list[str]]:
     return kinds, lines
 
 
+def _normalize_python_spec(spec: str) -> str:
+    name = spec.strip().strip("\"'")
+    name = re.split(r"[<>=!~\[;@\s]", name, maxsplit=1)[0]
+    return name.strip().lower().replace("_", "-")
+
+
+def _scan_pyproject(text: str) -> tuple[set[str], list[str]]:
+    try:
+        data = tomllib.loads(text)
+    except tomllib.TOMLDecodeError:
+        return set(), []
+    specs: list[str] = []
+    project = data.get("project")
+    if isinstance(project, dict):
+        for key in ("dependencies", "optional-dependencies"):
+            value = project.get(key)
+            if key == "dependencies" and isinstance(value, list):
+                specs.extend(item for item in value if isinstance(item, str))
+            elif key == "optional-dependencies" and isinstance(value, dict):
+                for group in value.values():
+                    if isinstance(group, list):
+                        specs.extend(item for item in group if isinstance(item, str))
+    poetry = (data.get("tool") or {}).get("poetry") if isinstance(data.get("tool"), dict) else None
+    if isinstance(poetry, dict):
+        for section in ("dependencies", "dev-dependencies"):
+            table = poetry.get(section)
+            if isinstance(table, dict):
+                specs.extend(str(name) for name in table)
+        groups = poetry.get("group")
+        if isinstance(groups, dict):
+            for group in groups.values():
+                if isinstance(group, dict) and isinstance(group.get("dependencies"), dict):
+                    specs.extend(str(name) for name in group["dependencies"])
+
+    kinds: set[str] = set()
+    lines: list[str] = []
+    for spec in specs:
+        kind = _PYTHON_PACKAGES.get(_normalize_python_spec(spec))
+        if kind:
+            kinds.add(kind)
+            lines.append(spec)
+    return kinds, lines
+
+
 def _scan_node(text: str) -> tuple[set[str], list[str]]:
     try:
         data = json.loads(text)
@@ -333,7 +378,11 @@ def scan_dependency_evidence(root: Path, info: ProjectInfo | None = None) -> lis
             artifact_kinds, lines = _scan_gradle(text)
             for kind in artifact_kinds:
                 record(kind, hostname=None, port=None, env_key=None, source=relative, lines=lines)
-        elif name in {"requirements.txt", "pyproject.toml", "pipfile"}:
+        elif name == "pyproject.toml":
+            artifact_kinds, lines = _scan_pyproject(text)
+            for kind in artifact_kinds:
+                record(kind, hostname=None, port=None, env_key=None, source=relative, lines=lines)
+        elif name in {"requirements.txt", "pipfile"}:
             artifact_kinds, lines = _scan_python(text)
             for kind in artifact_kinds:
                 record(kind, hostname=None, port=None, env_key=None, source=relative, lines=lines)

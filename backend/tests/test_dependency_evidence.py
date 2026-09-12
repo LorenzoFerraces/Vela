@@ -103,6 +103,16 @@ def test_python_and_node_manifests(tmp_path: Path) -> None:
     assert {"postgres", "redis"} <= {e.kind for e in scan_dependency_evidence(node)}
 
 
+def test_pyproject_pep621_dependencies(tmp_path: Path) -> None:
+    root = _write(tmp_path, {
+        "pyproject.toml": (
+            "[project]\n"
+            'dependencies = ["psycopg2>=2.9", "redis>=5"]\n'
+        ),
+    })
+    assert {"postgres", "redis"} <= {e.kind for e in scan_dependency_evidence(root)}
+
+
 def test_build_subdir_is_scanned(tmp_path: Path) -> None:
     from app.core.git.language_detection import analyze_project
 
