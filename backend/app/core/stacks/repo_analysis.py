@@ -14,6 +14,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.schemas import StackServiceCreate
 from app.core.build.default_image_builder import DefaultImageBuilder
 from app.core.exceptions import LlmCallError, LlmNotConfiguredError, ManifestParseError
+from app.core.git.dependency_evidence import (
+    ServiceEvidence,
+    reconcile_detected_services,
+    scan_dependency_evidence,
+)
 from app.core.git.git_ops import _CREDENTIALS_IN_URL, head_commit, rm_tree
 from app.core.git.git_source_analysis import (
     _clean_command_list,
@@ -25,6 +30,7 @@ from app.core.git.git_source_analysis import (
     _redact_secret_values,
     _validated_env_vars,
 )
+from app.core.git.project_analysis import analyze_project
 from app.core.llm import generate_json
 from app.core.llm.cache import delete_cached, load_cached, store_cached
 from app.core.llm.provider import (
@@ -46,7 +52,7 @@ _IGNORED_DIRECTORIES = frozenset(
 _COMPOSE_NAMES = ("docker-compose.yml", "docker-compose.yaml", "compose.yml", "compose.yaml")
 _COMPOSE_PATTERNS = ("docker-compose", "compose")
 _PREFERRED_DIRECTORIES = ("k8s", "kubernetes", "deploy", "manifests")
-STACKS_PROMPT_VERSION = "v3"  # ponytail: bumped for URL/secret redaction in the prompt
+STACKS_PROMPT_VERSION = "v4"  # ponytail: bumped for dependency-evidence facts
 
 
 @dataclass(frozen=True)
@@ -56,6 +62,7 @@ class RepoStackAnalysis:
     manifest_kind: RepoAnalysisKind
     manifest_path: str | None
     summary_hint: str | None
+    detected_service_names: tuple[str, ...] = ()
 
 
 def _is_ignored(path: Path) -> bool:
@@ -302,9 +309,10 @@ async def _generate_services(
     git_branch: str,
     warnings: list[str],
     root: Path,
+    evidence: list[ServiceEvidence],
     commit: str = "",
     config: LlmConfig | None = None,
-) -> tuple[list[StackService], str | None]:
+) -> tuple[list[StackService], str | None, tuple[str, ...]]:
     # ponytail: prompt-only redaction; the raw url is still used as the git source_ref
     redacted_url = _CREDENTIALS_IN_URL.sub(r"\1", git_url)
     prompt = (
@@ -325,7 +333,7 @@ async def _generate_services(
     )
     if manifest:
         prompt += f"\n\nDeployment manifest excerpt:\n{manifest}"
-    facts = _detected_facts_block(root, context)
+    facts = _detected_facts_block(root, context, evidence=evidence)
     if facts:
         prompt += (
             "\n\nDetected facts (already verified by deterministic scans; "
@@ -354,8 +362,15 @@ async def _generate_services(
     except LlmCallError:
         await delete_cached("stacks", commit, cache_version)
         raise
+    services, warnings, detected_names = reconcile_detected_services(
+        services, evidence, warnings
+    )
     summary = payload.get("summary_hint")
-    return services, summary.strip() if isinstance(summary, str) and summary.strip() else None
+    return (
+        services,
+        summary.strip() if isinstance(summary, str) and summary.strip() else None,
+        detected_names,
+    )
 
 
 async def analyze_repo_stack(
@@ -413,13 +428,16 @@ async def analyze_repo_stack(
         config = await resolve_llm_config_for_user(
             session, user_id, force_server_default=use_server_default
         )
-        services, summary_hint = await _generate_services(
-            context=_collect_context_excerpts(root),
+        info = analyze_project(root)
+        evidence = scan_dependency_evidence(root, info)
+        services, summary_hint, detected_names = await _generate_services(
+            context=_collect_context_excerpts(root, info, evidence),
             manifest=manifest_excerpt,
             git_url=git_url,
             git_branch=git_branch,
             warnings=warnings,
             root=root,
+            evidence=evidence,
             commit=commit,
             config=config,
         )
@@ -429,6 +447,7 @@ async def analyze_repo_stack(
             manifest_kind="llm",
             manifest_path=relative_path,
             summary_hint=summary_hint,
+            detected_service_names=detected_names,
         )
     finally:
         rm_tree(parent)

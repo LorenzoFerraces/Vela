@@ -58,6 +58,34 @@ FIXTURES: list[dict] = [
         },
     },
     {
+        "name": "springboot-3db",
+        "files": {
+            "README.md": "# Commit-y-me-voy\n\nJava Spring Boot server. Run with Maven.\n",
+            "backend/pom.xml": (
+                "<project><dependencies>"
+                "<dependency><artifactId>spring-boot-starter-data-jpa</artifactId></dependency>"
+                "<dependency><groupId>org.postgresql</groupId><artifactId>postgresql</artifactId></dependency>"
+                "<dependency><artifactId>mongodb-driver-sync</artifactId></dependency>"
+                "<dependency><artifactId>neo4j-ogm-core</artifactId></dependency>"
+                "<dependency><artifactId>postgresql</artifactId><scope>test</scope></dependency>"
+                "</dependencies></project>"
+            ),
+            "backend/src/main/resources/application.properties": (
+                "spring.datasource.url=jdbc:postgresql://localhost:5432/commit\n"
+                "spring.data.mongodb.uri=mongodb://localhost:27017/commit\n"
+                "spring.neo4j.uri=bolt://localhost:7687\n"
+            ),
+        },
+        "services": [
+            {"aliases": ["app", "api", "web", "server"], "kind": "git"},
+            {"aliases": ["postgres", "db"], "kind": "image", "port": 5432},
+            {"aliases": ["mongo", "mongodb"], "kind": "image", "port": 27017},
+            {"aliases": ["neo4j"], "kind": "image", "port": 7687},
+        ],
+        "required_env": ["SPRING_DATASOURCE_URL"],
+        "pinned_env": {},
+    },
+    {
         "name": "node-env-example",
         "files": {
             "README.md": (
@@ -329,6 +357,55 @@ async def test_pipeline_stubbed_llm_merges_env_fallback(
     assert by_name["db"].source_ref == "postgres:16"
     assert "Detected facts" in captured["prompt"]
     assert "DATABASE_URL" in captured["prompt"]
+
+
+async def test_pipeline_stubbed_llm_appends_detected_services(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fixture = next(f for f in FIXTURES if f["name"] == "springboot-3db")
+    root = _write_fixture(tmp_path, fixture)
+
+    app_only_payload = {
+        "services": [
+            {
+                "service_name": "app",
+                "source_kind": "git",
+                "source_ref": "",
+                "container_port": 8080,
+                "env_var_entries": [],
+                "command": None,
+                "public_route": True,
+                "depends_on": None,
+            },
+        ],
+        "summary_hint": "stubbed",
+    }
+
+    async def fake_generate_json(
+        *, prompt: str, schema: dict, config: LlmConfig | None = None
+    ) -> dict:
+        _ = schema, config, prompt
+        return app_only_payload
+
+    monkeypatch.setenv("VELA_GEMINI_API_KEY", "test-key")
+    monkeypatch.setattr(repo_analysis, "generate_json", fake_generate_json)
+    monkeypatch.delenv("VELA_E2E", raising=False)
+
+    analysis = await analyze_repo_stack(
+        _EvalImageBuilder(root),
+        git_url="https://github.com/org/repo.git",
+        git_branch="dev",
+        access_token=None,
+    )
+
+    by_name = {service.service_name: service for service in analysis.services}
+    assert {"app", "postgres", "mongo", "neo4j"} <= set(by_name)
+    assert set(analysis.detected_service_names) == {"postgres", "mongo", "neo4j"}
+    assert by_name["postgres"].source_ref == "postgres:16"
+    assert by_name["neo4j"].container_port == 7687
+    app = by_name["app"]
+    assert set(app.depends_on or []) == {"postgres", "mongo", "neo4j"}
+    assert app.env_vars["SPRING_DATASOURCE_URL"] == "jdbc:postgresql://postgres:5432/commit"
 
 
 @pytest.mark.parametrize("fixture", FIXTURES, ids=lambda fixture: fixture["name"])

@@ -375,6 +375,7 @@ def _collect_context_excerpts(
         )
 
     if evidence is None:
+        info = info or analyze_project(project_root)
         evidence = scan_dependency_evidence(project_root, info)
     evidence_text = _evidence_excerpt_lines(evidence)
     if evidence_text:

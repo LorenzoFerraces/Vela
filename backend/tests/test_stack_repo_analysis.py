@@ -330,6 +330,7 @@ def test_generate_services_prompt_contains_detected_facts(
             git_branch="main",
             warnings=[],
             root=root,
+            evidence=[],
         )
     )
     assert "Detected facts" in captured["prompt"]
@@ -362,6 +363,7 @@ def test_generate_services_prompt_redacts_git_url_credentials(
             git_branch="main",
             warnings=[],
             root=root,
+            evidence=[],
         )
     )
     assert "deploy-token" not in captured["prompt"]
