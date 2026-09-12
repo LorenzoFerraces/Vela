@@ -116,7 +116,7 @@ def _read(path: Path) -> str:
 
 
 def _redact_evidence_line(line: str) -> str:
-    return re.sub(r"(://)[^/@\s]+@", r"\1[REDACTED]@", line)
+    return re.sub(r"(://)[^@\s]*@", r"\1[REDACTED]@", line)
 
 
 def _normalize_property_key(dotted: str) -> str:
@@ -167,31 +167,33 @@ def _kinds_in_text(text: str, rules: tuple[tuple[str, str], ...]) -> set[str]:
     return {kind for needle, kind in rules if needle in lowered}
 
 
-def _scan_pom(text: str) -> tuple[set[str], list[str]]:
-    kinds: set[str] = set()
-    lines: list[str] = []
+def _scan_pom(text: str) -> dict[str, list[str]]:
+    by_kind: dict[str, list[str]] = {}
     for block in _POM_DEPENDENCY.findall(text):
         if _POM_TEST_SCOPE.search(block):
             continue
         artifacts = _POM_ARTIFACT.findall(block)
         block_kinds = {kind for artifact in artifacts for kind in _kinds_in_text(artifact, _JVM_ARTIFACTS)}
-        if block_kinds:
-            kinds |= block_kinds
-            lines.append(", ".join(artifacts))
-    return kinds, lines
+        for kind in block_kinds:
+            by_kind.setdefault(kind, []).append(", ".join(artifacts))
+    return by_kind
 
 
-def _scan_gradle(text: str) -> tuple[set[str], list[str]]:
-    kinds: set[str] = set()
-    lines: list[str] = []
+def _scan_gradle(text: str) -> dict[str, list[str]]:
+    by_kind: dict[str, list[str]] = {}
+    in_test = False
     for line in text.splitlines():
-        if _GRADLE_TEST.match(line):
+        if in_test:
+            if ")" in line:
+                in_test = False
             continue
-        line_kinds = _kinds_in_text(line, _JVM_ARTIFACTS)
-        if line_kinds:
-            kinds |= line_kinds
-            lines.append(line.strip())
-    return kinds, lines
+        if _GRADLE_TEST.match(line):
+            if ")" not in line:
+                in_test = True
+            continue
+        for kind in _kinds_in_text(line, _JVM_ARTIFACTS):
+            by_kind.setdefault(kind, []).append(line.strip())
+    return by_kind
 
 
 def _scan_python(text: str) -> tuple[set[str], list[str]]:
@@ -266,9 +268,9 @@ def _scan_node(text: str) -> tuple[set[str], list[str]]:
     return kinds, lines
 
 
-def _scan_spring(text: str, is_properties: bool) -> tuple[dict[str, tuple[str | None, int | None, str | None]], list[str]]:
+def _scan_spring(text: str, is_properties: bool) -> tuple[dict[str, tuple[str | None, int | None, str | None]], dict[str, list[str]]]:
     found: dict[str, tuple[str | None, int | None, str | None]] = {}
-    lines: list[str] = []
+    lines: dict[str, list[str]] = {}
     pairs = _flatten_yaml(text) if not is_properties else [
         (key, value) for key, value in (m.groups() for m in _PROPERTY_LINE.finditer(text))
     ]
@@ -279,8 +281,7 @@ def _scan_spring(text: str, is_properties: bool) -> tuple[dict[str, tuple[str | 
         kind, host, port = match
         env_key = _normalize_property_key(dotted_key)
         found.setdefault(kind, (host, port, env_key))
-        lines.append(f"{dotted_key}={value}")
-        lines.append(f"{env_key}={value}")
+        lines.setdefault(kind, []).extend([f"{dotted_key}={value}", f"{env_key}={value}"])
     return found, lines
 
 
@@ -372,12 +373,12 @@ def scan_dependency_evidence(root: Path, info: ProjectInfo | None = None) -> lis
         name = path.name.lower()
 
         if name == "pom.xml":
-            artifact_kinds, lines = _scan_pom(text)
-            for kind in artifact_kinds:
+            artifact_lines = _scan_pom(text)
+            for kind, lines in artifact_lines.items():
                 record(kind, hostname=None, port=None, env_key=None, source=relative, lines=lines)
         elif name.startswith("build.gradle"):
-            artifact_kinds, lines = _scan_gradle(text)
-            for kind in artifact_kinds:
+            artifact_lines = _scan_gradle(text)
+            for kind, lines in artifact_lines.items():
                 record(kind, hostname=None, port=None, env_key=None, source=relative, lines=lines)
         elif name == "pyproject.toml":
             artifact_kinds, lines = _scan_pyproject(text)
@@ -392,9 +393,9 @@ def scan_dependency_evidence(root: Path, info: ProjectInfo | None = None) -> lis
             for kind in artifact_kinds:
                 record(kind, hostname=None, port=None, env_key=None, source=relative, lines=lines)
         elif name in _SPRING_CONFIG_NAMES or (name.startswith("application-")):
-            spring_found, lines = _scan_spring(text, is_properties=name.endswith(".properties"))
+            spring_found, spring_lines = _scan_spring(text, is_properties=name.endswith(".properties"))
             for kind, (host, port, env_key) in spring_found.items():
-                record(kind, hostname=host, port=port, env_key=env_key, source=relative, lines=lines)
+                record(kind, hostname=host, port=port, env_key=env_key, source=relative, lines=spring_lines.get(kind, []))
         else:
             url_found, lines = _scan_url_only(text)
             for kind, (host, port) in url_found.items():

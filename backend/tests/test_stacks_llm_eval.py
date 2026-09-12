@@ -406,6 +406,55 @@ async def test_pipeline_stubbed_llm_appends_detected_services(
     app = by_name["app"]
     assert set(app.depends_on or []) == {"postgres", "mongo", "neo4j"}
     assert app.env_vars["SPRING_DATASOURCE_URL"] == "jdbc:postgresql://postgres:5432/commit"
+    assert any("Added postgres" in warning for warning in analysis.warnings)
+
+
+async def test_pipeline_warns_on_external_managed_host(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path / "repo"
+    root.mkdir()
+    (root / "requirements.txt").write_text("psycopg2\n", encoding="utf-8")
+    (root / ".env.example").write_text(
+        "DATABASE_URL=postgres://user:secret@db.example.com:5432/app\n",
+        encoding="utf-8",
+    )
+
+    app_only_payload = {
+        "services": [
+            {
+                "service_name": "app",
+                "source_kind": "git",
+                "source_ref": "",
+                "container_port": 8080,
+                "env_var_entries": [],
+                "command": None,
+                "public_route": True,
+                "depends_on": None,
+            },
+        ],
+        "summary_hint": "stubbed",
+    }
+
+    async def fake_generate_json(
+        *, prompt: str, schema: dict, config: LlmConfig | None = None
+    ) -> dict:
+        _ = schema, config, prompt
+        return app_only_payload
+
+    monkeypatch.setenv("VELA_GEMINI_API_KEY", "test-key")
+    monkeypatch.setattr(repo_analysis, "generate_json", fake_generate_json)
+    monkeypatch.delenv("VELA_E2E", raising=False)
+
+    analysis = await analyze_repo_stack(
+        _EvalImageBuilder(root),
+        git_url="https://github.com/org/repo.git",
+        git_branch="main",
+        access_token=None,
+    )
+
+    assert {service.service_name for service in analysis.services} == {"app"}
+    assert any("external" in warning.lower() or "managed" in warning.lower() for warning in analysis.warnings)
 
 
 @pytest.mark.parametrize("fixture", FIXTURES, ids=lambda fixture: fixture["name"])

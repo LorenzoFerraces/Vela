@@ -69,6 +69,47 @@ def test_gradle_kotlin_dsl_and_test_scope(tmp_path: Path) -> None:
     assert [e.kind for e in evidence] == ["postgres"]
 
 
+def test_gradle_multiline_test_scope_ignored(tmp_path: Path) -> None:
+    root = _write(tmp_path, {
+        "build.gradle.kts": (
+            'dependencies {\n'
+            '    implementation("org.postgresql:postgresql")\n'
+            '    testImplementation(\n'
+            '        "org.testcontainers:postgresql"\n'
+            '    )\n'
+            '}\n'
+        ),
+    })
+    evidence = scan_dependency_evidence(root)
+    assert [e.kind for e in evidence] == ["postgres"]
+    assert not any("testcontainers" in line for e in evidence for line in e.matched_lines)
+
+
+def test_matched_lines_are_per_kind(tmp_path: Path) -> None:
+    root = _write(tmp_path, {
+        "src/main/resources/application.properties": (
+            "spring.datasource.url=jdbc:postgresql://localhost:5432/commit\n"
+            "spring.data.mongodb.uri=mongodb://localhost:27017/commit\n"
+        ),
+    })
+    by_kind = {e.kind: e for e in scan_dependency_evidence(root)}
+    assert all("mongodb" not in line for line in by_kind["postgres"].matched_lines)
+    assert all("postgresql" not in line for line in by_kind["mongo"].matched_lines)
+
+
+def test_redacts_userinfo_with_slash() -> None:
+    from app.core.git.dependency_evidence import _redact_evidence_line
+
+    assert (
+        _redact_evidence_line("postgres://user:secret@host/db")
+        == "postgres://[REDACTED]@host/db"
+    )
+    assert (
+        _redact_evidence_line("postgres://user:pa/ss@host:5432/db")
+        == "postgres://[REDACTED]@host:5432/db"
+    )
+
+
 def test_application_properties_url_yields_host_and_env_key(tmp_path: Path) -> None:
     root = _write(tmp_path, {
         "src/main/resources/application.properties": (

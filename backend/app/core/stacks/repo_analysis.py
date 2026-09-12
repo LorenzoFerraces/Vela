@@ -312,7 +312,7 @@ async def _generate_services(
     evidence: list[ServiceEvidence],
     commit: str = "",
     config: LlmConfig | None = None,
-) -> tuple[list[StackService], str | None, tuple[str, ...]]:
+) -> tuple[list[StackService], str | None, tuple[str, ...], list[str]]:
     # ponytail: prompt-only redaction; the raw url is still used as the git source_ref
     redacted_url = _CREDENTIALS_IN_URL.sub(r"\1", git_url)
     prompt = (
@@ -370,6 +370,7 @@ async def _generate_services(
         services,
         summary.strip() if isinstance(summary, str) and summary.strip() else None,
         detected_names,
+        warnings,
     )
 
 
@@ -430,7 +431,7 @@ async def analyze_repo_stack(
         )
         info = analyze_project(root)
         evidence = scan_dependency_evidence(root, info)
-        services, summary_hint, detected_names = await _generate_services(
+        services, summary_hint, detected_names, warnings = await _generate_services(
             context=_collect_context_excerpts(root, info, evidence),
             manifest=manifest_excerpt,
             git_url=git_url,
