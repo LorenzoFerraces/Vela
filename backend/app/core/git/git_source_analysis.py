@@ -21,6 +21,7 @@ from app.core.exceptions import (
 )
 from app.core.git.git_ops import _CREDENTIALS_IN_URL, git_head_ref, rm_tree
 from app.core.git.project_analysis import analyze_project
+from app.core.git.dependency_evidence import ServiceEvidence, scan_dependency_evidence
 from app.core.models import ProjectInfo
 from app.core.llm import generate_json
 from app.core.llm.provider import (
@@ -33,7 +34,7 @@ from app.core.llm.cache import delete_cached, load_cached, store_cached
 from app.e2e_support import e2e_git_source_analysis_if_enabled
 MAX_FILE_BYTES = 12_000
 MAX_TOTAL_BYTES = 48_000
-GIT_SOURCE_PROMPT_VERSION = "v3"  # ponytail: bumped for URL/secret redaction in prompts and pre-filled values
+GIT_SOURCE_PROMPT_VERSION = "v4"  # ponytail: bumped for dependency-evidence facts
 
 _README_CANDIDATES = ("README.md", "README", "readme.md", "Readme.md")
 
@@ -316,9 +317,28 @@ def _append_excerpt(
     return total + len(chunk)
 
 
+def _evidence_excerpt_lines(evidence: list[ServiceEvidence]) -> str:
+    lines: list[str] = []
+    for item in evidence:
+        lines.extend(item.matched_lines)
+    return "\n".join(lines)
+
+
+def _evidence_fact_line(item: ServiceEvidence) -> str:
+    detail = ""
+    if item.hostname:
+        detail = f" host={item.hostname}"
+    sources = ", ".join(item.sources)
+    return (
+        f"external service required: {item.image_ref} (port {item.port}){detail}"
+        f" — evidence: {sources}"
+    )
+
+
 def _collect_context_excerpts(
     project_root: Path,
     info: ProjectInfo | None = None,
+    evidence: list[ServiceEvidence] | None = None,
 ) -> str:
     parts: list[str] = []
     total = 0
@@ -352,6 +372,17 @@ def _collect_context_excerpts(
             total=total,
             label=name,
             text=_read_file_excerpt(path),
+        )
+
+    if evidence is None:
+        evidence = scan_dependency_evidence(project_root, info)
+    evidence_text = _evidence_excerpt_lines(evidence)
+    if evidence_text:
+        total = _append_excerpt(
+            parts,
+            total=total,
+            label="dependency manifest evidence",
+            text=evidence_text,
         )
 
     readme_path = _find_readme(project_root)
@@ -461,6 +492,7 @@ def _detected_facts_block(
     root: Path,
     context: str,
     info: ProjectInfo | None = None,
+    evidence: list[ServiceEvidence] | None = None,
 ) -> str:
     lines: list[str] = []
     info = info or analyze_project(root)
@@ -487,7 +519,12 @@ def _detected_facts_block(
         if len(env_vars) > 20:
             rendered += " (more truncated)"
         lines.append(f"documented env vars: {rendered}")
-    return "\n".join(f"- {line}" for line in lines)
+    if evidence is None:
+        evidence = scan_dependency_evidence(root, info)
+    for item in evidence:
+        lines.append(_evidence_fact_line(item))
+    facts_text = "\n".join(f"- {line}" for line in lines)
+    return _redact_secret_values(facts_text)
 
 
 def _valid_env_key(key: str) -> bool:

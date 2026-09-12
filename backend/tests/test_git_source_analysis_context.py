@@ -371,6 +371,37 @@ def test_clean_command_list_drops_invalid_entries() -> None:
     ]
 
 
+def test_dependency_evidence_excerpt_and_facts(tmp_path: Path) -> None:
+    from app.core.git.git_source_analysis import (
+        _collect_context_excerpts,
+        _detected_facts_block,
+        _extract_env_vars_from_context,
+    )
+
+    (tmp_path / "backend" / "src" / "main" / "resources").mkdir(parents=True)
+    (tmp_path / "README.md").write_text("# App\n\nNo database prose here.\n", encoding="utf-8")
+    (tmp_path / "backend" / "pom.xml").write_text(
+        "<project><dependencies>"
+        "<dependency><artifactId>postgresql</artifactId></dependency>"
+        "</dependencies></project>",
+        encoding="utf-8",
+    )
+    (tmp_path / "backend" / "src" / "main" / "resources" / "application.properties").write_text(
+        "spring.datasource.url=jdbc:postgresql://localhost:5432/commit\n", encoding="utf-8"
+    )
+
+    from app.core.git.project_analysis import analyze_project
+
+    info = analyze_project(tmp_path)
+    context = _collect_context_excerpts(tmp_path, info)
+    assert "dependency manifest evidence" in context
+    extracted = _extract_env_vars_from_context(context)
+    assert extracted["SPRING_DATASOURCE_URL"] == "jdbc:postgresql://localhost:5432/commit"
+
+    facts = _detected_facts_block(tmp_path, context, info)
+    assert "external service required: postgres:16" in facts
+
+
 def test_payload_to_analysis_validates_start_command() -> None:
     payload = {
         "git_branch": "main",
