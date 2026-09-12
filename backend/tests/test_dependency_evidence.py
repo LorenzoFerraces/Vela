@@ -207,3 +207,44 @@ def test_reconcile_does_not_duplicate_covered_kind() -> None:
     assert detected == ()
     web = next(s for s in out if s.service_name == "web")
     assert web.env_vars["DATABASE_URL"] == "postgres://db:5432/app"
+
+
+def _image(name: str, ref: str, port: int) -> StackService:
+    return StackService(
+        service_name=name, source_kind="image", source_ref=ref, git_branch=None,
+        container_port=port, env_vars={}, command=None, public_route=False,
+        depends_on=None, volumes=[],
+    )
+
+
+def test_reconcile_rewrite_does_not_corrupt_scheme() -> None:
+    services = [
+        _app(env={
+            "SPRING_DATASOURCE_URL": "jdbc:postgresql://db:5432/commit",
+            "REDIS_URL": "redis://redis:6379",
+            "MONGO_URL": "mongodb://mongo:27017/commit",
+        }),
+        _image("postgres", "postgres:16", 5432),
+        _image("cache", "redis:7", 6379),
+        _image("mongodb", "mongo:7", 27017),
+    ]
+    evidence = [
+        _evidence("postgres", "db"),
+        _evidence("redis", "redis"),
+        _evidence("mongo", "mongo"),
+    ]
+    out, _, _ = reconcile_detected_services(services, evidence, [])
+    web = next(s for s in out if s.service_name == "web")
+    assert web.env_vars["SPRING_DATASOURCE_URL"] == "jdbc:postgresql://postgres:5432/commit"
+    assert web.env_vars["REDIS_URL"] == "redis://cache:6379"
+    assert web.env_vars["MONGO_URL"] == "mongodb://mongodb:27017/commit"
+
+
+def test_reconcile_no_self_dependency_for_alias_named_git_service() -> None:
+    db = _app(name="db", env={"DATABASE_URL": "postgres://localhost:5432/app"})
+    evidence = [_evidence("postgres", "localhost")]
+    out, _, detected = reconcile_detected_services([db], evidence, [])
+    assert detected == ()
+    db_out = next(s for s in out if s.service_name == "db")
+    assert db_out.depends_on is None
+    assert db_out.env_vars["DATABASE_URL"] == "postgres://db:5432/app"

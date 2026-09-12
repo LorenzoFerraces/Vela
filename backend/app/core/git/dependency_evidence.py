@@ -475,7 +475,12 @@ def _rewrite_local_host(value: str, kind: str, replacement: str) -> str:
         host = info[1]
         if host is None or classify_host(host) == "external":
             return token
-        return token.replace(host, replacement, 1)
+        return re.sub(
+            rf"(://(?:[^/@]*@)?){re.escape(host)}(?=[:/]|$)",
+            rf"\1{replacement}",
+            token,
+            count=1,
+        )
 
     return _URL_TOKEN.sub(replace, value)
 
@@ -542,7 +547,7 @@ def reconcile_detected_services(
             ),
             git_services[0] if git_services else None,
         )
-        if app_service is not None:
+        if app_service is not None and app_service.service_name.casefold() != target_name.casefold():
             deps = list(app_service.depends_on or [])
             if target_name not in deps:
                 deps.append(target_name)
