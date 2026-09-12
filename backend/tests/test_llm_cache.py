@@ -17,7 +17,11 @@ from app.core.exceptions import GitSourceAnalysisError, LlmCallError
 from app.core.git import git_source_analysis
 from app.core.git.git_ops import head_commit
 from app.core.llm import cache as cache_module
-from app.core.llm.provider import LlmConfig
+from app.core.llm.provider import (
+    LlmConfig,
+    endpoint_fingerprint,
+    resolve_llm_config,
+)
 from app.core.stacks import repo_analysis
 
 VALID_GIT_SOURCE_PAYLOAD = {
@@ -337,12 +341,14 @@ async def test_stacks_invalid_payload_is_not_cached(
             root=tmp_path,
             commit="abc123",
         )
+    server_config = resolve_llm_config()
+    assert server_config is not None
+    cache_version = (
+        f"{repo_analysis.STACKS_PROMPT_VERSION}:{server_config.provider}"
+        f":{server_config.model}:{endpoint_fingerprint(server_config)}"
+    )
     assert (
-        await cache_module.load_cached(
-            "stacks",
-            "abc123",
-            f"{repo_analysis.STACKS_PROMPT_VERSION}:gemini:gemini-3.5-flash",
-        )
+        await cache_module.load_cached("stacks", "abc123", cache_version)
         is None
     )
 

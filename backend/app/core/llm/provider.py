@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import os
 from dataclasses import dataclass
 
@@ -22,6 +23,17 @@ class LlmConfig:
 def _env(name: str) -> str | None:
     value = os.environ.get(name, "").strip()
     return value or None
+
+
+def endpoint_fingerprint(config: LlmConfig) -> str:
+    """Stable, non-secret cache discriminator for a provider endpoint.
+
+    Two configs that share a provider/model but hit different endpoints must not
+    share cached results. Keys/params are excluded (may contain the API key).
+    """
+    base = config.base_url or config.url
+    digest = hashlib.sha256(base.encode("utf-8")).hexdigest()[:12]
+    return digest
 
 
 def resolve_llm_config() -> LlmConfig | None:

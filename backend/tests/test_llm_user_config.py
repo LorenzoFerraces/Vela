@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.exceptions import LlmProviderConfigError
 from app.core.llm import user_config
-from app.core.llm.provider import DEFAULT_LLM_MODEL, GEMINI_API_ROOT
+from app.core.llm.provider import GEMINI_API_ROOT, endpoint_fingerprint
 from app.core.security.secrets import decrypt_secret, reset_token_cipher_for_tests
 from app.db.models import User
 
@@ -114,6 +114,75 @@ async def test_set_without_key_keeps_existing_key(
 
 
 @pytest.mark.asyncio
+async def test_set_without_key_when_provider_changes_raises(
+    db_session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    async with db_session_factory() as session:
+        user = await _make_user(session, "provider-change@example.com")
+        await session.commit()
+        await user_config.set_user_llm_provider(
+            session,
+            user.id,
+            provider="gemini",
+            base_url=None,
+            model="gemini-2.5-flash",
+            api_key="sk-old",
+        )
+        with pytest.raises(LlmProviderConfigError, match="API key required"):
+            await user_config.set_user_llm_provider(
+                session,
+                user.id,
+                provider="anthropic",
+                base_url=None,
+                model="claude-sonnet-4-5",
+                api_key=None,
+            )
+
+
+@pytest.mark.asyncio
+async def test_set_without_key_when_base_url_changes_raises(
+    db_session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    async with db_session_factory() as session:
+        user = await _make_user(session, "base-url-change@example.com")
+        await session.commit()
+        await user_config.set_user_llm_provider(
+            session,
+            user.id,
+            provider="openai_compatible",
+            base_url="https://one.example/v1",
+            model="gpt-4o-mini",
+            api_key="sk-old",
+        )
+        with pytest.raises(LlmProviderConfigError, match="API key required"):
+            await user_config.set_user_llm_provider(
+                session,
+                user.id,
+                provider="openai_compatible",
+                base_url="https://two.example/v1",
+                model="gpt-4o-mini",
+                api_key=None,
+            )
+
+
+def test_endpoint_fingerprint_isolates_same_model_different_endpoint() -> None:
+    one = user_config.config_from_parts(
+        provider="openai_compatible",
+        base_url="https://one.example/v1",
+        model="gpt-4o-mini",
+        api_key="sk",
+    )
+    two = user_config.config_from_parts(
+        provider="openai_compatible",
+        base_url="https://two.example/v1",
+        model="gpt-4o-mini",
+        api_key="sk",
+    )
+    assert endpoint_fingerprint(one) != endpoint_fingerprint(two)
+    assert "sk" not in endpoint_fingerprint(one)
+
+
+@pytest.mark.asyncio
 async def test_delete_roundtrip(
     db_session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
@@ -189,6 +258,7 @@ async def test_resolve_force_server_default_skips_user_row(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("VELA_GEMINI_API_KEY", "env-key")
+    monkeypatch.setenv("VELA_GEMINI_MODEL", "server-default-model")
     async with db_session_factory() as session:
         user = await _make_user(session, "force@example.com")
         await session.commit()
@@ -205,7 +275,7 @@ async def test_resolve_force_server_default_skips_user_row(
         )
         assert config is not None
         assert config.origin == "server"
-        assert config.model == DEFAULT_LLM_MODEL
+        assert config.model == "server-default-model"
 
 
 def test_resolve_none_when_nothing_configured() -> None:

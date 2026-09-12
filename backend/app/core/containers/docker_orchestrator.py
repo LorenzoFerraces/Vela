@@ -414,6 +414,7 @@ class DockerOrchestrator(ContainerOrchestrator):
         else:
             self._default_network = default_network.strip() or None
         self._default_network_ensured = False
+        self._default_network_lock = threading.Lock()
         self._log_stream_semaphore = asyncio.Semaphore(_max_concurrent_log_streams())
 
     async def _to_thread(self, fn: Callable[[], T]) -> T:
@@ -530,19 +531,23 @@ class DockerOrchestrator(ContainerOrchestrator):
         name = self._default_network
         if not name or self._default_network_ensured:
             return
-        self._default_network_ensured = True
-        try:
-            existing = [
-                n
-                for n in self._client.networks.list(filters={"name": name})
-                if n.name == name
-            ]
-            if existing:
+        with self._default_network_lock:
+            if self._default_network_ensured:
                 return
-            self._client.networks.create(name, driver="bridge")
-            logger.info("Created missing default Docker network %s", name)
-        except docker.errors.DockerException as e:
-            logger.warning("Could not ensure default Docker network %s: %s", name, e)
+            try:
+                existing = [
+                    n
+                    for n in self._client.networks.list(filters={"name": name})
+                    if n.name == name
+                ]
+                if not existing:
+                    self._client.networks.create(name, driver="bridge")
+                    logger.info("Created missing default Docker network %s", name)
+                self._default_network_ensured = True
+            except docker.errors.DockerException as e:
+                logger.warning(
+                    "Could not ensure default Docker network %s: %s", name, e
+                )
 
     async def deploy(self, config: DeployConfig) -> ContainerInfo:
         labels = self._merge_labels(config)

@@ -54,7 +54,7 @@ def _anthropic_config() -> LlmConfig:
 
 
 class _FakeResponse:
-    def __init__(self, payload: dict | None, status_code: int = 200):
+    def __init__(self, payload: object | None, status_code: int = 200):
         self._payload = payload
         self.status_code = status_code
         self.text = json.dumps(payload) if payload is not None else ""
@@ -65,7 +65,7 @@ class _FakeResponse:
             response = httpx.Response(self.status_code, request=request)
             raise httpx.HTTPStatusError("error", request=request, response=response)
 
-    def json(self) -> dict:
+    def json(self) -> object:
         if self._payload is None:
             raise ValueError("no json")
         return self._payload
@@ -242,6 +242,38 @@ def test_anthropic_verify_posts_one_token(
 
     assert asyncio.run(AnthropicProvider().verify(_anthropic_config())) is None
     assert client.posts[0]["json"]["max_tokens"] == 1
+
+
+def test_verify_empty_model_list_is_success(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _FakeClient(_FakeResponse({"models": []}))
+    _use(monkeypatch, client)
+    import asyncio
+
+    assert asyncio.run(GeminiProvider().verify(_gemini_config())) == []
+
+
+def test_verify_non_dict_body_raises(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _FakeClient(_FakeResponse(["not", "a", "dict"]))
+    _use(monkeypatch, client)
+    import asyncio
+
+    with pytest.raises(LlmCallError, match="Could not reach the provider"):
+        asyncio.run(GeminiProvider().verify(_gemini_config()))
+
+
+def test_verify_error_envelope_raises(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _FakeClient(_FakeResponse({"error": {"code": 403}}))
+    _use(monkeypatch, client)
+    import asyncio
+
+    with pytest.raises(LlmCallError, match="Could not reach the provider"):
+        asyncio.run(GeminiProvider().verify(_gemini_config()))
 
 
 def test_registry_dispatches() -> None:

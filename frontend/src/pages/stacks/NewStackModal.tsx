@@ -93,6 +93,7 @@ export default function NewStackModal({ open, onClose, onCreated }: NewStackModa
     setWarnings([])
     setOrigin('')
     setError(null)
+    setLlmFallbackAvailable(false)
     setReadingFile(false)
     setWorking(false)
     setDiscardOpen(false)

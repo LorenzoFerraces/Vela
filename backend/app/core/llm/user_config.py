@@ -37,6 +37,13 @@ async def set_user_llm_provider(
     row = await get_user_llm_provider(session, user_id)
     if api_key is None and row is None:
         raise LlmProviderConfigError("API key required.")
+    if api_key is None and row is not None:
+        # A saved key may only be reused when the auth endpoint is unchanged.
+        endpoint_changed = row.provider != provider or (
+            provider == "openai_compatible" and row.base_url != base_url
+        )
+        if endpoint_changed:
+            raise LlmProviderConfigError("API key required.")
     if row is None:
         row = UserLlmProvider(user_id=user_id)
         session.add(row)

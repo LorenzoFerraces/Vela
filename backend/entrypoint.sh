@@ -13,8 +13,9 @@ if [ "$(id -u)" -eq 0 ]; then
             # Docker Desktop (Windows) exposes the host socket as root:root,
             # which the vela user cannot open. Re-group it to the in-image
             # docker group (vela is a member) so it can connect.
-            chown root:"${DOCKER_GROUP_ID:-999}" "$SOCKET"
-            echo "vela-entrypoint: socket owned by root; chowned $SOCKET to group ${DOCKER_GROUP_ID:-999}"
+            docker_gid="$(getent group docker | cut -d: -f3)"
+            chown root:"${docker_gid}" "$SOCKET"
+            echo "vela-entrypoint: socket owned by root; chowned $SOCKET to group ${docker_gid}"
         else
             in_gid="$(getent group docker | cut -d: -f3)"
             if [ "$sock_gid" = "$in_gid" ]; then

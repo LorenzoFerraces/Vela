@@ -3,6 +3,14 @@ import { apiBase } from './constants'
 import { test, expect } from './fixtures'
 
 test.describe('LLM provider settings', () => {
+  test.afterEach(async ({ authenticatedPage }) => {
+    const token = await bearerToken(authenticatedPage)
+    await authenticatedPage.request.delete(
+      `${apiBase}/api/settings/llm-provider`,
+      { headers: { Authorization: `Bearer ${token}` } },
+    )
+  })
+
   test('renders the LLM provider card with Test disabled while no key is set', async ({
     authenticatedPage,
   }) => {
@@ -42,6 +50,18 @@ test.describe('LLM provider settings', () => {
   test('removes the provider through the confirm dialog', async ({
     authenticatedPage,
   }) => {
+    const token = await bearerToken(authenticatedPage)
+    await authenticatedPage.request.put(
+      `${apiBase}/api/settings/llm-provider`,
+      {
+        headers: { Authorization: `Bearer ${token}` },
+        data: {
+          provider: 'gemini',
+          model: 'gemini-2.5-flash',
+          api_key: 'sk-remove-e2e-test-key',
+        },
+      },
+    )
     await authenticatedPage.goto('/settings')
     await authenticatedPage.getByRole('button', { name: 'Remove' }).click()
     const dialog = authenticatedPage.getByRole('dialog', {

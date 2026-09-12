@@ -28,6 +28,7 @@ from app.core.models import (
     ScalingPolicyInfo,
     validate_finite_number,
 )
+from app.core.security.outbound_url import validate_outbound_url
 
 
 class VolumeMountRequest(BaseModel):
@@ -481,8 +482,7 @@ class LlmProviderSet(BaseModel):
         if not value:
             raise ValueError("Base URL is required for OpenAI-compatible providers.")
         root = value.rstrip("/")
-        if not root.startswith(("http://", "https://")):
-            raise ValueError("Base URL must start with http:// or https://.")
+        validate_outbound_url(root)
         return root
 
 
@@ -491,6 +491,20 @@ class LlmProviderTestRequest(BaseModel):
     base_url: str | None = Field(default=None, max_length=1024)
     model: str = Field(min_length=1, max_length=255)
     api_key: str = Field(min_length=1, max_length=2048)
+
+    @field_validator("base_url")
+    @classmethod
+    def _validate_base_url(
+        cls, value: str | None, info: ValidationInfo
+    ) -> str | None:
+        provider = info.data.get("provider")
+        if provider != "openai_compatible":
+            return None
+        if not value:
+            raise ValueError("Base URL is required for OpenAI-compatible providers.")
+        root = value.rstrip("/")
+        validate_outbound_url(root)
+        return root
 
 
 class LlmProviderTestResponse(BaseModel):

@@ -27,6 +27,15 @@ const PROVIDER_DEFAULTS: Record<
 
 const CUSTOM_MODEL_VALUE = '__custom__'
 
+function endpointKeyFor(
+  provider: LlmProviderKind,
+  baseUrl: string,
+): string {
+  return `${provider}|${
+    provider === 'openai_compatible' ? baseUrl.trim().replace(/\/$/, '') : ''
+  }`
+}
+
 type LlmProviderCardProps = {
   onChanged?: () => void
 }
@@ -37,6 +46,7 @@ export default function LlmProviderCard({ onChanged }: LlmProviderCardProps) {
   const [apiKey, setApiKey] = useState('')
   const [model, setModel] = useState('')
   const [modelOptions, setModelOptions] = useState<string[] | null>(null)
+  const [savedEndpoint, setSavedEndpoint] = useState<string | null>(null)
   const [hasSavedRow, setHasSavedRow] = useState(false)
   const [savedHasKey, setSavedHasKey] = useState(false)
   const [serverConfigured, setServerConfigured] = useState<boolean | null>(null)
@@ -65,6 +75,7 @@ export default function LlmProviderCard({ onChanged }: LlmProviderCardProps) {
           setModel(row.model)
           setSavedHasKey(row.has_key)
           setHasSavedRow(true)
+          setSavedEndpoint(endpointKeyFor(row.provider, row.base_url ?? ''))
         }
       } else {
         setLoadError(formatApiError(providerResult.reason))
@@ -83,6 +94,8 @@ export default function LlmProviderCard({ onChanged }: LlmProviderCardProps) {
   }, [])
 
   const effectiveModel = model.trim()
+  const endpointChanged =
+    !hasSavedRow || endpointKeyFor(provider, baseUrl) !== savedEndpoint
   const canTest =
     !loading &&
     busy === null &&
@@ -93,13 +106,15 @@ export default function LlmProviderCard({ onChanged }: LlmProviderCardProps) {
     !loading &&
     busy === null &&
     effectiveModel !== '' &&
-    (provider !== 'openai_compatible' || baseUrl.trim() !== '')
+    (provider !== 'openai_compatible' || baseUrl.trim() !== '') &&
+    (!endpointChanged || apiKey.trim() !== '')
 
   function handleProviderChange(next: LlmProviderKind) {
     setProvider(next)
     setBaseUrl(PROVIDER_DEFAULTS[next].baseUrl)
     setModel(PROVIDER_DEFAULTS[next].model)
     setModelOptions(null)
+    setApiKey('')
     setMessage(null)
   }
 
@@ -137,6 +152,7 @@ export default function LlmProviderCard({ onChanged }: LlmProviderCardProps) {
       const updated = await getLlmProvider()
       setSavedHasKey(Boolean(updated?.has_key))
       setHasSavedRow(true)
+      setSavedEndpoint(endpointKeyFor(provider, baseUrl))
       setMessage({ tone: 'ok', text: 'LLM provider saved.' })
       onChanged?.()
     } catch (error) {
@@ -158,6 +174,7 @@ export default function LlmProviderCard({ onChanged }: LlmProviderCardProps) {
       setModelOptions(null)
       setHasSavedRow(false)
       setSavedHasKey(false)
+      setSavedEndpoint(null)
       setMessage({ tone: 'ok', text: 'LLM provider removed.' })
       setConfirmRemoveOpen(false)
       onChanged?.()
@@ -285,9 +302,7 @@ export default function LlmProviderCard({ onChanged }: LlmProviderCardProps) {
                       disabled={loading || busy !== null}
                       onChange={(event) => {
                         const value = event.target.value
-                        if (value !== CUSTOM_MODEL_VALUE) {
-                          setModel(value)
-                        }
+                        setModel(value === CUSTOM_MODEL_VALUE ? '' : value)
                       }}
                     >
                       {modelOptions.map((option) => (
@@ -342,6 +357,7 @@ export default function LlmProviderCard({ onChanged }: LlmProviderCardProps) {
                 <button
                   type="button"
                   className="btn btn--danger"
+                  disabled={busy !== null}
                   onClick={() => setConfirmRemoveOpen(true)}
                 >
                   {busy === 'remove' ? 'Removing…' : 'Remove'}

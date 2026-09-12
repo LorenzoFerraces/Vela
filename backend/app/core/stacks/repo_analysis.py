@@ -27,7 +27,11 @@ from app.core.git.git_source_analysis import (
 )
 from app.core.llm import generate_json
 from app.core.llm.cache import delete_cached, load_cached, store_cached
-from app.core.llm.provider import LlmConfig, resolve_llm_config
+from app.core.llm.provider import (
+    LlmConfig,
+    endpoint_fingerprint,
+    resolve_llm_config,
+)
 from app.core.llm.user_config import resolve_llm_config_for_user
 from app.core.stacks.k8s_parser import _file_has_workload_kind
 from app.core.stacks.manifest_parser import parse_manifest
@@ -331,7 +335,10 @@ async def _generate_services(
         config = resolve_llm_config()
     if config is None:
         raise LlmNotConfiguredError("AI analysis is not configured on this server.")
-    cache_version = f"{STACKS_PROMPT_VERSION}:{config.provider}:{config.model}"
+    cache_version = (
+        f"{STACKS_PROMPT_VERSION}:{config.provider}:{config.model}"
+        f":{endpoint_fingerprint(config)}"
+    )
     payload = await load_cached("stacks", commit, cache_version)
     if payload is None:
         payload = await generate_json(prompt=prompt, schema=_generation_schema(), config=config)

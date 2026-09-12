@@ -46,6 +46,7 @@ class AnthropicProvider(LlmProvider):
 
     async def verify(self, config: LlmConfig) -> None:
         # No model-listing endpoint; a 1-token completion proves the key works.
+        self._assert_public_url(config)
         try:
             response = await base.get_client().post(
                 config.url,

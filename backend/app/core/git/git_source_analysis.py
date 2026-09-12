@@ -23,7 +23,11 @@ from app.core.git.git_ops import _CREDENTIALS_IN_URL, git_head_ref, rm_tree
 from app.core.git.project_analysis import analyze_project
 from app.core.models import ProjectInfo
 from app.core.llm import generate_json
-from app.core.llm.provider import LlmConfig, resolve_llm_config
+from app.core.llm.provider import (
+    LlmConfig,
+    endpoint_fingerprint,
+    resolve_llm_config,
+)
 from app.core.llm.user_config import resolve_llm_config_for_user
 from app.core.llm.cache import delete_cached, load_cached, store_cached
 from app.e2e_support import e2e_git_source_analysis_if_enabled
@@ -756,7 +760,10 @@ async def analyze_git_source(
         finally:
             rm_tree(parent)
 
-    cache_version = f"{GIT_SOURCE_PROMPT_VERSION}:{config.provider}:{config.model}"
+    cache_version = (
+        f"{GIT_SOURCE_PROMPT_VERSION}:{config.provider}:{config.model}"
+        f":{endpoint_fingerprint(config)}"
+    )
     # LLM path: cheap commit resolution (no clone) so a full-result cache hit skips the clone.
     commit = await git_head_ref(url=git_url, branch=git_branch, access_token=access_token) or ""
     cache_key = _git_source_cache_key(git_url, commit, git_branch)

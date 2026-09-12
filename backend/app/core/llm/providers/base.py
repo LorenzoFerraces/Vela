@@ -9,6 +9,7 @@ import httpx
 
 from app.core.exceptions import LlmCallError
 from app.core.llm.provider import LlmConfig
+from app.core.security.outbound_url import validate_outbound_url
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +37,18 @@ class LlmProvider(abc.ABC):
     def prepare_prompt(self, prompt: str, config: LlmConfig) -> str:
         return prompt
 
+    def _assert_public_url(self, config: LlmConfig) -> None:
+        """Re-check host resolution right before each outbound request.
+
+        Guards against DNS rebinding between validation and the actual call.
+        """
+        try:
+            validate_outbound_url(config.url)
+        except ValueError as exc:
+            raise LlmCallError(
+                "Could not complete AI analysis. Try again later."
+            ) from exc
+
     def parse_json_text(self, text: str) -> dict:
         parsed = json.loads(text)
         if not isinstance(parsed, dict):
@@ -51,6 +64,7 @@ class LlmProvider(abc.ABC):
         payload = self.build_request(
             config, self.prepare_prompt(prompt, config), schema
         )
+        self._assert_public_url(config)
         try:
             response = await get_client().post(
                 config.url,
@@ -60,14 +74,15 @@ class LlmProvider(abc.ABC):
             )
             response.raise_for_status()
         except httpx.HTTPError as exc:
-            response_detail = ""
-            if isinstance(exc, httpx.HTTPStatusError) and exc.response is not None:
-                response_detail = exc.response.text[:240]
+            status_code = (
+                exc.response.status_code
+                if isinstance(exc, httpx.HTTPStatusError)
+                else None
+            )
             logger.info(
-                "%s analysis request failed: %s %s",
+                "%s analysis request failed: %s",
                 config.provider,
-                exc,
-                response_detail,
+                status_code,
             )
             raise LlmCallError(
                 "Could not complete AI analysis. Try again later."
@@ -89,6 +104,7 @@ class LlmProvider(abc.ABC):
         url = self.models_url(config)
         if url is None:
             return None
+        self._assert_public_url(config)
         try:
             response = await get_client().get(
                 url, headers=config.headers, params=config.params
@@ -100,19 +116,22 @@ class LlmProvider(abc.ABC):
             body = response.json()
         except ValueError as exc:
             raise LlmCallError("Could not reach the provider.") from exc
+        if not isinstance(body, dict):
+            raise LlmCallError("Could not reach the provider.")
+        raw_models = body.get("models")
+        if raw_models is None and "data" in body:
+            raw_models = body.get("data")
+        if not isinstance(raw_models, list):
+            raise LlmCallError("Could not reach the provider.")
         names: list[str] = []
-        if isinstance(body, dict):
-            raw_models = body.get("models")
-            if isinstance(raw_models, list):
-                for item in raw_models:
-                    name = item.get("name") if isinstance(item, dict) else None
-                    if isinstance(name, str):
-                        names.append(name.removeprefix("models/"))
-            else:
-                raw_data = body.get("data")
-                if isinstance(raw_data, list):
-                    for item in raw_data:
-                        model_id = item.get("id") if isinstance(item, dict) else None
-                        if isinstance(model_id, str):
-                            names.append(model_id)
+        if "models" in body:
+            for item in raw_models:
+                name = item.get("name") if isinstance(item, dict) else None
+                if isinstance(name, str):
+                    names.append(name.removeprefix("models/"))
+        else:
+            for item in raw_models:
+                model_id = item.get("id") if isinstance(item, dict) else None
+                if isinstance(model_id, str):
+                    names.append(model_id)
         return names
