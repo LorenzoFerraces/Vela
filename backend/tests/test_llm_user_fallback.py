@@ -255,6 +255,7 @@ def _call_generate_services(root: Path, config: LlmConfig | None = None):
             git_branch="main",
             warnings=[],
             root=root,
+            evidence=[],
             commit="abc123",
             config=config,
         )
@@ -278,7 +279,7 @@ def test_generate_services_uses_explicit_user_config(
     monkeypatch.setenv("VELA_LLM_CACHE_DIR", str(tmp_path))
     record: dict = {}
     monkeypatch.setattr(repo_analysis, "generate_json", _record_stacks_fake(record))
-    services, summary = _call_generate_services(tmp_path, config=USER_CONFIG)
+    services, summary, _ = _call_generate_services(tmp_path, config=USER_CONFIG)
     assert record["config"] is USER_CONFIG
     assert [service.service_name for service in services] == ["web", "db"]
     assert summary == "web + db"

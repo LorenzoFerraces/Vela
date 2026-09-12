@@ -399,7 +399,7 @@ async def test_pipeline_stubbed_llm_appends_detected_services(
     )
 
     by_name = {service.service_name: service for service in analysis.services}
-    assert {"app", "postgres", "mongo", "neo4j"} <= set(by_name)
+    assert {"app", "postgres", "mongo", "neo4j"} == set(by_name)
     assert set(analysis.detected_service_names) == {"postgres", "mongo", "neo4j"}
     assert by_name["postgres"].source_ref == "postgres:16"
     assert by_name["neo4j"].container_port == 7687

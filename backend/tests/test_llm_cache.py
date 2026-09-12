@@ -339,6 +339,7 @@ async def test_stacks_invalid_payload_is_not_cached(
             git_branch="main",
             warnings=[],
             root=tmp_path,
+            evidence=[],
             commit="abc123",
         )
     server_config = resolve_llm_config()
