@@ -10,6 +10,7 @@ from pathlib import Path
 
 from app.core.git.language_detection import IGNORE_DIR_NAMES
 from app.core.models import ProjectInfo
+from app.db.models import StackService
 
 MAX_EVIDENCE_FILES = 20
 _WALK_DEPTH = 3
@@ -418,3 +419,140 @@ def scan_dependency_evidence(root: Path, info: ProjectInfo | None = None) -> lis
             matched_lines=tuple(entry.matched_lines),
         ))
     return evidence
+
+
+_LOCAL_HOSTS = frozenset({"localhost", "127.0.0.1", "0.0.0.0", "::1", ""})
+
+_KIND_ALIASES: dict[str, frozenset[str]] = {
+    "postgres": frozenset({"postgres", "postgresql", "db", "database", "rdbms"}),
+    "mongo": frozenset({"mongo", "mongodb"}),
+    "neo4j": frozenset({"neo4j", "graph"}),
+    "redis": frozenset({"redis", "cache"}),
+    "mysql": frozenset({"mysql"}),
+    "mariadb": frozenset({"mariadb"}),
+    "rabbitmq": frozenset({"rabbitmq", "rabbit", "amqp", "queue"}),
+}
+_IMAGE_FAMILY: dict[str, tuple[str, ...]] = {
+    "postgres": ("postgres",),
+    "mongo": ("mongo",),
+    "neo4j": ("neo4j",),
+    "redis": ("redis",),
+    "mysql": ("mysql",),
+    "mariadb": ("mariadb",),
+    "rabbitmq": ("rabbitmq",),
+}
+
+
+def classify_host(hostname: str | None) -> str:
+    if hostname is None:
+        return "local"
+    host = hostname.strip().strip("[]").lower()
+    if host in _LOCAL_HOSTS:
+        return "local"
+    if "." in host:
+        return "external"
+    return "sibling"
+
+
+def _covering_service(services: list[StackService], kind: str) -> StackService | None:
+    aliases = _KIND_ALIASES.get(kind, frozenset())
+    families = _IMAGE_FAMILY.get(kind, ())
+    for service in services:
+        if service.service_name.casefold() in aliases:
+            return service
+        ref = (service.source_ref or "").casefold()
+        if service.source_kind == "image" and any(ref.startswith(family) for family in families):
+            return service
+    return None
+
+
+def _rewrite_local_host(value: str, kind: str, replacement: str) -> str:
+    def replace(match: re.Match[str]) -> str:
+        token = match.group(0)
+        info = _match_url(token)
+        if info is None or info[0] != kind:
+            return token
+        host = info[1]
+        if host is None or classify_host(host) == "external":
+            return token
+        return token.replace(host, replacement, 1)
+
+    return _URL_TOKEN.sub(replace, value)
+
+
+def reconcile_detected_services(
+    services: list[StackService],
+    evidence: list[ServiceEvidence],
+    warnings: list[str],
+) -> tuple[list[StackService], list[str], tuple[str, ...]]:
+    result = list(services)
+    new_warnings = list(warnings)
+    detected_names: list[str] = []
+    existing_names = {service.service_name.casefold() for service in result}
+
+    for item in evidence:
+        host_class = classify_host(item.hostname)
+        if host_class == "external":
+            new_warnings.append(
+                f"{item.kind} appears to use an external/managed host"
+                f"{' (' + item.hostname + ')' if item.hostname else ''}; no service added."
+            )
+            continue
+
+        covering = _covering_service(result, item.kind)
+        if covering is None:
+            name = item.kind
+            suffix = 2
+            while name.casefold() in existing_names:
+                name = f"{item.kind}-{suffix}"
+                suffix += 1
+            existing_names.add(name.casefold())
+            result.append(StackService(
+                service_name=name,
+                source_kind="image",
+                source_ref=item.image_ref,
+                git_branch=None,
+                container_port=item.port,
+                env_vars={},
+                command=None,
+                public_route=False,
+                depends_on=None,
+                volumes=[],
+            ))
+            detected_names.append(name)
+            new_warnings.append(
+                f"Added {name} ({item.image_ref}) — detected in "
+                f"{', '.join(item.sources) or 'repo config'} but missing from the AI analysis."
+            )
+            covering = result[-1]
+
+        target_name = covering.service_name
+        git_services = [service for service in result if service.source_kind == "git"]
+        app_service = next(
+            (
+                service
+                for service in git_services
+                if any(
+                    any(
+                        parsed is not None and parsed[0] == item.kind
+                        for parsed in (_match_url(token) for token in _URL_TOKEN.findall(value))
+                    )
+                    for value in service.env_vars.values()
+                )
+            ),
+            git_services[0] if git_services else None,
+        )
+        if app_service is not None:
+            deps = list(app_service.depends_on or [])
+            if target_name not in deps:
+                deps.append(target_name)
+            app_service.depends_on = deps
+        for service in git_services:
+            rewritten = {
+                key: _rewrite_local_host(value, item.kind, target_name)
+                for key, value in service.env_vars.items()
+            }
+            if rewritten != service.env_vars:
+                service.env_vars = rewritten
+
+    return result, new_warnings, tuple(detected_names)

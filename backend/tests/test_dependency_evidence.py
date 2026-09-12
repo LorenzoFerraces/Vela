@@ -2,7 +2,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from app.core.git.dependency_evidence import scan_dependency_evidence
+from app.core.git.dependency_evidence import (
+    ServiceEvidence,
+    classify_host,
+    reconcile_detected_services,
+    scan_dependency_evidence,
+)
+from app.db.models import StackService
 
 
 def _write(root: Path, files: dict[str, str]) -> Path:
@@ -141,3 +147,63 @@ def test_one_evidence_per_kind_dedup(tmp_path: Path) -> None:
 def test_no_evidence_for_plain_repo(tmp_path: Path) -> None:
     root = _write(tmp_path, {"README.md": "# Hi\n", "package.json": '{"dependencies": {"express": "^4"}}'})
     assert scan_dependency_evidence(root) == []
+
+
+def _app(name: str = "web", env: dict[str, str] | None = None) -> StackService:
+    return StackService(
+        service_name=name, source_kind="git", source_ref="https://github.com/o/r.git",
+        git_branch="main", container_port=8080, env_vars=env or {}, command=None,
+        public_route=True, depends_on=None, volumes=[],
+    )
+
+
+def _evidence(kind: str, hostname: str | None, env_key: str | None = None) -> ServiceEvidence:
+    from app.core.git.dependency_evidence import KIND_DEFAULTS
+    image_ref, port = KIND_DEFAULTS[kind]
+    return ServiceEvidence(kind=kind, image_ref=image_ref, port=port, hostname=hostname,
+                           env_key=env_key, sources=("backend/pom.xml",), matched_lines=())
+
+
+def test_classify_host() -> None:
+    assert classify_host("localhost") == "local"
+    assert classify_host("127.0.0.1") == "local"
+    assert classify_host(None) == "local"
+    assert classify_host("db") == "sibling"
+    assert classify_host("cluster0.abc.mongodb.net") == "external"
+
+
+def test_reconcile_appends_missing_local_services() -> None:
+    services = [_app(env={"SPRING_DATASOURCE_URL": "jdbc:postgresql://localhost:5432/commit"})]
+    evidence = [_evidence("postgres", "localhost"), _evidence("neo4j", "localhost")]
+    warnings: list[str] = []
+    out, warns, detected = reconcile_detected_services(services, evidence, warnings)
+    names = {s.service_name for s in out}
+    assert {"web", "postgres", "neo4j"} <= names
+    assert detected == ("postgres", "neo4j")
+    web = next(s for s in out if s.service_name == "web")
+    assert set(web.depends_on or []) == {"postgres", "neo4j"}
+    assert web.env_vars["SPRING_DATASOURCE_URL"] == "jdbc:postgresql://postgres:5432/commit"
+    assert any("postgres" in w for w in warns)
+
+
+def test_reconcile_skips_external_host() -> None:
+    services = [_app()]
+    evidence = [_evidence("mongo", "cluster0.abc.mongodb.net")]
+    out, warns, detected = reconcile_detected_services(services, evidence, [])
+    assert detected == ()
+    assert {s.service_name for s in out} == {"web"}
+    assert any("external" in w.lower() or "managed" in w.lower() for w in warns)
+
+
+def test_reconcile_does_not_duplicate_covered_kind() -> None:
+    db = StackService(
+        service_name="db", source_kind="image", source_ref="postgres:16", git_branch=None,
+        container_port=5432, env_vars={}, command=None, public_route=False,
+        depends_on=None, volumes=[],
+    )
+    services = [_app(env={"DATABASE_URL": "postgres://localhost:5432/app"}), db]
+    evidence = [_evidence("postgres", "localhost")]
+    out, _, detected = reconcile_detected_services(services, evidence, [])
+    assert detected == ()
+    web = next(s for s in out if s.service_name == "web")
+    assert web.env_vars["DATABASE_URL"] == "postgres://db:5432/app"
