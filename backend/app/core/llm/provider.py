@@ -3,6 +3,8 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 
+DEFAULT_LLM_MODEL = "gemini-3.5-flash-lite"
+
 GEMINI_API_ROOT = "https://generativelanguage.googleapis.com/v1beta"
 
 
@@ -27,7 +29,7 @@ def resolve_llm_config() -> LlmConfig | None:
     vertex_project_id = _env("VELA_VERTEX_PROJECT_ID")
     if vertex_api_key and vertex_project_id:
         location = _env("VELA_VERTEX_LOCATION") or "us-central1"
-        model = _env("VELA_VERTEX_MODEL") or "gemini-2.5-flash"
+        model = _env("VELA_VERTEX_MODEL") or DEFAULT_LLM_MODEL
         return LlmConfig(
             provider="vertex",
             url=(
@@ -42,7 +44,7 @@ def resolve_llm_config() -> LlmConfig | None:
 
     gemini_api_key = _env("VELA_GEMINI_API_KEY")
     if gemini_api_key:
-        model = _env("VELA_GEMINI_MODEL") or "gemini-3.5-flash"
+        model = _env("VELA_GEMINI_MODEL") or DEFAULT_LLM_MODEL
         return LlmConfig(
             provider="gemini",
             url=f"{GEMINI_API_ROOT}/models/{model}:generateContent",
