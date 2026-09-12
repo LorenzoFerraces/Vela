@@ -48,6 +48,7 @@ export interface StackServiceCreate {
   volumes?: VolumeMountRequest[]
   scaling_policy?: ScalingPolicyRequest | null
   build_override?: BuildOverride | null
+  detected?: boolean
 }
 
 export async function listStacks(): Promise<Stack[]> {
