@@ -162,6 +162,18 @@ class LlmCallError(VelaError):
     """An LLM provider request or response failed."""
 
 
+class LlmProviderError(VelaError):
+    """A user-configured LLM provider failed; the server default may still work."""
+
+    def __init__(self, message: str, *, fallback_available: bool) -> None:
+        super().__init__(message)
+        self.fallback_available = fallback_available
+
+
+class LlmProviderConfigError(VelaError):
+    """User LLM provider settings are invalid or incomplete."""
+
+
 class DockerfileGenerationError(BuilderError):
     def __init__(self, language: str, message: str) -> None:
         self.language = language

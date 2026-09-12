@@ -13,6 +13,7 @@ import {
   patchAiPrefillPreferences,
   type AiPrefillPreferences,
 } from '../api/client'
+import LlmProviderCard from './settings/LlmProviderCard'
 import ProfileSection from './settings/ProfileSection'
 import { EmailNotificationSettingsCard } from '../components/EmailNotificationSettings'
 import ConfirmDialog from '../components/ConfirmDialog'
@@ -61,6 +62,7 @@ export default function SettingsPage() {
   const [banner, setBanner] = useState<Banner>(null)
   const [busy, setBusy] = useState(false)
   const [disconnectDialogOpen, setDisconnectDialogOpen] = useState(false)
+  const [aiStatusVersion, setAiStatusVersion] = useState(0)
 
   const reload = useCallback(async (options?: { showLoading?: boolean }) => {
     if (!getAccessToken()) {
@@ -205,7 +207,11 @@ export default function SettingsPage() {
         )}
       </div>
 
-      <AiPrefillSettingsCard />
+      <LlmProviderCard
+        onChanged={() => setAiStatusVersion((version) => version + 1)}
+      />
+
+      <AiPrefillSettingsCard refreshKey={aiStatusVersion} />
 
       <EmailNotificationSettingsCard />
 
@@ -230,7 +236,7 @@ const AI_PREFILL_LABELS: Record<keyof AiPrefillPreferences, string> = {
   start_command: 'Start command',
 }
 
-function AiPrefillSettingsCard() {
+function AiPrefillSettingsCard({ refreshKey = 0 }: { refreshKey?: number }) {
   const [preferences, setPreferences] = useState<AiPrefillPreferences | null>(
     null
   )
@@ -271,7 +277,7 @@ function AiPrefillSettingsCard() {
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [refreshKey])
 
   async function onToggle(field: keyof AiPrefillPreferences, enabled: boolean) {
     if (!preferences) {

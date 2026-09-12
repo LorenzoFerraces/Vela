@@ -39,6 +39,8 @@ from app.core.exceptions import (
     InvalidCredentialsError,
     LlmCallError,
     LlmNotConfiguredError,
+    LlmProviderConfigError,
+    LlmProviderError,
     NotAuthenticatedError,
     ObjectStorageError,
     AlreadyProjectMemberError,
@@ -387,6 +389,27 @@ def register_exception_handlers(app) -> None:
     ) -> JSONResponse:
         return JSONResponse(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            content={"detail": str(exc)},
+        )
+
+    @app.exception_handler(LlmProviderError)
+    async def llm_provider_error_handler(
+        _request: Request, exc: LlmProviderError
+    ) -> JSONResponse:
+        return JSONResponse(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            content={
+                "detail": str(exc),
+                "fallback_available": exc.fallback_available,
+            },
+        )
+
+    @app.exception_handler(LlmProviderConfigError)
+    async def llm_provider_config_error_handler(
+        _request: Request, exc: LlmProviderConfigError
+    ) -> JSONResponse:
+        return JSONResponse(
+            status_code=status.HTTP_400_BAD_REQUEST,
             content={"detail": str(exc)},
         )
 

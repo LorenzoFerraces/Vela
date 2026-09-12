@@ -28,7 +28,7 @@ from app.core.git.git_source_analysis import (
     _collect_context_excerpts,
     _extract_env_vars_from_context,
 )
-from app.core.llm.provider import resolve_llm_config
+from app.core.llm.provider import LlmConfig, resolve_llm_config
 from app.core.stacks import repo_analysis
 from app.core.stacks.repo_analysis import RepoStackAnalysis, analyze_repo_stack
 
@@ -301,11 +301,14 @@ async def test_pipeline_stubbed_llm_merges_env_fallback(
 
     captured: dict[str, str] = {}
 
-    async def fake_generate_json(*, prompt: str, schema: dict) -> dict:
-        _ = schema
+    async def fake_generate_json(
+        *, prompt: str, schema: dict, config: LlmConfig | None = None
+    ) -> dict:
+        _ = schema, config
         captured["prompt"] = prompt
         return STUB_PAYLOAD
 
+    monkeypatch.setenv("VELA_GEMINI_API_KEY", "test-key")
     monkeypatch.setattr(repo_analysis, "generate_json", fake_generate_json)
     monkeypatch.delenv("VELA_E2E", raising=False)
 

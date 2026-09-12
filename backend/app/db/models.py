@@ -116,6 +116,30 @@ class UserOAuthIdentity(Base):
     user: Mapped[User] = relationship(back_populates="oauth_identities")
 
 
+class UserLlmProvider(Base):
+    """One active LLM provider per user (BYO key for AI analysis)."""
+
+    __tablename__ = "user_llm_providers"
+
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    provider: Mapped[str] = mapped_column(String(32), nullable=False)
+    base_url: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    model: Mapped[str] = mapped_column(String(255), nullable=False)
+    api_key_encrypted: Mapped[bytes | None] = mapped_column(
+        LargeBinary, nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utcnow
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow
+    )
+
+
 class Dockerfile(Base):
     __tablename__ = "dockerfiles"
     __table_args__ = (

@@ -99,6 +99,7 @@ export async function parseManifest(body: {
 export async function analyzeRepo(body: {
   git_url: string
   git_branch: string
+  use_server_default?: boolean
 }): Promise<RepoAnalysisResult> {
   return apiPost<RepoAnalysisResult>('/api/stacks/analyze-repo', body)
 }

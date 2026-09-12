@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   analyzeGitSource,
   formatApiError,
+  isLlmFallbackError,
   uploadVolumeFolder,
   type BuildOverride,
   type ScalingPolicyRequest,
@@ -70,6 +71,7 @@ export function ServiceEditForm({
   )
   const [buildConfigBusy, setBuildConfigBusy] = useState(false)
   const [buildConfigError, setBuildConfigError] = useState<string | null>(null)
+  const [llmFallbackAvailable, setLlmFallbackAvailable] = useState(false)
   const folderInputRef = useRef<HTMLInputElement>(null)
   const envRows = useMemo(
     () => envRowsFromRecord(service.env_vars || {}),
@@ -198,22 +200,25 @@ export function ServiceEditForm({
     setBuildConfigOpen(true)
   }
 
-  async function onAnalyzeGitSource() {
+  async function onAnalyzeGitSource(useServerDefault = false) {
     if (!service.source_ref.trim()) {
       setBuildConfigError('Choose a git repository first.')
       return
     }
     setBuildConfigBusy(true)
     setBuildConfigError(null)
+    setLlmFallbackAvailable(false)
     try {
       const analysis = await analyzeGitSource({
         git_url: service.source_ref.trim(),
         git_branch: service.git_branch?.trim() || 'main',
+        use_server_default: useServerDefault,
       })
       if (analysis.needs_manual_build_config) {
         openBuildConfigModal(buildOverrideFromAnalysis(analysis))
       }
     } catch (error) {
+      setLlmFallbackAvailable(isLlmFallbackError(error))
       setBuildConfigError(formatApiError(error))
     } finally {
       setBuildConfigBusy(false)
@@ -486,6 +491,16 @@ export function ServiceEditForm({
             <p className="settings-banner settings-banner--err" role="alert">
               {buildConfigError}
             </p>
+          ) : null}
+          {buildConfigError && llmFallbackAvailable ? (
+            <button
+              type="button"
+              className="btn btn--ghost btn--sm"
+              disabled={buildConfigBusy}
+              onClick={() => void onAnalyzeGitSource(true)}
+            >
+              Retry with Vela default
+            </button>
           ) : null}
         </div>
       ) : null}

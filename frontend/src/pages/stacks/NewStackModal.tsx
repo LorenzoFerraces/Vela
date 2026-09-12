@@ -6,6 +6,7 @@ import {
   analyzeRepo,
   createStack,
   formatApiError,
+  isLlmFallbackError,
   parseManifest,
   type StackServiceCreate,
 } from '../../api/client'
@@ -71,6 +72,7 @@ export default function NewStackModal({ open, onClose, onCreated }: NewStackModa
   const [warnings, setWarnings] = useState<string[]>([])
   const [origin, setOrigin] = useState('')
   const [error, setError] = useState<string | null>(null)
+  const [llmFallbackAvailable, setLlmFallbackAvailable] = useState(false)
   const [readingFile, setReadingFile] = useState(false)
   const [working, setWorking] = useState(false)
   const [discardOpen, setDiscardOpen] = useState(false)
@@ -192,17 +194,19 @@ export default function NewStackModal({ open, onClose, onCreated }: NewStackModa
     }
   }
 
-  async function handleAnalyze() {
+  async function handleAnalyze(useServerDefault = false) {
     if (!sourceLooksLikeGitUrl(repoUrl)) {
       setError('Enter a Git repository URL starting with https://, http://, ssh://, or git@.')
       return
     }
     setWorking(true)
     setError(null)
+    setLlmFallbackAvailable(false)
     try {
       const result = await analyzeRepo({
         git_url: repoUrl.trim(),
         git_branch: branch.trim() || 'main',
+        use_server_default: useServerDefault,
       })
       if (!stackName.trim()) {
         setStackName(stackNameFromSource(repoUrl))
@@ -218,6 +222,7 @@ export default function NewStackModal({ open, onClose, onCreated }: NewStackModa
       )
       setStep('review')
     } catch (err) {
+      setLlmFallbackAvailable(isLlmFallbackError(err))
       setError(formatApiError(err))
     } finally {
       setWorking(false)
@@ -231,6 +236,7 @@ export default function NewStackModal({ open, onClose, onCreated }: NewStackModa
     }
     setStep('source')
     setError(null)
+    setLlmFallbackAvailable(false)
   }
 
   async function handleCreate() {
@@ -396,6 +402,11 @@ export default function NewStackModal({ open, onClose, onCreated }: NewStackModa
                     Open manual builder
                   </button>
                 ) : null}
+                {error && llmFallbackAvailable ? (
+                  <button type="button" className="btn btn--ghost btn--sm" onClick={() => void handleAnalyze(true)} disabled={busy}>
+                    Retry with Vela default
+                  </button>
+                ) : null}
               </div>
               <div className="containers-form__stack">
                 <label className="containers-form__label" htmlFor="new-stack-repo-branch">
@@ -414,7 +425,7 @@ export default function NewStackModal({ open, onClose, onCreated }: NewStackModa
                 <button type="button" className="btn btn--ghost" onClick={handleBackFromInput} disabled={busy}>
                   Back
                 </button>
-                <button type="button" className="btn btn--primary" onClick={handleAnalyze} disabled={busy}>
+                <button type="button" className="btn btn--primary" onClick={() => void handleAnalyze()} disabled={busy}>
                   {working ? 'Cloning & analyzing…' : 'Analyze repo'}
                 </button>
               </footer>
