@@ -840,6 +840,7 @@ class StackServiceCreate(BaseModel):
     volumes: list[VolumeMountRequest] = Field(default_factory=list)
     scaling_policy: ScalingPolicyConfig | None = None
     build_override: BuildOverride | None = None
+    detected: bool = False
 
 
 class StackCreate(BaseModel):

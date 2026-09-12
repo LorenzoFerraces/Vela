@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import uuid
+from collections.abc import Collection
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
@@ -159,7 +160,10 @@ async def analyze_repo_route(
         use_server_default=body.use_server_default,
     )
     return AnalyzeRepoResponse(
-        services=[_orm_service_to_create(service) for service in analysis.services],
+        services=[
+            _orm_service_to_create(service, analysis.detected_service_names)
+            for service in analysis.services
+        ],
         warnings=analysis.warnings,
         manifest_kind=analysis.manifest_kind,
         manifest_path=analysis.manifest_path,
@@ -301,7 +305,10 @@ async def deploy_user_stack(
     return result
 
 
-def _orm_service_to_create(service: StackService) -> StackServiceCreate:
+def _orm_service_to_create(
+    service: StackService,
+    detected_names: Collection[str] = (),
+) -> StackServiceCreate:
     volumes = service.volumes or []
     scaling = service.scaling_policy
     source_kind = service.source_kind
@@ -320,6 +327,7 @@ def _orm_service_to_create(service: StackService) -> StackServiceCreate:
         volumes=volumes or [],
         scaling_policy=scaling,  # type: ignore[arg-type]  # Pydantic v2 validates the JSON dict into the model field at runtime
         build_override=service.build_override,  # type: ignore[arg-type]  # Pydantic v2 validates the JSON dict into the model field at runtime
+        detected=service.service_name in detected_names,
     )
 
 
