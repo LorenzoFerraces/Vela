@@ -20,7 +20,7 @@ if [ "$(id -u)" -eq 0 ]; then
             in_gid="$(getent group docker | cut -d: -f3)"
             if [ "$sock_gid" = "$in_gid" ]; then
                 echo "vela-entrypoint: socket group already matches docker GID $sock_gid"
-            elif groupmod -g "$sock_gid" docker; then
+                elif groupmod -g "$sock_gid" docker; then
                 # Socket owned by a real host docker group with a different GID
                 # (e.g. non-999 on RHEL/Amazon Linux). Align the in-image group
                 # instead of chowning the socket, so the host's own docker
@@ -35,7 +35,7 @@ if [ "$(id -u)" -eq 0 ]; then
     fi
     app_home="$(getent passwd "$APP_USER" | cut -d: -f6)"
     exec env HOME="$app_home" USER="$APP_USER" LOGNAME="$APP_USER" \
-        setpriv --reuid="$APP_USER" --regid="$APP_USER" --init-groups "$@"
+    setpriv --reuid="$APP_USER" --regid="$APP_USER" --init-groups "$@"
 fi
 
 exec "$@"

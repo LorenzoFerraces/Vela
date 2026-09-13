@@ -96,9 +96,9 @@ Create `backend/.env` as needed. Common variables:
 | `VELA_GITHUB_OAUTH_SCOPES` | Comma-separated scopes requested from GitHub (default `repo,read:user`) |
 | `VELA_TOKEN_ENCRYPTION_KEY` | Fernet key used to encrypt third-party access tokens at rest. Generate with `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"` |
 | `VELA_GEMINI_API_KEY` | Google Gemini API key for GitHub repo analysis (pre-fill on Containers). Optional; without it, analysis uses deterministic project detection |
-| `VELA_GEMINI_MODEL` | Optional Gemini model id (default `gemini-3.5-flash`) |
+| `VELA_GEMINI_MODEL` | Optional Gemini model id (default `gemini-3.1-flash-lite`) |
 | `VELA_VERTEX_API_KEY` / `VELA_VERTEX_PROJECT_ID` | Optional Vertex AI key + project ID; when both are set, Vertex is used instead of direct Gemini |
-| `VELA_VERTEX_LOCATION` / `VELA_VERTEX_MODEL` | Optional Vertex location and model (defaults `us-central1`, `gemini-2.5-flash`) |
+| `VELA_VERTEX_LOCATION` / `VELA_VERTEX_MODEL` | Optional Vertex location and model (defaults `us-central1`, `gemini-3.1-flash-lite`) |
 | `BREVO_API_KEY` | Brevo transactional API key for container alert emails ([Python SDK](https://developers.brevo.com/guides/python); free tier ~300/day) |
 | `BREVO_SENDER_EMAIL` | Verified sender address in Brevo (required with `BREVO_API_KEY`) |
 | `BREVO_SENDER_NAME` | Optional From name (default `Vela`) |

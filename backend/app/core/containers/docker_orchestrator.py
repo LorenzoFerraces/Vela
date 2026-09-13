@@ -152,6 +152,22 @@ def _docker_daemon_unreachable_message(exc: BaseException) -> str:
             "DOCKER_SOCKET_PATH in .env points at the host daemon's socket and that the "
             "container is (re)started after changing it."
         )
+    low = msg.lower()
+    if "permission denied" in low:
+        return (
+            f"{msg}\n\n"
+            "The API container cannot open the Docker socket (permission denied). Check "
+            "the vela-api container logs for entrypoint socket-alignment output, and make "
+            "sure the socket's group GID is reachable (set DOCKER_GROUP_ID in .env if the "
+            "socket is root:root)."
+        )
+    if "no such file or directory" in low:
+        return (
+            f"{msg}\n\n"
+            "The Docker socket was not found inside the API container. Check that "
+            "DOCKER_SOCKET_PATH in .env points at the host daemon's socket and that the "
+            "container is (re)started after changing it."
+        )
     if "Error while fetching server API version" in msg:
         return (
             f"{msg}\n\n"
@@ -569,6 +585,7 @@ class DockerOrchestrator(ContainerOrchestrator):
                 if config.name:
                     self._remove_managed_name_conflict_sync(config.name)
                 self._ensure_default_network_sync()
+                self._ensure_default_network_sync()
                 self._ensure_image_sync(config.image)
             except (OrchestratorError, docker.errors.ImageNotFound):
                 raise
@@ -617,6 +634,12 @@ class DockerOrchestrator(ContainerOrchestrator):
                     config.image, registry_message=_docker_registry_error_text(e)
                 ) from e
             except docker.errors.NotFound as e:
+                msg = str(e)
+                if "network" in msg.lower() and "not found" in msg.lower():
+                    raise OrchestratorError(
+                        f"Docker network not found on the host engine: {msg}"
+                    ) from e
+                raise ContainerNotFoundError(msg) from e
                 msg = str(e)
                 if "network" in msg.lower() and "not found" in msg.lower():
                     raise OrchestratorError(
@@ -909,7 +932,9 @@ class DockerOrchestrator(ContainerOrchestrator):
             workdir="/",
             environment=["TERM=xterm-256color", f"COLUMNS={cols}", f"LINES={rows}"],
         )["Id"]
-        exec_runtime = self._client.api.exec_start(exec_id, socket=True, tty=True, demux=True)
+        exec_runtime = self._client.api.exec_start(
+            exec_id, socket=True, tty=True, demux=True
+        )
         return exec_id, exec_runtime
 
     async def stream_exec(
@@ -937,7 +962,9 @@ class DockerOrchestrator(ContainerOrchestrator):
                     if not chunk:
                         break
                     try:
-                        asyncio.run_coroutine_threadsafe(queue.put(chunk), loop).result(timeout=30)
+                        asyncio.run_coroutine_threadsafe(queue.put(chunk), loop).result(
+                            timeout=30
+                        )
                     except (TimeoutError, RuntimeError):
                         logger.warning(
                             "exec reader stalled on backpressure for %s; closing reader",
@@ -948,7 +975,9 @@ class DockerOrchestrator(ContainerOrchestrator):
                 logger.warning("exec reader error for %s: %s", container_id, exc)
             finally:
                 try:
-                    asyncio.run_coroutine_threadsafe(queue.put(None), loop).result(timeout=5)
+                    asyncio.run_coroutine_threadsafe(queue.put(None), loop).result(
+                        timeout=5
+                    )
                 except Exception:
                     pass
                 exec_runtime.close()
@@ -967,7 +996,9 @@ class DockerOrchestrator(ContainerOrchestrator):
             try:
                 executor.submit(_write_blocking, data)
             except RuntimeError:
-                logger.warning("exec write rejected for %s: session closed", container_id)
+                logger.warning(
+                    "exec write rejected for %s: session closed", container_id
+                )
 
         def _close_blocking() -> None:
             try:
@@ -995,7 +1026,9 @@ class DockerOrchestrator(ContainerOrchestrator):
 
         return _stdout_iterator(), _write, _close, exec_id
 
-    def resize_exec(self, container_id: str, exec_id: str, cols: int, rows: int) -> None:
+    def resize_exec(
+        self, container_id: str, exec_id: str, cols: int, rows: int
+    ) -> None:
         try:
             self._client.api.exec_resize(exec_id, height=rows, width=cols)
         except Exception as exc:

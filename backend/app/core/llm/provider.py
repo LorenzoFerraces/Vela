@@ -9,6 +9,9 @@ DEFAULT_LLM_MODEL = "gemini-3.5-flash-lite"
 GEMINI_API_ROOT = "https://generativelanguage.googleapis.com/v1beta"
 
 
+DEFAULT_LLM_MODEL = "gemini-3.1-flash-lite"
+
+
 @dataclass(frozen=True)
 class LlmConfig:
     provider: str
