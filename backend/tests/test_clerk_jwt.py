@@ -335,6 +335,27 @@ async def test_verify_clerk_token_without_aud_accepted(monkeypatch: Any) -> None
 
 
 @pytest.mark.asyncio
+async def test_verify_clerk_token_accepts_slightly_future_iat_within_leeway(
+    monkeypatch: Any,
+) -> None:
+    monkeypatch.setenv("VELA_CLERK_PUBLISHABLE_KEY", TEST_CLERK_PUBLISHABLE_KEY)
+    kid, private_key = _make_rsa_kid()
+    now = int(time.time())
+    claims = _full_claims()
+    claims["iat"] = now + 30
+    claims["nbf"] = now + 30
+    token = pyjwt.encode(claims, private_key, algorithm="RS256", headers={"kid": kid})
+
+    async def fake_fetch() -> dict[str, object]:
+        return _jwks_for(kid, private_key)
+
+    with patch.object(clerk_mod, "_fetch_jwks", new=fake_fetch):
+        verified = await verify_clerk_token(token)
+
+    assert verified == ClerkClaims(email="u@x.com", external_id="user_1")
+
+
+@pytest.mark.asyncio
 async def test_verify_clerk_token_azp_skipped_when_allowlist_empty(
     monkeypatch: Any,
 ) -> None:
