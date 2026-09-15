@@ -610,9 +610,12 @@ class DockerOrchestrator(ContainerOrchestrator):
                 kwargs["nano_cpus"] = nano_cpus
             if hc is not None:
                 kwargs["healthcheck"] = hc
-            if config.network:
+            attach_network_after_start = bool(
+                config.network and config.network_aliases
+            )
+            if config.network and not attach_network_after_start:
                 kwargs["network"] = config.network
-            elif self._default_network:
+            elif not config.network and self._default_network:
                 kwargs["network"] = self._default_network
             if config.volumes:
                 kwargs["mounts"] = [
@@ -628,6 +631,12 @@ class DockerOrchestrator(ContainerOrchestrator):
             try:
                 container = self._client.containers.create(config.image, **kwargs)
                 container.start()
+                if attach_network_after_start:
+                    network = self._client.networks.get(config.network)
+                    network.connect(
+                        container,
+                        aliases=list(config.network_aliases),
+                    )
                 data = self._inspect_container_with_size(container.id)
             except docker.errors.ImageNotFound as e:
                 raise ImageNotFoundError(

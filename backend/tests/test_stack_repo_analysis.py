@@ -275,6 +275,56 @@ def test_analyze_repo_compose_manifest(
     assert by_name["db"]["source_ref"] == "postgres:16"
 
 
+def test_analyze_repo_compose_enriches_app_env_from_env_example(
+    api_client: TestClient,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = tmp_path / "repo"
+    root.mkdir()
+    (root / ".env.example").write_text(
+        "SPRING_NEO4J_URI=bolt://neo4j:7687\nSPRING_JPA_SHOW_SQL=true\n",
+        encoding="utf-8",
+    )
+    (root / "docker-compose.yml").write_text(
+        """
+services:
+  app:
+    build: .
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/epersgeist
+      SPRING_DATA_MONGODB_URI: mongodb://mongodb:27017/epersMongo
+    depends_on:
+      - postgres
+      - mongodb
+      - neo4j
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: epersgeist
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+  mongodb:
+    image: mongo:7
+  neo4j:
+    image: neo4j:5
+""",
+        encoding="utf-8",
+    )
+    monkeypatch.delenv("VELA_E2E", raising=False)
+    response = _post_analyze_repo(api_client, root)
+    assert response.status_code == 200
+    app = next(
+        service for service in response.json()["services"] if service["service_name"] == "app"
+    )
+    assert app["env_vars"]["SPRING_NEO4J_URI"] == "bolt://neo4j:7687"
+    assert app["env_vars"]["SPRING_JPA_SHOW_SQL"] == "true"
+    assert (
+        app["env_vars"]["SPRING_DATASOURCE_URL"]
+        == "jdbc:postgresql://postgres:5432/epersgeist"
+    )
+
+
 def test_compose_manifest_path_skips_head_commit(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

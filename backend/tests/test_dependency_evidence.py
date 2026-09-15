@@ -126,6 +126,80 @@ def test_application_properties_url_yields_host_and_env_key(tmp_path: Path) -> N
     assert by_kind["neo4j"].hostname == "localhost"
 
 
+def test_spring_placeholder_defaults_yield_neo4j_env_key(tmp_path: Path) -> None:
+    root = _write(tmp_path, {
+        "src/main/resources/application.properties": (
+            "spring.neo4j.uri=${NEO_URL:bolt://localhost:7687}\n"
+            "spring.neo4j.authentication.username=${NEO_USER:neo4j}\n"
+            "spring.neo4j.authentication.password=${NEO_PASSWORD:rootroot}\n"
+            "spring.datasource.url=jdbc:postgresql://localhost:5432/epersgeist\n"
+            "spring.datasource.username=postgres\n"
+            "spring.datasource.password=root\n"
+        ),
+    })
+    by_kind = {item.kind: item for item in scan_dependency_evidence(root)}
+    assert by_kind["neo4j"].env_key == "SPRING_NEO4J_URI"
+    assert "NEO_URL=bolt://localhost:7687" in by_kind["neo4j"].matched_lines
+    assert by_kind["postgres"].container_env_vars == (
+        ("POSTGRES_DB", "epersgeist"),
+        ("POSTGRES_USER", "postgres"),
+        ("POSTGRES_PASSWORD", "root"),
+    )
+
+
+def test_reconcile_commit_y_me_voy_style_stack(tmp_path: Path) -> None:
+    root = _write(tmp_path, {
+        "build.gradle": (
+            "dependencies {\n"
+            "  implementation 'org.springframework.boot:spring-boot-starter-data-neo4j'\n"
+            "  implementation 'org.springframework.boot:spring-boot-starter-data-mongodb'\n"
+            "  implementation 'org.springframework.boot:spring-boot-starter-data-jpa'\n"
+            "  implementation 'org.postgresql:postgresql:42.7.2'\n"
+            "}\n"
+        ),
+        "src/main/resources/application.properties": (
+            "spring.neo4j.uri=${NEO_URL:bolt://localhost:7687}\n"
+            "spring.neo4j.authentication.username=${NEO_USER:neo4j}\n"
+            "spring.neo4j.authentication.password=${NEO_PASSWORD:rootroot}\n"
+            "spring.data.mongodb.uri=mongodb://localhost:27017/epersMongo\n"
+            "spring.datasource.url=jdbc:postgresql://localhost:5432/epersgeist\n"
+            "spring.datasource.username=postgres\n"
+            "spring.datasource.password=root\n"
+        ),
+    })
+    services = [
+        StackService(
+            service_name="app",
+            source_kind="git",
+            source_ref="https://github.com/EPERS-UNQ/Commit-y-me-voy.git",
+            git_branch="main",
+            container_port=8080,
+            env_vars={
+                "SPRING_DATASOURCE_URL": "jdbc:postgresql://postgres:5432/epersgeist",
+                "SPRING_DATA_MONGODB_URI": "mongodb://mongodb:27017/epersMongo",
+            },
+            command=None,
+            public_route=True,
+            depends_on=["postgres", "mongodb", "neo4j"],
+            volumes=[],
+        ),
+        _image("postgres", "postgres:16", 5432),
+        _image("mongodb", "mongo:7", 27017),
+        _image("neo4j", "neo4j:5", 7687),
+    ]
+    evidence = scan_dependency_evidence(root)
+    out, _, _ = reconcile_detected_services(services, evidence, [])
+    app = next(service for service in out if service.service_name == "app")
+    postgres = next(service for service in out if service.service_name == "postgres")
+    assert app.env_vars["SPRING_NEO4J_URI"] == "bolt://neo4j:7687"
+    assert app.env_vars["NEO_URL"] == "bolt://neo4j:7687"
+    assert app.env_vars["NEO_USER"] == "neo4j"
+    assert app.env_vars["NEO_PASSWORD"] == "rootroot"
+    assert postgres.env_vars["POSTGRES_DB"] == "epersgeist"
+    assert postgres.env_vars["POSTGRES_USER"] == "postgres"
+    assert postgres.env_vars["POSTGRES_PASSWORD"] == "root"
+
+
 def test_application_yaml_nested_url(tmp_path: Path) -> None:
     root = _write(tmp_path, {
         "src/main/resources/application.yml": (
@@ -279,6 +353,40 @@ def test_reconcile_rewrite_does_not_corrupt_scheme() -> None:
     assert web.env_vars["SPRING_DATASOURCE_URL"] == "jdbc:postgresql://postgres:5432/commit"
     assert web.env_vars["REDIS_URL"] == "redis://cache:6379"
     assert web.env_vars["MONGO_URL"] == "mongodb://mongodb:27017/commit"
+
+
+def test_reconcile_injects_missing_spring_env_key(tmp_path: Path) -> None:
+    root = _write(tmp_path, {
+        "src/main/resources/application.properties": (
+            "spring.datasource.url=jdbc:postgresql://localhost:5432/epersgeist\n"
+            "spring.data.mongodb.uri=mongodb://localhost:27017/epersMongo\n"
+            "spring.neo4j.uri=bolt://localhost:7687\n"
+        ),
+    })
+    services = [
+        StackService(
+            service_name="app",
+            source_kind="dockerfile_template",
+            source_ref=".",
+            git_branch=None,
+            container_port=8080,
+            env_vars={
+                "SPRING_DATASOURCE_URL": "jdbc:postgresql://postgres:5432/epersgeist",
+                "SPRING_DATA_MONGODB_URI": "mongodb://mongodb:27017/epersMongo",
+            },
+            command=None,
+            public_route=True,
+            depends_on=["postgres", "mongodb", "neo4j"],
+            volumes=[],
+        ),
+        _image("postgres", "postgres:16", 5432),
+        _image("mongodb", "mongo:7", 27017),
+        _image("neo4j", "neo4j:5", 7687),
+    ]
+    evidence = scan_dependency_evidence(root)
+    out, _, _ = reconcile_detected_services(services, evidence, [])
+    app = next(service for service in out if service.service_name == "app")
+    assert app.env_vars["SPRING_NEO4J_URI"] == "bolt://neo4j:7687"
 
 
 def test_reconcile_no_self_dependency_for_alias_named_git_service() -> None:

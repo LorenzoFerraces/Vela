@@ -3,38 +3,54 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
+from pathlib import Path
 
 import yaml
 
 from app.db.models import StackService
 
 # ${VAR:-default} or ${VAR-default} — capture default when host env is unavailable.
-_BRACE_DEFAULT_PATTERN = re.compile(
-    r"\$\{([A-Za-z_][A-Za-z0-9_]*)(?:(:-|-)([^}]*))?\}"
-)
+_BRACE_DEFAULT_PATTERN = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)(?:(:-|-)([^}]*))?\}")
 # Bare $VAR (not preceded by another $).
 _SIMPLE_VAR_PATTERN = re.compile(r"(?<!\$)\$([A-Za-z_][A-Za-z0-9_]*)")
 
 
-def resolve_compose_interpolation(value: str) -> str:
+def resolve_compose_interpolation(
+    value: str,
+    host_env: Mapping[str, str] | None = None,
+) -> str:
     """Resolve Compose/shell-style env interpolation for import into Vela.
 
-    Host environment is not available during import, so:
+    When ``host_env`` is omitted, host variables are unavailable:
     - ``${VAR:-default}`` / ``${VAR-default}`` → ``default``
     - ``${VAR}`` / ``$VAR`` → empty string
+
+    When ``host_env`` is provided (for example from ``env_file`` entries),
+    referenced variables resolve to their loaded values first.
     """
 
     def replace_braced(match: re.Match[str]) -> str:
+        variable = match.group(1)
         default = match.group(3)
+        if variable in env:
+            return env[variable]
         if default is not None:
             return default
         return ""
 
+    def replace_simple(match: re.Match[str]) -> str:
+        return env.get(match.group(1), "")
+
     resolved = _BRACE_DEFAULT_PATTERN.sub(replace_braced, value)
-    return _SIMPLE_VAR_PATTERN.sub("", resolved)
+    return _SIMPLE_VAR_PATTERN.sub(replace_simple, resolved)
 
 
-def parse_compose(yaml_content: str) -> tuple[list[StackService], list[str]]:
+def parse_compose(
+    yaml_content: str,
+    *,
+    compose_dir: Path | None = None,
+) -> tuple[list[StackService], list[str]]:
     """Parse docker-compose YAML content into StackService records.
 
     Returns:
@@ -54,10 +70,14 @@ def parse_compose(yaml_content: str) -> tuple[list[StackService], list[str]]:
 
     for service_name, config in services_config.items():
         if not isinstance(config, dict):
-            warnings.append(f"Service '{service_name}': invalid configuration, skipping.")
+            warnings.append(
+                f"Service '{service_name}': invalid configuration, skipping."
+            )
             continue
 
-        service, service_warnings = _parse_service(service_name, config)
+        service, service_warnings = _parse_service(
+            service_name, config, compose_dir=compose_dir
+        )
         services.append(service)
         warnings.extend(service_warnings)
 
@@ -67,6 +87,8 @@ def parse_compose(yaml_content: str) -> tuple[list[StackService], list[str]]:
 def _parse_service(
     name: str,
     config: dict,
+    *,
+    compose_dir: Path | None = None,
 ) -> tuple[StackService, list[str]]:
     """Parse a single service configuration into a StackService."""
     warnings: list[str] = []
@@ -74,7 +96,7 @@ def _parse_service(
     source_kind, source_ref = _resolve_source(config, name, warnings)
     git_branch = "main" if source_kind == "git" else None
     container_port = _extract_container_port(config, warnings)
-    env_vars = _extract_env(config)
+    env_vars = _extract_env(config, compose_dir=compose_dir)
 
     command = config.get("command")
     if isinstance(command, str):
@@ -139,7 +161,9 @@ def _resolve_source(
             return "git", context
         return "dockerfile_template", context
 
-    warnings.append(f"Service '{name}': no image or build specified, defaulting to 'nginx:alpine'.")
+    warnings.append(
+        f"Service '{name}': no image or build specified, defaulting to 'nginx:alpine'."
+    )
     return "image", "nginx:alpine"
 
 
@@ -170,12 +194,67 @@ def _extract_container_port(config: dict, warnings: list[str]) -> int:
     return 80
 
 
-def _extract_env(config: dict) -> dict[str, str]:
+_ENV_ASSIGNMENT = re.compile(r"^(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)=(.*)$")
+
+
+def _env_file_paths(config: dict) -> list[str]:
+    raw = config.get("env_file")
+    if raw is None:
+        return []
+    if isinstance(raw, str):
+        return [raw]
+    if isinstance(raw, list):
+        paths: list[str] = []
+        for item in raw:
+            if isinstance(item, str):
+                paths.append(item)
+            elif isinstance(item, dict) and item.get("path"):
+                paths.append(str(item["path"]))
+        return paths
+    return []
+
+
+def _load_dotenv_file(path: Path) -> dict[str, str]:
+    if not path.is_file():
+        return {}
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return {}
+    env_vars: dict[str, str] = {}
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        match = _ENV_ASSIGNMENT.match(stripped)
+        if not match:
+            continue
+        key = match.group(1)
+        value = match.group(2).strip().strip('"').strip("'")
+        env_vars[key] = value
+    return env_vars
+
+
+def _load_env_files(config: dict, compose_dir: Path) -> dict[str, str]:
+    env_vars: dict[str, str] = {}
+    for relative_path in _env_file_paths(config):
+        env_vars.update(_load_dotenv_file((compose_dir / relative_path).resolve()))
+    return env_vars
+
+
+def _extract_inline_env(
+    config: dict,
+    *,
+    host_env: Mapping[str, str] | None = None,
+) -> dict[str, str]:
     """Extract environment variables from list or dict format."""
     env = config.get("environment", {})
     if isinstance(env, dict):
         return {
-            str(key): resolve_compose_interpolation(str(value) if value is not None else "")
+            str(key): resolve_compose_interpolation(
+                str(value) if value is not None else "",
+                host_env,
+            )
             for key, value in env.items()
         }
     if isinstance(env, list):
@@ -184,11 +263,23 @@ def _extract_env(config: dict) -> dict[str, str]:
             item_str = str(item)
             if "=" in item_str:
                 key, _, value = item_str.partition("=")
-                result[key] = resolve_compose_interpolation(value)
+                result[key] = resolve_compose_interpolation(value, host_env)
             else:
-                result[item_str] = ""
+                result[item_str] = host_env.get(item_str, "")
         return result
     return {}
+
+
+def _extract_env(
+    config: dict,
+    *,
+    compose_dir: Path | None = None,
+) -> dict[str, str]:
+    file_env: dict[str, str] = {}
+    if compose_dir is not None:
+        file_env = _load_env_files(config, compose_dir)
+    inline_env = _extract_inline_env(config, host_env=file_env)
+    return {**file_env, **inline_env}
 
 
 def _extract_depends_on(config: dict) -> list[str] | None:

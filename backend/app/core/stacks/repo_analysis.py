@@ -211,6 +211,26 @@ def _generation_schema() -> dict:
     }
 
 
+def _is_repo_built_service(service: StackService) -> bool:
+    return service.source_kind in {"git", "dockerfile_template"}
+
+
+def _enrich_compose_services(
+    services: list[StackService],
+    *,
+    root: Path,
+    warnings: list[str],
+) -> tuple[list[StackService], list[str], tuple[str, ...]]:
+    info = analyze_project(root)
+    evidence = scan_dependency_evidence(root, info)
+    context = _collect_context_excerpts(root, info, evidence)
+    env_fallback = _validated_env_vars(_extract_env_vars_from_context(context))
+    for service in services:
+        if _is_repo_built_service(service):
+            service.env_vars = {**env_fallback, **service.env_vars}
+    return reconcile_detected_services(services, evidence, warnings)
+
+
 def _payload_to_services(
     payload: Mapping[str, object],
     *,
@@ -407,19 +427,28 @@ async def analyze_repo_stack(
             manifest_content = manifest_path.read_text(encoding="utf-8", errors="replace")
             manifest_excerpt = _redact_secret_values(_read_file_excerpt(manifest_path))
             try:
-                services, parser_warnings, parsed_kind = parse_manifest(manifest_content)
+                services, parser_warnings, parsed_kind = parse_manifest(
+                    manifest_content,
+                    compose_dir=manifest_path.parent,
+                )
             except ManifestParseError:
                 if manifest_kind != "compose":
                     raise
                 services, parser_warnings, parsed_kind = [], [], manifest_kind
             warnings.extend(parser_warnings)
             if services:
+                services, warnings, detected_names = _enrich_compose_services(
+                    services,
+                    root=root,
+                    warnings=warnings,
+                )
                 return RepoStackAnalysis(
                     services=services,
                     warnings=warnings,
                     manifest_kind=parsed_kind,
                     manifest_path=relative_path,
                     summary_hint=None,
+                    detected_service_names=detected_names,
                 )
             warnings.append("Selected manifest contained no usable services; using AI analysis.")
         else:

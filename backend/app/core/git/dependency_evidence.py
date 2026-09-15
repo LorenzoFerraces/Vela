@@ -85,6 +85,10 @@ _SPRING_CONFIG_NAMES = ("application.yml", "application.yaml", "application.prop
 _PROPERTY_LINE = re.compile(
     r"^\s*([A-Za-z0-9_.\-]+)\s*[=:]\s*(.+?)\s*$", re.MULTILINE
 )
+_SPRING_PLACEHOLDER = re.compile(
+    r"\$\{([A-Za-z_][A-Za-z0-9_]*)(?:(?::|-)([^}]*))?\}"
+)
+_JDBC_DB_NAME = re.compile(r"/([^/?]+)(?:\?|$)")
 
 
 @dataclass(frozen=True)
@@ -96,6 +100,7 @@ class ServiceEvidence:
     env_key: str | None
     sources: tuple[str, ...]
     matched_lines: tuple[str, ...]
+    container_env_vars: tuple[tuple[str, str], ...] = ()
 
 
 @dataclass
@@ -105,6 +110,7 @@ class _KindAccumulator:
     env_key: str | None = None
     sources: list[str] = field(default_factory=list)
     matched_lines: list[str] = field(default_factory=list)
+    container_env_vars: dict[str, str] = field(default_factory=dict)
 
 
 def _read(path: Path) -> str:
@@ -121,6 +127,54 @@ def _redact_evidence_line(line: str) -> str:
 
 def _normalize_property_key(dotted: str) -> str:
     return re.sub(r"[.\-]", "_", dotted).upper()
+
+
+def _resolve_spring_placeholder(value: str) -> tuple[str, list[tuple[str, str]]]:
+    """Resolve ``${ENV:default}`` placeholders; return value and env defaults."""
+    env_defaults: list[tuple[str, str]] = []
+    for match in _SPRING_PLACEHOLDER.finditer(value):
+        env_name = match.group(1)
+        default = (match.group(2) or "").strip()
+        if default:
+            env_defaults.append((env_name, default))
+    resolved = _SPRING_PLACEHOLDER.sub(
+        lambda match: (match.group(2) or "").strip(),
+        value,
+    )
+    return resolved, env_defaults
+
+
+def _spring_property_pairs(text: str, is_properties: bool) -> list[tuple[str, str]]:
+    if is_properties:
+        return [
+            (key, value)
+            for key, value in (match.groups() for match in _PROPERTY_LINE.finditer(text))
+        ]
+    return _flatten_yaml(text)
+
+
+def _postgres_container_env_from_spring(text: str, is_properties: bool) -> dict[str, str]:
+    jdbc_url: str | None = None
+    username: str | None = None
+    password: str | None = None
+    for dotted_key, value in _spring_property_pairs(text, is_properties):
+        resolved, _ = _resolve_spring_placeholder(value)
+        if dotted_key == "spring.datasource.url":
+            jdbc_url = resolved
+        elif dotted_key == "spring.datasource.username":
+            username = resolved
+        elif dotted_key == "spring.datasource.password":
+            password = resolved
+    env_vars: dict[str, str] = {}
+    if jdbc_url:
+        db_match = _JDBC_DB_NAME.search(jdbc_url)
+        if db_match:
+            env_vars["POSTGRES_DB"] = db_match.group(1)
+    if username:
+        env_vars["POSTGRES_USER"] = username
+    if password:
+        env_vars["POSTGRES_PASSWORD"] = password
+    return env_vars
 
 
 def _match_url(token: str) -> tuple[str, str | None, int | None] | None:
@@ -268,21 +322,34 @@ def _scan_node(text: str) -> tuple[set[str], list[str]]:
     return kinds, lines
 
 
-def _scan_spring(text: str, is_properties: bool) -> tuple[dict[str, tuple[str | None, int | None, str | None]], dict[str, list[str]]]:
+def _scan_spring(
+    text: str,
+    is_properties: bool,
+) -> tuple[
+    dict[str, tuple[str | None, int | None, str | None]],
+    dict[str, list[str]],
+    list[str],
+]:
     found: dict[str, tuple[str | None, int | None, str | None]] = {}
     lines: dict[str, list[str]] = {}
-    pairs = _flatten_yaml(text) if not is_properties else [
-        (key, value) for key, value in (m.groups() for m in _PROPERTY_LINE.finditer(text))
-    ]
-    for dotted_key, value in pairs:
-        match = _match_url(value)
+    app_env_lines: list[str] = []
+    for dotted_key, value in _spring_property_pairs(text, is_properties):
+        resolved, env_defaults = _resolve_spring_placeholder(value)
+        for env_name, default in env_defaults:
+            app_env_lines.append(f"{env_name}={default}")
+        match = _match_url(resolved)
         if match is None:
             continue
         kind, host, port = match
         env_key = _normalize_property_key(dotted_key)
         found.setdefault(kind, (host, port, env_key))
-        lines.setdefault(kind, []).extend([f"{dotted_key}={value}", f"{env_key}={value}"])
-    return found, lines
+        lines.setdefault(kind, []).extend(
+            [f"{dotted_key}={value}", f"{env_key}={resolved}"]
+        )
+    if app_env_lines:
+        for kind_lines in lines.values():
+            kind_lines.extend(app_env_lines)
+    return found, lines, app_env_lines
 
 
 def _scan_url_only(text: str) -> tuple[dict[str, tuple[str | None, int | None]], list[str]]:
@@ -393,9 +460,21 @@ def scan_dependency_evidence(root: Path, info: ProjectInfo | None = None) -> lis
             for kind in artifact_kinds:
                 record(kind, hostname=None, port=None, env_key=None, source=relative, lines=lines)
         elif name in _SPRING_CONFIG_NAMES or (name.startswith("application-")):
-            spring_found, spring_lines = _scan_spring(text, is_properties=name.endswith(".properties"))
+            is_properties = name.endswith(".properties")
+            spring_found, spring_lines, app_env_lines = _scan_spring(text, is_properties)
+            postgres_container_env = _postgres_container_env_from_spring(text, is_properties)
             for kind, (host, port, env_key) in spring_found.items():
-                record(kind, hostname=host, port=port, env_key=env_key, source=relative, lines=spring_lines.get(kind, []))
+                record(
+                    kind,
+                    hostname=host,
+                    port=port,
+                    env_key=env_key,
+                    source=relative,
+                    lines=spring_lines.get(kind, []) + app_env_lines,
+                )
+            if postgres_container_env:
+                entry = kinds.setdefault("postgres", _KindAccumulator())
+                entry.container_env_vars.update(postgres_container_env)
         else:
             url_found, lines = _scan_url_only(text)
             for kind, (host, port) in url_found.items():
@@ -418,6 +497,7 @@ def scan_dependency_evidence(root: Path, info: ProjectInfo | None = None) -> lis
             env_key=entry.env_key,
             sources=tuple(entry.sources),
             matched_lines=tuple(entry.matched_lines),
+            container_env_vars=tuple(entry.container_env_vars.items()),
         ))
     return evidence
 
@@ -464,6 +544,60 @@ def _covering_service(services: list[StackService], kind: str) -> StackService |
         ref = (service.source_ref or "").casefold()
         if service.source_kind == "image" and any(ref.startswith(family) for family in families):
             return service
+    return None
+
+
+def _repo_built_services(services: list[StackService]) -> list[StackService]:
+    return [
+        service
+        for service in services
+        if service.source_kind in {"git", "dockerfile_template"}
+    ]
+
+
+def _primary_app_service(
+    services: list[StackService],
+    *,
+    kind: str,
+) -> StackService | None:
+    built_services = _repo_built_services(services)
+    if not built_services:
+        return None
+    for service in built_services:
+        for value in service.env_vars.values():
+            for token in _URL_TOKEN.findall(value):
+                parsed = _match_url(token)
+                if parsed is not None and parsed[0] == kind:
+                    return service
+    return max(
+        built_services,
+        key=lambda service: (
+            service.public_route,
+            len(service.depends_on or []),
+            len(service.env_vars),
+        ),
+    )
+
+
+def _app_env_from_matched_lines(lines: tuple[str, ...]) -> dict[str, str]:
+    env_vars: dict[str, str] = {}
+    for line in lines:
+        if "=" not in line or line.startswith("spring."):
+            continue
+        key, _, value = line.partition("=")
+        key = key.strip()
+        if key and key[0].isalpha() and "." not in key:
+            env_vars[key] = value
+    return env_vars
+
+
+def _env_value_from_evidence(item: ServiceEvidence) -> str | None:
+    if item.env_key is None:
+        return None
+    prefix = f"{item.env_key}="
+    for line in item.matched_lines:
+        if line.startswith(prefix):
+            return line[len(prefix) :]
     return None
 
 
@@ -533,27 +667,31 @@ def reconcile_detected_services(
             covering = result[-1]
 
         target_name = covering.service_name
-        git_services = [service for service in result if service.source_kind == "git"]
-        app_service = next(
-            (
-                service
-                for service in git_services
-                if any(
-                    any(
-                        parsed is not None and parsed[0] == item.kind
-                        for parsed in (_match_url(token) for token in _URL_TOKEN.findall(value))
-                    )
-                    for value in service.env_vars.values()
-                )
-            ),
-            git_services[0] if git_services else None,
-        )
+        app_service = _primary_app_service(result, kind=item.kind)
         if app_service is not None and app_service.service_name.casefold() != target_name.casefold():
             deps = list(app_service.depends_on or [])
             if target_name not in deps:
                 deps.append(target_name)
             app_service.depends_on = deps
-        for service in git_services:
+        if item.container_env_vars and covering.source_kind == "image":
+            merged = dict(covering.env_vars)
+            for key, value in item.container_env_vars:
+                merged.setdefault(key, value)
+            covering.env_vars = merged
+        if app_service is not None and item.env_key:
+            raw_value = _env_value_from_evidence(item)
+            if raw_value and item.env_key not in app_service.env_vars:
+                app_service.env_vars[item.env_key] = _rewrite_local_host(
+                    raw_value,
+                    item.kind,
+                    target_name,
+                )
+        if app_service is not None:
+            for key, value in _app_env_from_matched_lines(item.matched_lines).items():
+                if key not in app_service.env_vars:
+                    rewritten = _rewrite_local_host(value, item.kind, target_name)
+                    app_service.env_vars[key] = rewritten
+        for service in _repo_built_services(result):
             rewritten = {
                 key: _rewrite_local_host(value, item.kind, target_name)
                 for key, value in service.env_vars.items()

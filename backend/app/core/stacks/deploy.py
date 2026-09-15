@@ -30,6 +30,10 @@ from app.core.url_display import sanitize_url_for_display
 from app.db.models import DeploymentRecord, Stack, StackService, User
 
 
+def _container_dns_name(stack: Stack, service: StackService) -> str:
+    return f"{stack.name}_{service.service_name}"
+
+
 def _build_override_from_service(service: StackService) -> BuildOverride | None:
     raw = service.build_override
     if not raw:
@@ -65,7 +69,7 @@ async def deploy_stack(
         await orchestrator.create_network(stack.network_name)
 
         for service in services:
-            container_name = f"{stack.name}_{service.service_name}"
+            container_name = _container_dns_name(stack, service)
             image_tag = await _resolve_service_image(
                 session,
                 user,
@@ -244,6 +248,7 @@ def _build_deploy_config(
         container_listen_port=service.container_port,
         command=service.command,
         network=stack.network_name,
+        network_aliases=[service.service_name],
         restart_policy=restart_policy,
         labels={
             "vela.stack_id": str(stack.id),
