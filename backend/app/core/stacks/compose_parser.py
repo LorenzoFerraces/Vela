@@ -33,14 +33,14 @@ def resolve_compose_interpolation(
     def replace_braced(match: re.Match[str]) -> str:
         variable = match.group(1)
         default = match.group(3)
-        if variable in env:
-            return env[variable]
+        if host_env and variable in host_env:
+            return host_env[variable]
         if default is not None:
             return default
         return ""
 
     def replace_simple(match: re.Match[str]) -> str:
-        return env.get(match.group(1), "")
+        return host_env[match.group(1)] if host_env and match.group(1) in host_env else ""
 
     resolved = _BRACE_DEFAULT_PATTERN.sub(replace_braced, value)
     return _SIMPLE_VAR_PATTERN.sub(replace_simple, resolved)
@@ -265,7 +265,7 @@ def _extract_inline_env(
                 key, _, value = item_str.partition("=")
                 result[key] = resolve_compose_interpolation(value, host_env)
             else:
-                result[item_str] = host_env.get(item_str, "")
+                result[item_str] = host_env.get(item_str, "") if host_env else ""
         return result
     return {}
 
