@@ -39,6 +39,7 @@ export type GitSourceAnalysis = {
 export async function analyzeGitSource(body: {
   git_url: string
   git_branch: string
+  use_server_default?: boolean
 }): Promise<GitSourceAnalysis> {
   return apiPost<GitSourceAnalysis, typeof body>(
     '/api/builder/analyze-source',

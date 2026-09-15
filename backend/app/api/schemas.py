@@ -11,6 +11,7 @@ from pydantic import (
     ConfigDict,
     EmailStr,
     Field,
+    ValidationInfo,
     field_validator,
     model_validator,
 )
@@ -27,6 +28,7 @@ from app.core.models import (
     ScalingPolicyInfo,
     validate_finite_number,
 )
+from app.core.security.outbound_url import validate_outbound_url
 
 
 class VolumeMountRequest(BaseModel):
@@ -417,6 +419,7 @@ class ContainerDeployResponse(BaseModel):
 class AnalyzeGitSourceRequest(BaseModel):
     git_url: str = Field(..., min_length=1, max_length=2048)
     git_branch: str = Field(default="main", max_length=256)
+    use_server_default: bool = False
 
 
 class GitSourceAnalysis(BaseModel):
@@ -452,8 +455,66 @@ class AiPrefillPreferencesUpdate(BaseModel):
     start_command: bool | None = None
 
 
+LlmProviderKind = Literal["openai_compatible", "gemini", "anthropic"]
+
+
+class LlmProviderGet(BaseModel):
+    provider: LlmProviderKind
+    base_url: str | None = None
+    model: str
+    has_key: bool = True
+
+
+class LlmProviderSet(BaseModel):
+    provider: LlmProviderKind
+    base_url: str | None = Field(default=None, max_length=1024, validate_default=True)
+    model: str = Field(min_length=1, max_length=255)
+    api_key: str | None = Field(default=None, min_length=1, max_length=2048)
+
+    @field_validator("base_url")
+    @classmethod
+    def _validate_base_url(
+        cls, value: str | None, info: ValidationInfo
+    ) -> str | None:
+        provider = info.data.get("provider")
+        if provider != "openai_compatible":
+            return None
+        if not value:
+            raise ValueError("Base URL is required for OpenAI-compatible providers.")
+        root = value.rstrip("/")
+        validate_outbound_url(root)
+        return root
+
+
+class LlmProviderTestRequest(BaseModel):
+    provider: LlmProviderKind
+    base_url: str | None = Field(default=None, max_length=1024)
+    model: str = Field(min_length=1, max_length=255)
+    api_key: str = Field(min_length=1, max_length=2048)
+
+    @field_validator("base_url")
+    @classmethod
+    def _validate_base_url(
+        cls, value: str | None, info: ValidationInfo
+    ) -> str | None:
+        provider = info.data.get("provider")
+        if provider != "openai_compatible":
+            return None
+        if not value:
+            raise ValueError("Base URL is required for OpenAI-compatible providers.")
+        root = value.rstrip("/")
+        validate_outbound_url(root)
+        return root
+
+
+class LlmProviderTestResponse(BaseModel):
+    ok: bool = True
+    models: list[str] | None = None
+
+
 class GeminiConfigStatus(BaseModel):
     configured: bool
+    user_provider: LlmProviderGet | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -779,6 +840,7 @@ class StackServiceCreate(BaseModel):
     volumes: list[VolumeMountRequest] = Field(default_factory=list)
     scaling_policy: ScalingPolicyConfig | None = None
     build_override: BuildOverride | None = None
+    detected: bool = False
 
 
 class StackCreate(BaseModel):
@@ -832,6 +894,7 @@ class ManifestParseResponse(BaseModel):
 class AnalyzeRepoRequest(BaseModel):
     git_url: str = Field(min_length=1, max_length=2048)
     git_branch: str = Field(default="main", max_length=256)
+    use_server_default: bool = False
 
 
 class AnalyzeRepoResponse(BaseModel):

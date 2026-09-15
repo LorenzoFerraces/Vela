@@ -145,6 +145,13 @@ class DeployConfig(BaseModel):
         default=None,
         description="Docker network to attach the container to (overrides orchestrator default).",
     )
+    network_aliases: list[str] = Field(
+        default_factory=list,
+        description=(
+            "DNS aliases on ``network`` so sibling stack services can reach this "
+            "container by short service name (e.g. ``postgres``)."
+        ),
+    )
 
     @field_validator("route_path_prefix")
     @classmethod

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 from types import SimpleNamespace
 from typing import Any
 
@@ -32,6 +33,7 @@ def _orchestrator(names: list[str]) -> tuple[DockerOrchestrator, _StubNetworks]:
     orch._client = client
     orch._default_network = "vela-workloads"
     orch._default_network_ensured = False
+    orch._default_network_lock = threading.Lock()
     return orch, client.networks
 
 

@@ -76,6 +76,11 @@ export default function ServiceReviewStep({
             const entries = envEntries(service.env_vars)
             return (
               <article key={`${service.service_name}-${index}`} className="stacks-modal__service">
+                {service.detected ? (
+                  <p className="stacks-modal__detected" title="Found in repository config files; edit or remove as needed.">
+                    [ DETECTED ]
+                  </p>
+                ) : null}
                 <div className="containers-form__grid">
                   <div className="containers-form__stack">
                     <label

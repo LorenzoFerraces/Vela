@@ -20,6 +20,8 @@ from app.core.exceptions import (
 )
 
 _JWKS_CACHE_TTL_SECONDS = 3600
+# Small tolerance for iat/nbf skew between Clerk, the browser, and this host.
+_JWT_LEEWAY_SECONDS = 60
 _CLERK_USER_API_URL = "https://api.clerk.com/v1/users/{user_id}"
 
 logger = logging.getLogger(__name__)
@@ -206,6 +208,7 @@ async def verify_clerk_token(token: str) -> ClerkClaims:
             key=jwk,
             algorithms=["RS256"],
             issuer=f"https://{clerk_frontend_api_host(publishable_key)}",
+            leeway=_JWT_LEEWAY_SECONDS,
             options={
                 "require": ["exp", "nbf", "iss", "sub"],
                 # Clerk default session tokens omit "aud"; PyJWT 2.13+ rejects
@@ -213,6 +216,13 @@ async def verify_clerk_token(token: str) -> ClerkClaims:
                 "verify_aud": False,
             },
         )
+    except jwt.ImmatureSignatureError as exc:
+        logger.warning(
+            "Clerk token verification failed (%s): %s", type(exc).__name__, exc
+        )
+        raise ClerkTokenError(
+            "Clerk token is not yet valid (clock skew). Try again in a moment."
+        ) from exc
     except InvalidTokenError as exc:
         logger.warning(
             "Clerk token verification failed (%s): %s", type(exc).__name__, exc

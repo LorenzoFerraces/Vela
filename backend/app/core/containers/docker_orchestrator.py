@@ -152,6 +152,22 @@ def _docker_daemon_unreachable_message(exc: BaseException) -> str:
             "DOCKER_SOCKET_PATH in .env points at the host daemon's socket and that the "
             "container is (re)started after changing it."
         )
+    low = msg.lower()
+    if "permission denied" in low:
+        return (
+            f"{msg}\n\n"
+            "The API container cannot open the Docker socket (permission denied). Check "
+            "the vela-api container logs for entrypoint socket-alignment output, and make "
+            "sure the socket's group GID is reachable (set DOCKER_GROUP_ID in .env if the "
+            "socket is root:root)."
+        )
+    if "no such file or directory" in low:
+        return (
+            f"{msg}\n\n"
+            "The Docker socket was not found inside the API container. Check that "
+            "DOCKER_SOCKET_PATH in .env points at the host daemon's socket and that the "
+            "container is (re)started after changing it."
+        )
     if "Error while fetching server API version" in msg:
         return (
             f"{msg}\n\n"
@@ -414,6 +430,7 @@ class DockerOrchestrator(ContainerOrchestrator):
         else:
             self._default_network = default_network.strip() or None
         self._default_network_ensured = False
+        self._default_network_lock = threading.Lock()
         self._log_stream_semaphore = asyncio.Semaphore(_max_concurrent_log_streams())
 
     async def _to_thread(self, fn: Callable[[], T]) -> T:
@@ -530,19 +547,23 @@ class DockerOrchestrator(ContainerOrchestrator):
         name = self._default_network
         if not name or self._default_network_ensured:
             return
-        self._default_network_ensured = True
-        try:
-            existing = [
-                n
-                for n in self._client.networks.list(filters={"name": name})
-                if n.name == name
-            ]
-            if existing:
+        with self._default_network_lock:
+            if self._default_network_ensured:
                 return
-            self._client.networks.create(name, driver="bridge")
-            logger.info("Created missing default Docker network %s", name)
-        except docker.errors.DockerException as e:
-            logger.warning("Could not ensure default Docker network %s: %s", name, e)
+            try:
+                existing = [
+                    n
+                    for n in self._client.networks.list(filters={"name": name})
+                    if n.name == name
+                ]
+                if not existing:
+                    self._client.networks.create(name, driver="bridge")
+                    logger.info("Created missing default Docker network %s", name)
+                self._default_network_ensured = True
+            except docker.errors.DockerException as e:
+                logger.warning(
+                    "Could not ensure default Docker network %s: %s", name, e
+                )
 
     async def deploy(self, config: DeployConfig) -> ContainerInfo:
         labels = self._merge_labels(config)
@@ -563,6 +584,7 @@ class DockerOrchestrator(ContainerOrchestrator):
             try:
                 if config.name:
                     self._remove_managed_name_conflict_sync(config.name)
+                self._ensure_default_network_sync()
                 self._ensure_default_network_sync()
                 self._ensure_image_sync(config.image)
             except (OrchestratorError, docker.errors.ImageNotFound):
@@ -588,9 +610,12 @@ class DockerOrchestrator(ContainerOrchestrator):
                 kwargs["nano_cpus"] = nano_cpus
             if hc is not None:
                 kwargs["healthcheck"] = hc
-            if config.network:
+            attach_network_after_start = bool(
+                config.network and config.network_aliases
+            )
+            if config.network and not attach_network_after_start:
                 kwargs["network"] = config.network
-            elif self._default_network:
+            elif not config.network and self._default_network:
                 kwargs["network"] = self._default_network
             if config.volumes:
                 kwargs["mounts"] = [
@@ -606,12 +631,24 @@ class DockerOrchestrator(ContainerOrchestrator):
             try:
                 container = self._client.containers.create(config.image, **kwargs)
                 container.start()
+                if attach_network_after_start:
+                    network = self._client.networks.get(config.network)
+                    network.connect(
+                        container,
+                        aliases=list(config.network_aliases),
+                    )
                 data = self._inspect_container_with_size(container.id)
             except docker.errors.ImageNotFound as e:
                 raise ImageNotFoundError(
                     config.image, registry_message=_docker_registry_error_text(e)
                 ) from e
             except docker.errors.NotFound as e:
+                msg = str(e)
+                if "network" in msg.lower() and "not found" in msg.lower():
+                    raise OrchestratorError(
+                        f"Docker network not found on the host engine: {msg}"
+                    ) from e
+                raise ContainerNotFoundError(msg) from e
                 msg = str(e)
                 if "network" in msg.lower() and "not found" in msg.lower():
                     raise OrchestratorError(
@@ -904,7 +941,9 @@ class DockerOrchestrator(ContainerOrchestrator):
             workdir="/",
             environment=["TERM=xterm-256color", f"COLUMNS={cols}", f"LINES={rows}"],
         )["Id"]
-        exec_runtime = self._client.api.exec_start(exec_id, socket=True, tty=True, demux=True)
+        exec_runtime = self._client.api.exec_start(
+            exec_id, socket=True, tty=True, demux=True
+        )
         return exec_id, exec_runtime
 
     async def stream_exec(
@@ -932,7 +971,9 @@ class DockerOrchestrator(ContainerOrchestrator):
                     if not chunk:
                         break
                     try:
-                        asyncio.run_coroutine_threadsafe(queue.put(chunk), loop).result(timeout=30)
+                        asyncio.run_coroutine_threadsafe(queue.put(chunk), loop).result(
+                            timeout=30
+                        )
                     except (TimeoutError, RuntimeError):
                         logger.warning(
                             "exec reader stalled on backpressure for %s; closing reader",
@@ -943,7 +984,9 @@ class DockerOrchestrator(ContainerOrchestrator):
                 logger.warning("exec reader error for %s: %s", container_id, exc)
             finally:
                 try:
-                    asyncio.run_coroutine_threadsafe(queue.put(None), loop).result(timeout=5)
+                    asyncio.run_coroutine_threadsafe(queue.put(None), loop).result(
+                        timeout=5
+                    )
                 except Exception:
                     pass
                 exec_runtime.close()
@@ -962,7 +1005,9 @@ class DockerOrchestrator(ContainerOrchestrator):
             try:
                 executor.submit(_write_blocking, data)
             except RuntimeError:
-                logger.warning("exec write rejected for %s: session closed", container_id)
+                logger.warning(
+                    "exec write rejected for %s: session closed", container_id
+                )
 
         def _close_blocking() -> None:
             try:
@@ -990,7 +1035,9 @@ class DockerOrchestrator(ContainerOrchestrator):
 
         return _stdout_iterator(), _write, _close, exec_id
 
-    def resize_exec(self, container_id: str, exec_id: str, cols: int, rows: int) -> None:
+    def resize_exec(
+        self, container_id: str, exec_id: str, cols: int, rows: int
+    ) -> None:
         try:
             self._client.api.exec_resize(exec_id, height=rows, width=cols)
         except Exception as exc:

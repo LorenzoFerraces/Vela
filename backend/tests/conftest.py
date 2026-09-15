@@ -16,6 +16,11 @@ os.environ.setdefault(
 )
 os.environ.setdefault("VELA_AUTH_SECRET", "test-secret-please-do-not-use-in-prod")
 os.environ.setdefault("VELA_AUTH_ACCESS_TOKEN_TTL_MINUTES", "60")
+# Fixed Fernet key for tests only (same value as frontend/playwright.config.ts).
+os.environ.setdefault(
+    "VELA_TOKEN_ENCRYPTION_KEY",
+    "DIBwkE2Pl2PjYfjld4BnLmx3bzzG3AaMBObQEQ6nZHs=",
+)
 os.environ.setdefault("VELA_FAKE_ORCHESTRATOR", "1")
 # Keep the background collector out of unit tests (it would hit a separate engine).
 os.environ.setdefault("VELA_LOG_COLLECTOR_ENABLED", "0")

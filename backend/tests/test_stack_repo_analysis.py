@@ -15,6 +15,7 @@ from app.api.deps import get_image_builder
 from app.core.build.default_image_builder import DefaultImageBuilder
 from app.core.exceptions import LlmCallError
 from app.core.git.git_source_analysis import _collect_context_excerpts
+from app.core.llm.provider import LlmConfig
 from app.core.stacks import repo_analysis
 from app.core.stacks.repo_analysis import (
     _generate_services,
@@ -274,6 +275,56 @@ def test_analyze_repo_compose_manifest(
     assert by_name["db"]["source_ref"] == "postgres:16"
 
 
+def test_analyze_repo_compose_enriches_app_env_from_env_example(
+    api_client: TestClient,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = tmp_path / "repo"
+    root.mkdir()
+    (root / ".env.example").write_text(
+        "SPRING_NEO4J_URI=bolt://neo4j:7687\nSPRING_JPA_SHOW_SQL=true\n",
+        encoding="utf-8",
+    )
+    (root / "docker-compose.yml").write_text(
+        """
+services:
+  app:
+    build: .
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/epersgeist
+      SPRING_DATA_MONGODB_URI: mongodb://mongodb:27017/epersMongo
+    depends_on:
+      - postgres
+      - mongodb
+      - neo4j
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: epersgeist
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+  mongodb:
+    image: mongo:7
+  neo4j:
+    image: neo4j:5
+""",
+        encoding="utf-8",
+    )
+    monkeypatch.delenv("VELA_E2E", raising=False)
+    response = _post_analyze_repo(api_client, root)
+    assert response.status_code == 200
+    app = next(
+        service for service in response.json()["services"] if service["service_name"] == "app"
+    )
+    assert app["env_vars"]["SPRING_NEO4J_URI"] == "bolt://neo4j:7687"
+    assert app["env_vars"]["SPRING_JPA_SHOW_SQL"] == "true"
+    assert (
+        app["env_vars"]["SPRING_DATASOURCE_URL"]
+        == "jdbc:postgresql://postgres:5432/epersgeist"
+    )
+
+
 def test_compose_manifest_path_skips_head_commit(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -313,10 +364,13 @@ def test_generate_services_prompt_contains_detected_facts(
 
     captured: dict[str, str] = {}
 
-    async def fake_generate_json(*, prompt: str, schema: dict) -> dict:
+    async def fake_generate_json(
+        *, prompt: str, schema: dict, config: LlmConfig | None = None
+    ) -> dict:
         captured["prompt"] = prompt
         return LLM_PAYLOAD
 
+    monkeypatch.setenv("VELA_GEMINI_API_KEY", "test-key")
     monkeypatch.setattr(repo_analysis, "generate_json", fake_generate_json)
     asyncio.run(
         _generate_services(
@@ -326,6 +380,7 @@ def test_generate_services_prompt_contains_detected_facts(
             git_branch="main",
             warnings=[],
             root=root,
+            evidence=[],
         )
     )
     assert "Detected facts" in captured["prompt"]
@@ -342,10 +397,13 @@ def test_generate_services_prompt_redacts_git_url_credentials(
 
     captured: dict[str, str] = {}
 
-    async def fake_generate_json(*, prompt: str, schema: dict) -> dict:
+    async def fake_generate_json(
+        *, prompt: str, schema: dict, config: LlmConfig | None = None
+    ) -> dict:
         captured["prompt"] = prompt
         return LLM_PAYLOAD
 
+    monkeypatch.setenv("VELA_GEMINI_API_KEY", "test-key")
     monkeypatch.setattr(repo_analysis, "generate_json", fake_generate_json)
     asyncio.run(
         _generate_services(
@@ -355,6 +413,7 @@ def test_generate_services_prompt_redacts_git_url_credentials(
             git_branch="main",
             warnings=[],
             root=root,
+            evidence=[],
         )
     )
     assert "deploy-token" not in captured["prompt"]
@@ -442,3 +501,23 @@ def test_analyze_repo_k8s_manifest(
     assert service["service_name"] == "web"
     assert service["source_ref"] == "nginx:alpine"
     assert service["container_port"] == 8080
+
+
+def test_orm_service_to_create_marks_detected() -> None:
+    from app.api.routes.stacks import _orm_service_to_create
+    from app.db.models import StackService
+
+    service = StackService(
+        service_name="postgres",
+        source_kind="image",
+        source_ref="postgres:16",
+        git_branch=None,
+        container_port=5432,
+        env_vars={},
+        command=None,
+        public_route=False,
+        depends_on=None,
+        volumes=[],
+    )
+    assert _orm_service_to_create(service).detected is False
+    assert _orm_service_to_create(service, detected_names=("postgres",)).detected is True

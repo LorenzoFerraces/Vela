@@ -62,6 +62,9 @@ async def analyze_git_source_route(
         git_url=git_url,
         git_branch=body.git_branch.strip() or "main",
         access_token=access_token,
+        session=session,
+        user_id=current_user.id,
+        use_server_default=body.use_server_default,
     )
 
 

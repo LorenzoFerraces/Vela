@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import uuid
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -8,10 +9,16 @@ from typing import Literal
 
 import yaml
 from pydantic import ValidationError
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.schemas import StackServiceCreate
 from app.core.build.default_image_builder import DefaultImageBuilder
-from app.core.exceptions import LlmCallError, ManifestParseError
+from app.core.exceptions import LlmCallError, LlmNotConfiguredError, ManifestParseError
+from app.core.git.dependency_evidence import (
+    ServiceEvidence,
+    reconcile_detected_services,
+    scan_dependency_evidence,
+)
 from app.core.git.git_ops import _CREDENTIALS_IN_URL, head_commit, rm_tree
 from app.core.git.git_source_analysis import (
     _clean_command_list,
@@ -23,8 +30,15 @@ from app.core.git.git_source_analysis import (
     _redact_secret_values,
     _validated_env_vars,
 )
+from app.core.git.project_analysis import analyze_project
 from app.core.llm import generate_json
 from app.core.llm.cache import delete_cached, load_cached, store_cached
+from app.core.llm.provider import (
+    LlmConfig,
+    endpoint_fingerprint,
+    resolve_llm_config,
+)
+from app.core.llm.user_config import resolve_llm_config_for_user
 from app.core.stacks.k8s_parser import _file_has_workload_kind
 from app.core.stacks.manifest_parser import parse_manifest
 from app.db.models import StackService
@@ -38,7 +52,7 @@ _IGNORED_DIRECTORIES = frozenset(
 _COMPOSE_NAMES = ("docker-compose.yml", "docker-compose.yaml", "compose.yml", "compose.yaml")
 _COMPOSE_PATTERNS = ("docker-compose", "compose")
 _PREFERRED_DIRECTORIES = ("k8s", "kubernetes", "deploy", "manifests")
-STACKS_PROMPT_VERSION = "v3"  # ponytail: bumped for URL/secret redaction in the prompt
+STACKS_PROMPT_VERSION = "v4"  # ponytail: bumped for dependency-evidence facts
 
 
 @dataclass(frozen=True)
@@ -48,6 +62,7 @@ class RepoStackAnalysis:
     manifest_kind: RepoAnalysisKind
     manifest_path: str | None
     summary_hint: str | None
+    detected_service_names: tuple[str, ...] = ()
 
 
 def _is_ignored(path: Path) -> bool:
@@ -196,6 +211,26 @@ def _generation_schema() -> dict:
     }
 
 
+def _is_repo_built_service(service: StackService) -> bool:
+    return service.source_kind in {"git", "dockerfile_template"}
+
+
+def _enrich_compose_services(
+    services: list[StackService],
+    *,
+    root: Path,
+    warnings: list[str],
+) -> tuple[list[StackService], list[str], tuple[str, ...]]:
+    info = analyze_project(root)
+    evidence = scan_dependency_evidence(root, info)
+    context = _collect_context_excerpts(root, info, evidence)
+    env_fallback = _validated_env_vars(_extract_env_vars_from_context(context))
+    for service in services:
+        if _is_repo_built_service(service):
+            service.env_vars = {**env_fallback, **service.env_vars}
+    return reconcile_detected_services(services, evidence, warnings)
+
+
 def _payload_to_services(
     payload: Mapping[str, object],
     *,
@@ -294,8 +329,10 @@ async def _generate_services(
     git_branch: str,
     warnings: list[str],
     root: Path,
+    evidence: list[ServiceEvidence],
     commit: str = "",
-) -> tuple[list[StackService], str | None]:
+    config: LlmConfig | None = None,
+) -> tuple[list[StackService], str | None, tuple[str, ...], list[str]]:
     # ponytail: prompt-only redaction; the raw url is still used as the git source_ref
     redacted_url = _CREDENTIALS_IN_URL.sub(r"\1", git_url)
     prompt = (
@@ -316,16 +353,24 @@ async def _generate_services(
     )
     if manifest:
         prompt += f"\n\nDeployment manifest excerpt:\n{manifest}"
-    facts = _detected_facts_block(root, context)
+    facts = _detected_facts_block(root, context, evidence=evidence)
     if facts:
         prompt += (
             "\n\nDetected facts (already verified by deterministic scans; "
             f"prefer them over re-deriving):\n{facts}"
         )
-    payload = await load_cached("stacks", commit, STACKS_PROMPT_VERSION)
+    if config is None:
+        config = resolve_llm_config()
+    if config is None:
+        raise LlmNotConfiguredError("AI analysis is not configured on this server.")
+    cache_version = (
+        f"{STACKS_PROMPT_VERSION}:{config.provider}:{config.model}"
+        f":{endpoint_fingerprint(config)}"
+    )
+    payload = await load_cached("stacks", commit, cache_version)
     if payload is None:
-        payload = await generate_json(prompt=prompt, schema=_generation_schema())
-        await store_cached("stacks", commit, STACKS_PROMPT_VERSION, payload)
+        payload = await generate_json(prompt=prompt, schema=_generation_schema(), config=config)
+        await store_cached("stacks", commit, cache_version, payload)
     try:
         services = _payload_to_services(
             payload,
@@ -335,10 +380,18 @@ async def _generate_services(
             env_fallback=_validated_env_vars(_extract_env_vars_from_context(context)),
         )
     except LlmCallError:
-        await delete_cached("stacks", commit, STACKS_PROMPT_VERSION)
+        await delete_cached("stacks", commit, cache_version)
         raise
+    services, warnings, detected_names = reconcile_detected_services(
+        services, evidence, warnings
+    )
     summary = payload.get("summary_hint")
-    return services, summary.strip() if isinstance(summary, str) and summary.strip() else None
+    return (
+        services,
+        summary.strip() if isinstance(summary, str) and summary.strip() else None,
+        detected_names,
+        warnings,
+    )
 
 
 async def analyze_repo_stack(
@@ -347,6 +400,9 @@ async def analyze_repo_stack(
     git_url: str,
     git_branch: str,
     access_token: str | None,
+    session: AsyncSession | None = None,
+    user_id: uuid.UUID | None = None,
+    use_server_default: bool = False,
 ) -> RepoStackAnalysis:
     fixture = e2e_stack_repo_analysis_if_enabled(git_url, git_branch)
     if fixture is not None:
@@ -371,33 +427,49 @@ async def analyze_repo_stack(
             manifest_content = manifest_path.read_text(encoding="utf-8", errors="replace")
             manifest_excerpt = _redact_secret_values(_read_file_excerpt(manifest_path))
             try:
-                services, parser_warnings, parsed_kind = parse_manifest(manifest_content)
+                services, parser_warnings, parsed_kind = parse_manifest(
+                    manifest_content,
+                    compose_dir=manifest_path.parent,
+                )
             except ManifestParseError:
                 if manifest_kind != "compose":
                     raise
                 services, parser_warnings, parsed_kind = [], [], manifest_kind
             warnings.extend(parser_warnings)
             if services:
+                services, warnings, detected_names = _enrich_compose_services(
+                    services,
+                    root=root,
+                    warnings=warnings,
+                )
                 return RepoStackAnalysis(
                     services=services,
                     warnings=warnings,
                     manifest_kind=parsed_kind,
                     manifest_path=relative_path,
                     summary_hint=None,
+                    detected_service_names=detected_names,
                 )
             warnings.append("Selected manifest contained no usable services; using AI analysis.")
         else:
             relative_path = None
 
         commit = await asyncio.to_thread(head_commit, root) or ""
-        services, summary_hint = await _generate_services(
-            context=_collect_context_excerpts(root),
+        config = await resolve_llm_config_for_user(
+            session, user_id, force_server_default=use_server_default
+        )
+        info = analyze_project(root)
+        evidence = scan_dependency_evidence(root, info)
+        services, summary_hint, detected_names, warnings = await _generate_services(
+            context=_collect_context_excerpts(root, info, evidence),
             manifest=manifest_excerpt,
             git_url=git_url,
             git_branch=git_branch,
             warnings=warnings,
             root=root,
+            evidence=evidence,
             commit=commit,
+            config=config,
         )
         return RepoStackAnalysis(
             services=services,
@@ -405,6 +477,7 @@ async def analyze_repo_stack(
             manifest_kind="llm",
             manifest_path=relative_path,
             summary_hint=summary_hint,
+            detected_service_names=detected_names,
         )
     finally:
         rm_tree(parent)

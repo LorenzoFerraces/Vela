@@ -5,10 +5,12 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import re
+import uuid
 from pathlib import Path
 from typing import Literal
 
 from pydantic import ValidationError
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.schemas import GitSourceAnalysis
 from app.core.build.default_image_builder import DefaultImageBuilder
@@ -16,17 +18,23 @@ from app.core.enums import SupportedLanguage
 from app.core.exceptions import (
     GitSourceAnalysisError,
     LlmCallError,
-    LlmNotConfiguredError,
 )
 from app.core.git.git_ops import _CREDENTIALS_IN_URL, git_head_ref, rm_tree
 from app.core.git.project_analysis import analyze_project
+from app.core.git.dependency_evidence import ServiceEvidence, scan_dependency_evidence
 from app.core.models import ProjectInfo
-from app.core.llm import generate_json, resolve_llm_config
+from app.core.llm import generate_json
+from app.core.llm.provider import (
+    LlmConfig,
+    endpoint_fingerprint,
+    resolve_llm_config,
+)
+from app.core.llm.user_config import resolve_llm_config_for_user
 from app.core.llm.cache import delete_cached, load_cached, store_cached
 from app.e2e_support import e2e_git_source_analysis_if_enabled
 MAX_FILE_BYTES = 12_000
 MAX_TOTAL_BYTES = 48_000
-GIT_SOURCE_PROMPT_VERSION = "v3"  # ponytail: bumped for URL/secret redaction in prompts and pre-filled values
+GIT_SOURCE_PROMPT_VERSION = "v4"  # ponytail: bumped for dependency-evidence facts
 
 _README_CANDIDATES = ("README.md", "README", "readme.md", "Readme.md")
 
@@ -309,9 +317,28 @@ def _append_excerpt(
     return total + len(chunk)
 
 
+def _evidence_excerpt_lines(evidence: list[ServiceEvidence]) -> str:
+    lines: list[str] = []
+    for item in evidence:
+        lines.extend(item.matched_lines)
+    return "\n".join(lines)
+
+
+def _evidence_fact_line(item: ServiceEvidence) -> str:
+    detail = ""
+    if item.hostname:
+        detail = f" host={item.hostname}"
+    sources = ", ".join(item.sources)
+    return (
+        f"external service required: {item.image_ref} (port {item.port}){detail}"
+        f" — evidence: {sources}"
+    )
+
+
 def _collect_context_excerpts(
     project_root: Path,
     info: ProjectInfo | None = None,
+    evidence: list[ServiceEvidence] | None = None,
 ) -> str:
     parts: list[str] = []
     total = 0
@@ -345,6 +372,18 @@ def _collect_context_excerpts(
             total=total,
             label=name,
             text=_read_file_excerpt(path),
+        )
+
+    if evidence is None:
+        info = info or analyze_project(project_root)
+        evidence = scan_dependency_evidence(project_root, info)
+    evidence_text = _evidence_excerpt_lines(evidence)
+    if evidence_text:
+        total = _append_excerpt(
+            parts,
+            total=total,
+            label="dependency manifest evidence",
+            text=evidence_text,
         )
 
     readme_path = _find_readme(project_root)
@@ -454,6 +493,7 @@ def _detected_facts_block(
     root: Path,
     context: str,
     info: ProjectInfo | None = None,
+    evidence: list[ServiceEvidence] | None = None,
 ) -> str:
     lines: list[str] = []
     info = info or analyze_project(root)
@@ -480,7 +520,12 @@ def _detected_facts_block(
         if len(env_vars) > 20:
             rendered += " (more truncated)"
         lines.append(f"documented env vars: {rendered}")
-    return "\n".join(f"- {line}" for line in lines)
+    if evidence is None:
+        evidence = scan_dependency_evidence(root, info)
+    for item in evidence:
+        lines.append(_evidence_fact_line(item))
+    facts_text = "\n".join(f"- {line}" for line in lines)
+    return _redact_secret_values(facts_text)
 
 
 def _valid_env_key(key: str) -> bool:
@@ -619,7 +664,14 @@ async def _call_gemini(
     git_branch: str,
     facts: str = "",
     commit: str = "",
+    config: LlmConfig | None = None,
 ) -> GitSourceAnalysis:
+    if config is None:
+        config = resolve_llm_config()
+    if config is None:
+        raise GitSourceAnalysisError(
+            "AI analysis is not configured on this server."
+        )
     # ponytail: prompt-only redaction; the raw url is still used for clone and cache key
     redacted_url = _CREDENTIALS_IN_URL.sub(r"\1", git_url)
     prompt = (
@@ -634,9 +686,9 @@ async def _call_gemini(
             f"prefer them over re-deriving):\n{facts}"
         )
     try:
-        parsed = await generate_json(prompt=prompt, schema=_analysis_json_schema())
-    except LlmNotConfiguredError as exc:
-        raise GitSourceAnalysisError("AI analysis is not configured on this server.") from exc
+        parsed = await generate_json(
+            prompt=prompt, schema=_analysis_json_schema(), config=config
+        )
     except LlmCallError as exc:
         if str(exc) == "Could not complete AI analysis. Try again later.":
             raise GitSourceAnalysisError(
@@ -719,12 +771,18 @@ async def analyze_git_source(
     git_url: str,
     git_branch: str,
     access_token: str | None,
+    session: AsyncSession | None = None,
+    user_id: uuid.UUID | None = None,
+    use_server_default: bool = False,
 ) -> GitSourceAnalysis:
     fixture = e2e_git_source_analysis_if_enabled(git_url, git_branch)
     if fixture is not None:
         return fixture
 
-    if resolve_llm_config() is None:
+    config = await resolve_llm_config_for_user(
+        session, user_id, force_server_default=use_server_default
+    )
+    if config is None:
         # No LLM: deterministic fallback. No commit resolution, no cache.
         project_path = await image_builder.clone_repository(
             git_url,
@@ -740,17 +798,21 @@ async def analyze_git_source(
         finally:
             rm_tree(parent)
 
+    cache_version = (
+        f"{GIT_SOURCE_PROMPT_VERSION}:{config.provider}:{config.model}"
+        f":{endpoint_fingerprint(config)}"
+    )
     # LLM path: cheap commit resolution (no clone) so a full-result cache hit skips the clone.
     commit = await git_head_ref(url=git_url, branch=git_branch, access_token=access_token) or ""
     cache_key = _git_source_cache_key(git_url, commit, git_branch)
     # ponytail: full-result cache hit returns the stored GitSourceAnalysis and skips the clone
     if cache_key:
-        cached = await load_cached("git_source", cache_key, GIT_SOURCE_PROMPT_VERSION)
+        cached = await load_cached("git_source", cache_key, cache_version)
         if cached is not None:
             try:
                 return GitSourceAnalysis.model_validate(cached)
             except ValidationError:
-                await delete_cached("git_source", cache_key, GIT_SOURCE_PROMPT_VERSION)
+                await delete_cached("git_source", cache_key, cache_version)
 
     # Cache miss: clone + full analysis (single analyze_project, off-loop FS walks).
     project_path = await image_builder.clone_repository(
@@ -764,11 +826,13 @@ async def analyze_git_source(
         info = analyze_project(root)
         context = await asyncio.to_thread(_collect_context_excerpts, root, info)
         facts = await asyncio.to_thread(_detected_facts_block, root, context, info)
-        analysis = await _call_gemini(context, git_url, git_branch, facts, commit)
+        analysis = await _call_gemini(
+            context, git_url, git_branch, facts, commit, config=config
+        )
         enriched = _enrich_with_local_detection(analysis, info)
         result = _merge_env_fallback(enriched, context)
         if cache_key:
-            await store_cached("git_source", cache_key, GIT_SOURCE_PROMPT_VERSION, result.model_dump(mode="json"))
+            await store_cached("git_source", cache_key, cache_version, result.model_dump(mode="json"))
         return result
     finally:
         rm_tree(parent)

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Literal
 
 import yaml
@@ -14,6 +15,8 @@ from app.db.models import StackService
 
 def parse_manifest(
     yaml_content: str,
+    *,
+    compose_dir: Path | None = None,
 ) -> tuple[list[StackService], list[str], Literal["compose", "k8s"]]:
     """Parse a manifest, detecting compose vs Kubernetes.
 
@@ -34,7 +37,7 @@ def parse_manifest(
         and isinstance(first.get("services"), dict)
         and first["services"]
     ):
-        services, warnings = parse_compose(yaml_content)
+        services, warnings = parse_compose(yaml_content, compose_dir=compose_dir)
         return services, warnings, "compose"
 
     if any(_is_k8s_document(document) for document in documents):
