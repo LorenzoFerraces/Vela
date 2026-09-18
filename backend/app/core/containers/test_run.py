@@ -6,8 +6,8 @@ from pathlib import Path
 _backend_root = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(_backend_root))
 
-from app.core.containers.docker_orchestrator import DockerOrchestrator
-from app.core.smoke import SMOKE_DEPLOY
+from app.core.containers.docker_orchestrator import DockerOrchestrator  # noqa: E402
+from app.core.smoke import SMOKE_DEPLOY  # noqa: E402
 
 
 async def main():

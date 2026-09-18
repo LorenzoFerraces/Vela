@@ -16,9 +16,17 @@ os.environ.setdefault(
 )
 os.environ.setdefault("VELA_AUTH_SECRET", "test-secret-please-do-not-use-in-prod")
 os.environ.setdefault("VELA_AUTH_ACCESS_TOKEN_TTL_MINUTES", "60")
+# Fixed Fernet key for tests only (same value as frontend/playwright.config.ts).
+os.environ.setdefault(
+    "VELA_TOKEN_ENCRYPTION_KEY",
+    "DIBwkE2Pl2PjYfjld4BnLmx3bzzG3AaMBObQEQ6nZHs=",
+)
 os.environ.setdefault("VELA_FAKE_ORCHESTRATOR", "1")
+# Keep the background collector out of unit tests (it would hit a separate engine).
+os.environ.setdefault("VELA_LOG_COLLECTOR_ENABLED", "0")
 # Force default so a developer .env cannot change module-level monitor constants.
 os.environ["VELA_CONTAINER_MONITOR_INTERVAL_SECONDS"] = "15"
+os.environ["VELA_METRICS_INTERVAL_SECONDS"] = "3600"
 os.environ.setdefault("VELA_OBJECT_STORAGE", "memory")
 
 import uuid
@@ -34,6 +42,7 @@ from sqlalchemy.ext.asyncio import (
     async_sessionmaker,
     create_async_engine,
 )
+from sqlalchemy.pool import StaticPool
 
 from app.api.app import create_app
 from app.api.deps import (
@@ -64,6 +73,7 @@ os.environ.setdefault("VELA_AUTH_ACCESS_TOKEN_TTL_MINUTES", "60")
 os.environ.setdefault("VELA_OBJECT_STORAGE", "memory")
 # ``engine.load_dotenv(override=True)`` may clobber the early set above.
 os.environ["VELA_CONTAINER_MONITOR_INTERVAL_SECONDS"] = "15"
+os.environ["VELA_METRICS_INTERVAL_SECONDS"] = "3600"
 
 
 def make_container_info(
@@ -160,7 +170,11 @@ def db_session_factory() -> Iterator[async_sessionmaker[AsyncSession]]:
     Returns:
         async_sessionmaker[AsyncSession]: A session factory producing AsyncSession instances backed by an in-memory SQLite engine. The fixture ensures Base.metadata.create_all() runs before yielding and disposes the underlying engine when the fixture is torn down.
     """
-    engine = create_async_engine("sqlite+aiosqlite:///:memory:", future=True)
+    # StaticPool keeps one shared connection so committed data survives
+    # across the per-request sessions handed to the app.
+    engine = create_async_engine(
+        "sqlite+aiosqlite:///:memory:", poolclass=StaticPool, future=True
+    )
     factory = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
 
     async def setup() -> None:
@@ -236,6 +250,8 @@ def _build_app_with_overrides(
 ) -> Any:
     app = create_app()
 
+    # Fresh session per request (mirrors production get_db); the shared
+    # StaticPool connection keeps committed data alive across requests.
     async def _get_db_override() -> AsyncIterator[AsyncSession]:
         async with db_session_factory() as session:
             yield session

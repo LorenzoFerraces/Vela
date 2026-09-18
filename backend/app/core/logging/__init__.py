@@ -1,0 +1,1 @@
+"""Log aggregation domain package."""

@@ -1,3 +1,5 @@
+import type { ReactNode } from 'react'
+
 type SkeletonProps = {
   className?: string
 }
@@ -8,10 +10,10 @@ export function Skeleton({ className = '' }: SkeletonProps) {
 }
 
 type TeamDetailSkeletonProps = {
-  showInviteSection: boolean
+  children: ReactNode
 }
 
-export function TeamDetailSkeleton({ showInviteSection }: TeamDetailSkeletonProps) {
+export function TeamDetailSkeleton({ children }: TeamDetailSkeletonProps) {
   return (
     <div aria-busy="true" aria-label="Loading team details">
       <section className="teams-page__section">
@@ -26,21 +28,29 @@ export function TeamDetailSkeleton({ showInviteSection }: TeamDetailSkeletonProp
         </ul>
       </section>
 
-      {showInviteSection ? (
-        <section className="teams-page__section">
-          <h3 className="teams-page__section-title">Invite member</h3>
-          <div className="teams-page__invite-form">
-            <Skeleton className="skeleton--invite-field" />
-            <Skeleton className="skeleton--invite-role" />
-            <Skeleton className="skeleton--invite-button" />
-          </div>
-        </section>
-      ) : (
-        <section className="teams-page__section">
-          <Skeleton className="skeleton--hint-line" />
-        </section>
-      )}
+      {children}
     </div>
+  )
+}
+
+export function TeamInviteSectionSkeleton() {
+  return (
+    <section className="teams-page__section">
+      <h3 className="teams-page__section-title">Invite member</h3>
+      <div className="teams-page__invite-form">
+        <Skeleton className="skeleton--invite-field" />
+        <Skeleton className="skeleton--invite-role" />
+        <Skeleton className="skeleton--invite-button" />
+      </div>
+    </section>
+  )
+}
+
+export function TeamHintSectionSkeleton() {
+  return (
+    <section className="teams-page__section">
+      <Skeleton className="skeleton--hint-line" />
+    </section>
   )
 }
 
@@ -65,7 +75,9 @@ export function TeamsPageSkeleton() {
             <Skeleton className="skeleton--detail-description" />
           </div>
         </div>
-        <TeamDetailSkeleton showInviteSection />
+        <TeamDetailSkeleton>
+          <TeamInviteSectionSkeleton />
+        </TeamDetailSkeleton>
       </div>
     </div>
   )

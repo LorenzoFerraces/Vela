@@ -4,13 +4,15 @@ from __future__ import annotations
 
 from fastapi.testclient import TestClient
 
+from app.core.notifications.container_monitor import get_monitor_interval_seconds
+
 
 def test_email_notifications_get_defaults(api_client: TestClient) -> None:
     response = api_client.get("/api/settings/email-notifications")
     assert response.status_code == 200
     body = response.json()
     assert body["alerts_enabled"] is True
-    assert set(body["alert_types"]) == {"stop", "failure", "unhealthy"}
+    assert set(body["alert_types"]) == {"stop", "failure", "unhealthy", "storage"}
     assert body["alert_frequency"] == "immediate"
     assert body["email"] == "user@example.com"
 
@@ -41,5 +43,5 @@ def test_monitoring_status(api_client: TestClient) -> None:
     assert response.status_code == 200
     body = response.json()
     assert body["enabled"] is True
-    assert body["interval_seconds"] == 15
+    assert body["interval_seconds"] == get_monitor_interval_seconds()
     assert body["total_containers_tracked"] >= 0

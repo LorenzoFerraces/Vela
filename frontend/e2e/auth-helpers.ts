@@ -39,6 +39,11 @@ export async function loginAndSeedToken(
  * @throws Error if no access token is found in localStorage.
  */
 export async function bearerToken(page: Page): Promise<string> {
+  // A page that has not navigated yet is at about:blank, an opaque origin
+  // where reading localStorage throws; land on the app origin first.
+  if (page.url() === 'about:blank') {
+    await page.goto('/dashboard')
+  }
   const token = await page.evaluate(() =>
     window.localStorage.getItem('vela.access_token'),
   )

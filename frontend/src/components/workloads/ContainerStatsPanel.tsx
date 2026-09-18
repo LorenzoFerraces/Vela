@@ -3,6 +3,11 @@ import type { ContainerStats } from '../../api/client'
 import { formatApiError, getContainerStats } from '../../api/client'
 import { formatBytes } from '../../utils/formatBytes'
 
+const percentFormatter = new Intl.NumberFormat(undefined, {
+  minimumFractionDigits: 1,
+  maximumFractionDigits: 1,
+})
+
 type ContainerStatsPanelProps = {
   containerId: string
   isActive: boolean
@@ -71,14 +76,14 @@ export function ContainerStatsPanel({
         <dl className="workloads-stats-panel__grid">
           <div>
             <dt>CPU</dt>
-            <dd>{stats.cpu_percent.toFixed(1)}%</dd>
+            <dd>{percentFormatter.format(stats.cpu_percent)}%</dd>
           </div>
           <div>
             <dt>Memory</dt>
             <dd>
               {formatBytes(stats.memory_usage_bytes)}
               {stats.memory_limit_bytes > 0
-                ? ` / ${formatBytes(stats.memory_limit_bytes)} (${stats.memory_percent.toFixed(1)}%)`
+                ? ` / ${formatBytes(stats.memory_limit_bytes)} (${percentFormatter.format(stats.memory_percent)}%)`
                 : ''}
             </dd>
           </div>

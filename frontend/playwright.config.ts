@@ -59,6 +59,18 @@ const e2eApiEnv: Record<string, string> = {
   VELA_PUBLIC_ROUTE_DOMAIN: 'apps.e2e.test',
   VELA_PUBLIC_URL_SCHEME: 'https',
   VELA_TRAFFIC_ROUTER: 'noop',
+  VELA_OBJECT_STORAGE: 'memory',
+}
+
+/** Shell env restricted to defined values so `env:` stays `Record<string, string>`. */
+function inheritedEnv(): Record<string, string> {
+  const env: Record<string, string> = {}
+  for (const [key, value] of Object.entries(process.env)) {
+    if (value !== undefined) {
+      env[key] = value
+    }
+  }
+  return env
 }
 
 export default defineConfig({
@@ -90,7 +102,7 @@ export default defineConfig({
       reuseExistingServer: false,
       timeout: 120_000,
       env: {
-        ...process.env,
+        ...inheritedEnv(),
         ...e2eApiEnv,
       },
     },
@@ -100,7 +112,7 @@ export default defineConfig({
       reuseExistingServer: false,
       timeout: 120_000,
       env: {
-        ...process.env,
+        ...inheritedEnv(),
         VITE_DEV_PROXY_TARGET: `http://127.0.0.1:${e2eApiPort}`,
         VITE_API_BASE_URL: baseURL,
       },

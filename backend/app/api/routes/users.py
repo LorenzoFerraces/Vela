@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import get_current_user, get_db, get_object_storage
 from app.api.schemas import UserProfileUpdate, UserPublic
 from app.api.user_view import user_public_from_snapshot
+from app.core.audit.service import emit_audit_log
 from app.core.profile.service import delete_avatar, update_profile, upload_avatar
 from app.core.storage.object_storage import ObjectStorage
 from app.db.models import User
@@ -33,6 +34,15 @@ async def patch_me(
         pronouns=updates.get("pronouns", ...),
         object_storage=object_storage,
     )
+    await emit_audit_log(
+        session,
+        user_id=current_user.id,
+        action="user.profile_update",
+        target_type="user",
+        target_id=str(current_user.id),
+        details={"fields": list(updates.keys())},
+    )
+    await session.commit()
     return user_public_from_snapshot(snapshot)
 
 
@@ -51,6 +61,14 @@ async def post_avatar(
         body=body,
         object_storage=object_storage,
     )
+    await emit_audit_log(
+        session,
+        user_id=current_user.id,
+        action="user.avatar_upload",
+        target_type="user",
+        target_id=str(current_user.id),
+    )
+    await session.commit()
     return user_public_from_snapshot(snapshot)
 
 
@@ -66,4 +84,12 @@ async def remove_avatar(
         current_user,
         object_storage=object_storage,
     )
+    await emit_audit_log(
+        session,
+        user_id=current_user.id,
+        action="user.avatar_removed",
+        target_type="user",
+        target_id=str(current_user.id),
+    )
+    await session.commit()
     return user_public_from_snapshot(snapshot)

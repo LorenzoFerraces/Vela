@@ -26,7 +26,12 @@ from app.core.models import (
     VolumeMount,
 )
 from app.core.traffic.traffic_router import TrafficRouter
+from app.core.url_display import sanitize_url_for_display
 from app.db.models import DeploymentRecord, Stack, StackService, User
+
+
+def _container_dns_name(stack: Stack, service: StackService) -> str:
+    return f"{stack.name}_{service.service_name}"
 
 
 def _build_override_from_service(service: StackService) -> BuildOverride | None:
@@ -64,7 +69,7 @@ async def deploy_stack(
         await orchestrator.create_network(stack.network_name)
 
         for service in services:
-            container_name = f"{stack.name}_{service.service_name}"
+            container_name = _container_dns_name(stack, service)
             image_tag = await _resolve_service_image(
                 session,
                 user,
@@ -178,15 +183,15 @@ async def _resolve_service_image(
             )
             return build_result.image_tag
         case "git":
-            from app.api.routes.containers import (
-                _github_token_for_url,
-                _is_github_https_url,
-                _looks_like_auth_failure,
+            from app.core.deploy.github_auth import (
+                github_token_for_url,
+                is_github_https_url,
+                looks_like_auth_failure,
             )
 
             git_url = service.source_ref.strip()
             branch = (service.git_branch or "main").strip() or "main"
-            access_token = await _github_token_for_url(session, user, git_url)
+            access_token = await github_token_for_url(session, user, git_url)
             tag = f"vela/gitbuild:{uuid.uuid4().hex[:12]}"
             override = _build_override_from_service(service)
             try:
@@ -199,8 +204,8 @@ async def _resolve_service_image(
             except CloneError as exc:
                 if (
                     access_token is None
-                    and _is_github_https_url(git_url)
-                    and _looks_like_auth_failure(str(exc))
+                    and is_github_https_url(git_url)
+                    and looks_like_auth_failure(str(exc))
                 ):
                     raise CloneError(
                         git_url,
@@ -243,6 +248,7 @@ def _build_deploy_config(
         container_listen_port=service.container_port,
         command=service.command,
         network=stack.network_name,
+        network_aliases=[service.service_name],
         restart_policy=restart_policy,
         labels={
             "vela.stack_id": str(stack.id),
@@ -251,7 +257,7 @@ def _build_deploy_config(
             VELA_OWNER_LABEL: str(user.id),
             VELA_PROJECT_LABEL: str(stack.project_id),
             VELA_SOURCE_KIND_LABEL: service.source_kind,
-            VELA_SOURCE_REF_LABEL: service.source_ref,
+            VELA_SOURCE_REF_LABEL: sanitize_url_for_display(service.source_ref),
         },
         public_route=service.public_route,
     )
@@ -289,7 +295,7 @@ async def _persist_deployment(
         container_id=container_info.id,
         container_name=container_info.name,
         source_kind=service.source_kind,
-        source_ref=service.source_ref,
+        source_ref=sanitize_url_for_display(service.source_ref),
         image_tag=image_tag,
         container_port=service.container_port,
         env_vars={k: "<REDACTED>" for k in service.env_vars},

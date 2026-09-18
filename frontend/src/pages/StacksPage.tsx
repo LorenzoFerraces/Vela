@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { Link } from 'react-router-dom'
 import {
   deleteStack,
   deployStack,
@@ -17,6 +17,8 @@ import {
   isNeedsBuildOverrideError,
   parseFailedServiceNameFromError,
 } from './containers/buildOverride'
+import NewStackModal from './stacks/NewStackModal'
+import './stacks/stacks.css'
 
 type Banner = { tone: 'ok' | 'err'; text: string } | null
 
@@ -58,38 +60,37 @@ function resolveFailedService(
   )
 }
 
-function StackRow({
+function StackCard({
   stack,
   busy,
   pendingDelete,
   onDeploy,
   onDelete,
-  onEdit,
 }: {
   stack: Stack
   busy: boolean
   pendingDelete: string | null
   onDeploy: (id: string) => void
   onDelete: (id: string) => void
-  onEdit: (id: string) => void
 }) {
   const isPending = pendingDelete === stack.id
   return (
-    <tr key={stack.id}>
-      <td>{stack.name}</td>
-      <td className="containers-table__mono">{stack.network_name}</td>
-      <td>{stack.services.length}</td>
-      <td className="containers-muted">
-        {new Date(stack.created_at).toLocaleDateString()}
-      </td>
-      <td className="containers-table__actions">
-        <button
-          type="button"
-          className="btn btn--ghost btn--sm"
-          onClick={() => onEdit(stack.id)}
-        >
-          Edit
-        </button>
+    <article className="stacks-card">
+      <div className="stacks-card__top">
+        <Link className="stacks-card__name" to={`/stacks/${stack.id}`}>
+          {stack.name}
+        </Link>
+      </div>
+      <div className="stacks-card__network">{stack.network_name}</div>
+      <div className="stacks-card__meta">
+        {stack.services.length}{' '}
+        {stack.services.length === 1 ? 'service' : 'services'} ·{' '}
+        {new Date(stack.created_at).toLocaleDateString(undefined, {
+          month: 'short',
+          day: 'numeric',
+        })}
+      </div>
+      <div className="stacks-card__actions">
         <button
           type="button"
           className="btn btn--ghost btn--sm"
@@ -106,18 +107,35 @@ function StackRow({
         >
           {isPending ? 'Confirm?' : 'Remove'}
         </button>
-      </td>
-    </tr>
+      </div>
+    </article>
+  )
+}
+
+function StackCardSkeleton() {
+  return (
+    <article className="stacks-card stacks-card--skeleton" aria-hidden="true">
+      <div className="stacks-card__top">
+        <span className="skeleton stacks-card__skeleton-line stacks-card__skeleton-line--name" />
+        <span className="skeleton stacks-card__skeleton-line stacks-card__skeleton-line--meta" />
+      </div>
+      <span className="skeleton stacks-card__skeleton-line stacks-card__skeleton-line--network" />
+      <span className="skeleton stacks-card__skeleton-line stacks-card__skeleton-line--meta" />
+      <div className="stacks-card__actions">
+        <span className="skeleton stacks-card__skeleton-line" />
+        <span className="skeleton stacks-card__skeleton-line" />
+      </div>
+    </article>
   )
 }
 
 export default function StacksPage() {
-  const navigate = useNavigate()
   const [stacks, setStacks] = useState<Stack[]>([])
   const [listLoading, setListLoading] = useState(true)
   const [busy, setBusy] = useState(false)
   const [banner, setBanner] = useState<Banner>(null)
   const [pendingDelete, setPendingDelete] = useState<string | null>(null)
+  const [newStackOpen, setNewStackOpen] = useState(false)
   const [buildConfigOpen, setBuildConfigOpen] = useState(false)
   const [buildConfigInitial, setBuildConfigInitial] = useState<BuildOverride | null>(
     null,
@@ -275,16 +293,9 @@ export default function StacksPage() {
         <button
           type="button"
           className="btn btn--primary"
-          onClick={() => navigate('/stacks/new')}
+          onClick={() => setNewStackOpen(true)}
         >
           New Stack
-        </button>
-        <button
-          type="button"
-          className="btn btn--ghost"
-          onClick={() => navigate('/stacks/import')}
-        >
-          Import Compose
         </button>
       </div>
 
@@ -304,37 +315,34 @@ export default function StacksPage() {
       <h2 className="containers-page__subtitle">Your stacks</h2>
 
       {listLoading && stacks.length === 0 ? (
-        <p className="containers-muted">Loading…</p>
+        <div className="stacks-cards">
+          {Array.from({ length: 4 }, (_, index) => (
+            <StackCardSkeleton key={index} />
+          ))}
+        </div>
       ) : stacks.length === 0 ? (
-        <p className="containers-muted">
-          No stacks yet. Create one or import a compose file.
-        </p>
+        <div className="stacks-empty">
+          <span>No stacks yet.</span>
+          <button
+            type="button"
+            className="btn btn--primary"
+            onClick={() => setNewStackOpen(true)}
+          >
+            New Stack
+          </button>
+        </div>
       ) : (
-        <div className="containers-table-wrap">
-          <table className="containers-table">
-            <thead>
-              <tr>
-                <th>Name</th>
-                <th>Network</th>
-                <th>Services</th>
-                <th>Created</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              {stacks.map((stack) => (
-                <StackRow
-                  key={stack.id}
-                  stack={stack}
-                  busy={busy}
-                  pendingDelete={pendingDelete}
-                  onDeploy={handleDeploy}
-                  onDelete={handleDelete}
-                  onEdit={(id) => navigate(`/stacks/${id}`)}
-                />
-              ))}
-            </tbody>
-          </table>
+        <div className="stacks-cards">
+          {stacks.map((stack) => (
+            <StackCard
+              key={stack.id}
+              stack={stack}
+              busy={busy}
+              pendingDelete={pendingDelete}
+              onDeploy={handleDeploy}
+              onDelete={handleDelete}
+            />
+          ))}
         </div>
       )}
 
@@ -351,6 +359,15 @@ export default function StacksPage() {
           Refresh
         </button>
       </div>
+
+      <NewStackModal
+        open={newStackOpen}
+        onClose={() => setNewStackOpen(false)}
+        onCreated={(stackName) => {
+          setBanner({ tone: 'ok', text: `Stack '${stackName}' created.` })
+          void loadStacks()
+        }}
+      />
 
       <BuildConfigModal
         open={buildConfigOpen}

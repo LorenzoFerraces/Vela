@@ -46,7 +46,7 @@ test.describe('Builder page', () => {
       .click()
     await expect(
       authenticatedPage
-        .getByRole('alert')
+        .getByRole('status')
         .filter({ hasText: 'Dockerfile template saved' }),
     ).toBeVisible()
   })

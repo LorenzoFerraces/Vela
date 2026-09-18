@@ -4,9 +4,22 @@
 
 **Goal:** Expose CPU and memory limits on the container run/deploy form so users can constrain container resources.
 
-**Architecture:** Wire existing `DeployConfig.cpu_limit` and `DeployConfig.memory_limit` through `RunFromSourceRequest` schema, deploy route, and frontend form. No changes to Docker orchestrator needed.
+**Architecture:** Wire existing `DeployConfig.cpu_limit` and `DeployConfig.memory_limit` through `RunFromSourceRequest` schema, deploy route, and frontend form.
 
 **Tech Stack:** FastAPI, Pydantic v2, React, TypeScript
+
+## Corrections (2026-08-16 review)
+
+- **Unit bug:** `DockerOrchestrator.deploy` passed `config.memory_limit` straight to docker-py `mem_limit`, which treats numbers as **bytes**. `memory_limit` is documented as MB everywhere, so 256 (MB) became 256 bytes → instant OOM kill. Fix (Task 2.4): convert MB→bytes at the single orchestrator call site and document the unit (`gt=0`) on `DeployConfig`.
+- `RunFromSourceRequest` fields are added after `build_override` (not `scaling_policy`); the 3 `_deploy_config_for_image` call sites are at lines ~697/~751/~824 in `routes/containers.py`.
+- Pair with `2025-08-03-resource-dashboard.md` for per-user/team usage visibility (`GET /api/metrics/usage`). Quota enforcement (hard ceilings at deploy time) is deliberately out of scope — add when a product policy exists.
+
+## Status (2026-09-02)
+
+- All tasks implemented on `f/resource-management`.
+- The Task 2 step 2.1 passthrough test was missing at first review and was added 2026-09-02 (see `2026-09-02-resource-management-premerge-fixes.md` Task 1).
+- `RunFromSourceRequest` now lives in `frontend/src/api/containers.ts` (API client refactor, re-exported from `client.ts`).
+- A `cpu_limit` finiteness validator was added per review findings.
 
 ## Global Constraints
 
@@ -65,14 +78,15 @@ def test_run_from_image_resource_limits_optional(api_client: TestClient) -> None
     assert response.status_code == 200
 ```
 
-- [ ] Write the two test functions to `backend/tests/test_api_integration.py`
-- [ ] Run `cd backend && python -m pytest tests/test_api_integration.py::test_run_from_image_with_resource_limits tests/test_api_integration.py::test_run_from_image_resource_limits_optional -q` — expect first test to fail (422 or field ignored), second to pass
+- [x] Write the two test functions to `backend/tests/test_api_integration.py`
+- [x] Run `cd backend && python -m pytest tests/test_api_integration.py::test_run_from_image_with_resource_limits tests/test_api_integration.py::test_run_from_image_resource_limits_optional -q` — expect first test to fail (422 or field ignored), second to pass
 
 ### Step 1.2: Add fields to `RunFromSourceRequest`
 
 File: `backend/app/api/schemas.py`
 
-After the `scaling_policy` field (line ~127), add:
+After the `build_override` field (line ~168; the last declared field of
+`RunFromSourceRequest`, right before the validators), add:
 
 ```python
     cpu_limit: float | None = Field(
@@ -87,9 +101,9 @@ After the `scaling_policy` field (line ~127), add:
     )
 ```
 
-- [ ] Add the two fields to `RunFromSourceRequest` in `backend/app/api/schemas.py`
-- [ ] Run the two tests again — both should pass
-- [ ] Run full test suite: `cd backend && python -m pytest tests -q` — ensure no regressions
+- [x] Add the two fields to `RunFromSourceRequest` in `backend/app/api/schemas.py`
+- [x] Run the two tests again — both should pass
+- [x] Run full test suite: `cd backend && python -m pytest tests -q` — ensure no regressions
 
 ---
 
@@ -113,8 +127,6 @@ Add this test after the Task 1 tests:
 def test_run_resource_limits_pass_through_all_source_kinds(
     api_client: TestClient,
     fake_orchestrator: FakeContainerOrchestrator,
-    db_session_factory,
-    seeded_user,
 ) -> None:
     """cpu_limit and memory_limit from RunFromSourceRequest reach DeployConfig."""
     response = api_client.post(
@@ -133,8 +145,8 @@ def test_run_resource_limits_pass_through_all_source_kinds(
     assert cfg.memory_limit == 512
 ```
 
-- [ ] Add the test to `backend/tests/test_api_integration.py`
-- [ ] Run the test — expect failure (limits not passed through)
+- [x] Add the test to `backend/tests/test_api_integration.py`
+- [x] Run the test — expect failure (limits not passed through)
 
 ### Step 2.2: Update `_deploy_config_for_image` to accept resource limits
 
@@ -172,8 +184,8 @@ def _deploy_config_for_image(
     )
 ```
 
-- [ ] Update `_deploy_config_for_image` signature and return statement
-- [ ] Run the test — still fails (callers haven't been updated yet)
+- [x] Update `_deploy_config_for_image` signature and return statement
+- [x] Run the test — still fails (callers haven't been updated yet)
 
 ### Step 2.3: Pass limits from `run_from_user_source` callers
 
@@ -214,9 +226,36 @@ to:
 
 Apply the same `cpu_limit=body.cpu_limit, memory_limit=body.memory_limit` addition to the dockerfile_template call (line ~748) and the git call (line ~820).
 
-- [ ] Update all three `_deploy_config_for_image` calls in `run_from_user_source`
-- [ ] Run the test — expect pass
-- [ ] Run full test suite: `cd backend && python -m pytest tests -q`
+- [x] Update all three `_deploy_config_for_image` calls in `run_from_user_source`
+- [x] Run the test — expect pass
+- [x] Run full test suite: `cd backend && python -m pytest tests -q`
+
+### Step 2.4: Fix the MB→bytes unit bug in the Docker orchestrator
+
+File: `backend/app/core/containers/docker_orchestrator.py`
+
+In `deploy()` the limit is forwarded raw: `kwargs["mem_limit"] = config.memory_limit`. docker-py treats numeric `mem_limit` as **bytes**, so an MB value is off by a factor of 1048576 (256 "MB" → 256 bytes → instant OOM kill). Change to:
+
+```python
+            if config.memory_limit is not None:
+                kwargs["mem_limit"] = config.memory_limit * 1024 * 1024
+```
+
+And document the unit on `DeployConfig` in `backend/app/core/models.py`:
+
+```python
+    cpu_limit: float | None = Field(
+        default=None, gt=0, description="CPU limit in cores (e.g. 0.5 for half a core)."
+    )
+    memory_limit: int | None = Field(
+        default=None, gt=0, description="Memory limit in MB."
+    )
+```
+
+`gt=0` also covers the direct `POST /api/containers/deploy` path, which takes `DeployConfig` unmediated.
+
+- [x] Apply both edits
+- [x] Run full test suite: `cd backend && python -m pytest tests -q`
 
 ---
 
@@ -235,15 +274,15 @@ Apply the same `cpu_limit=body.cpu_limit, memory_limit=body.memory_limit` additi
 
 File: `frontend/src/api/client.ts`
 
-After `scaling_policy` (line ~435), add:
+After `build_override` (line ~457; the last field of the interface), add:
 
 ```typescript
   cpu_limit?: number | null
   memory_limit?: number | null
 ```
 
-- [ ] Add the two optional fields to `RunFromSourceRequest` interface
-- [ ] Run `cd frontend && npm run build` — expect success
+- [x] Add the two optional fields to `RunFromSourceRequest` interface
+- [x] Run `cd frontend && npm run build` — expect success
 
 ### Step 3.2: Add resource limit inputs to `ContainersRunAdvancedFields`
 
@@ -305,8 +344,8 @@ Add the input fields before the `ContainersRunScalingFields` component (before l
           </p>
 ```
 
-- [ ] Add props, destructuring, and input fields to `ContainersRunAdvancedFields.tsx`
-- [ ] Run `cd frontend && npm run build` — expect success
+- [x] Add props, destructuring, and input fields to `ContainersRunAdvancedFields.tsx`
+- [x] Run `cd frontend && npm run build` — expect success
 
 ### Step 3.3: Wire state in `ContainersPage`
 
@@ -326,12 +365,12 @@ Reset in `resetAdvancedFields` (after `setScalingPolicy(null)`, line ~92):
     setMemoryLimit('')
 ```
 
-Parse and include in `buildRunRequest` (in the `base` object, after `scaling_policy`, line ~162):
+Parse and include in `buildRunRequest` (in the `base` object, after
+`build_override`):
 
 ```typescript
-      scaling_policy: scalingPolicy,
-      cpu_limit: (cpuLimit.trim() ? parseFloat(cpuLimit.trim()) : null),
-      memory_limit: (memoryLimit.trim() ? parseInt(memoryLimit.trim(), 10) : null),
+      cpu_limit: cpuLimit.trim() ? parseFloat(cpuLimit.trim()) : null,
+      memory_limit: memoryLimit.trim() ? parseInt(memoryLimit.trim(), 10) : null,
 ```
 
 Pass props to `<ContainersRunAdvancedFields>` (find the existing usage and add):
@@ -343,21 +382,44 @@ Pass props to `<ContainersRunAdvancedFields>` (find the existing usage and add):
           onMemoryLimitChange={setMemoryLimit}
 ```
 
-- [ ] Add state, reset logic, request parsing, and prop wiring to `ContainersPage.tsx`
-- [ ] Run `cd frontend && npm run build` — expect success
-- [ ] Run `cd frontend && npm run lint` — expect success
+- [x] Add state, reset logic, request parsing, and prop wiring to `ContainersPage.tsx`
+- [x] Run `cd frontend && npm run build` — expect success
+- [x] Run `cd frontend && npm run lint` — expect success
 
 ---
 
 ## Task 4: E2E verification
 
 **Files:**
-- Modify: `frontend/e2e/api-helpers.ts` (optional, if `deployImageContainer` needs updating)
+- Modify: `frontend/e2e/containers.spec.ts`
 
-### Step 4.1: Verify existing E2E tests still pass
+### Step 4.1: Extend the advanced-options test with the limit fields
 
-- [ ] Run `cd frontend && npm run test:e2e` — expect all existing tests to pass
-- [ ] Manually verify: open the containers page, expand "Advanced options", confirm CPU and memory limit fields appear and can be edited
+In `test('advanced env and start command can be set before build')`
+(after the "Advanced options" click, line ~82), assert the new fields exist
+and submit a deploy with them (no backend state is reachable from E2E beyond
+the HTTP round-trip, so visible fields + successful deploy is the assertion):
+
+```typescript
+    await expect(
+      authenticatedPage.getByLabel('CPU limit (cores)'),
+    ).toBeVisible()
+    await expect(
+      authenticatedPage.getByLabel('Memory limit (MB)'),
+    ).toBeVisible()
+    await authenticatedPage.getByLabel('CPU limit (cores)').fill('0.5')
+    await authenticatedPage.getByLabel('Memory limit (MB)').fill('128')
+```
+
+The existing `Build` click and "Started" alert assertion already cover the
+submit path with limits included in the request.
+
+### Step 4.2: Run the suite
+
+- [x] Run `cd frontend && npm run test:e2e` — expect all tests to pass
+  (stop dev servers on ports 8000/5173 first; `reuseExistingServer` is off)
+- [x] Manual smoke: open the containers page, expand "Advanced options",
+  confirm both fields accept input and reset after a successful deploy
 
 ---
 
@@ -368,7 +430,7 @@ Pass props to `<ContainersRunAdvancedFields>` (find the existing usage and add):
 - [x] Deploy route passes them through to `DeployConfig` (Task 2)
 - [x] Frontend form exposes the fields in the advanced section (Task 3)
 - [x] Tests cover schema acceptance and route passthrough (Tasks 1-2)
-- [x] No changes to Docker orchestrator (already handles `cpu_limit`/`memory_limit`)
+- [x] Docker orchestrator already applies both limits; the only change is the MB→bytes conversion and unit docs (Task 2.4)
 
 ### Placeholder scan
 - No "TBD", "TODO", or "add validation" placeholders remain

@@ -11,6 +11,7 @@ from pydantic import (
     ConfigDict,
     EmailStr,
     Field,
+    ValidationInfo,
     field_validator,
     model_validator,
 )
@@ -25,7 +26,9 @@ from app.core.models import (
     ProjectSource,
     ScalingPolicyConfig,
     ScalingPolicyInfo,
+    validate_finite_number,
 )
+from app.core.security.outbound_url import validate_outbound_url
 
 
 class VolumeMountRequest(BaseModel):
@@ -169,6 +172,16 @@ class RunFromSourceRequest(BaseModel):
         default=None,
         description="Manual language / build settings when auto-detection is insufficient.",
     )
+    cpu_limit: float | None = Field(
+        default=None,
+        gt=0,
+        description="CPU limit in cores (e.g. 0.5 for half a core).",
+    )
+    memory_limit: int | None = Field(
+        default=None,
+        gt=0,
+        description="Memory limit in MB.",
+    )
 
     @field_validator("env_vars")
     @classmethod
@@ -224,6 +237,11 @@ class RunFromSourceRequest(BaseModel):
             msg = "route_path_prefix must start with '/'"
             raise ValueError(msg)
         return value
+
+    @field_validator("cpu_limit")
+    @classmethod
+    def cpu_limit_must_be_finite(cls, value: float | None) -> float | None:
+        return validate_finite_number(value)
 
     @model_validator(mode="after")
     def validate_source_fields(self) -> RunFromSourceRequest:
@@ -401,6 +419,7 @@ class ContainerDeployResponse(BaseModel):
 class AnalyzeGitSourceRequest(BaseModel):
     git_url: str = Field(..., min_length=1, max_length=2048)
     git_branch: str = Field(default="main", max_length=256)
+    use_server_default: bool = False
 
 
 class GitSourceAnalysis(BaseModel):
@@ -436,8 +455,66 @@ class AiPrefillPreferencesUpdate(BaseModel):
     start_command: bool | None = None
 
 
+LlmProviderKind = Literal["openai_compatible", "gemini", "anthropic"]
+
+
+class LlmProviderGet(BaseModel):
+    provider: LlmProviderKind
+    base_url: str | None = None
+    model: str
+    has_key: bool = True
+
+
+class LlmProviderSet(BaseModel):
+    provider: LlmProviderKind
+    base_url: str | None = Field(default=None, max_length=1024, validate_default=True)
+    model: str = Field(min_length=1, max_length=255)
+    api_key: str | None = Field(default=None, min_length=1, max_length=2048)
+
+    @field_validator("base_url")
+    @classmethod
+    def _validate_base_url(
+        cls, value: str | None, info: ValidationInfo
+    ) -> str | None:
+        provider = info.data.get("provider")
+        if provider != "openai_compatible":
+            return None
+        if not value:
+            raise ValueError("Base URL is required for OpenAI-compatible providers.")
+        root = value.rstrip("/")
+        validate_outbound_url(root)
+        return root
+
+
+class LlmProviderTestRequest(BaseModel):
+    provider: LlmProviderKind
+    base_url: str | None = Field(default=None, max_length=1024)
+    model: str = Field(min_length=1, max_length=255)
+    api_key: str = Field(min_length=1, max_length=2048)
+
+    @field_validator("base_url")
+    @classmethod
+    def _validate_base_url(
+        cls, value: str | None, info: ValidationInfo
+    ) -> str | None:
+        provider = info.data.get("provider")
+        if provider != "openai_compatible":
+            return None
+        if not value:
+            raise ValueError("Base URL is required for OpenAI-compatible providers.")
+        root = value.rstrip("/")
+        validate_outbound_url(root)
+        return root
+
+
+class LlmProviderTestResponse(BaseModel):
+    ok: bool = True
+    models: list[str] | None = None
+
+
 class GeminiConfigStatus(BaseModel):
     configured: bool
+    user_provider: LlmProviderGet | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -455,6 +532,7 @@ class ProjectPublic(BaseModel):
     is_personal: bool
     role: ProjectRoleLiteral
     owner_email: str
+    storage_quota_bytes: int | None = None
 
 
 class ProjectCreate(BaseModel):
@@ -497,6 +575,21 @@ class IncomingProjectInvitationPublic(BaseModel):
 class MyProjectRolePublic(BaseModel):
     project_id: uuid.UUID
     role: ProjectRoleLiteral
+
+
+class ProjectStorageQuotaPublic(BaseModel):
+    quota_bytes: int | None
+    used_bytes: int
+    container_disk_bytes: int
+    uploads_bytes: int
+    over_quota: bool
+    source: str
+
+
+class ProjectStorageQuotaUpdate(BaseModel):
+    storage_quota_bytes: int | None = Field(
+        ..., ge=1, description="Bytes, or null to fall back to the platform default."
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -661,8 +754,8 @@ class EmailNotificationPreferences(BaseModel):
     user_id: uuid.UUID
     email: EmailStr
     alerts_enabled: bool
-    alert_types: list[Literal["stop", "failure", "unhealthy"]] = Field(
-        default=["stop", "failure", "unhealthy"]
+    alert_types: list[Literal["stop", "failure", "unhealthy", "storage"]] = Field(
+        default=["stop", "failure", "unhealthy", "storage"]
     )
     alert_frequency: Literal["immediate", "daily_digest", "weekly_summary"] = Field(
         default="immediate"
@@ -676,7 +769,7 @@ class EmailNotificationPreferencesUpdate(BaseModel):
 
     email: EmailStr | None = None
     alerts_enabled: bool | None = None
-    alert_types: list[Literal["stop", "failure", "unhealthy"]] | None = None
+    alert_types: list[Literal["stop", "failure", "unhealthy", "storage"]] | None = None
     alert_frequency: Literal["immediate", "daily_digest", "weekly_summary"] | None = (
         None
     )
@@ -709,6 +802,27 @@ class ContainerMonitoringStatus(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Audit log
+# ---------------------------------------------------------------------------
+
+
+class AuditLogEntry(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    user_id: uuid.UUID
+    action: str
+    target_type: str
+    target_id: str
+    details: dict | None = None
+    created_at: datetime
+
+
+class AuditLogListResponse(BaseModel):
+    entries: list[AuditLogEntry]
+    total: int
+
+
 # Stacks
 # ---------------------------------------------------------------------------
 
@@ -726,6 +840,7 @@ class StackServiceCreate(BaseModel):
     volumes: list[VolumeMountRequest] = Field(default_factory=list)
     scaling_policy: ScalingPolicyConfig | None = None
     build_override: BuildOverride | None = None
+    detected: bool = False
 
 
 class StackCreate(BaseModel):
@@ -766,21 +881,96 @@ class StackPublic(BaseModel):
     child_stack_ids: list[uuid.UUID] = []
 
 
-class ComposeImportRequest(BaseModel):
-    name: str = Field(min_length=1, max_length=128)
-    project_id: uuid.UUID | None = None
+class ManifestParseRequest(BaseModel):
     yaml_content: str
 
 
-class ComposeImportResponse(BaseModel):
-    stack: StackPublic
-    warnings: list[str] = []
-
-
-class ComposeParseRequest(BaseModel):
-    yaml_content: str
-
-
-class ComposeParseResponse(BaseModel):
+class ManifestParseResponse(BaseModel):
     services: list[StackServiceCreate]
     warnings: list[str] = []
+    manifest_kind: Literal["compose", "k8s"]
+
+
+class AnalyzeRepoRequest(BaseModel):
+    git_url: str = Field(min_length=1, max_length=2048)
+    git_branch: str = Field(default="main", max_length=256)
+    use_server_default: bool = False
+
+
+class AnalyzeRepoResponse(BaseModel):
+    services: list[StackServiceCreate]
+    warnings: list[str] = []
+    manifest_kind: Literal["compose", "k8s", "llm"]
+    manifest_path: str | None = None
+    summary_hint: str | None = None
+
+
+
+# ---------------------------------------------------------------------------
+# Metrics
+# ---------------------------------------------------------------------------
+
+
+class MetricPoint(BaseModel):
+    """Single stored metric row returned to the client."""
+
+    timestamp: datetime
+    cpu_percent: float
+    memory_usage_bytes: int
+    memory_limit_bytes: int
+    memory_percent: float
+    network_rx_bytes: int
+    network_tx_bytes: int
+
+
+class MetricSummary(BaseModel):
+    """Aggregated stats for a time bucket."""
+
+    bucket_start: datetime
+    cpu_avg: float
+    cpu_max: float
+    cpu_min: float
+    memory_usage_avg: int
+    memory_usage_max: int
+    memory_limit_avg: int
+    memory_percent_avg: float
+    memory_percent_max: float
+    network_rx_total: int
+    network_tx_total: int
+
+
+class ContainerUsageEntry(BaseModel):
+    """One container's latest stored usage snapshot (None usage = not running)."""
+
+    container_id: str
+    name: str
+    status: str
+    project_id: uuid.UUID | None
+    project_name: str | None
+    team_name: str | None
+    cpu_percent: float | None
+    memory_usage_bytes: int | None
+    memory_percent: float | None
+
+
+class ProjectUsage(BaseModel):
+    """Latest usage across one project's containers (team or personal)."""
+
+    project_id: uuid.UUID | None
+    project_name: str | None
+    team_name: str | None
+    cpu_percent_total: float
+    memory_usage_bytes_total: int
+    storage_quota_bytes: int | None = None
+    storage_used_bytes: int = 0
+    storage_over_quota: bool = False
+    containers: list[ContainerUsageEntry]
+
+
+class UsageSummary(BaseModel):
+    """Latest resource usage for every container the caller can access."""
+
+    projects: list[ProjectUsage]
+    total_cpu_percent: float
+    total_memory_usage_bytes: int
+    running_containers: int

@@ -80,6 +80,14 @@ test.describe('Containers page', () => {
       authenticatedPage.getByText('Image reference found.'),
     ).toBeVisible()
     await authenticatedPage.getByRole('button', { name: 'Advanced options' }).click()
+    await expect(
+      authenticatedPage.getByLabel('CPU limit (cores)'),
+    ).toBeVisible()
+    await expect(
+      authenticatedPage.getByLabel('Memory limit (MB)'),
+    ).toBeVisible()
+    await authenticatedPage.getByLabel('CPU limit (cores)').fill('0.5')
+    await authenticatedPage.getByLabel('Memory limit (MB)').fill('128')
     await authenticatedPage.getByLabel('Environment variable name 1').fill('FOO')
     await authenticatedPage.getByLabel('Environment variable value 1').fill('bar')
     await authenticatedPage.getByLabel('Start command').fill('nginx -g daemon off;')
