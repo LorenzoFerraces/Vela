@@ -6,8 +6,9 @@
 # The API drives the HOST Docker daemon through a bind-mounted socket, so
 # workload containers run on the host engine and join the `vela-workloads`
 # network. Traefik is attached to that same network, which is what lets public
-# routes reach workloads. Works from Windows (Docker Desktop) or WSL2: the api
-# entrypoint aligns the socket's group with its in-image docker group on start.
+# routes reach workloads. Stack networks (`vela-stack-*`) are joined by the API.
+# Works from Windows (Docker Desktop) or WSL2: the api entrypoint aligns the
+# socket's group with its in-image docker group on start.
 
 name: vela
 
@@ -65,7 +66,7 @@ services:
         required: false
     environment:
       VELA_DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-vela}:${POSTGRES_PASSWORD:-vela}@postgres:5432/${POSTGRES_DB:-Vela}
-      VELA_TRAEFIK_DYNAMIC_FILE: /etc/traefik/dynamic/traefik-http.json
+      VELA_TRAEFIK_DYNAMIC_FILE: /etc/traefik/dynamic/traefik-http.yml
       VELA_TRAEFIK_RELOAD_CONTAINER: vela-traefik
       VELA_DOCKER_NETWORK: vela-workloads
       VELA_VOLUME_UPLOADS_DIR: ${VELA_VOLUME_UPLOADS_DIR:-/data/volume-uploads}
@@ -108,9 +109,8 @@ services:
     container_name: vela-traefik
     restart: unless-stopped
     command:
-      - --providers.file.filename=/etc/traefik/dynamic/traefik-http.json
+      - --providers.file.directory=/etc/traefik/dynamic
       - --providers.file.watch=true
-      - --providers.file.directory=/etc/traefik/static
       - --entrypoints.web.address=:80
       - --api.dashboard=true
       - --api.insecure=true
@@ -119,7 +119,7 @@ services:
       - "127.0.0.1:8080:8080"
     volumes:
       - traefik_dynamic:/etc/traefik/dynamic
-      - ./traefik/static:/etc/traefik/static:ro
+      - ./traefik/static/spa.yaml:/etc/traefik/dynamic/spa.yaml:ro
     networks:
       - default
       - workloads

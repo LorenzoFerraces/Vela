@@ -36,3 +36,8 @@ blob-report/
 opencode.json
 opencode_requests.log
 .zed/
+
+.superpowers/
+.specify/
+
+docs/superpowers/

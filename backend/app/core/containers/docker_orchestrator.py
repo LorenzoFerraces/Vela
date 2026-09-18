@@ -404,6 +404,7 @@ class DockerOrchestrator(ContainerOrchestrator):
         *,
         client: docker.DockerClient | None = None,
         default_network: str | None = None,
+        proxy_container: str | None = None,
         **kwargs: Any,
     ) -> None:
         """Create the orchestrator.
@@ -413,6 +414,9 @@ class DockerOrchestrator(ContainerOrchestrator):
             default_network: Attach new containers to this Docker network at create time.
                 If ``None``, uses ``VELA_DOCKER_NETWORK`` from the environment when set.
                 Pass ``""`` to force default engine networking even when the env var is set.
+            proxy_container: Traefik container name to attach to stack networks.
+                If ``None``, uses ``VELA_TRAEFIK_RELOAD_CONTAINER`` from the environment.
+                Pass ``""`` to disable proxy attach/detach.
         """
         if client is not None:
             self._client = client
@@ -429,6 +433,12 @@ class DockerOrchestrator(ContainerOrchestrator):
             )
         else:
             self._default_network = default_network.strip() or None
+        if proxy_container is None:
+            self._proxy_container = (
+                os.environ.get("VELA_TRAEFIK_RELOAD_CONTAINER", "").strip() or None
+            )
+        else:
+            self._proxy_container = proxy_container.strip() or None
         self._default_network_ensured = False
         self._default_network_lock = threading.Lock()
         self._log_stream_semaphore = asyncio.Semaphore(_max_concurrent_log_streams())
@@ -1302,18 +1312,95 @@ class DockerOrchestrator(ContainerOrchestrator):
         )
         return await self.deploy(replica_config)
 
+    def _lookup_proxy_container_sync(self) -> Any | None:
+        proxy_name = self._proxy_container
+        if not proxy_name:
+            return None
+        try:
+            return self._client.containers.get(proxy_name)
+        except docker.errors.NotFound:
+            logger.warning(
+                "VELA_TRAEFIK_RELOAD_CONTAINER: no container named %r; Traefik may stay stale",
+                proxy_name,
+            )
+            return None
+        except docker.errors.DockerException as exc:
+            logger.warning(
+                "VELA_TRAEFIK_RELOAD_CONTAINER: could not look up %r: %s",
+                proxy_name,
+                exc,
+            )
+            return None
+
+    def _connect_proxy_to_network_sync(self, container: Any, network_name: str) -> None:
+        try:
+            network = self._client.networks.get(network_name)
+            network.connect(container)
+        except docker.errors.NotFound:
+            logger.warning(
+                "VELA_TRAEFIK_RELOAD_CONTAINER: network %s not found while attaching %r",
+                network_name,
+                self._proxy_container,
+            )
+        except docker.errors.DockerException as exc:
+            if isinstance(exc, docker.errors.APIError) and "already" in str(exc).lower():
+                return
+            logger.warning(
+                "VELA_TRAEFIK_RELOAD_CONTAINER: could not attach %r to %s: %s",
+                self._proxy_container,
+                network_name,
+                exc,
+            )
+
+    def _attach_proxy_to_network_sync(self, network_name: str) -> None:
+        container = self._lookup_proxy_container_sync()
+        if container is None:
+            return
+        self._connect_proxy_to_network_sync(container, network_name)
+        for network in self._client.networks.list():
+            name = network.name
+            if not name.startswith("vela-stack-") or name == network_name:
+                continue
+            self._connect_proxy_to_network_sync(container, name)
+
+    def _detach_proxy_from_network_sync(self, network_name: str) -> None:
+        proxy_name = self._proxy_container
+        if not proxy_name:
+            return
+        try:
+            container = self._client.containers.get(proxy_name)
+            network = self._client.networks.get(network_name)
+            network.disconnect(container, force=True)
+        except docker.errors.NotFound:
+            return
+        except docker.errors.DockerException as exc:
+            logger.warning(
+                "VELA_TRAEFIK_RELOAD_CONTAINER: could not detach %r from %s: %s",
+                proxy_name,
+                network_name,
+                exc,
+            )
+
     async def create_network(self, name: str) -> None:
-        existing = [
-            n
-            for n in self._client.networks.list(filters={"name": name})
-            if n.name == name
-        ]
-        if not existing:
-            self._client.networks.create(name, driver="bridge")
+        def sync() -> None:
+            existing = [
+                n
+                for n in self._client.networks.list(filters={"name": name})
+                if n.name == name
+            ]
+            if not existing:
+                self._client.networks.create(name, driver="bridge")
+            self._attach_proxy_to_network_sync(name)
+
+        await self._to_thread(sync)
 
     async def remove_network(self, name: str) -> None:
-        try:
-            network = self._client.networks.get(name)
-            network.remove()
-        except docker.errors.NotFound:
-            pass
+        def sync() -> None:
+            self._detach_proxy_from_network_sync(name)
+            try:
+                network = self._client.networks.get(name)
+                network.remove()
+            except docker.errors.NotFound:
+                pass
+
+        await self._to_thread(sync)
