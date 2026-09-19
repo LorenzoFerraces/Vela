@@ -47,6 +47,7 @@ from sqlalchemy.pool import StaticPool
 from app.api.app import create_app
 from app.api.deps import (
     get_db,
+    get_db_session_factory,
     get_image_builder,
     get_object_storage,
     get_orchestrator,
@@ -257,6 +258,7 @@ def _build_app_with_overrides(
             yield session
 
     app.dependency_overrides[get_db] = _get_db_override
+    app.dependency_overrides[get_db_session_factory] = lambda: db_session_factory
     if orchestrator is not None:
         app.dependency_overrides[get_orchestrator] = lambda: orchestrator
     if image_builder is not None:

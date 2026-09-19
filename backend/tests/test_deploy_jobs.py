@@ -1,10 +1,14 @@
-"""Unit tests for the in-memory deploy job registry (no app wiring)."""
+"""Tests for the in-memory deploy job registry and /api/deploys/active."""
 
 from __future__ import annotations
 
 import asyncio
 import uuid
 from datetime import datetime, timedelta, timezone
+from typing import Any, cast
+
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
 
 from app.core.deploy.jobs import (
     TERMINAL_JOB_TTL,
@@ -16,6 +20,7 @@ from app.core.exceptions import (
     NeedsBuildOverrideError,
     ProviderConnectionError,
 )
+from app.db.models import User
 
 PROJECT_ID = uuid.uuid4()
 USER_ID = uuid.uuid4()
@@ -126,3 +131,93 @@ def test_spawn_runs_coroutine_and_cancel_all_stops_workers() -> None:
         await registry.cancel_all()
 
     asyncio.run(main())
+
+
+def _create_job(
+    api_client: TestClient, seeded_user: User, **overrides: Any
+):
+    fastapi_app = cast(FastAPI, api_client.app)
+    project_id = seeded_user.personal_project_id
+    assert project_id is not None
+    params: dict[str, Any] = {
+        "kind": "container",
+        "project_id": project_id,
+        "user_id": seeded_user.id,
+        "name": "web",
+        "source_label": "nginx:alpine",
+    }
+    params.update(overrides)
+    return fastapi_app.state.deploy_jobs.create(**params)
+
+
+def test_active_deploys_requires_auth(anonymous_client: TestClient) -> None:
+    assert anonymous_client.get("/api/deploys/active").status_code == 401
+
+
+def test_active_deploys_lists_in_progress_job(
+    api_client: TestClient, seeded_user: User
+) -> None:
+    job = _create_job(api_client, seeded_user)
+    listed = api_client.get("/api/deploys/active")
+    assert listed.status_code == 200
+    jobs = listed.json()
+    assert [entry["job_id"] for entry in jobs] == [job.job_id]
+    assert jobs[0]["kind"] == "container"
+    assert jobs[0]["status"] == "in_progress"
+    assert jobs[0]["phase"] == "queued"
+    assert jobs[0]["name"] == "web"
+    assert jobs[0]["source_label"] == "nginx:alpine"
+    assert jobs[0]["services"] == []
+    assert jobs[0]["error"] is None
+    assert jobs[0]["result"] is None
+    assert jobs[0]["finished_at"] is None
+
+
+def test_active_deploys_keeps_terminal_job_visible(
+    api_client: TestClient, seeded_user: User
+) -> None:
+    job = _create_job(api_client, seeded_user)
+    cast(FastAPI, api_client.app).state.deploy_jobs.complete_failure(
+        job.job_id, {"code": "deploy_failed", "detail": "boom"}
+    )
+    jobs = api_client.get("/api/deploys/active").json()
+    assert [entry["job_id"] for entry in jobs] == [job.job_id]
+    assert jobs[0]["status"] == "failed"
+    assert jobs[0]["error"] == {"code": "deploy_failed", "detail": "boom"}
+
+
+def test_active_deploys_scoped_to_caller_projects(
+    api_client: TestClient,
+    other_user_client: TestClient,
+    seeded_user: User,
+) -> None:
+    job = _create_job(api_client, seeded_user)
+    mine = {
+        entry["job_id"] for entry in api_client.get("/api/deploys/active").json()
+    }
+    assert job.job_id in mine
+    theirs = {
+        entry["job_id"]
+        for entry in other_user_client.get("/api/deploys/active").json()
+    }
+    assert job.job_id not in theirs
+
+
+def test_active_deploys_unknown_project_404(api_client: TestClient) -> None:
+    response = api_client.get(f"/api/deploys/active?project_id={uuid.uuid4()}")
+    assert response.status_code == 404
+
+
+def test_active_deploys_echoes_stack_services(
+    api_client: TestClient, seeded_user: User
+) -> None:
+    job = _create_job(
+        api_client, seeded_user, kind="stack", name="my-stack", services=["web", "api"]
+    )
+    jobs = api_client.get("/api/deploys/active").json()
+    assert jobs[0]["kind"] == "stack"
+    assert jobs[0]["services"] == [
+        {"name": "web", "state": "pending"},
+        {"name": "api", "state": "pending"},
+    ]
+    _ = job

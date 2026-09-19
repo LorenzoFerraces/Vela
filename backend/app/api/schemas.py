@@ -635,6 +635,31 @@ class DeploymentDiffResponse(BaseModel):
     dockerfile_diff: list[str]
 
 
+class DeployServiceStatePublic(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    name: str
+    state: str
+
+
+class DeployJobPublic(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    job_id: str
+    kind: Literal["container", "stack"]
+    project_id: uuid.UUID
+    name: str
+    source_label: str = ""
+    status: Literal["in_progress", "succeeded", "failed"]
+    phase: str
+    phase_detail: str | None = None
+    services: list[DeployServiceStatePublic] = Field(default_factory=list)
+    error: dict | None = None
+    result: dict | None = None
+    created_at: datetime
+    finished_at: datetime | None = None
+
+
 # ---------------------------------------------------------------------------
 # Auth schemas
 # ---------------------------------------------------------------------------

@@ -19,6 +19,7 @@ from app.api.routes import (
     auth,
     builder,
     containers,
+    deploys,
     deployments,
     dockerfile_templates,
     github,
@@ -225,6 +226,11 @@ def create_app() -> FastAPI:
         stacks.router,
         prefix=f"{API_PREFIX}/stacks",
         tags=["stacks"],
+    )
+    application.include_router(
+        deploys.router,
+        prefix=f"{API_PREFIX}/deploys",
+        tags=["deploys"],
     )
     application.include_router(
         metrics.router,

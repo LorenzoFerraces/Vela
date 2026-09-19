@@ -8,15 +8,16 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Annotated
 
-from fastapi import Depends
+from fastapi import Depends, Request
 from fastapi.security import OAuth2PasswordBearer
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.auth.service import get_user_by_id
 from app.core.auth.tokens import decode_access_token
 from app.core.build.default_image_builder import DefaultImageBuilder
 from app.core.containers.docker_orchestrator import DockerOrchestrator
 from app.core.containers.orchestrator import ContainerOrchestrator
+from app.core.deploy.jobs import DeployJobRegistry
 from app.core.exceptions import (
     NotAuthenticatedError,
     ObjectStorageError,
@@ -164,3 +165,13 @@ async def get_current_user(
     if user is None:
         raise NotAuthenticatedError("User no longer exists.")
     return user
+
+
+def get_deploy_jobs(request: Request) -> DeployJobRegistry:
+    """Shared in-memory deploy job registry (created in the app lifespan)."""
+    return request.app.state.deploy_jobs
+
+
+def get_db_session_factory() -> async_sessionmaker[AsyncSession]:
+    """Session factory for detached deploy workers (tests override this)."""
+    return get_session_factory()
