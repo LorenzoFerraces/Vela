@@ -13,6 +13,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.gzip import GZipMiddleware
 
 from app.api.errors import register_exception_handlers
+from app.core.deploy.jobs import DeployJobRegistry
 from app.api.routes import (
     audit,
     auth,
@@ -47,6 +48,9 @@ async def _lifespan(_application: FastAPI):
     from app.e2e_support import ensure_e2e_database
 
     await ensure_e2e_database()
+
+    deploy_jobs = DeployJobRegistry()
+    _application.state.deploy_jobs = deploy_jobs
 
     monitor_task = asyncio.create_task(run_monitoring_loop())
     metrics_task: asyncio.Task[None] | None = None
@@ -88,6 +92,7 @@ async def _lifespan(_application: FastAPI):
     try:
         yield
     finally:
+        await deploy_jobs.cancel_all()
         monitor_task.cancel()
         if metrics_task is not None:
             metrics_task.cancel()
