@@ -396,11 +396,21 @@ async def _persist_run_deployment(
         except Exception:
             # In tests, request-session teardown ROLLBACKs on the shared
             # in-memory connection can wipe this INSERT before its COMMIT
-            # lands; retry from a clean session state.
-            await session.rollback()
-            if attempt == 2:
+            # lands; retry from a clean session state. A persist failure
+            # must never fail the deploy job.
+            logger.exception(
+                "Persist deployment history attempt %d/3 failed for container %s",
+                attempt + 1,
+                info.id,
+            )
+            try:
+                # Expunge the unflushed pending record so a retry cannot
+                # flush a duplicate row.
+                session.expunge_all()
+                await session.rollback()
+            except Exception:
                 logger.exception(
-                    "Failed to persist deployment history for container %s",
+                    "Could not reset session before persist retry for container %s",
                     info.id,
                 )
 
