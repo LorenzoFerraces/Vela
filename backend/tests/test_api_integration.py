@@ -6,6 +6,7 @@ Uses in-memory SQLite and FakeContainerOrchestrator — no Docker daemon require
 
 from __future__ import annotations
 
+import json
 import uuid
 from pathlib import Path
 from typing import cast
@@ -34,6 +35,7 @@ from app.core.containers.volume_uploads import (
 from app.core.traffic.traffic_router import NoopTrafficRouter
 from app.db.models import Dockerfile, User
 from tests.conftest import make_container_info
+from tests.test_deploy_jobs import wait_for_deploy
 
 
 async def _stub_git_shallow_clone(
@@ -208,7 +210,9 @@ def test_run_from_image_with_env_and_command(
             "command": ["nginx", "-g", "daemon off;"],
         },
     )
-    assert response.status_code == 200
+    assert response.status_code == 202
+    job = wait_for_deploy(api_client, response.json()["job_id"])
+    assert job["status"] == "succeeded"
     assert fake_orchestrator.last_deploy_config is not None
     assert fake_orchestrator.last_deploy_config.env_vars == {
         "NODE_ENV": "production",
@@ -234,7 +238,9 @@ def test_run_from_image_with_resource_limits(
             "memory_limit": 256,
         },
     )
-    assert response.status_code == 200
+    assert response.status_code == 202
+    job = wait_for_deploy(api_client, response.json()["job_id"])
+    assert job["status"] == "succeeded"
     assert fake_orchestrator.last_deploy_config is not None
     assert fake_orchestrator.last_deploy_config.cpu_limit == 0.5
     assert fake_orchestrator.last_deploy_config.memory_limit == 256
@@ -249,7 +255,9 @@ def test_run_from_image_resource_limits_optional(api_client: TestClient) -> None
             "image_ref": "nginx:alpine",
         },
     )
-    assert response.status_code == 200
+    assert response.status_code == 202
+    job = wait_for_deploy(api_client, response.json()["job_id"])
+    assert job["status"] == "succeeded"
 
 
 def test_run_resource_limits_pass_through_all_source_kinds(
@@ -273,7 +281,9 @@ def test_run_resource_limits_pass_through_all_source_kinds(
             "memory_limit": 256,
         },
     )
-    assert image_response.status_code == 200
+    assert image_response.status_code == 202
+    job = wait_for_deploy(api_client, image_response.json()["job_id"])
+    assert job["status"] == "succeeded"
     assert fake_orchestrator.last_deploy_config is not None
     assert fake_orchestrator.last_deploy_config.cpu_limit == 0.5
     assert fake_orchestrator.last_deploy_config.memory_limit == 256
@@ -296,7 +306,9 @@ def test_run_resource_limits_pass_through_all_source_kinds(
             "memory_limit": 512,
         },
     )
-    assert template_response.status_code == 200
+    assert template_response.status_code == 202
+    job = wait_for_deploy(api_client, template_response.json()["job_id"])
+    assert job["status"] == "succeeded"
     assert fake_orchestrator.last_deploy_config is not None
     assert fake_orchestrator.last_deploy_config.cpu_limit == 1.0
     assert fake_orchestrator.last_deploy_config.memory_limit == 512
@@ -312,7 +324,9 @@ def test_run_resource_limits_pass_through_all_source_kinds(
             "memory_limit": 1024,
         },
     )
-    assert git_response.status_code == 200
+    assert git_response.status_code == 202
+    job = wait_for_deploy(api_client, git_response.json()["job_id"])
+    assert job["status"] == "succeeded"
     assert fake_orchestrator.last_deploy_config is not None
     assert fake_orchestrator.last_deploy_config.cpu_limit == 2.0
     assert fake_orchestrator.last_deploy_config.memory_limit == 1024
@@ -377,7 +391,9 @@ def test_run_from_image_with_read_only_volumes(
             "volumes": [{"upload_id": upload_id, "target": "/data"}],
         },
     )
-    assert response.status_code == 200
+    assert response.status_code == 202
+    job = wait_for_deploy(api_client, response.json()["job_id"])
+    assert job["status"] == "succeeded"
     assert fake_orchestrator.last_deploy_config is not None
     assert len(fake_orchestrator.last_deploy_config.volumes) == 1
     assert fake_orchestrator.last_deploy_config.volumes[0].target == "/data"
@@ -516,8 +532,10 @@ def test_run_from_image_public_route(
             "route_tls": False,
         },
     )
-    assert response.status_code == 200
-    body = response.json()
+    assert response.status_code == 202
+    job = wait_for_deploy(api_client, response.json()["job_id"])
+    assert job["status"] == "succeeded"
+    body = job["result"]
     assert body["kind"] == "image"
     assert body["image"] == "nginx:alpine"
     assert body["route_wired"] is True
@@ -553,8 +571,10 @@ def test_run_from_dockerfile_template(
             "container_port": 80,
         },
     )
-    assert response.status_code == 200
-    body = response.json()
+    assert response.status_code == 202
+    job = wait_for_deploy(api_client, response.json()["job_id"])
+    assert job["status"] == "succeeded"
+    body = job["result"]
     assert body["kind"] == "dockerfile_template"
     assert body["image"].startswith("vela/templatebuild:")
     assert any(tag.startswith("vela/templatebuild:") for tag in fake_orchestrator._built_tags)
@@ -630,8 +650,10 @@ def test_run_from_git_url(
             "container_port": 80,
         },
     )
-    assert response.status_code == 200
-    body = response.json()
+    assert response.status_code == 202
+    job = wait_for_deploy(api_client, response.json()["job_id"])
+    assert job["status"] == "succeeded"
+    body = job["result"]
     assert body["kind"] == "git"
     assert body["image"].startswith("vela/gitbuild:")
 
@@ -664,8 +686,10 @@ def test_run_from_git_url_strips_embedded_credentials(
             "container_port": 80,
         },
     )
-    assert response.status_code == 200
-    assert "ghp_secrettoken123" not in response.text
+    assert response.status_code == 202
+    job = wait_for_deploy(api_client, response.json()["job_id"])
+    assert job["status"] == "succeeded"
+    assert "ghp_secrettoken123" not in json.dumps(job)
 
     listed = api_client.get("/api/containers/")
     assert listed.status_code == 200
@@ -930,7 +954,9 @@ def test_run_from_github_uses_stored_token(
         },
     )
 
-    assert response.status_code == 200, response.text
+    assert response.status_code == 202, response.text
+    job = wait_for_deploy(api_client, response.json()["job_id"])
+    assert job["status"] == "succeeded"
     assert recorded_tokens == ["ghp_secret_value"]
 
 
@@ -982,7 +1008,9 @@ def test_run_from_github_without_connection_does_not_send_token(
         },
     )
 
-    assert response.status_code == 200, response.text
+    assert response.status_code == 202, response.text
+    job = wait_for_deploy(api_client, response.json()["job_id"])
+    assert job["status"] == "succeeded"
     assert recorded_tokens == [None]
 
 
@@ -1023,9 +1051,10 @@ def test_run_private_github_clone_failure_hints_settings(
         },
     )
 
-    assert response.status_code == 422
-    detail = response.json()["detail"].lower()
-    assert "connect github in settings" in detail
+    assert response.status_code == 202, response.text
+    job = wait_for_deploy(api_client, response.json()["job_id"])
+    assert job["status"] == "failed"
+    assert "connect github in settings" in job["error"]["detail"].lower()
 
 
 def test_builder_build_calls_pipeline(make_authed_client, tmp_path, monkeypatch) -> None:
@@ -1276,10 +1305,11 @@ def test_run_from_git_needs_build_override(
             "container_port": 80,
         },
     )
-    assert response.status_code == 422
-    body = response.json()
-    assert body["code"] == "needs_build_override"
-    assert "detail" in body
+    assert response.status_code == 202, response.text
+    job = wait_for_deploy(api_client, response.json()["job_id"])
+    assert job["status"] == "failed"
+    assert job["error"]["code"] == "needs_build_override"
+    assert "detail" in job["error"]
 
 
 def test_stack_deploy_needs_build_override(

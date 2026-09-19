@@ -3,13 +3,17 @@
 from __future__ import annotations
 
 import asyncio
+import time
 import uuid
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Any, cast
 
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from app.core.containers.fake_orchestrator import FakeContainerOrchestrator
 from app.core.deploy.jobs import (
     TERMINAL_JOB_TTL,
     DeployJobRegistry,
@@ -221,3 +225,162 @@ def test_active_deploys_echoes_stack_services(
         {"name": "api", "state": "pending"},
     ]
     _ = job
+
+
+def _create_template(api_client: TestClient) -> str:
+    response = api_client.post(
+        "/api/dockerfiles/",
+        json={"name": f"tpl-{uuid.uuid4().hex[:8]}", "contents": "FROM nginx:alpine\n"},
+    )
+    assert response.status_code == 201
+    return response.json()["id"]
+
+
+def _submit_run(api_client: TestClient, json_body: dict[str, Any]):
+    return api_client.post("/api/containers/run", json=json_body)
+
+
+def wait_for_deploy(
+    client: TestClient, job_id: str, timeout: float = 10.0
+) -> dict[str, Any]:
+    """Poll /api/deploys/active until the job reaches a terminal state."""
+    deadline = time.monotonic() + timeout
+    last: dict[str, Any] | None = None
+    # Outlast the detached worker so no poll's request-session teardown
+    # ROLLBACK overlaps the worker's transaction on the shared in-memory
+    # SQLite connection (the worker already finished when polling starts).
+    time.sleep(0.2)
+    while True:
+        jobs = client.get("/api/deploys/active").json()
+        last = next(
+            (entry for entry in jobs if entry["job_id"] == job_id), None
+        )
+        if last is not None and last["status"] != "in_progress":
+            return last
+        if time.monotonic() >= deadline:
+            raise AssertionError(
+                f"deploy job {job_id} did not finish in {timeout}s; last={last}"
+            )
+        time.sleep(0.1)
+
+
+def test_run_returns_202_and_job_completes_with_run_response_shape(
+    api_client: TestClient,
+    fake_orchestrator: FakeContainerOrchestrator,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("VELA_PUBLIC_ROUTE_DOMAIN", "apps.example.com")
+    accepted = _submit_run(
+        api_client,
+        {
+            "source_kind": "image",
+            "image_ref": "nginx:alpine",
+            "public_route": True,
+            "container_port": 80,
+            "env_vars": {"FOO": "bar"},
+        },
+    )
+    assert accepted.status_code == 202
+    body = accepted.json()
+    assert body["status"] == "in_progress"
+
+    job = wait_for_deploy(api_client, body["job_id"])
+    assert job["phase"] in {"starting", "routing"}
+    assert job["status"] == "succeeded"
+    result = job["result"]
+    assert result["kind"] == "image"
+    assert result["image"] == "nginx:alpine"
+    assert result["route_wired"] is True
+    assert result["public_url"].startswith("https://")
+    assert result["container"]["status"] == "running"
+    assert fake_orchestrator.last_deploy_config is not None
+
+
+def test_run_job_persists_deployment_record(
+    api_client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("VELA_PUBLIC_ROUTE_DOMAIN", "apps.example.com")
+    accepted = _submit_run(
+        api_client,
+        {"source_kind": "image", "image_ref": "nginx:alpine", "env_vars": {"FOO": "bar"}},
+    )
+    job = wait_for_deploy(api_client, accepted.json()["job_id"])
+    assert job["status"] == "succeeded"
+
+    listed = api_client.get("/api/deployments/")
+    rows = listed.json()
+    assert rows[0]["env_vars"] == {"FOO": "<REDACTED>"}
+
+
+def test_run_job_error_contract_build_failure(
+    api_client: TestClient,
+    fake_orchestrator: FakeContainerOrchestrator,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def failing_build(self, dockerfile_contents: str, *, tag: str):
+        _ = self, dockerfile_contents, tag
+        raise ImageBuildError("boom during build", build_log="step 1\nfailed")
+
+    monkeypatch.setattr(
+        "app.core.build.default_image_builder.DefaultImageBuilder.build_from_dockerfile_template",
+        failing_build,
+    )
+    accepted = _submit_run(
+        api_client,
+        {
+            "source_kind": "dockerfile_template",
+            "dockerfile_template_id": _create_template(api_client),
+        },
+    )
+    job = wait_for_deploy(api_client, accepted.json()["job_id"])
+    assert job["status"] == "failed"
+    assert job["error"]["code"] == "build_failed"
+    assert job["error"]["detail"] == "boom during build"
+    assert "failed" in job["error"]["build_log"]
+
+
+def test_run_job_error_contract_needs_build_override(
+    api_client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def empty_clone(
+        *, url: str, branch: str, dest: Path, access_token: str | None = None
+    ) -> None:
+        _ = url, branch, access_token
+        dest.mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setattr(
+        "app.core.build.default_image_builder.git_shallow_clone", empty_clone
+    )
+    accepted = _submit_run(
+        api_client,
+        {"source": "https://github.com/example/empty.git", "git_branch": "main"},
+    )
+    job = wait_for_deploy(api_client, accepted.json()["job_id"])
+    assert job["status"] == "failed"
+    assert job["error"]["code"] == "needs_build_override"
+    assert "detail" in job["error"]
+
+
+def test_run_sync_400_stays_sync_for_missing_public_route_domain(
+    api_client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("VELA_PUBLIC_ROUTE_DOMAIN", raising=False)
+    response = _submit_run(
+        api_client, {"source": "nginx:alpine", "public_route": True}
+    )
+    assert response.status_code == 400
+    assert "VELA_PUBLIC_ROUTE_DOMAIN" in response.json()["detail"]
+
+
+def test_run_sync_422_stays_sync_for_bad_payload(api_client: TestClient) -> None:
+    assert (
+        _submit_run(
+            api_client,
+            {
+                "source_kind": "image",
+                "image_ref": "nginx:alpine",
+                "command": [],
+            },
+        ).status_code
+        == 422
+    )

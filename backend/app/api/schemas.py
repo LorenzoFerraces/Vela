@@ -635,6 +635,13 @@ class DeploymentDiffResponse(BaseModel):
     dockerfile_diff: list[str]
 
 
+class RunAcceptedResponse(BaseModel):
+    """202 body for async deploy submission; poll GET /api/deploys/active."""
+
+    job_id: str
+    status: Literal["in_progress"]
+
+
 class DeployServiceStatePublic(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

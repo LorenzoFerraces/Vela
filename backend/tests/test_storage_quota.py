@@ -38,6 +38,7 @@ from app.db.models import (
     ProjectMembership,
     User,
 )
+from tests.test_deploy_jobs import wait_for_deploy
 
 
 @pytest_asyncio.fixture
@@ -301,7 +302,9 @@ def test_run_allowed_under_team_quota(
         "/api/containers/run",
         json={"source_kind": "image", "image_ref": "nginx:alpine"},
     )
-    assert response.status_code == 200
+    assert response.status_code == 202, response.text
+    job = wait_for_deploy(api_client, response.json()["job_id"])
+    assert job["status"] == "succeeded"
 
 
 def test_deploy_blocked_when_team_quota_exceeded(

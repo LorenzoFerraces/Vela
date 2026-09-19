@@ -7,11 +7,13 @@ import json
 import logging
 import os
 import uuid
+from collections.abc import Coroutine
 from contextlib import suppress
-from typing import Annotated, Callable
+from typing import Annotated, Any, Callable
 
 from fastapi import (
     APIRouter,
+    BackgroundTasks,
     Depends,
     File,
     Query,
@@ -21,12 +23,14 @@ from fastapi import (
     status,
 )
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from starlette.websockets import WebSocketDisconnect
 
 from app.api.deps import (
     get_current_user,
     get_db,
+    get_db_session_factory,
+    get_deploy_jobs,
     get_image_builder,
     get_orchestrator,
     get_traffic_router,
@@ -41,6 +45,7 @@ from app.api.schemas import (
     ImageAvailabilityResponse,
     ImageSuggestion,
     ImageSuggestionsResponse,
+    RunAcceptedResponse,
     RunFromSourceRequest,
     RunFromSourceResponse,
     VolumeMountRequest,
@@ -76,6 +81,10 @@ from app.core.deploy.github_auth import (
     github_token_for_url,
     is_github_https_url,
     looks_like_auth_failure,
+)
+from app.core.deploy.jobs import (
+    DeployJobRegistry,
+    classify_deploy_error,
 )
 from app.core.deploy.deploy_source_suggestions import (
     DeploySourcesResponse,
@@ -127,6 +136,7 @@ from app.core.traffic.public_route_host import (
     apply_public_route_to_deploy_config,
     build_public_url,
     read_public_route_settings,
+    read_public_route_settings_or_raise_for_public_deploy,
 )
 from app.core.traffic.traffic_router import TrafficRouter
 from app.core.url_display import sanitize_url_for_display
@@ -357,33 +367,42 @@ async def _persist_run_deployment(
     public_url: str | None,
 ) -> None:
     sanitized_env_vars = _redacted_env_vars_for_history(body.env_vars)
-    try:
-        await record_deployment(
-            session,
-            user_id=user.id,
-            project_id=project_id,
-            snapshot=DeploymentSnapshot(
-                container_id=info.id,
-                container_name=info.name or body.container_name,
-                source_kind=source_kind,
-                source_ref=source_ref,
-                git_branch=body.git_branch if source_kind == "git" else None,
-                image_tag=image_tag,
-                container_port=body.container_port,
-                env_vars=sanitized_env_vars,
-                command=list(body.command) if body.command else None,
-                dockerfile_snapshot=dockerfile_snapshot,
-                public_url=public_url,
-                build_override=(
-                    body.build_override.model_dump() if body.build_override else None
+    for attempt in range(3):
+        try:
+            await record_deployment(
+                session,
+                user_id=user.id,
+                project_id=project_id,
+                snapshot=DeploymentSnapshot(
+                    container_id=info.id,
+                    container_name=info.name or body.container_name,
+                    source_kind=source_kind,
+                    source_ref=source_ref,
+                    git_branch=body.git_branch if source_kind == "git" else None,
+                    image_tag=image_tag,
+                    container_port=body.container_port,
+                    env_vars=sanitized_env_vars,
+                    command=list(body.command) if body.command else None,
+                    dockerfile_snapshot=dockerfile_snapshot,
+                    public_url=public_url,
+                    build_override=(
+                        body.build_override.model_dump()
+                        if body.build_override
+                        else None
+                    ),
                 ),
-            ),
-        )
-    except Exception:
-        logger.exception(
-            "Failed to persist deployment history for container %s",
-            info.id,
-        )
+            )
+            return
+        except Exception:
+            # In tests, request-session teardown ROLLBACKs on the shared
+            # in-memory connection can wipe this INSERT before its COMMIT
+            # lands; retry from a clean session state.
+            await session.rollback()
+            if attempt == 2:
+                logger.exception(
+                    "Failed to persist deployment history for container %s",
+                    info.id,
+                )
 
 
 async def _persist_scaling_policy(
@@ -818,7 +837,292 @@ async def upload_volume_folder(
     )
 
 
-@router.post("/run", response_model=RunFromSourceResponse)
+async def _spawn_deploy_worker(
+    registry: DeployJobRegistry,
+    job_id: str,
+    worker: Callable[..., Coroutine[Any, Any, None]],
+    *worker_args: Any,
+) -> None:
+    """Start the worker after the response is sent so its DB session never
+    overlaps the request sessions' teardown on the shared test connection."""
+    registry.spawn(job_id, worker(*worker_args))
+
+
+async def _run_container_deploy_worker(
+    registry: DeployJobRegistry,
+    job_id: str,
+    session_factory: async_sessionmaker[AsyncSession],
+    body: RunFromSourceRequest,
+    project_id: uuid.UUID,
+    resolved_volumes: list[VolumeMount],
+    current_user: User,
+    orchestrator: ContainerOrchestrator,
+    traffic_router: TrafficRouter,
+    image_builder: DefaultImageBuilder,
+) -> None:
+    """Run the deploy pipeline detached; mirror phases into the job registry."""
+    try:
+        async with session_factory() as session:
+            source_kind = body.source_kind
+            if source_kind is None:
+                raise ValueError(
+                    "source_kind must be set after request validation."
+                )
+
+            if source_kind == "image":
+                image_ref = (body.image_ref or "").strip()
+                cfg = _deploy_config_for_image(
+                    image=image_ref,
+                    container_name=body.container_name,
+                    host_port=body.host_port,
+                    container_port=body.container_port,
+                    env_vars=body.env_vars,
+                    command=body.command,
+                    volumes=resolved_volumes,
+                    cpu_limit=body.cpu_limit,
+                    memory_limit=body.memory_limit,
+                ).model_copy(update=_route_updates_from_run_body(body))
+                cfg = with_deploy_source_labels(
+                    cfg, source_kind="image", source_ref=image_ref
+                )
+                cfg = _apply_deploy_labels(
+                    cfg, owner_id=str(current_user.id), project_id=project_id
+                )
+                cfg = await apply_public_route_to_deploy_config(cfg, traffic_router)
+                registry.set_phase(job_id, "starting", image_ref)
+                info, route_wired, public_url = await _deploy_and_maybe_wire_route(
+                    orchestrator, traffic_router, cfg
+                )
+                registry.set_phase(job_id, "routing")
+                await _persist_run_deployment(
+                    session,
+                    current_user,
+                    body,
+                    info,
+                    project_id=project_id,
+                    source_kind="image",
+                    source_ref=image_ref,
+                    image_tag=image_ref,
+                    dockerfile_snapshot=None,
+                    public_url=public_url,
+                )
+                saved_policy, scaling_policy_warning = await _persist_scaling_policy(
+                    session, info.name, body
+                )
+                await emit_audit_log(
+                    session,
+                    user_id=current_user.id,
+                    action="container.deploy",
+                    target_type="container",
+                    target_id=info.id,
+                    details={
+                        "source_kind": "image",
+                        "source_ref": image_ref,
+                    },
+                )
+                await session.commit()
+                registry.complete_success(
+                    job_id,
+                    RunFromSourceResponse(
+                        container=info,
+                        kind="image",
+                        image=image_ref,
+                        route_wired=route_wired,
+                        public_url=public_url,
+                        scaling_policy=saved_policy,
+                        scaling_policy_warning=scaling_policy_warning,
+                    ).model_dump(mode="json"),
+                )
+                return
+
+            if source_kind == "dockerfile_template":
+                template_id = body.dockerfile_template_id
+                if template_id is None:
+                    raise ValueError("dockerfile_template_id is required.")
+                template = await user_library.get_dockerfile_template(
+                    session, current_user.id, template_id
+                )
+                tag = f"vela/templatebuild:{uuid.uuid4().hex[:12]}"
+                registry.set_phase(job_id, "building", tag)
+                build_result = await image_builder.build_from_dockerfile_template(
+                    template.contents,
+                    tag=tag,
+                )
+                cfg = _deploy_config_for_image(
+                    image=build_result.image_tag,
+                    container_name=body.container_name,
+                    host_port=body.host_port,
+                    container_port=body.container_port,
+                    env_vars=body.env_vars,
+                    command=body.command,
+                    volumes=resolved_volumes,
+                    cpu_limit=body.cpu_limit,
+                    memory_limit=body.memory_limit,
+                ).model_copy(
+                    update={
+                        "restart_policy": RestartPolicy.UNLESS_STOPPED,
+                        **_route_updates_from_run_body(body),
+                    }
+                )
+                cfg = with_deploy_source_labels(
+                    cfg,
+                    source_kind="dockerfile_template",
+                    source_ref=template.name,
+                )
+                cfg = _apply_deploy_labels(
+                    cfg, owner_id=str(current_user.id), project_id=project_id
+                )
+                cfg = await apply_public_route_to_deploy_config(cfg, traffic_router)
+                registry.set_phase(job_id, "starting", build_result.image_tag)
+                info, route_wired, public_url = await _deploy_and_maybe_wire_route(
+                    orchestrator, traffic_router, cfg
+                )
+                registry.set_phase(job_id, "routing")
+                await _persist_run_deployment(
+                    session,
+                    current_user,
+                    body,
+                    info,
+                    project_id=project_id,
+                    source_kind="dockerfile_template",
+                    source_ref=template.name,
+                    image_tag=build_result.image_tag,
+                    dockerfile_snapshot=(
+                        build_result.dockerfile_snapshot or template.contents
+                    ),
+                    public_url=public_url,
+                )
+                saved_policy, scaling_policy_warning = await _persist_scaling_policy(
+                    session, info.name, body
+                )
+                await emit_audit_log(
+                    session,
+                    user_id=current_user.id,
+                    action="container.deploy",
+                    target_type="container",
+                    target_id=info.id,
+                    details={
+                        "source_kind": "dockerfile_template",
+                        "source_ref": template.name,
+                    },
+                )
+                await session.commit()
+                registry.complete_success(
+                    job_id,
+                    RunFromSourceResponse(
+                        container=info,
+                        kind="dockerfile_template",
+                        image=build_result.image_tag,
+                        route_wired=route_wired,
+                        public_url=public_url,
+                        scaling_policy=saved_policy,
+                        scaling_policy_warning=scaling_policy_warning,
+                    ).model_dump(mode="json"),
+                )
+                return
+
+            git_url = (body.git_url or "").strip()
+            sanitized_git_url = sanitize_url_for_display(git_url)
+            access_token = await github_token_for_url(session, current_user, git_url)
+            tag = f"vela/gitbuild:{uuid.uuid4().hex[:12]}"
+            try:
+                build_result = await image_builder.build_from_source(
+                    ProjectSource(git_url=git_url, branch=body.git_branch),
+                    tag=tag,
+                    access_token=access_token,
+                    override=body.build_override,
+                    on_phase=lambda phase: registry.set_phase(job_id, phase),
+                )
+            except CloneError as exc:
+                if (
+                    access_token is None
+                    and is_github_https_url(git_url)
+                    and looks_like_auth_failure(str(exc))
+                ):
+                    raise CloneError(
+                        git_url,
+                        "Repository looks private. Connect GitHub in "
+                        "Settings to deploy private repos.",
+                    ) from exc
+                raise
+
+            cfg = _deploy_config_for_image(
+                image=build_result.image_tag,
+                container_name=body.container_name,
+                host_port=body.host_port,
+                container_port=body.container_port,
+                env_vars=body.env_vars,
+                command=body.command,
+                volumes=resolved_volumes,
+                cpu_limit=body.cpu_limit,
+                memory_limit=body.memory_limit,
+            ).model_copy(
+                update={
+                    "restart_policy": RestartPolicy.UNLESS_STOPPED,
+                    **_route_updates_from_run_body(body),
+                }
+            )
+            cfg = with_deploy_source_labels(
+                cfg, source_kind="git", source_ref=sanitized_git_url
+            )
+            cfg = _apply_deploy_labels(
+                cfg, owner_id=str(current_user.id), project_id=project_id
+            )
+            cfg = await apply_public_route_to_deploy_config(cfg, traffic_router)
+            registry.set_phase(job_id, "starting", build_result.image_tag)
+            info, route_wired, public_url = await _deploy_and_maybe_wire_route(
+                orchestrator, traffic_router, cfg
+            )
+            registry.set_phase(job_id, "routing")
+            await _persist_run_deployment(
+                session,
+                current_user,
+                body,
+                info,
+                project_id=project_id,
+                source_kind="git",
+                source_ref=sanitized_git_url,
+                image_tag=build_result.image_tag,
+                dockerfile_snapshot=build_result.dockerfile_snapshot,
+                public_url=public_url,
+            )
+            saved_policy, scaling_policy_warning = await _persist_scaling_policy(
+                session, info.name, body
+            )
+            await emit_audit_log(
+                session,
+                user_id=current_user.id,
+                action="container.deploy",
+                target_type="container",
+                target_id=info.id,
+                details={
+                    "source_kind": "git",
+                    "source_ref": sanitized_git_url,
+                },
+            )
+            await session.commit()
+            registry.complete_success(
+                job_id,
+                RunFromSourceResponse(
+                    container=info,
+                    kind="git",
+                    image=build_result.image_tag,
+                    route_wired=route_wired,
+                    public_url=public_url,
+                    scaling_policy=saved_policy,
+                    scaling_policy_warning=scaling_policy_warning,
+                ).model_dump(mode="json"),
+            )
+            return
+    except Exception as exc:
+        registry.complete_failure(job_id, classify_deploy_error(exc))
+
+
+@router.post(
+    "/run",
+    response_model=RunAcceptedResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
 async def run_from_user_source(
     body: RunFromSourceRequest,
     orchestrator: Annotated[ContainerOrchestrator, Depends(get_orchestrator)],
@@ -826,18 +1130,23 @@ async def run_from_user_source(
     image_builder: Annotated[DefaultImageBuilder, Depends(get_image_builder)],
     current_user: Annotated[User, Depends(get_current_user)],
     session: Annotated[AsyncSession, Depends(get_db)],
-) -> RunFromSourceResponse:
+    registry: Annotated[DeployJobRegistry, Depends(get_deploy_jobs)],
+    session_factory: Annotated[
+        async_sessionmaker[AsyncSession], Depends(get_db_session_factory)
+    ],
+    background_tasks: BackgroundTasks,
+) -> RunAcceptedResponse:
     """
-    Deploy a container by pulling or building an image from the user's specified source and return the deployment result.
+    Validate the deploy request synchronously, then run the deploy as a
+    detached job.
 
-    Depending on body.source_kind this will:
-    - "image": use the provided image reference (pull if needed) and deploy it.
-    - "dockerfile_template": build an ephemeral image from the user's saved Dockerfile template, then deploy it.
-    - "git": clone the Git source (using the caller's GitHub token for GitHub HTTPS URLs when available), build an image from the source, then deploy it.
-    When a public route is requested, route-related fields are adjusted and a Traefik route may be registered; private-repo clone failures on GitHub produce a CloneError with guidance to connect GitHub when applicable.
+    Quick validation (auth, project resolution, team storage quota, public
+    route settings) stays synchronous so clients get immediate 4xx errors.
+    The build/deploy work runs in a detached worker; poll
+    `GET /api/deploys/active` for phase progress and the terminal result.
 
     Returns:
-        RunFromSourceResponse: deployment result containing the created container info, the source kind, built/pulled image tag, whether a route was wired, and an optional public URL.
+        RunAcceptedResponse: `{"job_id", "status"}` — 202 Accepted.
     """
     source_kind = body.source_kind
     if source_kind is None:
@@ -845,228 +1154,49 @@ async def run_from_user_source(
 
     project_id = await _resolve_deploy_project_id(session, current_user, body)
     await enforce_team_storage_capacity(session, orchestrator, project_id)
+    if body.public_route:
+        read_public_route_settings_or_raise_for_public_deploy()
     resolved_volumes = _resolve_deploy_volumes(current_user.id, body.volumes)
 
+    if body.container_name:
+        job_name = body.container_name
+    elif source_kind == "image":
+        job_name = (body.image_ref or "").strip() or "image"
+    elif source_kind == "git":
+        job_name = sanitize_url_for_display((body.git_url or "").strip()) or "git"
+    else:
+        job_name = "dockerfile template"
     if source_kind == "image":
-        image_ref = (body.image_ref or "").strip()
-        cfg = _deploy_config_for_image(
-            image=image_ref,
-            container_name=body.container_name,
-            host_port=body.host_port,
-            container_port=body.container_port,
-            env_vars=body.env_vars,
-            command=body.command,
-            volumes=resolved_volumes,
-            cpu_limit=body.cpu_limit,
-            memory_limit=body.memory_limit,
-        ).model_copy(update=_route_updates_from_run_body(body))
-        cfg = with_deploy_source_labels(cfg, source_kind="image", source_ref=image_ref)
-        cfg = _apply_deploy_labels(
-            cfg, owner_id=str(current_user.id), project_id=project_id
-        )
-        cfg = await apply_public_route_to_deploy_config(cfg, traffic_router)
-        info, route_wired, public_url = await _deploy_and_maybe_wire_route(
-            orchestrator, traffic_router, cfg
-        )
-        await _persist_run_deployment(
-            session,
-            current_user,
-            body,
-            info,
-            project_id=project_id,
-            source_kind="image",
-            source_ref=image_ref,
-            image_tag=image_ref,
-            dockerfile_snapshot=None,
-            public_url=public_url,
-        )
-        saved_policy, scaling_policy_warning = await _persist_scaling_policy(
-            session, info.name, body
-        )
-        await emit_audit_log(
-            session,
-            user_id=current_user.id,
-            action="container.deploy",
-            target_type="container",
-            target_id=info.id,
-            details={
-                "source_kind": "image",
-                "source_ref": image_ref,
-            },
-        )
-        await session.commit()
-        return RunFromSourceResponse(
-            container=info,
-            kind="image",
-            image=image_ref,
-            route_wired=route_wired,
-            public_url=public_url,
-            scaling_policy=saved_policy,
-            scaling_policy_warning=scaling_policy_warning,
-        )
-
-    if source_kind == "dockerfile_template":
-        template_id = body.dockerfile_template_id
-        if template_id is None:
-            raise ValueError("dockerfile_template_id is required.")
-        template = await user_library.get_dockerfile_template(
-            session, current_user.id, template_id
-        )
-        tag = f"vela/templatebuild:{uuid.uuid4().hex[:12]}"
-        build_result = await image_builder.build_from_dockerfile_template(
-            template.contents,
-            tag=tag,
-        )
-        cfg = _deploy_config_for_image(
-            image=build_result.image_tag,
-            container_name=body.container_name,
-            host_port=body.host_port,
-            container_port=body.container_port,
-            env_vars=body.env_vars,
-            command=body.command,
-            volumes=resolved_volumes,
-            cpu_limit=body.cpu_limit,
-            memory_limit=body.memory_limit,
-        ).model_copy(
-            update={
-                "restart_policy": RestartPolicy.UNLESS_STOPPED,
-                **_route_updates_from_run_body(body),
-            }
-        )
-        cfg = with_deploy_source_labels(
-            cfg,
-            source_kind="dockerfile_template",
-            source_ref=template.name,
-        )
-        cfg = _apply_deploy_labels(
-            cfg, owner_id=str(current_user.id), project_id=project_id
-        )
-        cfg = await apply_public_route_to_deploy_config(cfg, traffic_router)
-        info, route_wired, public_url = await _deploy_and_maybe_wire_route(
-            orchestrator, traffic_router, cfg
-        )
-        await _persist_run_deployment(
-            session,
-            current_user,
-            body,
-            info,
-            project_id=project_id,
-            source_kind="dockerfile_template",
-            source_ref=template.name,
-            image_tag=build_result.image_tag,
-            dockerfile_snapshot=build_result.dockerfile_snapshot or template.contents,
-            public_url=public_url,
-        )
-        saved_policy, scaling_policy_warning = await _persist_scaling_policy(
-            session, info.name, body
-        )
-        await emit_audit_log(
-            session,
-            user_id=current_user.id,
-            action="container.deploy",
-            target_type="container",
-            target_id=info.id,
-            details={
-                "source_kind": "dockerfile_template",
-                "source_ref": template.name,
-            },
-        )
-        await session.commit()
-        return RunFromSourceResponse(
-            container=info,
-            kind="dockerfile_template",
-            image=build_result.image_tag,
-            route_wired=route_wired,
-            public_url=public_url,
-            scaling_policy=saved_policy,
-            scaling_policy_warning=scaling_policy_warning,
-        )
-
-    git_url = (body.git_url or "").strip()
-    sanitized_git_url = sanitize_url_for_display(git_url)
-    access_token = await github_token_for_url(session, current_user, git_url)
-    tag = f"vela/gitbuild:{uuid.uuid4().hex[:12]}"
-    try:
-        build_result = await image_builder.build_from_source(
-            ProjectSource(git_url=git_url, branch=body.git_branch),
-            tag=tag,
-            access_token=access_token,
-            override=body.build_override,
-        )
-    except CloneError as exc:
-        if (
-            access_token is None
-            and is_github_https_url(git_url)
-            and looks_like_auth_failure(str(exc))
-        ):
-            raise CloneError(
-                git_url,
-                "Repository looks private. Connect GitHub in Settings to deploy private repos.",
-            ) from exc
-        raise
-
-    cfg = _deploy_config_for_image(
-        image=build_result.image_tag,
-        container_name=body.container_name,
-        host_port=body.host_port,
-        container_port=body.container_port,
-        env_vars=body.env_vars,
-        command=body.command,
-        volumes=resolved_volumes,
-        cpu_limit=body.cpu_limit,
-        memory_limit=body.memory_limit,
-    ).model_copy(
-        update={
-            "restart_policy": RestartPolicy.UNLESS_STOPPED,
-            **_route_updates_from_run_body(body),
-        }
-    )
-    cfg = with_deploy_source_labels(
-        cfg, source_kind="git", source_ref=sanitized_git_url
-    )
-    cfg = _apply_deploy_labels(
-        cfg, owner_id=str(current_user.id), project_id=project_id
-    )
-    cfg = await apply_public_route_to_deploy_config(cfg, traffic_router)
-    info, route_wired, public_url = await _deploy_and_maybe_wire_route(
-        orchestrator, traffic_router, cfg
-    )
-    await _persist_run_deployment(
-        session,
-        current_user,
-        body,
-        info,
+        source_label = (body.image_ref or "").strip()
+    elif source_kind == "git":
+        source_label = sanitize_url_for_display((body.git_url or "").strip())
+    else:
+        source_label = ""
+    job = registry.create(
+        kind="container",
         project_id=project_id,
-        source_kind="git",
-        source_ref=sanitized_git_url,
-        image_tag=build_result.image_tag,
-        dockerfile_snapshot=build_result.dockerfile_snapshot,
-        public_url=public_url,
-    )
-    saved_policy, scaling_policy_warning = await _persist_scaling_policy(
-        session, info.name, body
-    )
-    await emit_audit_log(
-        session,
         user_id=current_user.id,
-        action="container.deploy",
-        target_type="container",
-        target_id=info.id,
-        details={
-            "source_kind": "git",
-            "source_ref": sanitized_git_url,
-        },
+        name=job_name,
+        source_label=source_label,
     )
-    await session.commit()
-    return RunFromSourceResponse(
-        container=info,
-        kind="git",
-        image=build_result.image_tag,
-        route_wired=route_wired,
-        public_url=public_url,
-        scaling_policy=saved_policy,
-        scaling_policy_warning=scaling_policy_warning,
+    registry.set_phase(job.job_id, "queued")
+    background_tasks.add_task(
+        _spawn_deploy_worker,
+        registry,
+        job.job_id,
+        _run_container_deploy_worker,
+        registry,
+        job.job_id,
+        session_factory,
+        body,
+        project_id,
+        resolved_volumes,
+        current_user,
+        orchestrator,
+        traffic_router,
+        image_builder,
     )
+    return RunAcceptedResponse(job_id=job.job_id, status="in_progress")
 
 
 @router.get("/{container_id}", response_model=ContainerInfo)
