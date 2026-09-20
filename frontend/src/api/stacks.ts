@@ -6,6 +6,7 @@ import {
   type VolumeMountRequest,
 } from './core'
 import { type BuildOverride } from './builds'
+import { type DeployAccepted } from './deploys'
 import { type ScalingPolicyRequest } from './scaling'
 
 export interface StackService {
@@ -113,6 +114,6 @@ export async function deleteStack(id: string): Promise<void> {
   await apiDelete(`/api/stacks/${encodeURIComponent(id)}`)
 }
 
-export async function deployStack(id: string): Promise<Record<string, unknown>> {
-  return apiPost<Record<string, unknown>>(`/api/stacks/${encodeURIComponent(id)}/deploy`, {})
+export async function deployStack(id: string): Promise<DeployAccepted> {
+  return apiPost<DeployAccepted>(`/api/stacks/${encodeURIComponent(id)}/deploy`, {})
 }

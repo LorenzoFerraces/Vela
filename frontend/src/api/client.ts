@@ -34,12 +34,24 @@ export {
   openContainerExecWebSocket,
   openContainerLogWebSocket,
   removeContainer,
-  runContainerFromSource,
   startContainer,
   stopContainer,
   uploadVolumeFolder,
   VELA_REPLICA_OF_LABEL,
 } from './containers'
+
+export {
+  listActiveDeploys,
+  submitRun,
+  type DeployAccepted,
+  type DeployJob,
+  type DeployJobError,
+  type DeployJobKind,
+  type DeployJobStatus,
+  type DeployServiceProgress,
+  type DeployServiceState,
+  type StackDeployContainers,
+} from './deploys'
 
 export { isLlmFallbackError } from './llmErrors'
 

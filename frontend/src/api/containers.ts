@@ -231,15 +231,6 @@ export async function fetchContainerLogs(
   return data.logs
 }
 
-export async function runContainerFromSource(
-  body: RunFromSourceRequest
-): Promise<RunFromSourceResponse> {
-  return apiPost<RunFromSourceResponse, RunFromSourceRequest>(
-    '/api/containers/run',
-    body
-  )
-}
-
 export async function uploadVolumeFolder(
   files: File[]
 ): Promise<VolumeUploadResponse> {
