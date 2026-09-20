@@ -13,6 +13,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.containers.fake_orchestrator import FakeContainerOrchestrator
@@ -475,6 +476,63 @@ def test_stack_deploy_persist_survives_teardown_rollback(
     assert accepted.status_code == 202
     job = wait_for_deploy(api_client, accepted.json()["job_id"])
     assert job["status"] == "succeeded"
+
+    listed = api_client.get("/api/deployments/")
+    persisted_ids = {row["container_id"] for row in listed.json()}
+    for container in job["result"]["containers"]:
+        assert container["container_id"] in persisted_ids
+    api_client.delete(f"/api/stacks/{stack_id}")
+
+
+def test_stack_deploy_persist_commit_failure_never_fails_job(
+    api_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The commit staging DeploymentRecords can fail mid-flush (e.g. an
+    # IntegrityError from a concurrent writer on the shared test
+    # connection). The persist retry must absorb it, retry, and never
+    # fail the deploy job or leak raw SQLAlchemy text onto the job. The
+    # failure is injected into the sync Session.flush that the real
+    # Session.commit runs internally, after the flush has actually run, so
+    # the commit machinery performs its internal rollback and detaches the
+    # flushed records from the identity map — the state a real failed
+    # commit leaves behind.
+    from sqlalchemy.orm import Session
+
+    raised = False
+    original_flush = Session.flush
+
+    def failing_flush(self: Session, *args: Any, **kwargs: Any) -> None:
+        nonlocal raised
+        if not raised and any(
+            isinstance(obj, DeploymentRecord) for obj in self.new
+        ):
+            raised = True
+            original_flush(self)
+            raise IntegrityError(
+                "INSERT INTO deployment_records (id) VALUES (?)",
+                {"id": "persist-test"},
+                Exception("UNIQUE constraint failed: deployment_records.id"),
+            )
+        original_flush(self, *args, **kwargs)
+
+    monkeypatch.setattr(Session, "flush", failing_flush)
+
+    stack_id = _create_stack(
+        api_client,
+        "jobs-persist-fail-stack",
+        [
+            _image_service("web", "nginx:alpine"),
+            _image_service("api", "python:3.12-slim", depends_on=["web"]),
+        ],
+    )
+    accepted = api_client.post(f"/api/stacks/{stack_id}/deploy")
+    assert accepted.status_code == 202
+    job = wait_for_deploy(api_client, accepted.json()["job_id"])
+    assert job["status"] == "succeeded"
+    error_text = str(job.get("error") or "")
+    assert "IntegrityError" not in error_text
+    assert "sqlalchemy" not in error_text.lower()
 
     listed = api_client.get("/api/deployments/")
     persisted_ids = {row["container_id"] for row in listed.json()}

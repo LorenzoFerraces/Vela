@@ -397,17 +397,18 @@ async def _commit_deployment_records(
                 attempt + 1,
                 container_ids,
             )
-            try:
-                # The failed commit left the transaction broken; reset it
-                # before retrying.
-                await session.rollback()
-            except Exception:
-                logger.exception(
-                    "Could not reset session before stack deploy persist retry for containers %s",
-                    container_ids,
-                )
-        for record in pending:
-            session.expunge(record)
+        try:
+            # Reset session state before retrying. expunge_all never raises
+            # for objects a failed commit already detached, unlike
+            # per-record expunge. A persist failure must never fail the
+            # deploy job.
+            session.expunge_all()
+            await session.rollback()
+        except Exception:
+            logger.exception(
+                "Could not reset session before stack deploy persist retry for containers %s",
+                container_ids,
+            )
     logger.error(
         "Stack deploy persist: records still missing after 3 attempts for containers %s",
         container_ids,
