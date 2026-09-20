@@ -1352,10 +1352,11 @@ def test_stack_deploy_needs_build_override(
     stack_id = created.json()["id"]
 
     deployed = api_client.post(f"/api/stacks/{stack_id}/deploy")
-    assert deployed.status_code == 422
-    body = deployed.json()
-    assert body["code"] == "needs_build_override"
-    assert "api" in body["detail"]
+    assert deployed.status_code == 202
+    job = wait_for_deploy(api_client, deployed.json()["job_id"])
+    assert job["status"] == "failed"
+    assert job["error"]["code"] == "needs_build_override"
+    assert "api" in job["error"]["detail"]
 
     api_client.delete(f"/api/stacks/{stack_id}")
 
@@ -1391,7 +1392,9 @@ def test_stack_crud(api_client: TestClient) -> None:
 
     # Deploy
     deployed = api_client.post(f"/api/stacks/{stack_id}/deploy")
-    assert deployed.status_code == 200
+    assert deployed.status_code == 202
+    job = wait_for_deploy(api_client, deployed.json()["job_id"])
+    assert job["status"] == "succeeded"
 
     # Delete
     deleted = api_client.delete(f"/api/stacks/{stack_id}")
@@ -1653,7 +1656,9 @@ def test_stack_deploy_creates_network(api_client: TestClient) -> None:
 
     # Deploy
     deployed = api_client.post(f"/api/stacks/{stack_id}/deploy")
-    assert deployed.status_code == 200
+    assert deployed.status_code == 202
+    job = wait_for_deploy(api_client, deployed.json()["job_id"])
+    assert job["status"] == "succeeded"
 
     # Verify network was created
     if orchestrator:
@@ -1691,7 +1696,9 @@ def test_stack_deploy_dockerfile_template_by_name(api_client: TestClient) -> Non
     stack_id = stack.json()["id"]
 
     deployed = api_client.post(f"/api/stacks/{stack_id}/deploy")
-    assert deployed.status_code == 200
+    assert deployed.status_code == 202
+    job = wait_for_deploy(api_client, deployed.json()["job_id"])
+    assert job["status"] == "succeeded"
 
     api_client.delete(f"/api/stacks/{stack_id}")
 
@@ -1741,7 +1748,9 @@ def test_stack_deploy_git_strips_credentials_from_display(
     )
 
     deployed = api_client.post(f"/api/stacks/{stack_id}/deploy")
-    assert deployed.status_code == 200
+    assert deployed.status_code == 202
+    job = wait_for_deploy(api_client, deployed.json()["job_id"])
+    assert job["status"] == "succeeded"
     assert recorded_urls == [
         "https://deployer:ghp_stacktoken456@github.com/org/app.git"
     ]
@@ -1793,7 +1802,9 @@ def test_stack_delete_cleans_network(api_client: TestClient) -> None:
     network_name = created.json()["network_name"]
 
     # Deploy (creates network)
-    api_client.post(f"/api/stacks/{stack_id}/deploy")
+    deployed = api_client.post(f"/api/stacks/{stack_id}/deploy")
+    assert deployed.status_code == 202
+    wait_for_deploy(api_client, deployed.json()["job_id"])
 
     # Delete
     deleted = api_client.delete(f"/api/stacks/{stack_id}")

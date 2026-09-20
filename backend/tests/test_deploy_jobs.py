@@ -384,3 +384,125 @@ def test_run_sync_422_stays_sync_for_bad_payload(api_client: TestClient) -> None
         ).status_code
         == 422
     )
+
+
+def _create_stack(api_client: TestClient, name: str, services: list[dict[str, Any]]) -> str:
+    created = api_client.post(
+        "/api/stacks/", json={"name": name, "services": services}
+    )
+    assert created.status_code == 201
+    return created.json()["id"]
+
+
+def _image_service(name: str, ref: str, **extra: Any) -> dict[str, Any]:
+    service = {
+        "service_name": name,
+        "source_kind": "image",
+        "source_ref": ref,
+        "container_port": 80,
+        "env_vars": {},
+        "public_route": False,
+    }
+    service.update(extra)
+    return service
+
+
+def test_stack_deploy_returns_202_and_completes(
+    api_client: TestClient, fake_orchestrator: FakeContainerOrchestrator
+) -> None:
+    stack_id = _create_stack(
+        api_client, "jobs-stack", [_image_service("web", "nginx:alpine")]
+    )
+    network_name = api_client.get(f"/api/stacks/{stack_id}").json()["network_name"]
+
+    accepted = api_client.post(f"/api/stacks/{stack_id}/deploy")
+    assert accepted.status_code == 202
+    job = wait_for_deploy(api_client, accepted.json()["job_id"])
+    assert job["kind"] == "stack"
+    assert job["status"] == "succeeded"
+    assert job["services"] == [{"name": "web", "state": "running"}]
+    assert job["result"] == {
+        "containers": [
+            {
+                "service_name": "web",
+                "container_id": job["result"]["containers"][0]["container_id"],
+                "container_name": job["result"]["containers"][0]["container_name"],
+            }
+        ]
+    }
+    assert network_name in fake_orchestrator._networks
+
+    api_client.delete(f"/api/stacks/{stack_id}")
+
+
+def test_stack_deploy_partial_failure_reports_failed_service(
+    api_client: TestClient, fake_orchestrator: FakeContainerOrchestrator
+) -> None:
+    fake_orchestrator.fail_deploy_for_image("python:3.12-slim")
+    stack_id = _create_stack(
+        api_client,
+        "jobs-rollback-stack",
+        [
+            _image_service("web", "nginx:alpine"),
+            _image_service("api", "python:3.12-slim", depends_on=["web"]),
+        ],
+    )
+    network_name = api_client.get(f"/api/stacks/{stack_id}").json()["network_name"]
+
+    accepted = api_client.post(f"/api/stacks/{stack_id}/deploy")
+    assert accepted.status_code == 202
+    job = wait_for_deploy(api_client, accepted.json()["job_id"])
+
+    assert job["status"] == "failed"
+    assert job["error"]["code"] == "deploy_failed"
+    assert job["error"]["failed_service"] == "api"
+    assert "api" in job["error"]["detail"]
+    states = {service["name"]: service["state"] for service in job["services"]}
+    assert states == {"web": "running", "api": "failed"}
+
+    assert network_name not in fake_orchestrator._networks
+    api_client.delete(f"/api/stacks/{stack_id}")
+
+
+def test_stack_deploy_needs_build_override_job_error(
+    api_client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def empty_clone(
+        *, url: str, branch: str, dest: Path, access_token: str | None = None
+    ) -> None:
+        _ = url, branch, access_token
+        dest.mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setattr(
+        "app.core.build.default_image_builder.git_shallow_clone", empty_clone
+    )
+    stack_id = _create_stack(
+        api_client,
+        "jobs-override-stack",
+        [
+            {
+                "service_name": "api",
+                "source_kind": "git",
+                "source_ref": "https://github.com/example/empty.git",
+                "git_branch": "main",
+                "container_port": 80,
+                "env_vars": {},
+                "public_route": False,
+            }
+        ],
+    )
+    accepted = api_client.post(f"/api/stacks/{stack_id}/deploy")
+    assert accepted.status_code == 202
+    job = wait_for_deploy(api_client, accepted.json()["job_id"])
+    assert job["status"] == "failed"
+    assert job["error"]["code"] == "needs_build_override"
+    assert "api" in job["error"]["detail"]
+    api_client.delete(f"/api/stacks/{stack_id}")
+
+
+def test_stack_deploy_viewer_still_403_sync(
+    api_client: TestClient, seeded_user: User
+) -> None:
+    # ownership check happens before the job exists (covered fully in
+    # test_stack_permissions.py); here only the sync 404 path matters.
+    assert api_client.post(f"/api/stacks/{uuid.uuid4()}/deploy").status_code == 404

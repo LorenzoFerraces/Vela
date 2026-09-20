@@ -7,30 +7,43 @@ import uuid
 from collections.abc import Collection
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Depends,
+    HTTPException,
+    Response,
+    status,
+)
 from sqlalchemy import select as sa_select
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.orm import selectinload
 
 from app.api.deps import (
     get_current_user,
     get_db,
+    get_db_session_factory,
+    get_deploy_jobs,
     get_image_builder,
     get_orchestrator,
     get_traffic_router,
 )
+from app.api.routes.containers import _spawn_deploy_worker
 from app.api.schemas import (
     AnalyzeRepoRequest,
     AnalyzeRepoResponse,
     ManifestParseRequest,
     ManifestParseResponse,
+    RunAcceptedResponse,
     StackCreate,
     StackPublic,
     StackServiceCreate,
     StackServicePublic,
 )
+from app.core.auth.service import get_user_by_id
 from app.core.build.default_image_builder import DefaultImageBuilder
 from app.core.containers.orchestrator import ContainerOrchestrator
+from app.core.deploy.jobs import DeployJobRegistry, classify_deploy_error
 from app.core.exceptions import ProjectAccessDeniedError
 from app.core.projects.enums import can_write
 from app.core.projects.repository import get_personal_project_id, require_membership
@@ -42,6 +55,7 @@ from app.core.stacks.repository import (
     delete_stack,
     get_stack,
     list_stacks,
+    resolve_composition,
     update_stack,
 )
 from app.core.traffic.traffic_router import TrafficRouter
@@ -256,7 +270,80 @@ async def delete_user_stack(
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
-@router.post("/{stack_id}/deploy", response_model=dict[str, object])
+async def _run_stack_deploy_worker(
+    registry: DeployJobRegistry,
+    job_id: str,
+    session_factory: async_sessionmaker[AsyncSession],
+    stack_id: uuid.UUID,
+    user_id: uuid.UUID,
+    orchestrator: ContainerOrchestrator,
+    traffic_router: TrafficRouter,
+    image_builder: DefaultImageBuilder,
+) -> None:
+    """Redeploy the stack detached; mirror per-service progress into the job."""
+    try:
+        async with session_factory() as session:
+            stack = await get_stack(session, stack_id, user_id)
+            user = await get_user_by_id(session, user_id)
+            if stack is None or user is None:
+                registry.complete_failure(
+                    job_id,
+                    {"code": "deploy_failed", "detail": "Stack not found."},
+                )
+                return
+            child_stacks: list[Stack] = []
+            for comp in stack.compositions_parent:
+                child_result = await session.execute(
+                    sa_select(Stack)
+                    .where(Stack.id == comp.child_stack_id)
+                    .options(selectinload(Stack.services))
+                )
+                child = child_result.scalar_one_or_none()
+                if child:
+                    child_stacks.append(child)
+
+            registry.set_services(
+                job_id,
+                [s.service_name for s in resolve_composition(stack, child_stacks)],
+            )
+            result = await deploy_stack(
+                session,
+                orchestrator,
+                traffic_router,
+                image_builder,
+                stack,
+                user,
+                child_stacks,
+                on_phase=lambda phase, _detail: registry.set_phase(job_id, phase),
+                on_service_state=lambda name, state: registry.set_service_state(
+                    job_id, name, state
+                ),
+            )
+    except Exception as exc:
+        registry.complete_failure(job_id, classify_deploy_error(exc))
+        return
+
+    if result.get("error"):
+        detail = str(result["error"])
+        failed_service = result.get("failed_service")
+        if failed_service:
+            detail = f"Deploy failed on service '{failed_service}': {detail}"
+        error: dict[str, object] = {
+            "code": "deploy_failed",
+            "detail": detail,
+        }
+        if failed_service:
+            error["failed_service"] = str(failed_service)
+        registry.complete_failure(job_id, error)
+        return
+    registry.complete_success(job_id, result)
+
+
+@router.post(
+    "/{stack_id}/deploy",
+    response_model=RunAcceptedResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
 async def deploy_user_stack(
     stack_id: uuid.UUID,
     current_user: Annotated[User, Depends(get_current_user)],
@@ -264,7 +351,13 @@ async def deploy_user_stack(
     orchestrator: Annotated[ContainerOrchestrator, Depends(get_orchestrator)],
     traffic_router: Annotated[TrafficRouter, Depends(get_traffic_router)],
     image_builder: Annotated[DefaultImageBuilder, Depends(get_image_builder)],
-) -> dict[str, object]:
+    registry: Annotated[DeployJobRegistry, Depends(get_deploy_jobs)],
+    session_factory: Annotated[
+        async_sessionmaker[AsyncSession], Depends(get_db_session_factory)
+    ],
+    background_tasks: BackgroundTasks,
+) -> RunAcceptedResponse:
+    """Validate access synchronously, then deploy the stack as a detached job."""
     stack = await get_stack(session, stack_id, current_user.id)
     if stack is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Stack not found.")
@@ -287,22 +380,31 @@ async def deploy_user_stack(
         if child:
             child_stacks.append(child)
 
-    result = await deploy_stack(
-        session,
+    services = resolve_composition(stack, child_stacks)
+    job = registry.create(
+        kind="stack",
+        project_id=stack.project_id,
+        user_id=current_user.id,
+        name=stack.name,
+        source_label=stack.network_name,
+        services=[s.service_name for s in services],
+    )
+    registry.set_phase(job.job_id, "queued")
+    background_tasks.add_task(
+        _spawn_deploy_worker,
+        registry,
+        job.job_id,
+        _run_stack_deploy_worker,
+        registry,
+        job.job_id,
+        session_factory,
+        stack_id,
+        current_user.id,
         orchestrator,
         traffic_router,
         image_builder,
-        stack,
-        current_user,
-        child_stacks,
     )
-    if result.get("error"):
-        detail = str(result["error"])
-        failed_service = result.get("failed_service")
-        if failed_service:
-            detail = f"Deploy failed on service '{failed_service}': {detail}"
-        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, detail=detail)
-    return result
+    return RunAcceptedResponse(job_id=job.job_id, status="in_progress")
 
 
 def _orm_service_to_create(

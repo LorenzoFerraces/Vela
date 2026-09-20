@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 import uuid
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -49,6 +50,9 @@ async def deploy_stack(
     stack: Stack,
     user: User,
     child_stacks: list[Stack],
+    *,
+    on_phase: Callable[[str, str | None], None] | None = None,
+    on_service_state: Callable[[str, str], None] | None = None,
 ) -> dict[str, object]:
     """Deploy all services in a stack onto a shared network.
 
@@ -66,10 +70,15 @@ async def deploy_stack(
     deployed_containers: list[ContainerInfo] = []
 
     try:
+        if on_phase is not None:
+            on_phase("deploying", None)
+
         await orchestrator.create_network(stack.network_name)
 
         for service in services:
             container_name = _container_dns_name(stack, service)
+            if on_service_state is not None:
+                on_service_state(service.service_name, "building")
             image_tag = await _resolve_service_image(
                 session,
                 user,
@@ -84,6 +93,8 @@ async def deploy_stack(
                 image_tag=image_tag,
             )
 
+            if on_service_state is not None:
+                on_service_state(service.service_name, "starting")
             info = await orchestrator.deploy(config)
             deployed_containers.append(info)
 
@@ -117,6 +128,9 @@ async def deploy_stack(
                     session, container_name, service.scaling_policy
                 )
 
+            if on_service_state is not None:
+                on_service_state(service.service_name, "running")
+
         await session.commit()
         return {
             "containers": [
@@ -130,6 +144,9 @@ async def deploy_stack(
         }
 
     except Exception as exc:
+        if on_phase is not None:
+            on_phase("rolling_back", None)
+
         for container in deployed_containers:
             try:
                 await orchestrator.stop(container.id, timeout=5)
@@ -145,6 +162,9 @@ async def deploy_stack(
         failed_service = None
         if len(deployed_containers) < len(services):
             failed_service = services[len(deployed_containers)].service_name
+
+        if failed_service is not None and on_service_state is not None:
+            on_service_state(failed_service, "failed")
 
         if isinstance(exc, NeedsBuildOverrideError):
             if failed_service:

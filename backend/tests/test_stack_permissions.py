@@ -7,6 +7,7 @@ from typing import Any
 from fastapi.testclient import TestClient
 
 from app.core.containers.fake_orchestrator import FakeContainerOrchestrator
+from tests.test_deploy_jobs import wait_for_deploy
 from tests.test_project_container_access import _invite_and_accept, _register
 
 
@@ -104,8 +105,10 @@ def test_stack_partial_deploy_rolls_back(
     network_name = created.json()["network_name"]
 
     deployed = api_client.post(f"/api/stacks/{stack_id}/deploy")
-    assert deployed.status_code == 500
-    assert "api" in deployed.json()["detail"]
+    assert deployed.status_code == 202
+    job = wait_for_deploy(api_client, deployed.json()["job_id"])
+    assert job["status"] == "failed"
+    assert "api" in job["error"]["detail"]
 
     assert network_name not in fake_orchestrator._networks
     remaining = [
