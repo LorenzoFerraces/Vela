@@ -541,6 +541,55 @@ def test_stack_deploy_persist_commit_failure_never_fails_job(
     api_client.delete(f"/api/stacks/{stack_id}")
 
 
+def test_stack_deploy_scaling_policy_persist_lands_one_record_per_container(
+    api_client: TestClient,
+    db_session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    # upsert_policy commits the worker's shared session while the
+    # service's DeploymentRecord is already staged, so the row lands via
+    # that intermediate commit. The terminal persist must treat rows
+    # landed by intermediate commits as complete (idempotent staging) and
+    # insert no duplicates.
+    stack_id = _create_stack(
+        api_client,
+        "jobs-policy-stack",
+        [
+            _image_service("web", "nginx:alpine"),
+            _image_service(
+                "api",
+                "python:3.12-slim",
+                depends_on=["web"],
+                scaling_policy={},
+            ),
+        ],
+    )
+    accepted = api_client.post(f"/api/stacks/{stack_id}/deploy")
+    assert accepted.status_code == 202
+    job = wait_for_deploy(api_client, accepted.json()["job_id"])
+    assert job["status"] == "succeeded"
+
+    container_ids = [
+        container["container_id"] for container in job["result"]["containers"]
+    ]
+
+    async def count_rows() -> dict[str, int]:
+        async with db_session_factory() as session:
+            rows = await session.execute(
+                select(DeploymentRecord.container_id).where(
+                    DeploymentRecord.container_id.in_(container_ids)
+                )
+            )
+            counts: dict[str, int] = {}
+            for container_id in rows.scalars():
+                counts[container_id] = counts.get(container_id, 0) + 1
+            return counts
+
+    counts = asyncio.run(count_rows())
+    assert set(counts) == set(container_ids)
+    assert all(count == 1 for count in counts.values())
+    api_client.delete(f"/api/stacks/{stack_id}")
+
+
 def test_stack_deploy_partial_failure_reports_failed_service(
     api_client: TestClient, fake_orchestrator: FakeContainerOrchestrator
 ) -> None:

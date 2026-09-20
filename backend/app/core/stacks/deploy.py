@@ -365,26 +365,47 @@ async def _commit_deployment_records(
     session: AsyncSession,
     records: list[DeploymentRecord],
 ) -> None:
-    """Commit the staged DeploymentRecords, retrying a bounded number of
-    times and verifying the rows landed. In tests, a poll request's
-    teardown ROLLBACK on the shared in-memory connection can wipe the
-    pending INSERTs between the worker's flush and commit; the commit then
-    succeeds on an empty transaction and the records are silently lost. A
-    persist failure must never fail the deploy job."""
+    """Persist the staged DeploymentRecords idempotently and verify the
+    rows landed. An intermediate commit on this session (e.g. the scaling
+    policy's upsert_policy) can already have landed some or all of the
+    rows, so every attempt stages only the snapshots still missing from
+    the database and verifies coverage by container_id — a partial
+    landing can neither fail verification nor insert duplicates. In
+    tests, a poll request's teardown ROLLBACK on the shared in-memory
+    connection can wipe the pending INSERTs between the worker's flush
+    and commit; the commit then succeeds on an empty transaction and the
+    records are silently lost. A persist failure must never fail the
+    deploy job."""
     container_ids = [record.container_id for record in records]
     snapshots = [_deployment_record_values(record) for record in records]
+    # Detach the originals first: some rows may already be committed by an
+    # intermediate commit, and unflushed ones must not INSERT twice
+    # alongside the fresh copies staged below.
+    session.expunge_all()
     for attempt in range(3):
-        pending = [DeploymentRecord(**values) for values in snapshots]
         try:
-            for record in pending:
-                session.add(record)
-            await session.commit()
-            landed = await session.execute(
+            present_rows = await session.execute(
                 select(DeploymentRecord.container_id).where(
                     DeploymentRecord.container_id.in_(container_ids)
                 )
             )
-            if len(landed.scalars().all()) == len(container_ids):
+            present = set(present_rows.scalars().all())
+            missing = [
+                values
+                for values in snapshots
+                if values["container_id"] not in present
+            ]
+            if not missing:
+                return
+            for values in missing:
+                session.add(DeploymentRecord(**values))
+            await session.commit()
+            landed_rows = await session.execute(
+                select(DeploymentRecord.container_id).where(
+                    DeploymentRecord.container_id.in_(container_ids)
+                )
+            )
+            if set(landed_rows.scalars().all()) >= set(container_ids):
                 return
             logger.warning(
                 "Stack deploy persist attempt %d/3: records missing after commit for containers %s",
