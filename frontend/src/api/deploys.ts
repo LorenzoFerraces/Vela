@@ -26,15 +26,6 @@ export interface DeployJobError {
   failed_service?: string | null
 }
 
-/** Success payload of a stack deploy (today's sync response body). */
-export interface StackDeployContainers {
-  containers: {
-    service_name: string
-    container_id: string
-    container_name: string
-  }[]
-}
-
 export interface DeployJob {
   job_id: string
   kind: DeployJobKind

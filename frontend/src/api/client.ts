@@ -50,7 +50,6 @@ export {
   type DeployJobStatus,
   type DeployServiceProgress,
   type DeployServiceState,
-  type StackDeployContainers,
 } from './deploys'
 
 export { isLlmFallbackError } from './llmErrors'

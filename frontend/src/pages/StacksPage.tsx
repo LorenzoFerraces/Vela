@@ -218,11 +218,11 @@ export default function StacksPage() {
   }, [])
 
   // ponytail: 1s poll — the hook only fetches on mount and at a 2.5s cadence
-  // while it already knows about in-flight jobs, so a stack deploy submitted
-  // via the API or another tab would never surface its checklist here, and a
-  // just-submitted card job would sit out the 2.5s cadence first. Skipped
-  // when background stack jobs are in flight and no card is pending (the
-  // hook covers that cadence).
+  // while it already knows about in-flight jobs, so a deploy submitted outside
+  // this page's form (API, another tab) would never surface its checklist
+  // here, and a just-submitted card job would sit out the 2.5s cadence first.
+  // Skipped when background stack jobs are in flight and no card is pending
+  // (the hook covers that cadence).
   useEffect(() => {
     const interval = window.setInterval(() => {
       if (document.visibilityState !== 'visible') return
