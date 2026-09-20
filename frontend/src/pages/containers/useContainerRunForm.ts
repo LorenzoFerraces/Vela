@@ -2,15 +2,13 @@ import { useCallback, useMemo, useState } from 'react'
 import {
   formatApiError,
   getImageAvailability,
-  runContainerFromSource,
+  submitRun,
   type BuildOverride,
+  type DeployJob,
   type RunFromSourceRequest,
   type ScalingPolicyRequest,
 } from '../../api/client'
-import {
-  buildOverrideFromAnalysis,
-  isNeedsBuildOverrideError,
-} from './buildOverride'
+import { buildOverrideFromAnalysis } from './buildOverride'
 import { selectionShowsGitBranch } from './deploySourceTypes'
 import { validateScalingPolicy } from './scalingPolicyUtils'
 import type { FormMessage } from './types'
@@ -51,6 +49,7 @@ export function useContainerRunForm({
   )
   const [retryRunAfterConfirm, setRetryRunAfterConfirm] = useState(false)
   const [busy, setBusy] = useState(false)
+  const [pendingJobId, setPendingJobId] = useState<string | null>(null)
   const [message, setMessage] = useState<FormMessage | null>(null)
   const [sourceError, setSourceError] = useState<string | null>(null)
   const [portError, setPortError] = useState<string | null>(null)
@@ -298,23 +297,42 @@ export function useContainerRunForm({
         })
         return
       }
-      const response = await runContainerFromSource(requestBody)
-      const routeNote = response.route_wired
-        ? ' Traefik route registered.'
-        : ''
+      const accepted = await submitRun(requestBody)
+      setPendingJobId(accepted.job_id)
+      setBusy(false)
+      return
+    } catch (error) {
+      setMessage({ type: 'err', text: formatApiError(error) })
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  function resolveDeployJob(job: DeployJob): void {
+    if (pendingJobId !== job.job_id) return
+    setPendingJobId(null)
+    if (job.status === 'succeeded' && job.result) {
+      const result = job.result as {
+        kind?: string
+        container?: { name: string }
+        image?: string
+        route_wired?: boolean
+        public_url?: string | null
+        scaling_policy_warning?: string | null
+      }
+      const routeNote = result.route_wired ? ' Traefik route registered.' : ''
       const scalingWarning =
-        typeof response.scaling_policy_warning === 'string' &&
-        response.scaling_policy_warning.length > 0
-          ? ` ${response.scaling_policy_warning}`
+        typeof result.scaling_policy_warning === 'string' &&
+        result.scaling_policy_warning.length > 0
+          ? ` ${result.scaling_policy_warning}`
           : ''
       const publicUrl =
-        typeof response.public_url === 'string' &&
-        response.public_url.length > 0
-          ? response.public_url
+        typeof result.public_url === 'string' && result.public_url.length > 0
+          ? result.public_url
           : undefined
       setMessage({
         type: 'ok',
-        text: `Started (${response.kind}) as ${response.container.name} — image ${response.image}.${routeNote}${scalingWarning}`,
+        text: `Started (${result.kind}) as ${result.container?.name} — image ${result.image}.${routeNote}${scalingWarning}`,
         publicUrl,
       })
       deploySource.clearSelection()
@@ -322,19 +340,19 @@ export function useContainerRunForm({
       setGitBranch('main')
       setContainerPort('80')
       resetAdvancedFields()
-      await refresh()
-    } catch (error) {
-      if (isNeedsBuildOverrideError(error)) {
-        openBuildConfigModal({
-          initial: override,
-          retryOnConfirm: true,
-        })
-        return
-      }
-      setMessage({ type: 'err', text: formatApiError(error) })
-    } finally {
-      setBusy(false)
+      void refresh()
+      return
     }
+    const jobError = job.error
+    if (jobError?.code === 'needs_build_override') {
+      openBuildConfigModal({ initial: buildOverride, retryOnConfirm: true })
+      return
+    }
+    let text = jobError?.detail ?? 'Deploy failed.'
+    if (jobError?.build_log) {
+      text += `\n\n${jobError.build_log.slice(-2000)}`
+    }
+    setMessage({ type: 'err', text })
   }
 
   async function onSubmit(event: React.FormEvent) {
@@ -436,6 +454,8 @@ export function useContainerRunForm({
     applyDeploySuggestion,
     onAnalyzeGitSource,
     onSubmit,
+    pendingJobId,
+    resolveDeployJob,
     closeBuildConfigModal,
     onBuildConfigConfirm,
   }

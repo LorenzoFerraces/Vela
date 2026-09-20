@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import threading
 import time
 import uuid
@@ -120,6 +121,9 @@ class FakeContainerOrchestrator(ContainerOrchestrator):
         Returns:
             ContainerInfo: A newly created container record in `RUNNING` state with a generated `id`, the resolved `name`, merged `labels` (including route-related labels when `config.route_host` is set), computed `access_url`, and the current UTC creation timestamp. The container is stored in the orchestrator's internal container registry.
         """
+        delay_ms = int(os.environ.get("VELA_FAKE_DEPLOY_DELAY_MS", "0") or 0)
+        if delay_ms > 0:
+            await asyncio.sleep(delay_ms / 1000)
         self.last_deploy_config = config
         image_ref = config.image.strip()
         if image_ref in self._deploy_fail_images:

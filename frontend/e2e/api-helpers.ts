@@ -68,6 +68,20 @@ export async function waitForDeployJob(
 }
 
 /**
+ * Synthetic Response-like object matching the APIResponse surface callers
+ * use (`ok()`/`status()`/`json()` as methods). A real fetch `Response` does
+ * not work here: in Node its `ok`/`status` are properties, and every spec
+ * calls `response.ok()`.
+ */
+function syntheticResponse(status: number, payload: unknown) {
+  return {
+    ok: () => status >= 200 && status < 300,
+    status: () => status,
+    json: () => Promise.resolve(payload),
+  }
+}
+
+/**
  * Starts a new container from the given image and waits for the deploy job
  * to finish. Returns a Response-like object so existing callers keep working:
  * succeeded → 200 with the run response body; failed → 422 with the job
@@ -100,15 +114,9 @@ export async function deployImageContainer(
   const accepted = (await response.json()) as { job_id: string }
   const job = await waitForDeployJob(page, token, accepted.job_id)
   if (job.status === 'failed') {
-    return new Response(JSON.stringify(job.error ?? {}), {
-      status: 422,
-      headers: { 'content-type': 'application/json' },
-    })
+    return syntheticResponse(422, job.error ?? {})
   }
-  return new Response(JSON.stringify(job.result ?? {}), {
-    status: 200,
-    headers: { 'content-type': 'application/json' },
-  })
+  return syntheticResponse(200, job.result ?? {})
 }
 
 /**

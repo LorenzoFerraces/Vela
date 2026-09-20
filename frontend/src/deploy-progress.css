@@ -1,0 +1,100 @@
+/* Deploy progress: pinned job row (containers) + stack card checklist. */
+
+.deploy-job-row td {
+  padding-top: 0.75rem;
+  padding-bottom: 0.75rem;
+}
+
+.deploy-job-row__name {
+  color: var(--text);
+}
+
+.deploy-job-row__status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.deploy-job-row__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 0;
+  background: var(--warn);
+  box-shadow: 0 0 6px var(--warn-line);
+  animation: pulse 1.2s ease-in-out infinite;
+}
+
+.deploy-job-row__phase {
+  font-size: 0.72rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.deploy-job-row__skeleton {
+  display: inline-block;
+  width: 84px;
+  height: 14px;
+}
+
+.stacks-card__services {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.stacks-card__service {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.78rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.stacks-card__service-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 0;
+  background: var(--border-subtle);
+}
+
+.stacks-card__service--building .stacks-card__service-dot,
+.stacks-card__service--starting .stacks-card__service-dot {
+  background: var(--warn);
+  box-shadow: 0 0 6px var(--warn-line);
+  animation: pulse 1.2s ease-in-out infinite;
+}
+
+.stacks-card__service--running .stacks-card__service-dot {
+  background: var(--ok);
+  box-shadow: 0 0 6px var(--ok-line);
+}
+
+.stacks-card__service--failed .stacks-card__service-dot {
+  background: var(--error);
+  box-shadow: 0 0 6px var(--error-line);
+}
+
+.stacks-card__service--pending .stacks-card__service-name {
+  color: var(--text-muted);
+}
+
+.stacks-card__service-phase {
+  color: var(--text-muted);
+}
+
+.stacks-card__service--failed .stacks-card__service-phase {
+  color: var(--error);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .deploy-job-row__dot,
+  .stacks-card__service--building .stacks-card__service-dot,
+  .stacks-card__service--starting .stacks-card__service-dot {
+    animation: none;
+  }
+}

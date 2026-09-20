@@ -1,10 +1,11 @@
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   formatApiError,
   removeContainer,
   startContainer,
   stopContainer,
 } from '../api/client'
+import { useActiveDeployJobs } from '../hooks/useActiveDeployJobs'
 import ConfirmDialog from '../components/ConfirmDialog'
 import BuildConfigModal from './containers/BuildConfigModal'
 import { ContainersFormMessageBanner } from './containers/ContainersFormMessageBanner'
@@ -19,6 +20,9 @@ import { Toast } from '../components/Toast'
 import { WorkloadsTable } from '../components/workloads/WorkloadsTable'
 import { useWorkloadGroups } from './containers/useWorkloadGroups'
 import { useContainerRunForm } from './containers/useContainerRunForm'
+import '../deploy-progress.css'
+
+const DEPLOY_JOB_DISCOVERY_POLL_MS = 1000
 
 export default function ContainersPage() {
   const [rowBusy, setRowBusy] = useState<string | null>(null)
@@ -48,7 +52,9 @@ export default function ContainersPage() {
     onAnalyzeGitSource,
     onBuildConfigConfirm,
     onSubmit,
+    pendingJobId,
     portError,
+    resolveDeployJob,
     runImageRefAvailabilityCheck,
     scalingPolicy,
     scalingValidationError,
@@ -68,6 +74,47 @@ export default function ContainersPage() {
     volumeRows,
   } = runForm
 
+  const { jobs: deployJobs, refresh: refreshDeployJobs } = useActiveDeployJobs()
+  const containerJobs = deployJobs.filter(
+    (job) => job.kind === 'container' && job.status === 'in_progress',
+  )
+  const hasInFlightJob = containerJobs.length > 0
+
+  // ponytail: 1s poll — the hook only fetches on mount and at a 2.5s cadence
+  // while it already knows about in-flight jobs, so a deploy submitted via the
+  // API or another tab would never appear here, and a just-submitted form job
+  // would sit on the 2.5s cadence before resolving. Skipped when background
+  // jobs are in flight and the form isn't pending (the hook covers that).
+  useEffect(() => {
+    const interval = window.setInterval(() => {
+      if (document.visibilityState !== 'visible') return
+      if (hasInFlightJob && pendingJobId === null) return
+      void refreshDeployJobs()
+    }, DEPLOY_JOB_DISCOVERY_POLL_MS)
+    return () => window.clearInterval(interval)
+  }, [hasInFlightJob, pendingJobId, refreshDeployJobs])
+
+  useEffect(() => {
+    if (!pendingJobId) return
+    const job = deployJobs.find((entry) => entry.job_id === pendingJobId)
+    if (job && job.status !== 'in_progress') {
+      resolveDeployJob(job)
+      void refreshDeployJobs()
+    }
+  }, [deployJobs, pendingJobId, resolveDeployJob, refreshDeployJobs])
+
+  // Terminal jobs leave the filtered list on the next poll; refresh the
+  // workloads table on that in-flight → none transition so the finished
+  // container's row appears even when the form didn't submit the job.
+  const workloadsRefreshRef = useRef<() => void>(() => {})
+  const hadInFlightJobRef = useRef(false)
+  useEffect(() => {
+    if (hadInFlightJobRef.current && !hasInFlightJob) {
+      workloadsRefreshRef.current()
+    }
+    hadInFlightJobRef.current = hasInFlightJob
+  }, [hasInFlightJob])
+
   const reportListLoadError = useCallback(
     (detail: string) => {
       setMessage({ type: 'err', text: detail })
@@ -77,6 +124,12 @@ export default function ContainersPage() {
 
   const { groups, listLoading, refresh } = useWorkloadGroups(reportListLoadError)
   refreshRef.current = refresh
+
+  useEffect(() => {
+    workloadsRefreshRef.current = () => {
+      void refresh({ revalidate: true })
+    }
+  }, [refresh])
 
   const onStart = useCallback(
     async (containerId: string) => {
@@ -271,6 +324,7 @@ export default function ContainersPage() {
       <WorkloadsTable
         listLoading={listLoading}
         groups={groups}
+        deployJobs={containerJobs}
         rowBusyId={rowBusy}
         onStart={onStart}
         onStop={onStop}

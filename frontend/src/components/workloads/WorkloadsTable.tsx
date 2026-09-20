@@ -1,14 +1,17 @@
 import { useCallback, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
-import type { ContainerInfo } from '../../api/client'
+import type { ContainerInfo, DeployJob } from '../../api/client'
 import type { WorkloadGroup } from '../../pages/containers/workloadGrouping'
 import { workloadInstances } from '../../pages/containers/workloadGrouping'
 import { WorkloadRow, type WorkloadStatsCellProps } from './WorkloadRow'
+import { DeployJobRow } from './DeployJobRow'
 import { Skeleton } from '../Skeleton'
 
 type WorkloadsTableProps = {
   listLoading: boolean
   groups: WorkloadGroup[]
+  /** In-flight container deploy jobs, pinned above real rows. */
+  deployJobs?: DeployJob[]
   rowBusyId: string | null
   onStart: (containerId: string) => void
   onStop: (containerId: string) => void
@@ -89,6 +92,7 @@ function WorkloadStatsCell({
 export function WorkloadsTable({
   listLoading,
   groups,
+  deployJobs,
   rowBusyId,
   onStart,
   onStop,
@@ -110,6 +114,7 @@ export function WorkloadsTable({
   const [terminalContainerId, setTerminalContainerId] = useState<string | null>(null)
 
   const columnCount = statsCell ? 9 : 8
+  const hasContent = groups.length > 0 || (deployJobs?.length ?? 0) > 0
 
   const toggleReplicaGroup = useCallback((groupId: string) => {
     setExpandedReplicaGroupId((current) =>
@@ -175,13 +180,13 @@ export function WorkloadsTable({
 
   return (
     <div className="workloads-table-wrap-outer">
-      {listLoading && groups.length === 0 ? (
+      {listLoading && groups.length === 0 && !hasContent ? (
         <div aria-busy="true" aria-label="Loading workloads">
           {[1, 2, 3].map((row) => (
             <Skeleton key={row} className="skeleton--team-row" />
           ))}
         </div>
-      ) : groups.length === 0 ? (
+      ) : !hasContent ? (
         <p className="containers-muted">No Vela-managed containers yet.</p>
       ) : (
         <div className="containers-table-wrap workloads-table-wrap">
@@ -200,6 +205,9 @@ export function WorkloadsTable({
               </tr>
             </thead>
             <tbody>
+              {(deployJobs ?? []).map((job) => (
+                <DeployJobRow key={job.job_id} job={job} />
+              ))}
               {groups.map((group) => {
                 const containerRow = group.base
                 const instances = workloadInstances(group)
