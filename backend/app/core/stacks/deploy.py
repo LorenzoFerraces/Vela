@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+import logging
 import uuid
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import user_library
@@ -29,6 +31,8 @@ from app.core.models import (
 from app.core.traffic.traffic_router import TrafficRouter
 from app.core.url_display import sanitize_url_for_display
 from app.db.models import DeploymentRecord, Stack, StackService, User
+
+logger = logging.getLogger(__name__)
 
 
 def _container_dns_name(stack: Stack, service: StackService) -> str:
@@ -67,13 +71,20 @@ async def deploy_stack(
     if not services:
         return {"error": "Stack has no services to deploy."}
 
+    # Plain copies up front: a persist-retry rollback can expire the ORM
+    # objects, and an async session cannot lazy-load an expired attribute
+    # outside a greenlet.
+    service_names = [service.service_name for service in services]
+    network_name = stack.network_name
+
     deployed_containers: list[ContainerInfo] = []
+    deployed_records: list[DeploymentRecord] = []
 
     try:
         if on_phase is not None:
             on_phase("deploying", None)
 
-        await orchestrator.create_network(stack.network_name)
+        await orchestrator.create_network(network_name)
 
         for service in services:
             container_name = _container_dns_name(stack, service)
@@ -114,13 +125,15 @@ async def deploy_stack(
                 except Exception:
                     pass
 
-            await _persist_deployment(
-                session,
-                user,
-                stack,
-                service,
-                info,
-                image_tag=image_tag,
+            deployed_records.append(
+                await _persist_deployment(
+                    session,
+                    user,
+                    stack,
+                    service,
+                    info,
+                    image_tag=image_tag,
+                )
             )
 
             if service.scaling_policy:
@@ -131,15 +144,15 @@ async def deploy_stack(
             if on_service_state is not None:
                 on_service_state(service.service_name, "running")
 
-        await session.commit()
+        await _commit_deployment_records(session, deployed_records)
         return {
             "containers": [
                 {
-                    "service_name": s.service_name,
+                    "service_name": name,
                     "container_id": c.id,
                     "container_name": c.name,
                 }
-                for s, c in zip(services, deployed_containers)
+                for name, c in zip(service_names, deployed_containers)
             ],
         }
 
@@ -155,13 +168,13 @@ async def deploy_stack(
                 pass
 
         try:
-            await orchestrator.remove_network(stack.network_name)
+            await orchestrator.remove_network(network_name)
         except Exception:
             pass
 
         failed_service = None
         if len(deployed_containers) < len(services):
-            failed_service = services[len(deployed_containers)].service_name
+            failed_service = service_names[len(deployed_containers)]
 
         if failed_service is not None and on_service_state is not None:
             on_service_state(failed_service, "failed")
@@ -307,8 +320,8 @@ async def _persist_deployment(
     container_info: ContainerInfo,
     *,
     image_tag: str,
-) -> None:
-    """Persist a DeploymentRecord for a stack service deployment."""
+) -> DeploymentRecord:
+    """Stage a DeploymentRecord for a stack service deployment."""
     record = DeploymentRecord(
         user_id=user.id,
         project_id=stack.project_id,
@@ -323,3 +336,79 @@ async def _persist_deployment(
         stack_id=stack.id,
     )
     session.add(record)
+    return record
+
+
+def _deployment_record_values(record: DeploymentRecord) -> dict[str, object]:
+    """Plain copy of a staged record's values, taken while its attributes
+    are still loaded. Retries build fresh instances from this snapshot
+    instead of re-reading ORM attributes (a session rollback expires them,
+    and an async session cannot lazy-load an expired attribute outside a
+    greenlet). Fresh instances also INSERT a new row where re-adding the
+    wiped record's known identity would not."""
+    return {
+        "user_id": record.user_id,
+        "project_id": record.project_id,
+        "container_id": record.container_id,
+        "container_name": record.container_name,
+        "source_kind": record.source_kind,
+        "source_ref": record.source_ref,
+        "image_tag": record.image_tag,
+        "container_port": record.container_port,
+        "env_vars": dict(record.env_vars),
+        "command": list(record.command) if record.command else None,
+        "stack_id": record.stack_id,
+    }
+
+
+async def _commit_deployment_records(
+    session: AsyncSession,
+    records: list[DeploymentRecord],
+) -> None:
+    """Commit the staged DeploymentRecords, retrying a bounded number of
+    times and verifying the rows landed. In tests, a poll request's
+    teardown ROLLBACK on the shared in-memory connection can wipe the
+    pending INSERTs between the worker's flush and commit; the commit then
+    succeeds on an empty transaction and the records are silently lost. A
+    persist failure must never fail the deploy job."""
+    container_ids = [record.container_id for record in records]
+    snapshots = [_deployment_record_values(record) for record in records]
+    for attempt in range(3):
+        pending = [DeploymentRecord(**values) for values in snapshots]
+        try:
+            for record in pending:
+                session.add(record)
+            await session.commit()
+            landed = await session.execute(
+                select(DeploymentRecord.container_id).where(
+                    DeploymentRecord.container_id.in_(container_ids)
+                )
+            )
+            if len(landed.scalars().all()) == len(container_ids):
+                return
+            logger.warning(
+                "Stack deploy persist attempt %d/3: records missing after commit for containers %s",
+                attempt + 1,
+                container_ids,
+            )
+        except Exception:
+            logger.exception(
+                "Stack deploy persist attempt %d/3 failed for containers %s",
+                attempt + 1,
+                container_ids,
+            )
+            try:
+                # The failed commit left the transaction broken; reset it
+                # before retrying.
+                await session.rollback()
+            except Exception:
+                logger.exception(
+                    "Could not reset session before stack deploy persist retry for containers %s",
+                    container_ids,
+                )
+        for record in pending:
+            session.expunge(record)
+    logger.error(
+        "Stack deploy persist: records still missing after 3 attempts for containers %s",
+        container_ids,
+    )

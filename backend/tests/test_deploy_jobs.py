@@ -12,6 +12,8 @@ from typing import Any, cast
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.containers.fake_orchestrator import FakeContainerOrchestrator
 from app.core.deploy.jobs import (
@@ -24,7 +26,7 @@ from app.core.exceptions import (
     NeedsBuildOverrideError,
     ProviderConnectionError,
 )
-from app.db.models import User
+from app.db.models import DeploymentRecord, User
 
 PROJECT_ID = uuid.uuid4()
 USER_ID = uuid.uuid4()
@@ -432,6 +434,52 @@ def test_stack_deploy_returns_202_and_completes(
     }
     assert network_name in fake_orchestrator._networks
 
+    api_client.delete(f"/api/stacks/{stack_id}")
+
+
+def test_stack_deploy_persist_survives_teardown_rollback(
+    api_client: TestClient,
+    db_session_factory: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Force the shared-connection hazard deterministically: the first
+    # commit that stages DeploymentRecords gets a competing ROLLBACK on
+    # the shared in-memory connection between its flush and COMMIT — the
+    # same interleaving a poll request's session teardown can cause.
+    raced = False
+    original_commit = AsyncSession.commit
+
+    async def racy_commit(self: AsyncSession) -> None:
+        nonlocal raced
+        if not raced and any(
+            isinstance(obj, DeploymentRecord) for obj in self.sync_session.new
+        ):
+            raced = True
+            await self.flush()
+            async with db_session_factory() as competitor:
+                await competitor.execute(select(1))
+                await competitor.rollback()
+        await original_commit(self)
+
+    monkeypatch.setattr(AsyncSession, "commit", racy_commit)
+
+    stack_id = _create_stack(
+        api_client,
+        "jobs-persist-stack",
+        [
+            _image_service("web", "nginx:alpine"),
+            _image_service("api", "python:3.12-slim", depends_on=["web"]),
+        ],
+    )
+    accepted = api_client.post(f"/api/stacks/{stack_id}/deploy")
+    assert accepted.status_code == 202
+    job = wait_for_deploy(api_client, accepted.json()["job_id"])
+    assert job["status"] == "succeeded"
+
+    listed = api_client.get("/api/deployments/")
+    persisted_ids = {row["container_id"] for row in listed.json()}
+    for container in job["result"]["containers"]:
+        assert container["container_id"] in persisted_ids
     api_client.delete(f"/api/stacks/{stack_id}")
 
 
