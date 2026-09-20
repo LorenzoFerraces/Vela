@@ -5,10 +5,6 @@
   padding-bottom: 0.75rem;
 }
 
-.deploy-job-row__name {
-  color: var(--text);
-}
-
 .deploy-job-row__status {
   display: inline-flex;
   align-items: center;

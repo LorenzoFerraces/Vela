@@ -29,14 +29,7 @@ DeployJobStatus = Literal["in_progress", "succeeded", "failed"]
 TERMINAL_JOB_TTL = 300  # seconds a terminal job stays visible to pollers
 
 
-class DeployError(VelaError):
-    """Worker-side deploy failure carrying the structured error payload."""
-
-    def __init__(self, error: dict[str, Any]) -> None:
-        self.error = error
-        super().__init__(
-            str(error.get("detail", error.get("code", "deploy failed")))
-        )
+GENERIC_DEPLOY_FAILURE_DETAIL = "Deploy failed due to an unexpected error."
 
 
 def classify_deploy_error(exc: Exception) -> dict[str, Any]:
@@ -53,7 +46,9 @@ def classify_deploy_error(exc: Exception) -> dict[str, Any]:
         }
     if isinstance(exc, ProviderConnectionError):
         return {"code": "provider_unavailable", "detail": str(exc)}
-    return {"code": "deploy_failed", "detail": str(exc)}
+    if isinstance(exc, VelaError):
+        return {"code": "deploy_failed", "detail": str(exc)}
+    return {"code": "deploy_failed", "detail": GENERIC_DEPLOY_FAILURE_DETAIL}
 
 
 @dataclass

@@ -25,6 +25,7 @@ from app.core.deploy.jobs import (
 from app.core.exceptions import (
     ImageBuildError,
     NeedsBuildOverrideError,
+    ProjectAccessDeniedError,
     ProviderConnectionError,
 )
 from app.db.models import DeploymentRecord, User
@@ -119,8 +120,14 @@ def test_classify_deploy_error_known_types() -> None:
     provider = classify_deploy_error(ProviderConnectionError("docker down"))
     assert provider == {"code": "provider_unavailable", "detail": "docker down"}
 
+    domain = classify_deploy_error(ProjectAccessDeniedError("no access"))
+    assert domain == {"code": "deploy_failed", "detail": "no access"}
+
     other = classify_deploy_error(RuntimeError("weird"))
-    assert other == {"code": "deploy_failed", "detail": "weird"}
+    assert other == {
+        "code": "deploy_failed",
+        "detail": "Deploy failed due to an unexpected error.",
+    }
 
 
 def test_spawn_runs_coroutine_and_cancel_all_stops_workers() -> None:
@@ -655,7 +662,7 @@ def test_stack_deploy_needs_build_override_job_error(
     api_client.delete(f"/api/stacks/{stack_id}")
 
 
-def test_stack_deploy_viewer_still_403_sync(
+def test_stack_deploy_viewer_still_404_sync(
     api_client: TestClient, seeded_user: User
 ) -> None:
     # ownership check happens before the job exists (covered fully in

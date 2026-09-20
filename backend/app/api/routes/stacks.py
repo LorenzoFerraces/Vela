@@ -28,7 +28,7 @@ from app.api.deps import (
     get_orchestrator,
     get_traffic_router,
 )
-from app.api.routes.containers import _spawn_deploy_worker
+from app.api.routes.deploys import spawn_deploy_worker
 from app.api.schemas import (
     AnalyzeRepoRequest,
     AnalyzeRepoResponse,
@@ -391,7 +391,7 @@ async def deploy_user_stack(
     )
     registry.set_phase(job.job_id, "queued")
     background_tasks.add_task(
-        _spawn_deploy_worker,
+        spawn_deploy_worker,
         registry,
         job.job_id,
         _run_stack_deploy_worker,

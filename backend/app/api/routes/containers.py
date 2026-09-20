@@ -7,9 +7,8 @@ import json
 import logging
 import os
 import uuid
-from collections.abc import Coroutine
 from contextlib import suppress
-from typing import Annotated, Any, Callable
+from typing import Annotated, Callable
 
 from fastapi import (
     APIRouter,
@@ -40,6 +39,7 @@ from app.api.route_wiring import (
     register_route_for_deployed_container,
     remove_route_for_container_name,
 )
+from app.api.routes.deploys import spawn_deploy_worker
 from app.api.schemas import (
     ContainerDeployResponse,
     ImageAvailabilityResponse,
@@ -847,17 +847,6 @@ async def upload_volume_folder(
     )
 
 
-async def _spawn_deploy_worker(
-    registry: DeployJobRegistry,
-    job_id: str,
-    worker: Callable[..., Coroutine[Any, Any, None]],
-    *worker_args: Any,
-) -> None:
-    """Start the worker after the response is sent so its DB session never
-    overlaps the request sessions' teardown on the shared test connection."""
-    registry.spawn(job_id, worker(*worker_args))
-
-
 async def _run_container_deploy_worker(
     registry: DeployJobRegistry,
     job_id: str,
@@ -865,7 +854,7 @@ async def _run_container_deploy_worker(
     body: RunFromSourceRequest,
     project_id: uuid.UUID,
     resolved_volumes: list[VolumeMount],
-    current_user: User,
+    user_id: uuid.UUID,
     orchestrator: ContainerOrchestrator,
     traffic_router: TrafficRouter,
     image_builder: DefaultImageBuilder,
@@ -873,6 +862,16 @@ async def _run_container_deploy_worker(
     """Run the deploy pipeline detached; mirror phases into the job registry."""
     try:
         async with session_factory() as session:
+            user = await get_user_by_id(session, user_id)
+            if user is None:
+                registry.complete_failure(
+                    job_id,
+                    {
+                        "code": "deploy_failed",
+                        "detail": "User not found.",
+                    },
+                )
+                return
             source_kind = body.source_kind
             if source_kind is None:
                 raise ValueError(
@@ -896,7 +895,7 @@ async def _run_container_deploy_worker(
                     cfg, source_kind="image", source_ref=image_ref
                 )
                 cfg = _apply_deploy_labels(
-                    cfg, owner_id=str(current_user.id), project_id=project_id
+                    cfg, owner_id=str(user.id), project_id=project_id
                 )
                 cfg = await apply_public_route_to_deploy_config(cfg, traffic_router)
                 registry.set_phase(job_id, "starting", image_ref)
@@ -906,7 +905,7 @@ async def _run_container_deploy_worker(
                 registry.set_phase(job_id, "routing")
                 await _persist_run_deployment(
                     session,
-                    current_user,
+                    user,
                     body,
                     info,
                     project_id=project_id,
@@ -921,7 +920,7 @@ async def _run_container_deploy_worker(
                 )
                 await emit_audit_log(
                     session,
-                    user_id=current_user.id,
+                    user_id=user.id,
                     action="container.deploy",
                     target_type="container",
                     target_id=info.id,
@@ -950,7 +949,7 @@ async def _run_container_deploy_worker(
                 if template_id is None:
                     raise ValueError("dockerfile_template_id is required.")
                 template = await user_library.get_dockerfile_template(
-                    session, current_user.id, template_id
+                    session, user.id, template_id
                 )
                 tag = f"vela/templatebuild:{uuid.uuid4().hex[:12]}"
                 registry.set_phase(job_id, "building", tag)
@@ -980,7 +979,7 @@ async def _run_container_deploy_worker(
                     source_ref=template.name,
                 )
                 cfg = _apply_deploy_labels(
-                    cfg, owner_id=str(current_user.id), project_id=project_id
+                    cfg, owner_id=str(user.id), project_id=project_id
                 )
                 cfg = await apply_public_route_to_deploy_config(cfg, traffic_router)
                 registry.set_phase(job_id, "starting", build_result.image_tag)
@@ -990,7 +989,7 @@ async def _run_container_deploy_worker(
                 registry.set_phase(job_id, "routing")
                 await _persist_run_deployment(
                     session,
-                    current_user,
+                    user,
                     body,
                     info,
                     project_id=project_id,
@@ -1007,7 +1006,7 @@ async def _run_container_deploy_worker(
                 )
                 await emit_audit_log(
                     session,
-                    user_id=current_user.id,
+                    user_id=user.id,
                     action="container.deploy",
                     target_type="container",
                     target_id=info.id,
@@ -1033,7 +1032,7 @@ async def _run_container_deploy_worker(
 
             git_url = (body.git_url or "").strip()
             sanitized_git_url = sanitize_url_for_display(git_url)
-            access_token = await github_token_for_url(session, current_user, git_url)
+            access_token = await github_token_for_url(session, user, git_url)
             tag = f"vela/gitbuild:{uuid.uuid4().hex[:12]}"
             try:
                 build_result = await image_builder.build_from_source(
@@ -1076,7 +1075,7 @@ async def _run_container_deploy_worker(
                 cfg, source_kind="git", source_ref=sanitized_git_url
             )
             cfg = _apply_deploy_labels(
-                cfg, owner_id=str(current_user.id), project_id=project_id
+                cfg, owner_id=str(user.id), project_id=project_id
             )
             cfg = await apply_public_route_to_deploy_config(cfg, traffic_router)
             registry.set_phase(job_id, "starting", build_result.image_tag)
@@ -1086,7 +1085,7 @@ async def _run_container_deploy_worker(
             registry.set_phase(job_id, "routing")
             await _persist_run_deployment(
                 session,
-                current_user,
+                user,
                 body,
                 info,
                 project_id=project_id,
@@ -1101,7 +1100,7 @@ async def _run_container_deploy_worker(
             )
             await emit_audit_log(
                 session,
-                user_id=current_user.id,
+                user_id=user.id,
                 action="container.deploy",
                 target_type="container",
                 target_id=info.id,
@@ -1191,7 +1190,7 @@ async def run_from_user_source(
     )
     registry.set_phase(job.job_id, "queued")
     background_tasks.add_task(
-        _spawn_deploy_worker,
+        spawn_deploy_worker,
         registry,
         job.job_id,
         _run_container_deploy_worker,
@@ -1201,7 +1200,7 @@ async def run_from_user_source(
         body,
         project_id,
         resolved_volumes,
-        current_user,
+        current_user.id,
         orchestrator,
         traffic_router,
         image_builder,

@@ -6,6 +6,7 @@ import {
   type BuildOverride,
   type DeployJob,
   type RunFromSourceRequest,
+  type RunFromSourceResponse,
   type ScalingPolicyRequest,
 } from '../../api/client'
 import { buildOverrideFromAnalysis } from './buildOverride'
@@ -299,7 +300,6 @@ export function useContainerRunForm({
       }
       const accepted = await submitRun(requestBody)
       setPendingJobId(accepted.job_id)
-      setBusy(false)
       return
     } catch (error) {
       setMessage({ type: 'err', text: formatApiError(error) })
@@ -312,14 +312,7 @@ export function useContainerRunForm({
     if (pendingJobId !== job.job_id) return
     setPendingJobId(null)
     if (job.status === 'succeeded' && job.result) {
-      const result = job.result as {
-        kind?: string
-        container?: { name: string }
-        image?: string
-        route_wired?: boolean
-        public_url?: string | null
-        scaling_policy_warning?: string | null
-      }
+      const result = job.result as Partial<RunFromSourceResponse>
       const routeNote = result.route_wired ? ' Traefik route registered.' : ''
       const scalingWarning =
         typeof result.scaling_policy_warning === 'string' &&
