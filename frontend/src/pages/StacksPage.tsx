@@ -12,13 +12,14 @@ import {
   type StackService,
   type StackServiceCreate,
 } from '../api/client'
+import { useActiveDeployJobs } from '../hooks/useActiveDeployJobs'
+import type { DeployJob, DeployJobError } from '../api/client'
 import BuildConfigModal from './containers/BuildConfigModal'
-import {
-  isNeedsBuildOverrideError,
-  parseFailedServiceNameFromError,
-} from './containers/buildOverride'
 import NewStackModal from './stacks/NewStackModal'
 import './stacks/stacks.css'
+import '../deploy-progress.css'
+
+const DEPLOY_JOB_DISCOVERY_POLL_MS = 1000
 
 type Banner = { tone: 'ok' | 'err'; text: string } | null
 
@@ -60,20 +61,34 @@ function resolveFailedService(
   )
 }
 
+function jobNeedsBuildOverride(job: DeployJob): boolean {
+  return job.error?.code === 'needs_build_override'
+}
+
+function failedServiceFromJob(job: DeployJob): string | null {
+  if (job.error?.failed_service) return job.error.failed_service
+  return (
+    job.services.find((service) => service.state === 'failed')?.name ?? null
+  )
+}
+
 function StackCard({
   stack,
   busy,
   pendingDelete,
+  deployJob,
   onDeploy,
   onDelete,
 }: {
   stack: Stack
   busy: boolean
   pendingDelete: string | null
+  deployJob: DeployJob | undefined
   onDeploy: (id: string) => void
   onDelete: (id: string) => void
 }) {
   const isPending = pendingDelete === stack.id
+  const deploying = deployJob !== undefined && deployJob.status === 'in_progress'
   return (
     <article className="stacks-card">
       <div className="stacks-card__top">
@@ -82,28 +97,53 @@ function StackCard({
         </Link>
       </div>
       <div className="stacks-card__network">{stack.network_name}</div>
-      <div className="stacks-card__meta">
-        {stack.services.length}{' '}
-        {stack.services.length === 1 ? 'service' : 'services'} ·{' '}
-        {new Date(stack.created_at).toLocaleDateString(undefined, {
-          month: 'short',
-          day: 'numeric',
-        })}
-      </div>
+      {deploying && deployJob && deployJob.services.length > 0 ? (
+        <ul
+          className="stacks-card__services"
+          role="status"
+          aria-live="polite"
+          aria-label={`Deploying ${stack.name}`}
+        >
+          {deployJob.services.map((service) => (
+            <li
+              key={service.name}
+              className={`stacks-card__service stacks-card__service--${service.state}`}
+            >
+              <span className="stacks-card__service-dot" aria-hidden="true" />
+              <span className="stacks-card__service-name">{service.name}</span>
+              {service.state !== 'pending' && service.state !== 'running' ? (
+                <span className="stacks-card__service-phase">
+                  {service.state}
+                </span>
+              ) : null}
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <div className="stacks-card__meta">
+          {stack.services.length}{' '}
+          {stack.services.length === 1 ? 'service' : 'services'} ·{' '}
+          {new Date(stack.created_at).toLocaleDateString(undefined, {
+            month: 'short',
+            day: 'numeric',
+          })}
+        </div>
+      )}
       <div className="stacks-card__actions">
         <button
           type="button"
           className="btn btn--ghost btn--sm"
           onClick={() => onDeploy(stack.id)}
-          disabled={busy}
+          disabled={deploying || busy}
+          aria-busy={deploying}
         >
-          Deploy
+          {deploying ? 'DEPLOYING…' : 'Deploy'}
         </button>
         <button
           type="button"
           className="btn btn--danger btn--sm"
           onClick={() => onDelete(stack.id)}
-          disabled={busy}
+          disabled={deploying || busy}
         >
           {isPending ? 'Confirm?' : 'Remove'}
         </button>
@@ -144,7 +184,17 @@ export default function StacksPage() {
     null,
   )
   const [pendingServiceName, setPendingServiceName] = useState<string | null>(null)
+  const [pendingJobIds, setPendingJobIds] = useState<Record<string, string>>({})
   const deleteTimer = useRef<ReturnType<typeof setTimeout>>(undefined)
+
+  const { jobs: deployJobs, refresh: refreshDeployJobs } = useActiveDeployJobs()
+  const stackJobs = deployJobs.filter((job) => job.kind === 'stack')
+  const stackJobsInFlight = stackJobs.some((job) => job.status === 'in_progress')
+  const pendingStackJobCount = Object.keys(pendingJobIds).length
+  const activeJobFor = (stackId: string) => {
+    const jobId = pendingJobIds[stackId]
+    return jobId ? stackJobs.find((job) => job.job_id === jobId) : undefined
+  }
 
   const loadStacks = useCallback(async () => {
     try {
@@ -167,16 +217,31 @@ export default function StacksPage() {
     }
   }, [])
 
+  // ponytail: 1s poll — the hook only fetches on mount and at a 2.5s cadence
+  // while it already knows about in-flight jobs, so a stack deploy submitted
+  // via the API or another tab would never surface its checklist here, and a
+  // just-submitted card job would sit out the 2.5s cadence first. Skipped
+  // when background stack jobs are in flight and no card is pending (the
+  // hook covers that cadence).
+  useEffect(() => {
+    const interval = window.setInterval(() => {
+      if (document.visibilityState !== 'visible') return
+      if (stackJobsInFlight && pendingStackJobCount === 0) return
+      void refreshDeployJobs()
+    }, DEPLOY_JOB_DISCOVERY_POLL_MS)
+    return () => window.clearInterval(interval)
+  }, [stackJobsInFlight, pendingStackJobCount, refreshDeployJobs])
+
   const openBuildConfigForDeployFailure = useCallback(
-    async (stackId: string, error: unknown) => {
+    async (stackId: string, error: DeployJobError | null) => {
       try {
         const stack = await getStack(stackId)
-        const failedName = parseFailedServiceNameFromError(error)
+        const failedName = error?.failed_service ?? null
         const service = resolveFailedService(stack, failedName)
         if (!service) {
           setBanner({
             tone: 'err',
-            text: formatApiError(error),
+            text: error?.detail ?? 'Deploy failed.',
           })
           return
         }
@@ -195,25 +260,51 @@ export default function StacksPage() {
     [],
   )
 
+  const resolvingRef = useRef<Set<string>>(new Set())
+
+  useEffect(() => {
+    for (const [stackId, jobId] of Object.entries(pendingJobIds)) {
+      if (resolvingRef.current.has(jobId)) continue
+      const job = deployJobs.find((entry) => entry.job_id === jobId)
+      if (!job || job.status === 'in_progress') continue
+      resolvingRef.current.add(jobId)
+      setPendingJobIds((prev) => {
+        const next = { ...prev }
+        delete next[stackId]
+        return next
+      })
+      if (job.status === 'succeeded') {
+        setBanner({ tone: 'ok', text: 'Stack deployed.' })
+        void loadStacks()
+      } else if (job.error && jobNeedsBuildOverride(job)) {
+        void openBuildConfigForDeployFailure(stackId, job.error)
+      } else {
+        const failedService = job.error ? failedServiceFromJob(job) : null
+        setBanner({
+          tone: 'err',
+          text: failedService
+            ? `Deploy failed on service '${failedService}'.`
+            : job.error?.detail ?? 'Deploy failed.',
+        })
+        void refreshDeployJobs()
+      }
+    }
+  }, [deployJobs, pendingJobIds, loadStacks, openBuildConfigForDeployFailure, refreshDeployJobs])
+
   const handleDeploy = useCallback(
     async (id: string) => {
       setBusy(true)
       setBanner(null)
       try {
-        await deployStack(id)
-        setBanner({ tone: 'ok', text: 'Stack deployed.' })
-        await loadStacks()
+        const accepted = await deployStack(id)
+        setPendingJobIds((prev) => ({ ...prev, [id]: accepted.job_id }))
       } catch (err) {
-        if (isNeedsBuildOverrideError(err)) {
-          await openBuildConfigForDeployFailure(id, err)
-          return
-        }
         setBanner({ tone: 'err', text: formatApiError(err) })
       } finally {
         setBusy(false)
       }
     },
-    [loadStacks, openBuildConfigForDeployFailure],
+    [],
   )
 
   function closeBuildConfigModal() {
@@ -246,14 +337,10 @@ export default function StacksPage() {
         name: stack.name,
         services,
       })
-      await deployStack(stackId)
-      setBanner({ tone: 'ok', text: 'Stack deployed.' })
-      await loadStacks()
+      const accepted = await deployStack(stackId)
+      setPendingJobIds((prev) => ({ ...prev, [stackId]: accepted.job_id }))
+      return
     } catch (err) {
-      if (isNeedsBuildOverrideError(err)) {
-        await openBuildConfigForDeployFailure(stackId, err)
-        return
-      }
       setBanner({ tone: 'err', text: formatApiError(err) })
     } finally {
       setBusy(false)
@@ -339,6 +426,7 @@ export default function StacksPage() {
               stack={stack}
               busy={busy}
               pendingDelete={pendingDelete}
+              deployJob={activeJobFor(stack.id)}
               onDeploy={handleDeploy}
               onDelete={handleDelete}
             />

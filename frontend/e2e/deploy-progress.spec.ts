@@ -1,5 +1,7 @@
 import { expect, test } from './fixtures'
 import { deployImageContainer } from './api-helpers'
+import { bearerToken } from './auth-helpers'
+import { apiBase } from './constants'
 
 /**
  * In-flight UI assertions need a slow fake deploy; run this spec with:
@@ -83,5 +85,65 @@ test.describe('Deploy progress (containers)', () => {
     ).toBeVisible()
     const response = await deployPromise
     expect(response.ok()).toBeTruthy()
+  })
+})
+
+test.describe('Deploy progress (stacks)', () => {
+  // The app authenticates with Bearer tokens (no cookie session), so the
+  // stack-create and cleanup requests carry the page's token explicitly.
+  test('stack card morphs to the service checklist and reverts on success', async ({
+    authenticatedPageNoGithub,
+  }) => {
+    const token = await bearerToken(authenticatedPageNoGithub)
+    const authHeaders = { Authorization: `Bearer ${token}` }
+    const stackName = `progress-stack-${Date.now()}`
+    const created = await authenticatedPageNoGithub.request.post(
+      `${apiBase}/api/stacks/`,
+      {
+        headers: authHeaders,
+        data: {
+          name: stackName,
+          services: [
+            {
+              service_name: 'web',
+              source_kind: 'image',
+              source_ref: 'nginx:alpine',
+              container_port: 80,
+              env_vars: {},
+              public_route: false,
+            },
+          ],
+        },
+      },
+    )
+    expect(created.ok()).toBeTruthy()
+    const stack = (await created.json()) as { id: string }
+
+    await authenticatedPageNoGithub.goto('/stacks')
+    const card = authenticatedPageNoGithub
+      .locator('.stacks-card')
+      .filter({ hasText: stackName })
+    await card.getByRole('button', { name: 'Deploy', exact: true }).click()
+
+    if (deployDelayActive) {
+      // One image service: building is momentary; the fake-orchestrator
+      // delay lands the card in the stable 'starting' state mid-deploy.
+      await expect(card.locator('.stacks-card__service')).toHaveCount(1)
+      await expect(card.locator('.stacks-card__service--starting')).toBeVisible()
+      await expect(card).toContainText('DEPLOYING')
+    }
+
+    await expect(
+      card.getByRole('button', { name: 'Deploy', exact: true }),
+    ).toBeVisible({ timeout: 15_000 })
+    await expect(
+      authenticatedPageNoGithub.getByText('Stack deployed.'),
+    ).toBeVisible()
+    await expect(card.locator('.stacks-card__services')).toHaveCount(0)
+
+    await authenticatedPageNoGithub.request.delete(
+      `${apiBase}/api/stacks/${stack.id}`,
+      { headers: authHeaders },
+    )
   })
 })
