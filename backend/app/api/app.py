@@ -15,6 +15,7 @@ from starlette.middleware.gzip import GZipMiddleware
 from app.api.errors import register_exception_handlers
 from app.core.deploy.jobs import DeployJobRegistry
 from app.api.routes import (
+    admin,
     audit,
     auth,
     builder,
@@ -184,6 +185,11 @@ def create_app() -> FastAPI:
         auth.router,
         prefix=f"{API_PREFIX}/auth",
         tags=["auth"],
+    )
+    application.include_router(
+        admin.router,
+        prefix=f"{API_PREFIX}/admin",
+        tags=["admin"],
     )
     application.include_router(
         users.router,

@@ -190,6 +190,37 @@ def db_session_factory() -> Iterator[async_sessionmaker[AsyncSession]]:
         asyncio.run(engine.dispose())
 
 
+@pytest.fixture
+def provision_user(
+    db_session_factory: async_sessionmaker[AsyncSession],
+):
+    def _provision(
+        email: str,
+        *,
+        role: str = "student",
+        password: str | None = "password-min-8-chars",
+    ) -> tuple[User, str]:
+        from app.core.auth.enums import UserRole
+        from app.core.projects.bootstrap import ensure_personal_workspace
+
+        async def run() -> tuple[User, str]:
+            async with db_session_factory() as session:
+                user = User(
+                    email=email,
+                    password_hash=hash_password(password) if password else None,
+                    role=UserRole(role),
+                )
+                session.add(user)
+                await session.flush()
+                await ensure_personal_workspace(session, user)
+                await session.refresh(user)
+                return user, create_access_token(user.id)
+
+        return asyncio.run(run())
+
+    return _provision
+
+
 def _seed_user(
     factory: async_sessionmaker[AsyncSession],
     *,
