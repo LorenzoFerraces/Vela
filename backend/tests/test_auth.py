@@ -120,6 +120,19 @@ def test_me_without_token_is_unauthorized(db_app: Any) -> None:
     assert response.status_code == 401
 
 
+def test_me_includes_role(db_app: Any) -> None:
+    with TestClient(db_app) as client:
+        registered = client.post(
+            "/api/auth/register",
+            json={"email": "role-me@example.com", "password": "password-min-8-chars"},
+        )
+        assert registered.status_code == 201
+        token = registered.json()["access_token"]
+        me = client.get("/api/auth/me", headers={"Authorization": f"Bearer {token}"})
+    assert me.status_code == 200
+    assert me.json()["role"] == "student"
+
+
 def test_me_with_invalid_token_is_unauthorized(db_app: Any) -> None:
     with TestClient(db_app) as client:
         response = client.get(

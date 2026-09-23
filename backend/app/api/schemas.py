@@ -16,6 +16,7 @@ from pydantic import (
     model_validator,
 )
 
+from app.core.auth.enums import UserRole
 from app.core.containers.volume_uploads import (
     VOLUME_UPLOAD_MAX_BYTES,
     VOLUME_UPLOAD_USER_QUOTA_BYTES,
@@ -693,6 +694,7 @@ class UserPublic(BaseModel):
     display_name: str | None = None
     pronouns: str | None = None
     avatar_url: str | None = None
+    role: UserRole
 
 
 class UserProfileUpdate(BaseModel):

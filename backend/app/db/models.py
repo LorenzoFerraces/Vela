@@ -43,6 +43,17 @@ class User(Base):
         String(320), unique=True, nullable=False, index=True
     )
     password_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # ponytail: literal "student" not UserRole — importing app.core.auth from
+    # models.py creates a circular import (auth package init -> service -> models).
+    role: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        default="student",
+        server_default="student",
+    )
+    is_active: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default=sa.true()
+    )
     display_name: Mapped[str | None] = mapped_column(String(120), nullable=True)
     pronouns: Mapped[str | None] = mapped_column(String(40), nullable=True)
     avatar_object_key: Mapped[str | None] = mapped_column(String(512), nullable=True)
