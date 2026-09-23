@@ -1,11 +1,11 @@
-import { appBase, E2E_USER_EMAIL, E2E_USER_PASSWORD } from './constants'
-import { expect, test } from './fixtures'
-
-/**
- * These tests intentionally do NOT use the `authenticatedPage` fixture, because
- * they exercise the login/register flow itself: they need to start anonymous
- * and drive the real forms against the live API.
- */
+import {
+  appBase,
+  E2E_ADMIN_EMAIL,
+  E2E_ADMIN_PASSWORD,
+  E2E_USER_EMAIL,
+  E2E_USER_PASSWORD,
+} from './constants'
+import { expect, loginAndSeedToken, test } from './fixtures'
 
 const baseURL = appBase
 
@@ -49,39 +49,54 @@ test.describe('login form', () => {
   })
 })
 
-test.describe('registration form', () => {
-  test('client-side validation blocks short passwords without hitting the API', async ({
-    page,
+test.describe('role-gated routes', () => {
+  test('anonymous access preserves the requested next path', async ({ page }) => {
+    for (const path of ['/teams?view=active', '/admin?tab=users']) {
+      await page.goto(path)
+      await expect(page).toHaveURL(
+        `${baseURL}/login?next=${encodeURIComponent(path)}`,
+      )
+    }
+  })
+
+  test('students are redirected away from staff routes', async ({
+    authenticatedPageNoGithub,
   }) => {
-    await page.goto('/register')
-    await page.getByLabel('Email').fill('new.user@example.com')
-    await page.getByLabel('Password').fill('short')
-    await page.getByRole('button', { name: 'Create account' }).click()
-
-    await expect(page.getByRole('alert')).toContainText(
-      'Password must be at least 8 characters.',
-    )
-    await expect(page).toHaveURL(/\/register/)
+    for (const path of ['/teams', '/admin']) {
+      await authenticatedPageNoGithub.goto(path)
+      await expect(authenticatedPageNoGithub).toHaveURL(`${baseURL}/dashboard`)
+    }
   })
 
-  test('registration is disabled with a clear error', async ({ page }) => {
-    const email = `register.${Date.now()}@example.com`
+  test('navbar entries reflect each role', async ({
+    authenticatedPageNoGithub,
+    instructorPage,
+    browser,
+  }) => {
+    await authenticatedPageNoGithub.goto('/dashboard')
+    const studentNav = authenticatedPageNoGithub.getByRole('navigation', {
+      name: 'Main',
+    })
+    await expect(studentNav.getByRole('link', { name: 'Teams' })).toHaveCount(0)
+    await expect(studentNav.getByRole('link', { name: 'Admin' })).toHaveCount(0)
 
-    await page.goto('/register')
-    await page.getByLabel('Email').fill(email)
-    await page.getByLabel('Password').fill('a-long-enough-password')
-    await page.getByRole('button', { name: 'Create account' }).click()
+    await instructorPage.goto('/dashboard')
+    const instructorNav = instructorPage.getByRole('navigation', { name: 'Main' })
+    await expect(instructorNav.getByRole('link', { name: 'Teams' })).toBeVisible()
+    await expect(instructorNav.getByRole('link', { name: 'Admin' })).toHaveCount(0)
 
-    await expect(page.getByRole('alert')).toContainText('Registration disabled')
-    await expect(page).toHaveURL(`${baseURL}/register`)
+    const adminContext = await browser.newContext()
+    const adminPage = await adminContext.newPage()
+    await loginAndSeedToken(adminPage, E2E_ADMIN_EMAIL, E2E_ADMIN_PASSWORD)
+    await adminPage.goto('/admin')
+    await expect(
+      adminPage.getByRole('heading', { name: 'Admin', level: 1 }),
+    ).toBeVisible()
+    await adminContext.close()
   })
+})
 
-  test('registration is disabled for an existing email', async ({ page }) => {
-    await page.goto('/register')
-    await page.getByLabel('Email').fill(E2E_USER_EMAIL)
-    await page.getByLabel('Password').fill('a-long-enough-password')
-    await page.getByRole('button', { name: 'Create account' }).click()
-
-    await expect(page.getByRole('alert')).toContainText('Registration disabled')
-  })
+test('login has no public signup link', async ({ page }) => {
+  await page.goto('/login')
+  await expect(page.getByText('Create an account')).toHaveCount(0)
 })

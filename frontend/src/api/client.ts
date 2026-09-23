@@ -99,7 +99,6 @@ export {
   listGithubRepoBranches,
   listGithubRepos,
   login,
-  registerUser,
   updateProfile,
   uploadAvatar,
 } from './auth'
@@ -199,10 +198,10 @@ export type {
   GithubStatus,
   ListGithubReposParams,
   LoginRequest,
-  RegisterRequest,
   TokenResponse,
   UserProfileUpdate,
   UserPublic,
+  UserRole,
 } from './auth'
 
 export type {

@@ -14,10 +14,8 @@ import {
   getMe,
   login as apiLogin,
   onUnauthorized,
-  registerUser as apiRegister,
   setAccessToken,
   type LoginRequest,
-  type RegisterRequest,
   type UserPublic,
 } from '../api/client'
 import {
@@ -82,14 +80,6 @@ export function AuthProvider({ children }: AuthProviderProps) {
     return response.user
   }, [])
 
-  const register = useCallback(async (body: RegisterRequest) => {
-    const response = await apiRegister(body)
-    setAccessToken(response.access_token)
-    setUser(response.user)
-    setStatus('authenticated')
-    return response.user
-  }, [])
-
   const clerkLogin = useCallback(async (clerkToken: string) => {
     const response = await apiClerkLogin(clerkToken)
     setAccessToken(response.access_token)
@@ -116,8 +106,8 @@ export function AuthProvider({ children }: AuthProviderProps) {
   }, [])
 
   const value = useMemo<AuthContextValue>(
-    () => ({ status, user, login, register, clerkLogin, logout, refreshUser }),
-    [status, user, login, register, clerkLogin, logout, refreshUser]
+    () => ({ status, user, login, clerkLogin, logout, refreshUser }),
+    [status, user, login, clerkLogin, logout, refreshUser]
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

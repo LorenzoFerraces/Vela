@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Link, useLocation, useNavigate } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { ApiError, apiRequest, formatApiError } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 
@@ -225,13 +225,6 @@ export default function LoginPage() {
             </button>
           </>
         ) : null}
-
-        <p className="auth-form__footer">
-          New to Vela?{' '}
-          <Link className="auth-form__footer-link" to="/register">
-            Create an account
-          </Link>
-        </p>
       </section>
     </main>
   )

@@ -3,28 +3,22 @@ import { Route, Routes } from 'react-router-dom'
 import Layout from './components/Layout'
 import Navbar from './components/Navbar'
 import RequireAuth from './auth/RequireAuth'
+import RequireStaff, { RequireAdmin } from './auth/RequireRole'
 import Home from './pages/Home'
 import LoginPage from './pages/LoginPage'
-import RegisterPage from './pages/RegisterPage'
 
 const DashboardPage = lazy(() => import('./pages/DashboardPage'))
 const ContainersPage = lazy(() => import('./pages/ContainersPage'))
 const BuilderPage = lazy(() => import('./pages/BuilderPage'))
 const ImagesPage = lazy(() => import('./pages/ImagesPage'))
 const TeamsPage = lazy(() => import('./pages/TeamsPage'))
+const AdminPage = lazy(() => import('./pages/AdminPage'))
 const SettingsPage = lazy(() => import('./pages/SettingsPage'))
 const LogsPage = lazy(() => import('./pages/LogsPage'))
 const AuditLogPage = lazy(() => import('./pages/AuditLogPage'))
 const StacksPage = lazy(() => import('./pages/StacksPage'))
 const StackBuilderPage = lazy(() => import('./pages/stacks/StackBuilderPage'))
 const ResourceDashboardPage = lazy(() => import('./pages/ResourceDashboardPage'))
-/**
- * Defines the application's client-side routes and layout.
- *
- * Renders public routes for /login and /register, and nested routes within the main Layout: / (Home), and protected routes /dashboard, /containers, /builder, and /settings which are wrapped with RequireAuth.
- *
- * @returns The top-level routing JSX element that configures the application's routes.
- */
 export default function App() {
   return (
     <Suspense
@@ -41,7 +35,6 @@ export default function App() {
     >
       <Routes>
         <Route path="/login" element={<LoginPage />} />
-        <Route path="/register" element={<RegisterPage />} />
         <Route element={<Layout />}>
           <Route path="/" element={<Home />} />
           <Route
@@ -88,7 +81,19 @@ export default function App() {
             path="/teams/:projectId?"
             element={
               <RequireAuth>
-                <TeamsPage />
+                <RequireStaff>
+                  <TeamsPage />
+                </RequireStaff>
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/admin"
+            element={
+              <RequireAuth>
+                <RequireAdmin>
+                  <AdminPage />
+                </RequireAdmin>
               </RequireAuth>
             }
           />
