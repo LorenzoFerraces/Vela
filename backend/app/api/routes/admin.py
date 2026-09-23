@@ -61,8 +61,8 @@ async def list_users(
 async def global_audit(
     session: Annotated[AsyncSession, Depends(get_db)],
     _: Annotated[User, Depends(require_admin)],
-    action: Annotated[str | None, Query()] = None,
-    target_type: Annotated[str | None, Query()] = None,
+    action: Annotated[str | None, Query(max_length=200)] = None,
+    target_type: Annotated[str | None, Query(max_length=80)] = None,
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> AuditLogListResponse:

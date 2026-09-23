@@ -1,6 +1,8 @@
 import asyncio
 from typing import Any
 
+import pytest
+
 
 def test_ensure_admin_user_creates_and_reactivates(db_session_factory: Any, monkeypatch: Any) -> None:
     from app.core.auth.bootstrap import ensure_admin_user
@@ -34,6 +36,22 @@ def test_ensure_admin_user_creates_and_reactivates(db_session_factory: Any, monk
             assert ensured.role == "admin"
 
     asyncio.run(run_deactivate_then_ensure())
+
+
+def test_ensure_admin_user_rejects_short_password(
+    db_session_factory: Any, monkeypatch: Any
+) -> None:
+    from app.core.auth.bootstrap import ensure_admin_user
+
+    monkeypatch.setenv("VELA_ADMIN_EMAIL", "root@example.com")
+    monkeypatch.setenv("VELA_ADMIN_PASSWORD", "short")
+
+    async def run() -> None:
+        async with db_session_factory() as session:
+            with pytest.raises(ValueError, match="8 and 128"):
+                await ensure_admin_user(session)
+
+    asyncio.run(run())
 
 
 def test_ensure_admin_user_noop_without_env(db_session_factory: Any, monkeypatch: Any) -> None:

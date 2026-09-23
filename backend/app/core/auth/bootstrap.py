@@ -23,6 +23,8 @@ async def ensure_admin_user(session: AsyncSession) -> User | None:
     if user is None:
         if not password:
             raise ValueError("VELA_ADMIN_PASSWORD is required when creating VELA_ADMIN_EMAIL")
+        if not 8 <= len(password) <= 128:
+            raise ValueError("VELA_ADMIN_PASSWORD must be between 8 and 128 characters")
         user = User(email=email, password_hash=hash_password(password))
         session.add(user)
         await session.flush()

@@ -20,11 +20,14 @@ from app.api.schemas import (
 from app.api.user_view import user_public_from_snapshot
 from app.core.auth.service import authenticate
 from app.core.auth.tokens import create_access_token
-from app.core.exceptions import IntegrationConfigurationError, RegistrationDisabledError
+from app.core.exceptions import (
+    AccountDeactivatedError,
+    IntegrationConfigurationError,
+    RegistrationDisabledError,
+)
 from app.core.oauth.clerk import clerk_available, verify_clerk_token
 from app.core.oauth.identity import upsert_clerk_identity
 from app.core.profile.service import user_to_snapshot
-from app.core.projects.bootstrap import ensure_personal_workspace
 from app.core.storage.object_storage import ObjectStorage
 from app.db.models import User
 
@@ -89,11 +92,9 @@ async def clerk_exchange(
     )
 
     if user is None:
-        user = User(email=claims.email, password_hash=None)
-        session.add(user)
-        await session.flush()
-        await ensure_personal_workspace(session, user)
-        await session.refresh(user)
+        raise RegistrationDisabledError()
+    if not user.is_active:
+        raise AccountDeactivatedError()
 
     await upsert_clerk_identity(
         session,
