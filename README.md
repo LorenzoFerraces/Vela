@@ -132,8 +132,11 @@ Bootstrap: set `VELA_ADMIN_EMAIL` / `VELA_ADMIN_PASSWORD`. Public registration i
 
 ### Authentication
 
-- `POST /api/auth/register` — create an account; returns `{ access_token, token_type, user }`.
-- `POST /api/auth/login` — email + password; same response shape.
+- `POST /api/auth/register` — disabled; returns 403 `Registration disabled`.
+- `POST /api/auth/login` — email + password; returns `{ access_token, user }`.
+
+Accounts are provisioned by admins or instructors on the Admin page. Bootstrap the first admin with `VELA_ADMIN_EMAIL` / `VELA_ADMIN_PASSWORD`.
+
 - `GET /api/auth/me` — current user (`display_name`, `pronouns`, `avatar_url`, email, `created_at`); requires bearer token.
 - `PATCH /api/users/me` — update `display_name` and/or `pronouns`.
 - `POST /api/users/me/avatar` — multipart upload (`file` field); JPEG, PNG, or WebP, max 2 MB.
@@ -235,7 +238,7 @@ Open **http://127.0.0.1:5173**. Override the API base URL in `frontend/.env.loca
 VITE_API_BASE_URL=http://127.0.0.1:8000
 ```
 
-**Sign-in:** use **Register** (`/register`) or **Log in** (`/login`). After a successful register or login, the UI stores the access token in **localStorage** under `vela.access_token` and sends it on API requests. Protected app routes redirect to `/login` when you are not signed in.
+**Sign-in:** use **Log in** (`/login`) with an account provisioned by an admin or instructor. After login, the UI stores the access token in **localStorage** under `vela.access_token` and sends it on API requests. Protected app routes redirect to `/login` when you are not signed in.
 
 **Git builds:** auto-detect Go, Python, Node, Java/Clojure, Rust, Ruby, PHP, .NET, and Elixir (root + shallow scan); Containers and Stacks open a build override modal when inference is insufficient.
 
@@ -287,7 +290,7 @@ The CI workflow (`.github/workflows/ci.yml`) installs Python + Node + Chromium a
 | Traefik hot reload / stale routes | Set **`VELA_TRAEFIK_RELOAD_CONTAINER`** to the Traefik container name. Also prefer **mounting the parent directory** for the dynamic file; ensure `providers.file.watch` is true. |
 | API vs Docker | Docker running; socket reachable. The api container starts as root so its entrypoint aligns the mounted socket's group (re-groups root:root sockets to `DOCKER_GROUP_ID`, or re-GIDs the in-image docker group to match a host docker group) before dropping to `vela`. Check `docker compose logs api` for `vela-entrypoint:` lines, and `DOCKER_SOCKET_PATH` in `.env` |
 | UI vs API | `VITE_API_BASE_URL`; backend on port 8000; CORS |
-| `401` on container or image routes | Register or log in; ensure requests send `Authorization: Bearer …` (the UI does this when a token is stored) |
+| `401` on container or image routes | Log in with a provisioned account; ensure requests send `Authorization: Bearer …` (the UI does this when a token is stored) |
 | Database connection errors | Postgres is running; `VELA_DATABASE_URL` matches your instance; run **`alembic upgrade head`** from `backend/` |
 | `WinError 64` / `ConnectionDoesNotExistError` from the **API** (asyncpg) on Windows | Docker Desktop / `localhost` / timing: prefer **`127.0.0.1`** in `VELA_DATABASE_URL` (the app maps `localhost` → `127.0.0.1` on Windows). `alembic upgrade` uses **sync psycopg** and is usually unaffected. |
 | `FATAL: password authentication failed` for user `vela` | `VELA_DATABASE_URL` must match **`POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB`** and the **published host port** in `docker-compose.dev.yml` (currently **15432**). If you changed those env vars **after** the first `up`, remove the volume and recreate: `docker compose -f docker-compose.dev.yml down -v` then `up -d`. Compose must map **`15432:5432`** (host:container), not `HOST:HOST`. |
