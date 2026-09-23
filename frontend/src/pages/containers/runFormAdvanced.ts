@@ -1,3 +1,5 @@
+import { newId } from '../../utils/uid'
+
 export type EnvVarRow = {
   id: string
   key: string
@@ -15,12 +17,12 @@ export type VolumeMountRow = {
 }
 
 export function createEmptyEnvRow(): EnvVarRow {
-  return { id: crypto.randomUUID(), key: '', value: '' }
+  return { id: newId(), key: '', value: '' }
 }
 
 export function createEmptyVolumeMountRow(): VolumeMountRow {
   return {
-    id: crypto.randomUUID(),
+    id: newId(),
     uploadId: null,
     folderName: null,
     totalBytes: null,
@@ -38,7 +40,7 @@ export function envRowsFromRecord(
     return [createEmptyEnvRow()]
   }
   return entries.map(([key, value]) => ({
-    id: crypto.randomUUID(),
+    id: newId(),
     key,
     value,
   }))

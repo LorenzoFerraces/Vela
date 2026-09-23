@@ -10,6 +10,7 @@ import {
 import ConfirmDialog from '../../components/ConfirmDialog'
 import { ServiceEditForm, type ServiceFieldErrors } from './ServiceEditForm'
 import StackVisualizer from './StackVisualizer'
+import { newId } from '../../utils/uid'
 
 type Banner = { tone: 'ok' | 'err'; text: string } | null
 
@@ -77,7 +78,7 @@ export default function StackBuilderPage() {
             volumes: s.volumes,
             scaling_policy: s.scaling_policy,
             build_override: s.build_override ?? null,
-            uid: crypto.randomUUID(),
+            uid: newId(),
           }))
         )
       } catch (err) {
@@ -175,7 +176,7 @@ export default function StackBuilderPage() {
       container_port: 80,
       public_route: false,
       build_override: null,
-      uid: crypto.randomUUID(),
+      uid: newId(),
     }
     const newIndex = services.length
     setServices((prev) => [...prev, newService])
