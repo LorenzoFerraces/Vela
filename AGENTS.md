@@ -77,6 +77,7 @@ The E2E suite resets the database on API startup (`app/e2e_support.py` `ensure_e
 | `VELA_FAKE_ORCHESTRATOR=1` | Swaps real Docker for `FakeContainerOrchestrator` (tests, E2E) |
 | `VELA_E2E=1` | Enables E2E mode: seeds users, mocks GitHub, allows DB reset |
 | `VELA_E2E_ALLOW_DB_RESET=1` | Required alongside `VELA_E2E` to permit schema drop+create |
+| `VELA_ADMIN_EMAIL` / `VELA_ADMIN_PASSWORD` | Bootstrap admin credentials |
 | `VELA_TRAFFIC_ROUTER` | `noop` (default), `traefik_file`, or `kubernetes` |
 | `VELA_OBJECT_STORAGE` | `memory` (default for dev/tests) or `r2` |
 

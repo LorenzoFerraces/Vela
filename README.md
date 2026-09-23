@@ -120,6 +120,16 @@ python run.py
 
 API: **http://127.0.0.1:8000** — health: `GET /api/health` (no auth).
 
+## Roles
+
+| Role | Can |
+|------|-----|
+| admin | Everything + manage users/roles, global audit |
+| instructor | Provision users (not admin role), manage teams |
+| student | Own projects only; no signup, no team management |
+
+Bootstrap: set `VELA_ADMIN_EMAIL` / `VELA_ADMIN_PASSWORD`. Public registration is disabled.
+
 ### Authentication
 
 - `POST /api/auth/register` — create an account; returns `{ access_token, token_type, user }`.
