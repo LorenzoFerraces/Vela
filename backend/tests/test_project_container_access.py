@@ -2,29 +2,32 @@
 
 from __future__ import annotations
 
+import uuid
 from typing import Any
 
 from fastapi.testclient import TestClient
 
+from app.core.auth.tokens import create_access_token
 from app.core.containers.docker_orchestrator import VELA_PROJECT_LABEL
-from tests.conftest import make_container_info
+from tests.conftest import _seed_user, make_container_info
 
 
-def _register(client: TestClient, email: str) -> tuple[str, str, str]:
-    response = client.post(
-        "/api/auth/register",
-        json={"email": email, "password": "password-min-8-chars"},
+def _register(
+    db_session_factory: Any, client: TestClient, email: str
+) -> tuple[str, str, str]:
+    user = _seed_user(
+        db_session_factory,
+        user_id=uuid.uuid4(),
+        email=email,
+        password="password-min-8-chars",
     )
-    assert response.status_code == 201, response.text
-    body = response.json()
-    token = body["access_token"]
-    user_id = body["user"]["id"]
+    token = create_access_token(user.id)
     client.headers.update({"Authorization": f"Bearer {token}"})
     projects_response = client.get("/api/projects/")
     assert projects_response.status_code == 200, projects_response.text
     projects = projects_response.json()
-    assert projects, "expected at least one project after register"
-    return token, projects[0]["id"], user_id
+    assert projects, "expected at least one project after seeding user"
+    return token, projects[0]["id"], str(user.id)
 
 
 def _invite_and_accept(
@@ -53,10 +56,11 @@ def _invite_and_accept(
 def test_pending_invite_has_no_container_access(
     integration_app: Any,
     fake_orchestrator: Any,
+    db_session_factory: Any,
 ) -> None:
     with TestClient(integration_app) as owner_client, TestClient(integration_app) as invitee_client:
-        _, project_id, owner_user_id = _register(owner_client, "rbac-owner@example.com")
-        _register(invitee_client, "rbac-invitee@example.com")
+        _, project_id, owner_user_id = _register(db_session_factory, owner_client, "rbac-owner@example.com")
+        _register(db_session_factory, invitee_client, "rbac-invitee@example.com")
 
         pending = owner_client.post(
             f"/api/projects/{project_id}/invitations",
@@ -82,10 +86,11 @@ def test_pending_invite_has_no_container_access(
 def test_viewer_can_read_but_not_stop(
     integration_app: Any,
     fake_orchestrator: Any,
+    db_session_factory: Any,
 ) -> None:
     with TestClient(integration_app) as owner_client, TestClient(integration_app) as invitee_client:
-        _, project_id, owner_user_id = _register(owner_client, "viewer-owner@example.com")
-        _register(invitee_client, "viewer-member@example.com")
+        _, project_id, owner_user_id = _register(db_session_factory, owner_client, "viewer-owner@example.com")
+        _register(db_session_factory, invitee_client, "viewer-member@example.com")
         _invite_and_accept(
             owner_client,
             invitee_client,
@@ -113,10 +118,11 @@ def test_viewer_can_read_but_not_stop(
 def test_operator_can_stop_shared_container(
     integration_app: Any,
     fake_orchestrator: Any,
+    db_session_factory: Any,
 ) -> None:
     with TestClient(integration_app) as owner_client, TestClient(integration_app) as invitee_client:
-        _, project_id, owner_user_id = _register(owner_client, "operator-owner@example.com")
-        _register(invitee_client, "operator-member@example.com")
+        _, project_id, owner_user_id = _register(db_session_factory, owner_client, "operator-owner@example.com")
+        _register(db_session_factory, invitee_client, "operator-member@example.com")
         _invite_and_accept(
             owner_client,
             invitee_client,
@@ -139,13 +145,14 @@ def test_operator_can_stop_shared_container(
 def test_outsider_cannot_see_shared_container(
     integration_app: Any,
     fake_orchestrator: Any,
+    db_session_factory: Any,
 ) -> None:
     with (
         TestClient(integration_app) as owner_client,
         TestClient(integration_app) as stranger_client,
     ):
-        _, project_id, owner_user_id = _register(owner_client, "outsider-owner@example.com")
-        _register(stranger_client, "outsider-stranger@example.com")
+        _, project_id, owner_user_id = _register(db_session_factory, owner_client, "outsider-owner@example.com")
+        _register(db_session_factory, stranger_client, "outsider-stranger@example.com")
 
         shared_container = make_container_info(
             owner_id=owner_user_id,

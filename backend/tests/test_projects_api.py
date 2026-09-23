@@ -2,27 +2,34 @@
 
 from __future__ import annotations
 
+import uuid
 from typing import Any
 
 from fastapi.testclient import TestClient
 
+from app.core.auth.tokens import create_access_token
+from tests.conftest import _seed_user
 
-def _register(client: TestClient, email: str, password: str = "password-min-8-chars") -> str:
-    response = client.post(
-        "/api/auth/register",
-        json={"email": email, "password": password},
+
+def _register(
+    db_session_factory: Any, email: str, password: str = "password-min-8-chars"
+) -> str:
+    user = _seed_user(
+        db_session_factory,
+        user_id=uuid.uuid4(),
+        email=email,
+        password=password,
     )
-    assert response.status_code == 201, response.text
-    return response.json()["access_token"]
+    return create_access_token(user.id)
 
 
 def _auth_headers(token: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
 
 
-def test_create_shared_project(db_app: Any) -> None:
+def test_create_shared_project(db_app: Any, db_session_factory: Any) -> None:
     with TestClient(db_app) as client:
-        token = _register(client, "creator@example.com")
+        token = _register(db_session_factory, "creator@example.com")
         client.headers.update(_auth_headers(token))
 
         create_response = client.post(
@@ -41,10 +48,10 @@ def test_create_shared_project(db_app: Any) -> None:
         assert shared["name"] == "Platform team"
 
 
-def test_member_can_leave_shared_project(db_app: Any) -> None:
+def test_member_can_leave_shared_project(db_app: Any, db_session_factory: Any) -> None:
     with TestClient(db_app) as owner_client, TestClient(db_app) as member_client:
-        owner_token = _register(owner_client, "leave-owner@example.com")
-        member_token = _register(member_client, "leave-member@example.com")
+        owner_token = _register(db_session_factory, "leave-owner@example.com")
+        member_token = _register(db_session_factory, "leave-member@example.com")
         owner_client.headers.update(_auth_headers(owner_token))
         member_client.headers.update(_auth_headers(member_token))
 
@@ -79,9 +86,9 @@ def test_member_can_leave_shared_project(db_app: Any) -> None:
         assert all(project["id"] != project_id for project in member_projects)
 
 
-def test_register_creates_personal_project(db_app: Any) -> None:
+def test_register_creates_personal_project(db_app: Any, db_session_factory: Any) -> None:
     with TestClient(db_app) as client:
-        token = _register(client, "solo@example.com")
+        token = _register(db_session_factory, "solo@example.com")
         response = client.get("/api/projects/", headers=_auth_headers(token))
     assert response.status_code == 200
     projects = response.json()
@@ -90,10 +97,10 @@ def test_register_creates_personal_project(db_app: Any) -> None:
     assert projects[0]["role"] == "owner"
 
 
-def test_invite_requires_accept_before_membership(db_app: Any) -> None:
+def test_invite_requires_accept_before_membership(db_app: Any, db_session_factory: Any) -> None:
     with TestClient(db_app) as owner_client, TestClient(db_app) as invitee_client:
-        owner_token = _register(owner_client, "owner@example.com")
-        invitee_token = _register(invitee_client, "invitee@example.com")
+        owner_token = _register(db_session_factory, "owner@example.com")
+        invitee_token = _register(db_session_factory, "invitee@example.com")
         owner_client.headers.update(_auth_headers(owner_token))
         invitee_client.headers.update(_auth_headers(invitee_token))
 
@@ -130,10 +137,10 @@ def test_invite_requires_accept_before_membership(db_app: Any) -> None:
         assert len(invitee_projects_after) == 2
 
 
-def test_reject_invitation_does_not_add_member(db_app: Any) -> None:
+def test_reject_invitation_does_not_add_member(db_app: Any, db_session_factory: Any) -> None:
     with TestClient(db_app) as owner_client, TestClient(db_app) as invitee_client:
-        owner_token = _register(owner_client, "reject-owner@example.com")
-        invitee_token = _register(invitee_client, "reject-invitee@example.com")
+        owner_token = _register(db_session_factory, "reject-owner@example.com")
+        invitee_token = _register(db_session_factory, "reject-invitee@example.com")
         owner_client.headers.update(_auth_headers(owner_token))
         invitee_client.headers.update(_auth_headers(invitee_token))
 
@@ -153,15 +160,15 @@ def test_reject_invitation_does_not_add_member(db_app: Any) -> None:
         assert "reject-invitee@example.com" not in [member["email"] for member in members]
 
 
-def test_non_owner_cannot_invite(db_app: Any) -> None:
+def test_non_owner_cannot_invite(db_app: Any, db_session_factory: Any) -> None:
     with (
         TestClient(db_app) as owner_client,
         TestClient(db_app) as invitee_client,
         TestClient(db_app) as stranger_client,
     ):
-        owner_token = _register(owner_client, "perm-owner@example.com")
-        invitee_token = _register(invitee_client, "perm-invitee@example.com")
-        stranger_token = _register(stranger_client, "stranger@example.com")
+        owner_token = _register(db_session_factory, "perm-owner@example.com")
+        invitee_token = _register(db_session_factory, "perm-invitee@example.com")
+        stranger_token = _register(db_session_factory, "stranger@example.com")
         owner_client.headers.update(_auth_headers(owner_token))
         invitee_client.headers.update(_auth_headers(invitee_token))
         stranger_client.headers.update(_auth_headers(stranger_token))
@@ -182,9 +189,9 @@ def test_non_owner_cannot_invite(db_app: Any) -> None:
         assert forbidden.status_code == 404
 
 
-def test_unknown_email_returns_400(db_app: Any) -> None:
+def test_unknown_email_returns_400(db_app: Any, db_session_factory: Any) -> None:
     with TestClient(db_app) as client:
-        token = _register(client, "unknown-owner@example.com")
+        token = _register(db_session_factory, "unknown-owner@example.com")
         client.headers.update(_auth_headers(token))
         project_id = client.get("/api/projects/").json()[0]["id"]
 
@@ -195,10 +202,10 @@ def test_unknown_email_returns_400(db_app: Any) -> None:
     assert response.status_code == 400
 
 
-def test_cancelled_invite_cannot_be_accepted(db_app: Any) -> None:
+def test_cancelled_invite_cannot_be_accepted(db_app: Any, db_session_factory: Any) -> None:
     with TestClient(db_app) as owner_client, TestClient(db_app) as invitee_client:
-        owner_token = _register(owner_client, "cancel-owner@example.com")
-        invitee_token = _register(invitee_client, "cancel-invitee@example.com")
+        owner_token = _register(db_session_factory, "cancel-owner@example.com")
+        invitee_token = _register(db_session_factory, "cancel-invitee@example.com")
         owner_client.headers.update(_auth_headers(owner_token))
         invitee_client.headers.update(_auth_headers(invitee_token))
 

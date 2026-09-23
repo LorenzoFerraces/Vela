@@ -11,6 +11,7 @@ from fastapi.responses import JSONResponse
 from app.core.exceptions import (
     AnalysisError,
     AuthError,
+    AccountDeactivatedError,
     AvatarValidationError,
     BuilderError,
     CloneError,
@@ -54,7 +55,9 @@ from app.core.exceptions import (
     UserNotRegisteredError,
     OrchestratorError,
     RegistryAccessDeniedError,
+    PermissionDeniedError,
     ProviderConnectionError,
+    RegistrationDisabledError,
     ResourceLimitError,
     RouteConfigurationError,
     RouteNotFoundError,
@@ -313,6 +316,33 @@ def register_exception_handlers(app) -> None:
     ) -> JSONResponse:
         return JSONResponse(
             status_code=status.HTTP_409_CONFLICT,
+            content={"detail": str(exc)},
+        )
+
+    @app.exception_handler(AccountDeactivatedError)
+    async def account_deactivated_handler(
+        _request: Request, exc: AccountDeactivatedError
+    ) -> JSONResponse:
+        return JSONResponse(
+            status_code=status.HTTP_403_FORBIDDEN,
+            content={"detail": str(exc)},
+        )
+
+    @app.exception_handler(RegistrationDisabledError)
+    async def registration_disabled_handler(
+        _request: Request, exc: RegistrationDisabledError
+    ) -> JSONResponse:
+        return JSONResponse(
+            status_code=status.HTTP_403_FORBIDDEN,
+            content={"detail": str(exc)},
+        )
+
+    @app.exception_handler(PermissionDeniedError)
+    async def permission_denied_handler(
+        _request: Request, exc: PermissionDeniedError
+    ) -> JSONResponse:
+        return JSONResponse(
+            status_code=status.HTTP_403_FORBIDDEN,
             content={"detail": str(exc)},
         )
 

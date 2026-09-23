@@ -64,7 +64,7 @@ test.describe('registration form', () => {
     await expect(page).toHaveURL(/\/register/)
   })
 
-  test('successful registration lands on /containers', async ({ page }) => {
+  test('registration is disabled with a clear error', async ({ page }) => {
     const email = `register.${Date.now()}@example.com`
 
     await page.goto('/register')
@@ -72,20 +72,16 @@ test.describe('registration form', () => {
     await page.getByLabel('Password').fill('a-long-enough-password')
     await page.getByRole('button', { name: 'Create account' }).click()
 
-    await expect(page).toHaveURL(`${baseURL}/containers`)
-    await expect(
-      page.getByRole('heading', { name: 'Containers', level: 1 }),
-    ).toBeVisible()
+    await expect(page.getByRole('alert')).toContainText('Registration disabled')
+    await expect(page).toHaveURL(`${baseURL}/register`)
   })
 
-  test('duplicate email is rejected with a clear error', async ({ page }) => {
+  test('registration is disabled for an existing email', async ({ page }) => {
     await page.goto('/register')
     await page.getByLabel('Email').fill(E2E_USER_EMAIL)
     await page.getByLabel('Password').fill('a-long-enough-password')
     await page.getByRole('button', { name: 'Create account' }).click()
 
-    await expect(page.getByRole('alert')).toContainText(
-      'That email is already registered.',
-    )
+    await expect(page.getByRole('alert')).toContainText('Registration disabled')
   })
 })

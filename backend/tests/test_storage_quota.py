@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import (
 )
 from sqlalchemy.pool import StaticPool
 
+from app.core.auth.tokens import create_access_token
 from app.core.containers.docker_orchestrator import (
     VELA_MANAGED_LABEL,
     VELA_OWNER_LABEL,
@@ -38,6 +39,7 @@ from app.db.models import (
     ProjectMembership,
     User,
 )
+from tests.conftest import _seed_user
 from tests.test_deploy_jobs import wait_for_deploy
 
 
@@ -349,13 +351,14 @@ def test_upload_blocked_when_team_storage_quota_exceeded(
     assert "storage quota" in second.json()["detail"]
 
 
-def _register(client: TestClient, email: str) -> None:
-    response = client.post(
-        "/api/auth/register",
-        json={"email": email, "password": "password-min-8-chars"},
+def _register(db_session_factory: Any, client: TestClient, email: str) -> None:
+    user = _seed_user(
+        db_session_factory,
+        user_id=uuid.uuid4(),
+        email=email,
+        password="password-min-8-chars",
     )
-    assert response.status_code == 201, response.text
-    client.headers["Authorization"] = f"Bearer {response.json()['access_token']}"
+    client.headers["Authorization"] = f"Bearer {create_access_token(user.id)}"
 
 
 def _personal_project_id(client: TestClient) -> str:
@@ -392,14 +395,14 @@ def test_storage_quota_get_for_member(
 
 
 def test_storage_quota_requires_membership(
-    db_app: Any, monkeypatch: pytest.MonkeyPatch
+    db_app: Any, db_session_factory: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("VELA_TEAM_STORAGE_QUOTA_BYTES", str(_GB))
     with TestClient(db_app) as owner_client, TestClient(db_app) as stranger_client:
-        _register(owner_client, "quota-owner@example.com")
+        _register(db_session_factory, owner_client, "quota-owner@example.com")
         owner_project_id = _personal_project_id(owner_client)
 
-        _register(stranger_client, "quota-stranger@example.com")
+        _register(db_session_factory, stranger_client, "quota-stranger@example.com")
         response = stranger_client.get(
             f"/api/projects/{owner_project_id}/storage-quota"
         )
@@ -407,11 +410,11 @@ def test_storage_quota_requires_membership(
 
 
 def test_patch_storage_quota_rejects_above_platform_limit(
-    db_app: Any, monkeypatch: pytest.MonkeyPatch
+    db_app: Any, db_session_factory: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("VELA_TEAM_STORAGE_QUOTA_BYTES", str(10 * 1024 * 1024))
     with TestClient(db_app) as client:
-        _register(client, "quota-patch@example.com")
+        _register(db_session_factory, client, "quota-patch@example.com")
         project_id = _personal_project_id(client)
         response = client.patch(
             f"/api/projects/{project_id}/storage-quota",
@@ -422,11 +425,11 @@ def test_patch_storage_quota_rejects_above_platform_limit(
 
 
 def test_patch_storage_quota_owner_sets_and_clears(
-    db_app: Any, monkeypatch: pytest.MonkeyPatch
+    db_app: Any, db_session_factory: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("VELA_TEAM_STORAGE_QUOTA_BYTES", str(10 * _GB))
     with TestClient(db_app) as client:
-        _register(client, "quota-set@example.com")
+        _register(db_session_factory, client, "quota-set@example.com")
         project_id = _personal_project_id(client)
 
         response = client.patch(
@@ -451,16 +454,18 @@ def test_patch_storage_quota_owner_sets_and_clears(
         assert response.json()["source"] == "platform"
 
 
-def test_patch_storage_quota_forbidden_for_non_owner(db_app: Any) -> None:
+def test_patch_storage_quota_forbidden_for_non_owner(
+    db_app: Any, db_session_factory: Any
+) -> None:
     with TestClient(db_app) as owner_client, TestClient(db_app) as member_client:
-        _register(owner_client, "quota-team-owner@example.com")
+        _register(db_session_factory, owner_client, "quota-team-owner@example.com")
         create_response = owner_client.post(
             "/api/projects/", json={"name": "Quota team"}
         )
         assert create_response.status_code == 201, create_response.text
         team_id = create_response.json()["id"]
 
-        _register(member_client, "quota-team-member@example.com")
+        _register(db_session_factory, member_client, "quota-team-member@example.com")
         invitation = owner_client.post(
             f"/api/projects/{team_id}/invitations",
             json={"email": "quota-team-member@example.com", "role": "viewer"},

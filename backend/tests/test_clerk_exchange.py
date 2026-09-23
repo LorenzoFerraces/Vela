@@ -13,6 +13,7 @@ import app.core.oauth.clerk as clerk_mod
 from app.core.exceptions import ProviderConnectionError
 from app.core.oauth.clerk import ClerkClaims, reset_jwks_cache_for_tests
 from app.db.models import UserOAuthIdentity
+from tests.conftest import _seed_user
 
 TEST_CLERK_PUBLISHABLE_KEY = "pk_test_c2FtcGxlMTIzLmNsZXJrLmFjY291bnRzLmRldiQ"
 
@@ -72,21 +73,17 @@ def test_clerk_exchange_links_existing_user(
     db_app: Any, db_session_factory: Any, monkeypatch: Any
 ) -> None:
     monkeypatch.setenv("VELA_CLERK_PUBLISHABLE_KEY", TEST_CLERK_PUBLISHABLE_KEY)
+    registered_user = _seed_user(
+        db_session_factory,
+        user_id=uuid.uuid4(),
+        email="clerk-user@example.com",
+        password="supersecret123",
+    )
 
     from fastapi.testclient import TestClient
 
     with _patch_clerk_verify():
         with TestClient(db_app) as client:
-            reg = client.post(
-                "/api/auth/register",
-                json={
-                    "email": "clerk-user@example.com",
-                    "password": "supersecret123",
-                },
-            )
-            assert reg.status_code == 201
-            registered_user_id = uuid.UUID(reg.json()["user"]["id"])
-
             response = client.post(
                 "/api/auth/clerk/exchange",
                 json={"clerk_token": "fake.clerk.jwt"},
@@ -99,7 +96,7 @@ def test_clerk_exchange_links_existing_user(
     assert len(identities) == 1
     assert identities[0].provider == "clerk"
     assert identities[0].provider_subject == "user_2Xtest"
-    assert identities[0].user_id == registered_user_id
+    assert identities[0].user_id == registered_user.id
 
 
 def test_clerk_exchange_missing_config_returns_503(db_app: Any, monkeypatch: Any) -> None:
