@@ -124,6 +124,13 @@ export { exportLogs, getLogs } from './logs'
 export { getAuditLog } from './audit'
 
 export {
+  createAdminUser,
+  getGlobalAudit,
+  listAdminUsers,
+  patchAdminUser,
+} from './admin'
+
+export {
   getMetricPoints,
   getMetricSummary,
   getUsageSummary,
@@ -234,6 +241,14 @@ export type {
   ProjectUsage,
   UsageSummary,
 } from './metrics'
+
+export type {
+  AdminUserCreate,
+  AdminUserListResponse,
+  AdminUserPatch,
+  AdminUserPublic,
+  AuditLogListResponse,
+} from './admin'
 
 export type {
   AuditLogEntry,
