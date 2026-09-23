@@ -14,8 +14,11 @@ from app.api.schemas import (
     AdminUserListResponse,
     AdminUserPatch,
     AdminUserPublic,
+    AuditLogEntry,
+    AuditLogListResponse,
 )
 from app.core.admin import service as admin_service
+from app.core.audit.service import list_audit_logs
 from app.core.auth.enums import UserRole
 from app.db.models import User
 
@@ -52,6 +55,29 @@ async def list_users(
         offset=offset,
     )
     return AdminUserListResponse(users=[_to_public(user) for user in users], total=total)
+
+
+@router.get("/audit", response_model=AuditLogListResponse)
+async def global_audit(
+    session: Annotated[AsyncSession, Depends(get_db)],
+    _: Annotated[User, Depends(require_admin)],
+    action: Annotated[str | None, Query()] = None,
+    target_type: Annotated[str | None, Query()] = None,
+    limit: Annotated[int, Query(ge=1, le=200)] = 50,
+    offset: Annotated[int, Query(ge=0)] = 0,
+) -> AuditLogListResponse:
+    result = await list_audit_logs(
+        session,
+        user_id=None,
+        action=action,
+        target_type=target_type,
+        limit=limit,
+        offset=offset,
+    )
+    return AuditLogListResponse(
+        entries=[AuditLogEntry.model_validate(entry) for entry in result.entries],
+        total=result.total,
+    )
 
 
 @router.post(

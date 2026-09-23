@@ -278,3 +278,18 @@ def test_duplicate_user_email_returns_conflict(
     assert created.json()["email"] == "duplicate@example.com"
     assert duplicate.status_code == 409
     assert duplicate.json()["detail"] == "That email is already registered."
+
+
+def test_global_audit_admin_only(db_app: Any, provision_user: Any) -> None:
+    _, admin_token = provision_user("audit-admin@example.com", role="admin")
+    _, inst_token = provision_user("audit-inst@example.com", role="instructor")
+
+    with TestClient(db_app) as client:
+        instructor_forbidden = client.get(
+            "/api/admin/audit", headers=_auth(inst_token)
+        )
+        ok = client.get("/api/admin/audit", headers=_auth(admin_token))
+
+    assert instructor_forbidden.status_code == 403
+    assert ok.status_code == 200
+    assert "entries" in ok.json()
