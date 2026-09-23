@@ -242,7 +242,9 @@ async def remove_member(
     actor_user_id: uuid.UUID,
     target_user_id: uuid.UUID,
 ) -> None:
-    await require_owner(session, project_id=project_id, user_id=actor_user_id)
+    await _require_project_manager(
+        session, project_id=project_id, actor_user_id=actor_user_id
+    )
     project = await require_project(session, project_id)
     if project.is_personal and target_user_id == actor_user_id:
         raise ProjectAccessDeniedError("The personal project owner cannot remove themselves.")

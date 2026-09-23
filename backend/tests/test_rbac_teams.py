@@ -18,6 +18,32 @@ def _auth(token: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
 
 
+def _invite_and_accept_member(
+    db_client: Any,
+    provision_user: Any,
+    *,
+    owner_token: str,
+    instructor_token: str,
+    member_email: str,
+) -> Any:
+    member, member_token = provision_user(member_email, role="student")
+    project_id = db_client.get(
+        "/api/projects", headers=_auth(owner_token)
+    ).json()[0]["id"]
+    invitation = db_client.post(
+        f"/api/projects/{project_id}/invitations",
+        headers=_auth(instructor_token),
+        json={"email": member_email, "role": "viewer"},
+    )
+    assert invitation.status_code == 201
+    accepted = db_client.post(
+        f"/api/projects/invitations/{invitation.json()['id']}/accept",
+        headers=_auth(member_token),
+    )
+    assert accepted.status_code == 200
+    return project_id, member
+
+
 def test_student_cannot_create_invitation(
     db_client: Any, provision_user: Any
 ) -> None:
@@ -153,3 +179,90 @@ def test_instructor_can_patch_member_role_for_project_they_do_not_own(
 
     assert response.status_code == 200
     assert response.json()["role"] == "operator"
+
+
+def test_student_owner_cannot_remove_member(
+    db_client: Any, provision_user: Any
+) -> None:
+    _, owner_token = provision_user("remove-owner@example.com", role="student")
+    _, instructor_token = provision_user(
+        "remove-instructor@example.com", role="instructor"
+    )
+    project_id, member = _invite_and_accept_member(
+        db_client,
+        provision_user,
+        owner_token=owner_token,
+        instructor_token=instructor_token,
+        member_email="remove-member@example.com",
+    )
+
+    response = db_client.delete(
+        f"/api/projects/{project_id}/members/{member.id}",
+        headers=_auth(owner_token),
+    )
+
+    assert response.status_code == 403
+
+
+def test_instructor_can_remove_member_for_project_they_do_not_own(
+    db_client: Any, provision_user: Any
+) -> None:
+    _, owner_token = provision_user("staff-remove-owner@example.com", role="student")
+    _, instructor_token = provision_user(
+        "staff-remove-instructor@example.com", role="instructor"
+    )
+    project_id, member = _invite_and_accept_member(
+        db_client,
+        provision_user,
+        owner_token=owner_token,
+        instructor_token=instructor_token,
+        member_email="staff-remove-member@example.com",
+    )
+
+    response = db_client.delete(
+        f"/api/projects/{project_id}/members/{member.id}",
+        headers=_auth(instructor_token),
+    )
+    members = db_client.get(
+        f"/api/projects/{project_id}/members", headers=_auth(owner_token)
+    )
+
+    assert response.status_code == 204
+    assert str(member.id) not in {row["user_id"] for row in members.json()}
+
+
+def test_instructor_cannot_remove_sole_project_owner(
+    db_client: Any, provision_user: Any
+) -> None:
+    owner, owner_token = provision_user("sole-owner@example.com", role="student")
+    _, instructor_token = provision_user(
+        "sole-owner-instructor@example.com", role="instructor"
+    )
+    project_id = db_client.get(
+        "/api/projects", headers=_auth(owner_token)
+    ).json()[0]["id"]
+
+    response = db_client.delete(
+        f"/api/projects/{project_id}/members/{owner.id}",
+        headers=_auth(instructor_token),
+    )
+
+    assert response.status_code == 403
+
+
+def test_instructor_cannot_remove_self_from_personal_project(
+    db_client: Any, provision_user: Any
+) -> None:
+    instructor, instructor_token = provision_user(
+        "personal-owner@example.com", role="instructor"
+    )
+    project_id = db_client.get(
+        "/api/projects", headers=_auth(instructor_token)
+    ).json()[0]["id"]
+
+    response = db_client.delete(
+        f"/api/projects/{project_id}/members/{instructor.id}",
+        headers=_auth(instructor_token),
+    )
+
+    assert response.status_code == 403

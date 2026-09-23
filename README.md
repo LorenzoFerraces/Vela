@@ -82,7 +82,7 @@ Create `backend/.env` as needed. Common variables:
 |----------|--------|
 | `VELA_DATABASE_URL` | Async SQLAlchemy URL (e.g. `postgresql+asyncpg://vela:vela@127.0.0.1:15432/Vela` when using this repo’s Compose port) |
 | `VELA_AUTH_SECRET` | Long random secret used to sign JWT access tokens |
-| `VELA_ADMIN_EMAIL` | Bootstrap admin email; ensured admin at startup |
+| `VELA_ADMIN_EMAIL` | Bootstrap admin email; creates the admin on first startup if missing |
 | `VELA_ADMIN_PASSWORD` | Password for bootstrap admin (required on first create) |
 | `VELA_AUTH_ACCESS_TOKEN_TTL_MINUTES` | Optional; access token lifetime in minutes (default sensible if omitted) |
 | `VELA_TRAFFIC_ROUTER` | `noop` (default), `traefik_file`, or `kubernetes` |

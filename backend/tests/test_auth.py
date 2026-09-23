@@ -58,7 +58,15 @@ def test_deactivated_login_and_token_rejected(
         me = client.get("/api/auth/me", headers={"Authorization": f"Bearer {token}"})
 
     assert login.status_code == 403
+    assert login.json() == {
+        "detail": "Account deactivated.",
+        "code": "account_deactivated",
+    }
     assert me.status_code == 403
+    assert me.json() == {
+        "detail": "Account deactivated.",
+        "code": "account_deactivated",
+    }
 
 
 def test_login_returns_token_and_user(db_app: Any, seeded_user: Any) -> None:

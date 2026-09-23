@@ -323,7 +323,7 @@ async def patch_project_member(
 async def delete_project_member(
     project_id: uuid.UUID,
     user_id: uuid.UUID,
-    current_user: Annotated[User, Depends(get_current_user)],
+    current_user: Annotated[User, Depends(require_instructor)],
     session: Annotated[AsyncSession, Depends(get_db)],
 ) -> Response:
     await remove_member(

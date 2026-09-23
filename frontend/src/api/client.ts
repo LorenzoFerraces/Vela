@@ -20,6 +20,7 @@ export {
   getApiBaseUrl,
   getApiWebSocketUrl,
   getHealth,
+  isAccountDeactivated,
   notifyUnauthorized,
   onUnauthorized,
   setAccessToken,

@@ -12,6 +12,7 @@ import {
   clerkLogin as apiClerkLogin,
   getAccessToken,
   getMe,
+  isAccountDeactivated,
   login as apiLogin,
   onUnauthorized,
   setAccessToken,
@@ -52,7 +53,10 @@ export function AuthProvider({ children }: AuthProviderProps) {
         setStatus('authenticated')
       } catch (error) {
         if (cancelledRef.current) return
-        if (error instanceof ApiError && error.status === 401) {
+        if (
+          error instanceof ApiError &&
+          (error.status === 401 || isAccountDeactivated(error))
+        ) {
           clearAccessToken()
         }
         setUser(null)

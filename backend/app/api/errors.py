@@ -325,7 +325,10 @@ def register_exception_handlers(app) -> None:
     ) -> JSONResponse:
         return JSONResponse(
             status_code=status.HTTP_403_FORBIDDEN,
-            content={"detail": str(exc)},
+            content={
+                "detail": str(exc),
+                "code": "account_deactivated",
+            },
         )
 
     @app.exception_handler(RegistrationDisabledError)

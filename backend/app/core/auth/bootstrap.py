@@ -1,4 +1,4 @@
-"""Ensure the env-configured bootstrap admin exists at startup."""
+"""Create the env-configured bootstrap admin when it is missing."""
 
 from __future__ import annotations
 
@@ -18,19 +18,24 @@ async def ensure_admin_user(session: AsyncSession) -> User | None:
     if not email:
         return None
 
-    password = os.environ.get("VELA_ADMIN_PASSWORD", "")
     user = await session.scalar(select(User).where(User.email == email))
-    if user is None:
-        if not password:
-            raise ValueError("VELA_ADMIN_PASSWORD is required when creating VELA_ADMIN_EMAIL")
-        if not 8 <= len(password) <= 128:
-            raise ValueError("VELA_ADMIN_PASSWORD must be between 8 and 128 characters")
-        user = User(email=email, password_hash=hash_password(password))
-        session.add(user)
-        await session.flush()
-        await ensure_personal_workspace(session, user)
-    user.role = UserRole.ADMIN.value
-    user.is_active = True
+    if user is not None:
+        return user
+
+    password = os.environ.get("VELA_ADMIN_PASSWORD", "")
+    if not password:
+        raise ValueError("VELA_ADMIN_PASSWORD is required when creating VELA_ADMIN_EMAIL")
+    if not 8 <= len(password) <= 128:
+        raise ValueError("VELA_ADMIN_PASSWORD must be between 8 and 128 characters")
+    user = User(
+        email=email,
+        password_hash=hash_password(password),
+        role=UserRole.ADMIN,
+        is_active=True,
+    )
+    session.add(user)
+    await session.flush()
+    await ensure_personal_workspace(session, user)
     await session.commit()
     await session.refresh(user)
     return user

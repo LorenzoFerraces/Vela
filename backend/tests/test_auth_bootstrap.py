@@ -4,7 +4,9 @@ from typing import Any
 import pytest
 
 
-def test_ensure_admin_user_creates_and_reactivates(db_session_factory: Any, monkeypatch: Any) -> None:
+def test_ensure_admin_user_preserves_existing_account_state(
+    db_session_factory: Any, monkeypatch: Any
+) -> None:
     from app.core.auth.bootstrap import ensure_admin_user
 
     monkeypatch.setenv("VELA_ADMIN_EMAIL", "root@example.com")
@@ -30,10 +32,11 @@ def test_ensure_admin_user_creates_and_reactivates(db_session_factory: Any, monk
             user.is_active = False
             user.role = "student"
             await session.commit()
+            monkeypatch.delenv("VELA_ADMIN_PASSWORD")
             ensured = await ensure_admin_user(session)
             assert ensured is not None
-            assert ensured.is_active is True
-            assert ensured.role == "admin"
+            assert ensured.is_active is False
+            assert ensured.role == "student"
 
     asyncio.run(run_deactivate_then_ensure())
 
