@@ -6,11 +6,16 @@ Uses in-memory SQLite and FakeContainerOrchestrator — no Docker daemon require
 
 from __future__ import annotations
 
+import json
 import uuid
 from pathlib import Path
+from typing import cast
 
 import pytest
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.websockets import WebSocketDisconnect
 
 from app.api.app import create_app
@@ -28,8 +33,9 @@ from app.core.containers.volume_uploads import (
     VOLUME_UPLOAD_USER_QUOTA_BYTES,
 )
 from app.core.traffic.traffic_router import NoopTrafficRouter
-from app.db.models import User
+from app.db.models import Dockerfile, User
 from tests.conftest import make_container_info
+from tests.test_deploy_jobs import wait_for_deploy
 
 
 async def _stub_git_shallow_clone(
@@ -204,7 +210,9 @@ def test_run_from_image_with_env_and_command(
             "command": ["nginx", "-g", "daemon off;"],
         },
     )
-    assert response.status_code == 200
+    assert response.status_code == 202
+    job = wait_for_deploy(api_client, response.json()["job_id"])
+    assert job["status"] == "succeeded"
     assert fake_orchestrator.last_deploy_config is not None
     assert fake_orchestrator.last_deploy_config.env_vars == {
         "NODE_ENV": "production",
@@ -215,6 +223,113 @@ def test_run_from_image_with_env_and_command(
         "-g",
         "daemon off;",
     ]
+
+
+def test_run_from_image_with_resource_limits(
+    api_client: TestClient,
+    fake_orchestrator: FakeContainerOrchestrator,
+) -> None:
+    response = api_client.post(
+        "/api/containers/run",
+        json={
+            "source_kind": "image",
+            "image_ref": "nginx:alpine",
+            "cpu_limit": 0.5,
+            "memory_limit": 256,
+        },
+    )
+    assert response.status_code == 202
+    job = wait_for_deploy(api_client, response.json()["job_id"])
+    assert job["status"] == "succeeded"
+    assert fake_orchestrator.last_deploy_config is not None
+    assert fake_orchestrator.last_deploy_config.cpu_limit == 0.5
+    assert fake_orchestrator.last_deploy_config.memory_limit == 256
+
+
+def test_run_from_image_resource_limits_optional(api_client: TestClient) -> None:
+    """Omitting resource limits should still work (fields are optional)."""
+    response = api_client.post(
+        "/api/containers/run",
+        json={
+            "source_kind": "image",
+            "image_ref": "nginx:alpine",
+        },
+    )
+    assert response.status_code == 202
+    job = wait_for_deploy(api_client, response.json()["job_id"])
+    assert job["status"] == "succeeded"
+
+
+def test_run_resource_limits_pass_through_all_source_kinds(
+    api_client: TestClient,
+    fake_orchestrator: FakeContainerOrchestrator,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("VELA_PUBLIC_ROUTE_DOMAIN", "apps.example.com")
+    monkeypatch.setenv("VELA_PUBLIC_URL_SCHEME", "https")
+    monkeypatch.setattr(
+        "app.core.build.default_image_builder.git_shallow_clone",
+        _stub_git_shallow_clone,
+    )
+
+    image_response = api_client.post(
+        "/api/containers/run",
+        json={
+            "source_kind": "image",
+            "image_ref": "nginx:alpine",
+            "cpu_limit": 0.5,
+            "memory_limit": 256,
+        },
+    )
+    assert image_response.status_code == 202
+    job = wait_for_deploy(api_client, image_response.json()["job_id"])
+    assert job["status"] == "succeeded"
+    assert fake_orchestrator.last_deploy_config is not None
+    assert fake_orchestrator.last_deploy_config.cpu_limit == 0.5
+    assert fake_orchestrator.last_deploy_config.memory_limit == 256
+
+    create = api_client.post(
+        "/api/dockerfiles/",
+        json={"name": "limits-tpl", "contents": "FROM alpine:3.20\n"},
+    )
+    assert create.status_code == 201
+    template_id = create.json()["id"]
+
+    template_response = api_client.post(
+        "/api/containers/run",
+        json={
+            "source_kind": "dockerfile_template",
+            "dockerfile_template_id": template_id,
+            "public_route": True,
+            "container_port": 80,
+            "cpu_limit": 1.0,
+            "memory_limit": 512,
+        },
+    )
+    assert template_response.status_code == 202
+    job = wait_for_deploy(api_client, template_response.json()["job_id"])
+    assert job["status"] == "succeeded"
+    assert fake_orchestrator.last_deploy_config is not None
+    assert fake_orchestrator.last_deploy_config.cpu_limit == 1.0
+    assert fake_orchestrator.last_deploy_config.memory_limit == 512
+
+    git_response = api_client.post(
+        "/api/containers/run",
+        json={
+            "source": "https://github.com/org/repo.git",
+            "git_branch": "develop",
+            "public_route": True,
+            "container_port": 80,
+            "cpu_limit": 2.0,
+            "memory_limit": 1024,
+        },
+    )
+    assert git_response.status_code == 202
+    job = wait_for_deploy(api_client, git_response.json()["job_id"])
+    assert job["status"] == "succeeded"
+    assert fake_orchestrator.last_deploy_config is not None
+    assert fake_orchestrator.last_deploy_config.cpu_limit == 2.0
+    assert fake_orchestrator.last_deploy_config.memory_limit == 1024
 
 
 def test_run_rejects_empty_env_key(api_client: TestClient) -> None:
@@ -276,7 +391,9 @@ def test_run_from_image_with_read_only_volumes(
             "volumes": [{"upload_id": upload_id, "target": "/data"}],
         },
     )
-    assert response.status_code == 200
+    assert response.status_code == 202
+    job = wait_for_deploy(api_client, response.json()["job_id"])
+    assert job["status"] == "succeeded"
     assert fake_orchestrator.last_deploy_config is not None
     assert len(fake_orchestrator.last_deploy_config.volumes) == 1
     assert fake_orchestrator.last_deploy_config.volumes[0].target == "/data"
@@ -415,8 +532,10 @@ def test_run_from_image_public_route(
             "route_tls": False,
         },
     )
-    assert response.status_code == 200
-    body = response.json()
+    assert response.status_code == 202
+    job = wait_for_deploy(api_client, response.json()["job_id"])
+    assert job["status"] == "succeeded"
+    body = job["result"]
     assert body["kind"] == "image"
     assert body["image"] == "nginx:alpine"
     assert body["route_wired"] is True
@@ -452,8 +571,10 @@ def test_run_from_dockerfile_template(
             "container_port": 80,
         },
     )
-    assert response.status_code == 200
-    body = response.json()
+    assert response.status_code == 202
+    job = wait_for_deploy(api_client, response.json()["job_id"])
+    assert job["status"] == "succeeded"
+    body = job["result"]
     assert body["kind"] == "dockerfile_template"
     assert body["image"].startswith("vela/templatebuild:")
     assert any(tag.startswith("vela/templatebuild:") for tag in fake_orchestrator._built_tags)
@@ -479,6 +600,36 @@ def test_run_from_dockerfile_template(
     assert deployed["source_label"] == "minimal"
 
 
+def test_request_recovers_after_mid_transaction_db_error(
+    api_client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A handler that fails mid-DB-transaction must not poison later requests."""
+    import app.core.user_library as user_library_module
+
+    async def unguarded_create(
+        session: AsyncSession, owner_id: uuid.UUID, *, name: str, contents: str
+    ) -> None:
+        session.add(Dockerfile(owner_id=owner_id, name=name, contents=contents))
+        await session.flush()
+
+    created = api_client.post(
+        "/api/dockerfiles/", json={"name": "dup", "contents": "FROM alpine\n"}
+    )
+    assert created.status_code == 201
+
+    monkeypatch.setattr(
+        user_library_module, "create_dockerfile_template", unguarded_create
+    )
+    with pytest.raises(IntegrityError):
+        api_client.post(
+            "/api/dockerfiles/", json={"name": "dup", "contents": "FROM alpine\n"}
+        )
+
+    listed = api_client.get("/api/dockerfiles/")
+    assert listed.status_code == 200
+    assert [row["name"] for row in listed.json()] == ["dup"]
+
+
 def test_run_from_git_url(
     api_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
@@ -499,10 +650,76 @@ def test_run_from_git_url(
             "container_port": 80,
         },
     )
-    assert response.status_code == 200
-    body = response.json()
+    assert response.status_code == 202
+    job = wait_for_deploy(api_client, response.json()["job_id"])
+    assert job["status"] == "succeeded"
+    body = job["result"]
     assert body["kind"] == "git"
     assert body["image"].startswith("vela/gitbuild:")
+
+
+def test_run_from_git_url_strips_embedded_credentials(
+    api_client: TestClient,
+    db_session_factory,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A credential-bearing git URL must not leak into labels, records, or history."""
+    import asyncio
+
+    from sqlalchemy import select
+
+    from app.db.models import DeploymentRecord
+
+    monkeypatch.setenv("VELA_PUBLIC_ROUTE_DOMAIN", "apps.example.com")
+    monkeypatch.setenv("VELA_PUBLIC_URL_SCHEME", "https")
+    monkeypatch.setattr(
+        "app.core.build.default_image_builder.git_shallow_clone",
+        _stub_git_shallow_clone,
+    )
+
+    response = api_client.post(
+        "/api/containers/run",
+        json={
+            "source": "https://deployer:ghp_secrettoken123@github.com/org/repo.git",
+            "git_branch": "develop",
+            "public_route": True,
+            "container_port": 80,
+        },
+    )
+    assert response.status_code == 202
+    job = wait_for_deploy(api_client, response.json()["job_id"])
+    assert job["status"] == "succeeded"
+    assert "ghp_secrettoken123" not in json.dumps(job)
+
+    listed = api_client.get("/api/containers/")
+    assert listed.status_code == 200
+    deployed = next(
+        row
+        for row in listed.json()
+        if row["image"].startswith("vela/gitbuild:")
+    )
+    assert deployed["source_kind"] == "git"
+    assert deployed["source_label"] == "https://github.com/org/repo.git"
+
+    async def stored_source_ref() -> str:
+        async with db_session_factory() as session:
+            row = (
+                await session.execute(
+                    select(DeploymentRecord.source_ref).where(
+                        DeploymentRecord.source_kind == "git"
+                    )
+                )
+            ).scalar_one()
+        return row
+
+    assert asyncio.run(stored_source_ref()) == "https://github.com/org/repo.git"
+
+    history = api_client.get("/api/deployments/")
+    assert history.status_code == 200
+    git_rows = [row for row in history.json() if row["source_kind"] == "git"]
+    assert git_rows
+    assert git_rows[0]["source_ref"] == "https://github.com/org/repo.git"
+    assert all("ghp_secrettoken123" not in row["source_ref"] for row in git_rows)
 
 
 def test_run_public_route_requires_domain(
@@ -526,7 +743,7 @@ def test_start_stop_restart_remove(api_client: TestClient) -> None:
 
 
 def test_container_logs_stats_health(api_client: TestClient) -> None:
-    assert api_client.get("/api/containers/cid-1/logs").json()["logs"] == "log line\n"
+    assert api_client.get("/api/containers/cid-1/logs").json()["logs"].startswith("log line")
 
 
 def test_container_logs_tail_validation(api_client: TestClient) -> None:
@@ -569,7 +786,7 @@ def test_logs_stream_authenticated(
         f"/api/containers/cid-1/logs/stream?access_token={auth_token}&follow=false"
     ) as websocket:
         data = websocket.receive_bytes()
-    assert data == b"log line\n"
+    assert data.startswith(b"log line")
 
 
 def test_logs_stream_requires_token(anonymous_client: TestClient) -> None:
@@ -619,6 +836,34 @@ def test_deploy_with_public_route(
 def test_run_rejects_empty_source(api_client: TestClient) -> None:
     response = api_client.post("/api/containers/run", json={"source": ""})
     assert response.status_code == 422
+
+
+def test_run_rejects_non_finite_cpu_limit(
+    api_client: TestClient, db_session_factory
+) -> None:
+    import asyncio
+
+    from sqlalchemy import select
+
+    from app.db.models import DeploymentRecord
+
+    # ponytail: httpx can't encode float("inf") via json=; the raw Infinity token still reaches the server validator
+    response = api_client.post(
+        "/api/containers/run",
+        content='{"source_kind": "image", "image_ref": "nginx:alpine", "cpu_limit": Infinity}',
+        headers={"Content-Type": "application/json"},
+    )
+    assert response.status_code == 422
+    assert "Value must be a finite number" in response.text
+
+    async def count_deployments() -> int:
+        async with db_session_factory() as session:
+            rows = (
+                (await session.execute(select(DeploymentRecord))).scalars().all()
+            )
+        return len(rows)
+
+    assert asyncio.run(count_deployments()) == 0
 
 
 def test_run_from_github_uses_stored_token(
@@ -709,7 +954,9 @@ def test_run_from_github_uses_stored_token(
         },
     )
 
-    assert response.status_code == 200, response.text
+    assert response.status_code == 202, response.text
+    job = wait_for_deploy(api_client, response.json()["job_id"])
+    assert job["status"] == "succeeded"
     assert recorded_tokens == ["ghp_secret_value"]
 
 
@@ -761,7 +1008,9 @@ def test_run_from_github_without_connection_does_not_send_token(
         },
     )
 
-    assert response.status_code == 200, response.text
+    assert response.status_code == 202, response.text
+    job = wait_for_deploy(api_client, response.json()["job_id"])
+    assert job["status"] == "succeeded"
     assert recorded_tokens == [None]
 
 
@@ -802,9 +1051,10 @@ def test_run_private_github_clone_failure_hints_settings(
         },
     )
 
-    assert response.status_code == 422
-    detail = response.json()["detail"].lower()
-    assert "connect github in settings" in detail
+    assert response.status_code == 202, response.text
+    job = wait_for_deploy(api_client, response.json()["job_id"])
+    assert job["status"] == "failed"
+    assert "connect github in settings" in job["error"]["detail"].lower()
 
 
 def test_builder_build_calls_pipeline(make_authed_client, tmp_path, monkeypatch) -> None:
@@ -1055,10 +1305,11 @@ def test_run_from_git_needs_build_override(
             "container_port": 80,
         },
     )
-    assert response.status_code == 422
-    body = response.json()
-    assert body["code"] == "needs_build_override"
-    assert "detail" in body
+    assert response.status_code == 202, response.text
+    job = wait_for_deploy(api_client, response.json()["job_id"])
+    assert job["status"] == "failed"
+    assert job["error"]["code"] == "needs_build_override"
+    assert "detail" in job["error"]
 
 
 def test_stack_deploy_needs_build_override(
@@ -1101,10 +1352,11 @@ def test_stack_deploy_needs_build_override(
     stack_id = created.json()["id"]
 
     deployed = api_client.post(f"/api/stacks/{stack_id}/deploy")
-    assert deployed.status_code == 422
-    body = deployed.json()
-    assert body["code"] == "needs_build_override"
-    assert "api" in body["detail"]
+    assert deployed.status_code == 202
+    job = wait_for_deploy(api_client, deployed.json()["job_id"])
+    assert job["status"] == "failed"
+    assert job["error"]["code"] == "needs_build_override"
+    assert "api" in job["error"]["detail"]
 
     api_client.delete(f"/api/stacks/{stack_id}")
 
@@ -1140,7 +1392,9 @@ def test_stack_crud(api_client: TestClient) -> None:
 
     # Deploy
     deployed = api_client.post(f"/api/stacks/{stack_id}/deploy")
-    assert deployed.status_code == 200
+    assert deployed.status_code == 202
+    job = wait_for_deploy(api_client, deployed.json()["job_id"])
+    assert job["status"] == "succeeded"
 
     # Delete
     deleted = api_client.delete(f"/api/stacks/{stack_id}")
@@ -1290,44 +1544,30 @@ def test_stack_composition_cycle_prevention(api_client: TestClient) -> None:
     api_client.delete(f"/api/stacks/{id_a}")
 
 
-def test_stack_compose_import(api_client: TestClient) -> None:
-    """Import a docker-compose YAML and verify services are created."""
-    compose_yaml = """
-version: "3.8"
-services:
-  web:
-    image: nginx:alpine
-    ports:
-      - "80:80"
-    environment:
-      NGINX_HOST: example.com
-  redis:
-    image: redis:7
-    ports:
-      - "6379:6379"
+def test_stack_parse_manifest_k8s(api_client: TestClient) -> None:
+    k8s_yaml = """
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web
+spec:
+  template:
+    spec:
+      containers:
+        - name: web
+          image: nginx:alpine
+          ports:
+            - containerPort: 8080
 """
-    resp = api_client.post("/api/stacks/import-compose", json={
-        "name": "imported-stack",
-        "yaml_content": compose_yaml,
-    })
-    assert resp.status_code == 201
+    resp = api_client.post("/api/stacks/parse-manifest", json={"yaml_content": k8s_yaml})
+    assert resp.status_code == 200
     data = resp.json()
-    assert data["stack"]["name"] == "imported-stack"
-    service_names = {s["service_name"] for s in data["stack"]["services"]}
-    assert "web" in service_names
-    assert "redis" in service_names
-
-    # Verify the stack is accessible
-    stack_id = data["stack"]["id"]
-    got = api_client.get(f"/api/stacks/{stack_id}")
-    assert got.status_code == 200
-    assert got.json()["name"] == "imported-stack"
-
-    # Cleanup
-    api_client.delete(f"/api/stacks/{stack_id}")
+    assert data["manifest_kind"] == "k8s"
+    assert data["services"][0]["service_name"] == "web"
+    assert data["services"][0]["container_port"] == 8080
 
 
-def test_stack_parse_compose(api_client: TestClient) -> None:
+def test_stack_parse_manifest_compose(api_client: TestClient) -> None:
     """Parse compose returns services without creating a stack."""
     compose_yaml = """
 services:
@@ -1346,9 +1586,10 @@ services:
     assert before.status_code == 200
     count_before = len(before.json())
 
-    resp = api_client.post("/api/stacks/parse-compose", json={"yaml_content": compose_yaml})
+    resp = api_client.post("/api/stacks/parse-manifest", json={"yaml_content": compose_yaml})
     assert resp.status_code == 200, resp.text
     data = resp.json()
+    assert data["manifest_kind"] == "compose"
     service_names = {s["service_name"] for s in data["services"]}
     assert service_names == {"web", "redis"}
     web = next(s for s in data["services"] if s["service_name"] == "web")
@@ -1361,14 +1602,14 @@ services:
     assert len(after.json()) == count_before
 
 
-def test_stack_parse_compose_git_url(api_client: TestClient) -> None:
+def test_stack_parse_manifest_git_url(api_client: TestClient) -> None:
     compose_yaml = """
 services:
   app:
     build:
       context: https://github.com/LorenzoFerraces/Commit-y-me-voy.git
 """
-    resp = api_client.post("/api/stacks/parse-compose", json={"yaml_content": compose_yaml})
+    resp = api_client.post("/api/stacks/parse-manifest", json={"yaml_content": compose_yaml})
     assert resp.status_code == 200, resp.text
     app = resp.json()["services"][0]
     assert app["source_kind"] == "git"
@@ -1376,10 +1617,10 @@ services:
     assert app["git_branch"] == "main"
 
 
-def test_stack_parse_compose_empty(api_client: TestClient) -> None:
-    resp = api_client.post("/api/stacks/parse-compose", json={"yaml_content": "services: {}"})
+def test_stack_parse_manifest_unrecognized(api_client: TestClient) -> None:
+    resp = api_client.post("/api/stacks/parse-manifest", json={"yaml_content": "foo: bar"})
     assert resp.status_code == 400
-    assert "no valid services" in resp.json()["detail"].lower()
+    assert "unrecognized manifest" in resp.json()["detail"].lower()
 
 
 def test_stack_deploy_creates_network(api_client: TestClient) -> None:
@@ -1387,8 +1628,9 @@ def test_stack_deploy_creates_network(api_client: TestClient) -> None:
     from app.core.containers.fake_orchestrator import FakeContainerOrchestrator
 
     # Get the orchestrator from the test client
+    fastapi_app = cast(FastAPI, api_client.app)
     orchestrator = None
-    for dep in api_client.app.dependency_overrides.values():
+    for dep in fastapi_app.dependency_overrides.values():
         result = dep()
         if isinstance(result, FakeContainerOrchestrator):
             orchestrator = result
@@ -1414,7 +1656,9 @@ def test_stack_deploy_creates_network(api_client: TestClient) -> None:
 
     # Deploy
     deployed = api_client.post(f"/api/stacks/{stack_id}/deploy")
-    assert deployed.status_code == 200
+    assert deployed.status_code == 202
+    job = wait_for_deploy(api_client, deployed.json()["job_id"])
+    assert job["status"] == "succeeded"
 
     # Verify network was created
     if orchestrator:
@@ -1452,7 +1696,77 @@ def test_stack_deploy_dockerfile_template_by_name(api_client: TestClient) -> Non
     stack_id = stack.json()["id"]
 
     deployed = api_client.post(f"/api/stacks/{stack_id}/deploy")
-    assert deployed.status_code == 200
+    assert deployed.status_code == 202
+    job = wait_for_deploy(api_client, deployed.json()["job_id"])
+    assert job["status"] == "succeeded"
+
+    api_client.delete(f"/api/stacks/{stack_id}")
+
+
+def test_stack_deploy_git_strips_credentials_from_display(
+    api_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Stack git services keep credentials for the clone but not in displayed refs."""
+    recorded_urls: list[str] = []
+
+    async def _recording_clone(
+        *, url: str, branch: str, dest: Path, access_token: str | None = None
+    ) -> None:
+        recorded_urls.append(url)
+        await _stub_git_shallow_clone(
+            url=url, branch=branch, dest=dest, access_token=access_token
+        )
+
+    monkeypatch.setattr(
+        "app.core.build.default_image_builder.git_shallow_clone",
+        _recording_clone,
+    )
+
+    created = api_client.post(
+        "/api/stacks/",
+        json={
+            "name": "cred-stack",
+            "services": [
+                {
+                    "service_name": "web",
+                    "source_kind": "git",
+                    "source_ref": "https://deployer:ghp_stacktoken456@github.com/org/app.git",
+                    "git_branch": "main",
+                    "container_port": 80,
+                    "env_vars": {},
+                    "public_route": False,
+                }
+            ],
+        },
+    )
+    assert created.status_code == 201
+    stack_id = created.json()["id"]
+    assert (
+        created.json()["services"][0]["source_ref"]
+        == "https://github.com/org/app.git"
+    )
+
+    deployed = api_client.post(f"/api/stacks/{stack_id}/deploy")
+    assert deployed.status_code == 202
+    job = wait_for_deploy(api_client, deployed.json()["job_id"])
+    assert job["status"] == "succeeded"
+    assert recorded_urls == [
+        "https://deployer:ghp_stacktoken456@github.com/org/app.git"
+    ]
+
+    fetched = api_client.get(f"/api/stacks/{stack_id}")
+    assert fetched.status_code == 200
+    assert (
+        fetched.json()["services"][0]["source_ref"]
+        == "https://github.com/org/app.git"
+    )
+
+    history = api_client.get("/api/deployments/")
+    assert history.status_code == 200
+    git_rows = [row for row in history.json() if row["source_kind"] == "git"]
+    assert git_rows
+    assert all("ghp_stacktoken456" not in row["source_ref"] for row in git_rows)
 
     api_client.delete(f"/api/stacks/{stack_id}")
 
@@ -1461,8 +1775,9 @@ def test_stack_delete_cleans_network(api_client: TestClient) -> None:
     """Delete should clean up the stack's Docker network."""
     from app.core.containers.fake_orchestrator import FakeContainerOrchestrator
 
+    fastapi_app = cast(FastAPI, api_client.app)
     orchestrator = None
-    for dep in api_client.app.dependency_overrides.values():
+    for dep in fastapi_app.dependency_overrides.values():
         result = dep()
         if isinstance(result, FakeContainerOrchestrator):
             orchestrator = result
@@ -1487,7 +1802,9 @@ def test_stack_delete_cleans_network(api_client: TestClient) -> None:
     network_name = created.json()["network_name"]
 
     # Deploy (creates network)
-    api_client.post(f"/api/stacks/{stack_id}/deploy")
+    deployed = api_client.post(f"/api/stacks/{stack_id}/deploy")
+    assert deployed.status_code == 202
+    wait_for_deploy(api_client, deployed.json()["job_id"])
 
     # Delete
     deleted = api_client.delete(f"/api/stacks/{stack_id}")

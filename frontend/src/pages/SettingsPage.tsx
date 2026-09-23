@@ -13,8 +13,10 @@ import {
   patchAiPrefillPreferences,
   type AiPrefillPreferences,
 } from '../api/client'
+import LlmProviderCard from './settings/LlmProviderCard'
 import ProfileSection from './settings/ProfileSection'
 import { EmailNotificationSettingsCard } from '../components/EmailNotificationSettings'
+import ConfirmDialog from '../components/ConfirmDialog'
 
 type StatusState =
   | { kind: 'loading' }
@@ -59,6 +61,8 @@ export default function SettingsPage() {
   const [state, setState] = useState<StatusState>({ kind: 'loading' })
   const [banner, setBanner] = useState<Banner>(null)
   const [busy, setBusy] = useState(false)
+  const [disconnectDialogOpen, setDisconnectDialogOpen] = useState(false)
+  const [aiStatusVersion, setAiStatusVersion] = useState(0)
 
   const reload = useCallback(async (options?: { showLoading?: boolean }) => {
     if (!getAccessToken()) {
@@ -129,10 +133,11 @@ export default function SettingsPage() {
     }
   }
 
-  async function handleDisconnect() {
-    if (!window.confirm('Disconnect your GitHub account from Vela?')) {
-      return
-    }
+  function handleDisconnect() {
+    setDisconnectDialogOpen(true)
+  }
+
+  async function handleDisconnectConfirm() {
     setBusy(true)
     setBanner(null)
     try {
@@ -143,6 +148,7 @@ export default function SettingsPage() {
       setBanner({ tone: 'err', text: formatApiError(error) })
     } finally {
       setBusy(false)
+      setDisconnectDialogOpen(false)
     }
   }
 
@@ -168,7 +174,7 @@ export default function SettingsPage() {
               ? 'settings-banner settings-banner--ok'
               : 'settings-banner settings-banner--err'
           }
-          role={banner.tone === 'err' ? 'alert' : undefined}
+          role={banner.tone === 'err' ? 'alert' : 'status'}
         >
           {banner.text}
         </p>
@@ -201,9 +207,23 @@ export default function SettingsPage() {
         )}
       </div>
 
-      <AiPrefillSettingsCard />
+      <LlmProviderCard
+        onChanged={() => setAiStatusVersion((version) => version + 1)}
+      />
+
+      <AiPrefillSettingsCard refreshKey={aiStatusVersion} />
 
       <EmailNotificationSettingsCard />
+
+      <ConfirmDialog
+        open={disconnectDialogOpen}
+        title="Disconnect GitHub?"
+        message="You will no longer be able to deploy private repositories from GitHub."
+        confirmLabel={busy ? 'Disconnecting…' : 'Disconnect'}
+        busy={busy && disconnectDialogOpen}
+        onConfirm={() => void handleDisconnectConfirm()}
+        onClose={() => setDisconnectDialogOpen(false)}
+      />
     </section>
   )
 }
@@ -216,7 +236,7 @@ const AI_PREFILL_LABELS: Record<keyof AiPrefillPreferences, string> = {
   start_command: 'Start command',
 }
 
-function AiPrefillSettingsCard() {
+function AiPrefillSettingsCard({ refreshKey = 0 }: { refreshKey?: number }) {
   const [preferences, setPreferences] = useState<AiPrefillPreferences | null>(
     null
   )
@@ -257,7 +277,7 @@ function AiPrefillSettingsCard() {
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [refreshKey])
 
   async function onToggle(field: keyof AiPrefillPreferences, enabled: boolean) {
     if (!preferences) {
@@ -297,7 +317,7 @@ function AiPrefillSettingsCard() {
         ) : null}
         {geminiConfigured === false ? (
           <p className="settings-card__muted">
-            AI analysis is unavailable until the server sets VELA_GEMINI_API_KEY.
+            AI analysis is not configured on this server.
             Deterministic fallbacks may still apply when analyzing repos.
           </p>
         ) : null}

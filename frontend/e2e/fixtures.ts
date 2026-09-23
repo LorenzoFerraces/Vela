@@ -36,13 +36,18 @@ export const test = baseTest.extend<AuthenticatedFixtures>({
     await loginAndSeedToken(page)
     await use(page)
   },
-  authenticatedPageNoGithub: async ({ page }, use) => {
+  authenticatedPageNoGithub: async ({ browser }, use) => {
+    // Separate context, not just a second page: localStorage is per-context,
+    // so both fixtures must not share storage or the last seeded token wins.
+    const noGithubContext = await browser.newContext()
+    const noGithubPage = await noGithubContext.newPage()
     await loginAndSeedToken(
-      page,
+      noGithubPage,
       E2E_USER_NO_GITHUB_EMAIL,
       E2E_USER_NO_GITHUB_PASSWORD,
     )
-    await use(page)
+    await use(noGithubPage)
+    await noGithubContext.close()
   },
 })
 

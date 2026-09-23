@@ -7,6 +7,7 @@ from typing import Any
 from fastapi.testclient import TestClient
 
 from app.core.containers.fake_orchestrator import FakeContainerOrchestrator
+from tests.test_deploy_jobs import wait_for_deploy
 from tests.test_project_container_access import _invite_and_accept, _register
 
 
@@ -31,7 +32,7 @@ def _create_stack(client: TestClient, *, name: str, project_id: str | None = Non
     return response.json()
 
 
-def test_viewer_cannot_import_or_deploy_stack(integration_app: Any) -> None:
+def test_viewer_cannot_create_or_deploy_stack(integration_app: Any) -> None:
     with TestClient(integration_app) as owner_client, TestClient(integration_app) as viewer_client:
         _, project_id, _ = _register(owner_client, "stack-owner@example.com")
         _register(viewer_client, "stack-viewer@example.com")
@@ -44,16 +45,6 @@ def test_viewer_cannot_import_or_deploy_stack(integration_app: Any) -> None:
         )
 
         stack = _create_stack(owner_client, name="rbac-stack", project_id=project_id)
-
-        import_denied = viewer_client.post(
-            "/api/stacks/import-compose",
-            json={
-                "project_id": project_id,
-                "name": "viewer-import",
-                "yaml_content": "services:\n  web:\n    image: nginx:alpine\n",
-            },
-        )
-        assert import_denied.status_code == 403
 
         deploy_denied = viewer_client.post(f"/api/stacks/{stack['id']}/deploy")
         assert deploy_denied.status_code == 403
@@ -114,8 +105,10 @@ def test_stack_partial_deploy_rolls_back(
     network_name = created.json()["network_name"]
 
     deployed = api_client.post(f"/api/stacks/{stack_id}/deploy")
-    assert deployed.status_code == 500
-    assert "api" in deployed.json()["detail"]
+    assert deployed.status_code == 202
+    job = wait_for_deploy(api_client, deployed.json()["job_id"])
+    assert job["status"] == "failed"
+    assert "api" in job["error"]["detail"]
 
     assert network_name not in fake_orchestrator._networks
     remaining = [

@@ -1,0 +1,55 @@
+.resource-usage__empty {
+  margin: 0;
+  font-size: 14px;
+  color: var(--text-muted);
+}
+
+.resource-usage__summary {
+  margin: 0 0 12px;
+  font-size: 14px;
+  color: var(--text-muted);
+}
+
+.resource-usage__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 12px;
+}
+
+.resource-usage__card {
+  border: 1px solid var(--border);
+  padding: 16px;
+}
+
+.resource-usage__card-title {
+  margin: 0;
+  font-size: 14px;
+  color: var(--text-heading);
+}
+
+.resource-usage__card-meta {
+  margin: 4px 0 12px;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.resource-usage__list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.resource-usage__row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 13px;
+  padding: 2px 0;
+}
+
+.resource-usage__name {
+  color: var(--accent);
+}
+
+.resource-usage__value {
+  color: var(--text-muted);
+}

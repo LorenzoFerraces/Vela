@@ -3,6 +3,7 @@ import {
   analyzeGitSource,
   formatApiError,
   getAiPrefillPreferences,
+  isLlmFallbackError,
   type AiPrefillPreferences,
   type GitSourceAnalysis,
 } from '../../api/client'
@@ -22,6 +23,7 @@ export function useGitSourceAnalysis(setters: GitAnalysisFormSetters) {
   )
   const [analysisLoading, setAnalysisLoading] = useState(false)
   const [analysisError, setAnalysisError] = useState<string | null>(null)
+  const [llmFallbackAvailable, setLlmFallbackAvailable] = useState(false)
   const [successToast, setSuccessToast] = useState<string | null>(null)
 
   useEffect(() => {
@@ -45,6 +47,7 @@ export function useGitSourceAnalysis(setters: GitAnalysisFormSetters) {
   const clearAnalysis = useCallback(() => {
     setAnalysisLoading(false)
     setAnalysisError(null)
+    setLlmFallbackAvailable(false)
     setSuccessToast(null)
   }, [])
 
@@ -56,9 +59,11 @@ export function useGitSourceAnalysis(setters: GitAnalysisFormSetters) {
     async (
       gitUrl: string,
       gitBranch: string,
+      useServerDefault = false,
     ): Promise<GitSourceAnalysis | null> => {
       setAnalysisLoading(true)
       setAnalysisError(null)
+      setLlmFallbackAvailable(false)
       setSuccessToast(null)
       try {
         let prefs = preferences
@@ -73,6 +78,7 @@ export function useGitSourceAnalysis(setters: GitAnalysisFormSetters) {
         const analysis: GitSourceAnalysis = await analyzeGitSource({
           git_url: gitUrl,
           git_branch: gitBranch,
+          use_server_default: useServerDefault,
         })
         applyGitSourceAnalysis(analysis, prefs, setters)
         const hint = analysis.summary_hint?.trim()
@@ -81,6 +87,7 @@ export function useGitSourceAnalysis(setters: GitAnalysisFormSetters) {
         )
         return analysis
       } catch (error) {
+        setLlmFallbackAvailable(isLlmFallbackError(error))
         setAnalysisError(formatApiError(error))
         return null
       } finally {
@@ -93,6 +100,7 @@ export function useGitSourceAnalysis(setters: GitAnalysisFormSetters) {
   return {
     analysisLoading,
     analysisError,
+    llmFallbackAvailable,
     successToast,
     dismissSuccessToast,
     runAnalysis,

@@ -31,13 +31,61 @@ async function accessTokenForPage(
   return body.access_token
 }
 
+/** Minimal view of a deploy job from GET /api/deploys/active. */
+interface DeployJobView {
+  job_id: string
+  status: 'in_progress' | 'succeeded' | 'failed'
+  error?: { code: string; detail: string; build_log?: string | null } | null
+  result?: Record<string, unknown> | null
+}
+
 /**
- * Starts a new container from the given image and exposes it with a public route.
- *
- * @param imageRef - Image reference to run (e.g., `owner/name:tag` or a registry URL)
- * @param containerName - Optional name for the created container; if omitted, no name is set
- * @param credentials - Optional credentials to authenticate the request; if omitted, E2E defaults are used
- * @returns The HTTP response returned by the containers run API endpoint
+ * Polls /api/deploys/active until the job reaches a terminal state.
+ * Types are duplicated locally (not imported from src/api) so the helper
+ * never pulls Vite-only modules into the Playwright process.
+ */
+export async function waitForDeployJob(
+  page: Page,
+  token: string,
+  jobId: string,
+  timeoutMs = 30_000,
+): Promise<DeployJobView> {
+  const deadline = Date.now() + timeoutMs
+  for (;;) {
+    const response = await page.request.get(`${apiBase}/api/deploys/active`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+    const jobs = (await response.json()) as DeployJobView[]
+    const job = jobs.find((entry) => entry.job_id === jobId)
+    if (job && job.status !== 'in_progress') {
+      return job
+    }
+    if (Date.now() >= deadline) {
+      throw new Error(`deploy job ${jobId} did not finish within ${timeoutMs}ms`)
+    }
+    await new Promise((resolve) => setTimeout(resolve, 250))
+  }
+}
+
+/**
+ * Synthetic Response-like object matching the APIResponse surface callers
+ * use (`ok()`/`status()`/`json()` as methods). A real fetch `Response` does
+ * not work here: in Node its `ok`/`status` are properties, and every spec
+ * calls `response.ok()`.
+ */
+function syntheticResponse(status: number, payload: unknown) {
+  return {
+    ok: () => status >= 200 && status < 300,
+    status: () => status,
+    json: () => Promise.resolve(payload),
+  }
+}
+
+/**
+ * Starts a new container from the given image and waits for the deploy job
+ * to finish. Returns a Response-like object so existing callers keep working:
+ * succeeded → 200 with the run response body; failed → 422 with the job
+ * error body (code/detail/build_log); sync 4xx → the raw 4xx response.
  */
 export async function deployImageContainer(
   page: Page,
@@ -50,7 +98,7 @@ export async function deployImageContainer(
     credentials?.email,
     credentials?.password,
   )
-  return page.request.post(`${apiBase}/api/containers/run`, {
+  const response = await page.request.post(`${apiBase}/api/containers/run`, {
     headers: { Authorization: `Bearer ${token}` },
     data: {
       source_kind: 'image',
@@ -60,6 +108,15 @@ export async function deployImageContainer(
       container_name: containerName ?? null,
     },
   })
+  if (!response.ok()) {
+    return response
+  }
+  const accepted = (await response.json()) as { job_id: string }
+  const job = await waitForDeployJob(page, token, accepted.job_id)
+  if (job.status === 'failed') {
+    return syntheticResponse(422, job.error ?? {})
+  }
+  return syntheticResponse(200, job.result ?? {})
 }
 
 /**

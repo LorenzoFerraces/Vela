@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import difflib
 import uuid
+from collections.abc import Collection
 from dataclasses import dataclass
-from datetime import datetime
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -97,13 +97,15 @@ async def latest_source_by_container_ids(
     session: AsyncSession,
     user_id: uuid.UUID,
     container_ids: list[str],
+    project_ids: Collection[uuid.UUID] | None = None,
 ) -> dict[str, tuple[str, str]]:
     """Most recent ``(source_kind, source_ref)`` per container id for history fallback."""
     if not container_ids:
         return {}
-    from app.core.projects.repository import list_project_ids_for_user
+    if project_ids is None:
+        from app.core.projects.repository import list_project_ids_for_user
 
-    project_ids = await list_project_ids_for_user(session, user_id)
+        project_ids = await list_project_ids_for_user(session, user_id)
     result = await session.execute(
         select(DeploymentRecord)
         .where(

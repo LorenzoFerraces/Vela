@@ -1,0 +1,42 @@
+.metrics-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.metrics-toolbar__label {
+  font-size: 14px;
+  color: var(--text-muted);
+}
+
+.metrics-toolbar__refresh {
+  margin-left: auto;
+}
+
+.metrics-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+.metrics-card {
+  border: 1px solid var(--border);
+  padding: 16px;
+}
+
+.metrics-card__title {
+  margin: 0 0 8px;
+  font-size: 14px;
+  color: var(--text-heading);
+}
+
+.metrics-empty {
+  padding: 40px;
+  text-align: center;
+  color: var(--text-muted);
+}
+
+.metrics-empty__hint {
+  font-size: 14px;
+}

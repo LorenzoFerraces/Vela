@@ -1,388 +1,178 @@
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   formatApiError,
-  getImageAvailability,
   removeContainer,
-  runContainerFromSource,
   startContainer,
   stopContainer,
-  type BuildOverride,
-  type RunFromSourceRequest,
-  type ScalingPolicyRequest,
 } from '../api/client'
+import { useActiveDeployJobs } from '../hooks/useActiveDeployJobs'
+import ConfirmDialog from '../components/ConfirmDialog'
 import BuildConfigModal from './containers/BuildConfigModal'
-import {
-  buildOverrideFromAnalysis,
-  isNeedsBuildOverrideError,
-} from './containers/buildOverride'
 import { ContainersFormMessageBanner } from './containers/ContainersFormMessageBanner'
 import { ContainersRunAdvancedFields } from './containers/ContainersRunAdvancedFields'
-import { ContainersRunFormFields } from './containers/ContainersRunFormFields'
-import { validateScalingPolicy } from './containers/scalingPolicyUtils'
+import {
+  ContainersRunFormFields,
+  ContainersRunGitFields,
+} from './containers/ContainersRunFormFields'
 import { DeployProjectSelect } from './containers/DeployProjectSelect'
 import { DeploySourceCombobox } from './containers/DeploySourceCombobox'
 import { Toast } from '../components/Toast'
 import { WorkloadsTable } from '../components/workloads/WorkloadsTable'
-import type { FormMessage } from './containers/types'
-import {
-  selectionNeedsRegistryCheck,
-  selectionShowsGitBranch,
-} from './containers/deploySourceTypes'
 import { useWorkloadGroups } from './containers/useWorkloadGroups'
-import { useDeploySourceSelection } from './containers/useDeploySourceSelection'
-import { useDeployProjects } from './containers/useDeployProjects'
-import { useGitSourceAnalysis } from './containers/useGitSourceAnalysis'
-import { useImageRefAvailability } from './containers/useImageRefAvailability'
-import {
-  createEmptyVolumeMountRow,
-  parseStartCommand,
-  recordFromEnvRows,
-  volumesFromRows,
-  type EnvVarRow,
-  type VolumeMountRow,
-} from './containers/runFormAdvanced'
+import { useContainerRunForm } from './containers/useContainerRunForm'
+import '../deploy-progress.css'
+
+const DEPLOY_JOB_DISCOVERY_POLL_MS = 1000
 
 export default function ContainersPage() {
-  const [containerName, setContainerName] = useState('')
-  const [gitBranch, setGitBranch] = useState('main')
-  const [containerPort, setContainerPort] = useState('80')
-  const [envRows, setEnvRows] = useState<EnvVarRow[]>([{ key: '', value: '' }])
-  const [volumeRows, setVolumeRows] = useState<VolumeMountRow[]>([
-    createEmptyVolumeMountRow(),
-  ])
-  const [startCommand, setStartCommand] = useState('')
-  const [scalingPolicy, setScalingPolicy] = useState<ScalingPolicyRequest | null>(null)
-  const [buildOverride, setBuildOverride] = useState<BuildOverride | null>(null)
-  const [buildConfigOpen, setBuildConfigOpen] = useState(false)
-  const [buildConfigInitial, setBuildConfigInitial] = useState<BuildOverride | null>(
-    null,
-  )
-  const [retryRunAfterConfirm, setRetryRunAfterConfirm] = useState(false)
-  const [busy, setBusy] = useState(false)
-  const [message, setMessage] = useState<FormMessage | null>(null)
   const [rowBusy, setRowBusy] = useState<string | null>(null)
-  const deploySource = useDeploySourceSelection()
-  const showGitBranch = selectionShowsGitBranch(deploySource.selection)
+  const [pendingRemoveId, setPendingRemoveId] = useState<string | null>(null)
 
-  const gitAnalysisSetters = useMemo(
-    () => ({
-      setGitBranch,
-      setContainerPort,
-      setContainerName,
-      setEnvRows,
-      setStartCommand,
-    }),
-    []
+  const refreshRef = useRef<() => Promise<void>>(async () => {})
+  const runForm = useContainerRunForm({ refresh: () => refreshRef.current() })
+  const {
+    applyDeploySuggestion,
+    buildConfigInitial,
+    buildConfigOpen,
+    busy,
+    closeBuildConfigModal,
+    containerName,
+    containerPort,
+    cpuLimit,
+    deployProjects,
+    deploySource,
+    envRows,
+    gitAnalysis,
+    gitBranch,
+    handleContainerPortChange,
+    handleVolumeRowsChange,
+    imageRefCheck,
+    memoryLimit,
+    message,
+    onAnalyzeGitSource,
+    onBuildConfigConfirm,
+    onSubmit,
+    pendingJobId,
+    portError,
+    resolveDeployJob,
+    runImageRefAvailabilityCheck,
+    scalingPolicy,
+    scalingValidationError,
+    setContainerName,
+    setCpuLimit,
+    setEnvRows,
+    setGitBranch,
+    setMemoryLimit,
+    setMessage,
+    setScalingPolicy,
+    setSourceError,
+    setStartCommand,
+    showGitBranch,
+    sourceError,
+    startCommand,
+    volumeError,
+    volumeRows,
+  } = runForm
+
+  const { jobs: deployJobs, refresh: refreshDeployJobs } = useActiveDeployJobs()
+  const containerJobs = deployJobs.filter(
+    (job) => job.kind === 'container' && job.status === 'in_progress',
   )
+  const hasInFlightJob = containerJobs.length > 0
 
-  const gitAnalysis = useGitSourceAnalysis(gitAnalysisSetters)
+  // ponytail: 1s poll — the hook only fetches on mount and at a 2.5s cadence
+  // while it already knows about in-flight jobs, so a deploy submitted via the
+  // API or another tab would never appear here, and a just-submitted form job
+  // would sit on the 2.5s cadence before resolving. Skipped when background
+  // jobs are in flight and the form isn't pending (the hook covers that).
+  useEffect(() => {
+    const interval = window.setInterval(() => {
+      if (document.visibilityState !== 'visible') return
+      if (hasInFlightJob && pendingJobId === null) return
+      void refreshDeployJobs()
+    }, DEPLOY_JOB_DISCOVERY_POLL_MS)
+    return () => window.clearInterval(interval)
+  }, [hasInFlightJob, pendingJobId, refreshDeployJobs])
 
-  const reportListLoadError = useCallback((detail: string) => {
-    setMessage({ type: 'err', text: detail })
-  }, [])
+  useEffect(() => {
+    if (!pendingJobId) return
+    const job = deployJobs.find((entry) => entry.job_id === pendingJobId)
+    if (job && job.status !== 'in_progress') {
+      resolveDeployJob(job)
+      void refreshDeployJobs()
+    }
+  }, [deployJobs, pendingJobId, resolveDeployJob, refreshDeployJobs])
+
+  // Terminal jobs leave the filtered list on the next poll; refresh the
+  // workloads table on that in-flight → none transition so the finished
+  // container's row appears even when the form didn't submit the job.
+  const workloadsRefreshRef = useRef<() => void>(() => {})
+  const hadInFlightJobRef = useRef(false)
+  useEffect(() => {
+    if (hadInFlightJobRef.current && !hasInFlightJob) {
+      workloadsRefreshRef.current()
+    }
+    hadInFlightJobRef.current = hasInFlightJob
+  }, [hasInFlightJob])
+
+  const reportListLoadError = useCallback(
+    (detail: string) => {
+      setMessage({ type: 'err', text: detail })
+    },
+    [setMessage],
+  )
 
   const { groups, listLoading, refresh } = useWorkloadGroups(reportListLoadError)
-  const deployProjects = useDeployProjects()
+  refreshRef.current = refresh
 
-  const imageRefForCheck =
-    deploySource.selection?.kind === 'image'
-      ? deploySource.selection.ref
-      : ''
+  useEffect(() => {
+    workloadsRefreshRef.current = () => {
+      void refresh({ revalidate: true })
+    }
+  }, [refresh])
 
-  const { imageRefCheck, setImageRefCheck, runImageRefAvailabilityCheck } =
-    useImageRefAvailability(imageRefForCheck)
-
-  const scalingValidationError = useMemo(
-    () => (scalingPolicy ? validateScalingPolicy(scalingPolicy) : null),
-    [scalingPolicy],
+  const onStart = useCallback(
+    async (containerId: string) => {
+      setRowBusy(containerId)
+      setMessage(null)
+      try {
+        await startContainer(containerId)
+        await refresh()
+      } catch (error) {
+        setMessage({ type: 'err', text: formatApiError(error) })
+      } finally {
+        setRowBusy(null)
+      }
+    },
+    [refresh, setMessage],
   )
 
-  function resetAdvancedFields() {
-    setEnvRows([{ key: '', value: '' }])
-    setVolumeRows([createEmptyVolumeMountRow()])
-    setStartCommand('')
-    setScalingPolicy(null)
-    setBuildOverride(null)
-  }
+  const onStop = useCallback(
+    async (containerId: string) => {
+      setRowBusy(containerId)
+      setMessage(null)
+      try {
+        await stopContainer(containerId)
+        await refresh()
+      } catch (error) {
+        setMessage({ type: 'err', text: formatApiError(error) })
+      } finally {
+        setRowBusy(null)
+      }
+    },
+    [refresh, setMessage],
+  )
 
-  function closeBuildConfigModal() {
-    setBuildConfigOpen(false)
-    setRetryRunAfterConfirm(false)
-  }
+  const onRemove = useCallback(
+    (containerId: string) => setPendingRemoveId(containerId),
+    [],
+  )
 
-  function openBuildConfigModal(options: {
-    initial?: BuildOverride | null
-    retryOnConfirm?: boolean
-  }) {
-    setBuildConfigInitial(options.initial ?? buildOverride)
-    setRetryRunAfterConfirm(options.retryOnConfirm ?? false)
-    setBuildConfigOpen(true)
-  }
-
-  function validateVolumeRows(): string | null {
-    for (const [index, row] of volumeRows.entries()) {
-      const target = row.target.trim()
-      const hasUpload = Boolean(row.uploadId)
-      const hasTarget = Boolean(target)
-      if (!hasUpload && !hasTarget) {
-        continue
-      }
-      if (row.uploading) {
-        return 'Wait for folder uploads to finish before deploying.'
-      }
-      if (!hasUpload) {
-        return `Choose a folder for volume ${index + 1}.`
-      }
-      if (!hasTarget) {
-        return `Enter a container path for volume ${index + 1}.`
-      }
-      if (!target.startsWith('/')) {
-        return `Volume ${index + 1} target must start with /.`
-      }
-    }
-    return null
-  }
-
-  function applyDeploySuggestion(
-    suggestion: Parameters<typeof deploySource.applySuggestion>[0]
-  ) {
-    deploySource.applySuggestion(suggestion)
-    if (suggestion.kind === 'git') {
-      setGitBranch(suggestion.default_branch || 'main')
-      setImageRefCheck({ status: 'idle' })
-      resetAdvancedFields()
-      gitAnalysis.clearAnalysis()
+  async function confirmPendingRemove() {
+    const containerId = pendingRemoveId
+    if (!containerId) {
       return
     }
-    gitAnalysis.clearAnalysis()
-    resetAdvancedFields()
-    setImageRefCheck({ status: 'idle' })
-  }
-
-  async function onAnalyzeGitSource() {
-    const selection = deploySource.selection
-    if (selection?.kind !== 'git') {
-      return
-    }
-    const analysis = await gitAnalysis.runAnalysis(
-      selection.url,
-      gitBranch.trim() || 'main',
-    )
-    if (analysis?.needs_manual_build_config) {
-      openBuildConfigModal({
-        initial: buildOverrideFromAnalysis(analysis),
-        retryOnConfirm: false,
-      })
-    }
-  }
-
-  function buildRunRequest(
-    container_port: number,
-    override: BuildOverride | null = buildOverride,
-  ): RunFromSourceRequest | null {
-    const selection = deploySource.selection
-    if (!selection || !deployProjects.selectedProjectId) {
-      return null
-    }
-    const command = parseStartCommand(startCommand)
-    const base = {
-      container_name: containerName.trim() || null,
-      host_port: null,
-      container_port,
-      git_branch: gitBranch.trim() || 'main',
-      route_host: null,
-      route_path_prefix: '/',
-      route_tls: false,
-      public_route: true,
-      env_vars: recordFromEnvRows(envRows),
-      command,
-      volumes: volumesFromRows(volumeRows),
-      project_id: deployProjects.selectedProjectId,
-      scaling_policy: scalingPolicy,
-      build_override: override,
-    }
-    switch (selection.kind) {
-      case 'image':
-        return {
-          ...base,
-          source_kind: 'image',
-          image_ref: selection.ref,
-        }
-      case 'git':
-        return {
-          ...base,
-          source_kind: 'git',
-          git_url: selection.url,
-        }
-      case 'dockerfile_template':
-        return {
-          ...base,
-          source_kind: 'dockerfile_template',
-          dockerfile_template_id: selection.templateId,
-        }
-      default: {
-        const _exhaustive: never = selection
-        return _exhaustive
-      }
-    }
-  }
-
-  async function executeRun(override: BuildOverride | null = buildOverride) {
-    const parsedPort = parseInt(containerPort.trim(), 10)
-    if (
-      Number.isNaN(parsedPort) ||
-      parsedPort < 1 ||
-      parsedPort > 65535
-    ) {
-      setMessage({
-        type: 'err',
-        text: 'Enter a container port between 1 and 65535.',
-      })
-      return
-    }
-
-    const volumeError = validateVolumeRows()
-    if (volumeError) {
-      setMessage({ type: 'err', text: volumeError })
-      return
-    }
-
-    if (scalingValidationError) {
-      setMessage({ type: 'err', text: scalingValidationError })
-      return
-    }
-
-    setBusy(true)
-    setMessage(null)
-    try {
-      const requestBody = buildRunRequest(parsedPort, override)
-      if (!requestBody) {
-        setMessage({
-          type: 'err',
-          text: 'Choose a deploy source from the search results.',
-        })
-        return
-      }
-      const response = await runContainerFromSource(requestBody)
-      const routeNote = response.route_wired
-        ? ' Traefik route registered.'
-        : ''
-      const scalingWarning =
-        typeof response.scaling_policy_warning === 'string' &&
-        response.scaling_policy_warning.length > 0
-          ? ` ${response.scaling_policy_warning}`
-          : ''
-      const publicUrl =
-        typeof response.public_url === 'string' &&
-        response.public_url.length > 0
-          ? response.public_url
-          : undefined
-      setMessage({
-        type: 'ok',
-        text: `Started (${response.kind}) as ${response.container.name} — image ${response.image}.${routeNote}${scalingWarning}`,
-        publicUrl,
-      })
-      deploySource.clearSelection()
-      setContainerName('')
-      setGitBranch('main')
-      setContainerPort('80')
-      resetAdvancedFields()
-      await refresh()
-    } catch (error) {
-      if (isNeedsBuildOverrideError(error)) {
-        openBuildConfigModal({
-          initial: override,
-          retryOnConfirm: true,
-        })
-        return
-      }
-      setMessage({ type: 'err', text: formatApiError(error) })
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  async function onSubmit(event: React.FormEvent) {
-    event.preventDefault()
-    const selection = deploySource.selection
-    if (!selection) {
-      setMessage({
-        type: 'err',
-        text: 'Choose a deploy source from the search results.',
-      })
-      return
-    }
-    if (selection.kind === 'image') {
-      const trimmed = selection.ref
-      const alreadyOkForRef =
-        imageRefCheck.status === 'ok' && imageRefCheck.ref === trimmed
-      if (!alreadyOkForRef) {
-        try {
-          const availability = await getImageAvailability(trimmed)
-          if (availability.checked && !availability.available) {
-            const notFoundMessage = availability.can_attempt_deploy
-              ? 'Registry did not confirm this image (you may need registry access).'
-              : 'Image not found in the registry.'
-            setImageRefCheck({
-              status: 'unavailable',
-              ref: availability.ref,
-              canAttemptDeploy: availability.can_attempt_deploy === true,
-            })
-            if (!availability.can_attempt_deploy) {
-              setMessage({ type: 'err', text: notFoundMessage })
-              return
-            }
-          }
-          if (availability.checked && availability.available) {
-            setImageRefCheck({ status: 'ok', ref: availability.ref })
-          }
-        } catch (error) {
-          setMessage({ type: 'err', text: formatApiError(error) })
-          return
-        }
-      }
-    }
-
-    await executeRun(buildOverride)
-  }
-
-  async function onBuildConfigConfirm(override: BuildOverride) {
-    setBuildOverride(override)
-    const shouldRetry = retryRunAfterConfirm
-    closeBuildConfigModal()
-    if (shouldRetry) {
-      await executeRun(override)
-    }
-  }
-
-  async function onStart(containerId: string) {
-    setRowBusy(containerId)
-    setMessage(null)
-    try {
-      await startContainer(containerId)
-      await refresh()
-    } catch (error) {
-      setMessage({ type: 'err', text: formatApiError(error) })
-    } finally {
-      setRowBusy(null)
-    }
-  }
-
-  async function onStop(containerId: string) {
-    setRowBusy(containerId)
-    setMessage(null)
-    try {
-      await stopContainer(containerId)
-      await refresh()
-    } catch (error) {
-      setMessage({ type: 'err', text: formatApiError(error) })
-    } finally {
-      setRowBusy(null)
-    }
-  }
-
-  async function onRemove(containerId: string) {
-    if (!window.confirm('Remove this container?')) return
     setRowBusy(containerId)
     setMessage(null)
     try {
@@ -392,8 +182,15 @@ export default function ContainersPage() {
       setMessage({ type: 'err', text: formatApiError(error) })
     } finally {
       setRowBusy(null)
+      setPendingRemoveId(null)
     }
   }
+
+  const pendingRemoveContainer = pendingRemoveId
+    ? groups.find((group) => group.base.id === pendingRemoveId)?.base
+    : undefined
+  const pendingRemoveBusy =
+    pendingRemoveId !== null && rowBusy === pendingRemoveId
 
   return (
     <section className="containers-page">
@@ -422,7 +219,10 @@ export default function ContainersPage() {
           pastedGithubRepoPending={deploySource.pastedGithubRepoPending}
           pastedGithubHint={deploySource.pastedGithubHint}
           imageRefCheck={imageRefCheck}
-          onInputChange={deploySource.onInputChange}
+          onInputChange={(value) => {
+            setSourceError(null)
+            deploySource.onInputChange(value)
+          }}
           onInputFocus={deploySource.onInputFocus}
           onPickSuggestion={applyDeploySuggestion}
           onRequestImageCheck={runImageRefAvailabilityCheck}
@@ -432,7 +232,17 @@ export default function ContainersPage() {
               applyDeploySuggestion(committed)
             }
           }}
+          onListClose={() => deploySource.setListOpen(false)}
         />
+        {sourceError ? (
+          <p
+            id="deploy-source-error"
+            className="containers-source-check containers-source-check--err"
+            role="alert"
+          >
+            {sourceError}
+          </p>
+        ) : null}
         <DeployProjectSelect
           projects={deployProjects.projects}
           selectedProjectId={deployProjects.selectedProjectId}
@@ -440,44 +250,52 @@ export default function ContainersPage() {
           loading={deployProjects.loading}
           error={deployProjects.error}
         />
-        <ContainersRunFormFields
-          showGitBranch={showGitBranch}
-          containerName={containerName}
-          onContainerNameChange={setContainerName}
-          containerPort={containerPort}
-          onContainerPortChange={setContainerPort}
-          gitBranch={gitBranch}
-          onGitBranchChange={setGitBranch}
-          gitAnalysisLoading={gitAnalysis.analysisLoading}
-          gitAnalysisError={gitAnalysis.analysisError}
-          onAnalyzeGit={showGitBranch ? () => void onAnalyzeGitSource() : undefined}
-        />
+        {showGitBranch ? (
+          <ContainersRunGitFields
+            containerName={containerName}
+            onContainerNameChange={setContainerName}
+            containerPort={containerPort}
+            onContainerPortChange={handleContainerPortChange}
+            portError={portError}
+            gitBranch={gitBranch}
+            onGitBranchChange={setGitBranch}
+            gitAnalysisLoading={gitAnalysis.analysisLoading}
+            gitAnalysisError={gitAnalysis.analysisError}
+            gitLlmFallbackAvailable={gitAnalysis.llmFallbackAvailable}
+            onRetryWithDefault={() => void onAnalyzeGitSource(true)}
+            onAnalyzeGit={() => void onAnalyzeGitSource()}
+          />
+        ) : (
+          <ContainersRunFormFields
+            containerName={containerName}
+            onContainerNameChange={setContainerName}
+            containerPort={containerPort}
+            onContainerPortChange={handleContainerPortChange}
+            portError={portError}
+          />
+        )}
         <ContainersRunAdvancedFields
           envRows={envRows}
           onEnvRowsChange={setEnvRows}
           volumeRows={volumeRows}
-          onVolumeRowsChange={setVolumeRows}
+          onVolumeRowsChange={handleVolumeRowsChange}
+          volumeError={volumeError}
           startCommand={startCommand}
           onStartCommandChange={setStartCommand}
           scalingPolicy={scalingPolicy}
           onScalingPolicyChange={setScalingPolicy}
           scalingValidationError={scalingValidationError}
+          cpuLimit={cpuLimit}
+          onCpuLimitChange={setCpuLimit}
+          memoryLimit={memoryLimit}
+          onMemoryLimitChange={setMemoryLimit}
         />
 
         <div className="containers-form__actions">
           <button
             type="submit"
             className="btn btn--primary"
-            disabled={
-              busy ||
-              deployProjects.loading ||
-              deployProjects.projects.length === 0 ||
-              gitAnalysis.analysisLoading ||
-              !deploySource.selection ||
-              (selectionNeedsRegistryCheck(deploySource.selection) &&
-                imageRefCheck.status === 'unavailable' &&
-                !imageRefCheck.canAttemptDeploy)
-            }
+            disabled={busy || !deployProjects.selectedProjectId}
           >
             {busy ? 'Building…' : 'Build'}
           </button>
@@ -506,6 +324,7 @@ export default function ContainersPage() {
       <WorkloadsTable
         listLoading={listLoading}
         groups={groups}
+        deployJobs={containerJobs}
         rowBusyId={rowBusy}
         onStart={onStart}
         onStop={onStop}
@@ -524,6 +343,20 @@ export default function ContainersPage() {
         onConfirm={(override) => {
           void onBuildConfigConfirm(override)
         }}
+      />
+
+      <ConfirmDialog
+        open={pendingRemoveId !== null}
+        title="Remove container?"
+        message={
+          pendingRemoveContainer
+            ? `This permanently removes ${pendingRemoveContainer.name}. This cannot be undone.`
+            : 'This permanently removes the container. This cannot be undone.'
+        }
+        confirmLabel={pendingRemoveBusy ? 'Removing…' : 'Remove'}
+        busy={pendingRemoveBusy}
+        onConfirm={() => void confirmPendingRemove()}
+        onClose={() => setPendingRemoveId(null)}
       />
     </section>
   )

@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 
 from app.core.models import BuildOverride, BuildResult, ProjectInfo, ProjectSource
 
@@ -21,6 +22,7 @@ class ImageBuilder(ABC):
         tag: str,
         access_token: str | None = None,
         override: BuildOverride | None = None,
+        on_phase: Callable[[str], None] | None = None,
     ) -> BuildResult:
         """Full pipeline: clone → analyse → generate/detect Dockerfile → build.
 
@@ -35,6 +37,8 @@ class ImageBuilder(ABC):
                 private HTTPS repos. Never stored alongside ``source``.
             override: Optional client-supplied build settings when detection
                 fails or the user pins language / ``build_subdir``.
+            on_phase: Optional progress callback emitting "preparing" (git
+                clone) and "building" (docker build).
 
         Returns:
             A ``BuildResult`` with the image ID, tag, strategy used, and

@@ -19,45 +19,6 @@ export type PackageManagerOption = {
   label: string
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null
-}
-
-function hasStringBody(error: unknown): error is { body: string } {
-  return isRecord(error) && typeof error.body === 'string'
-}
-
-export function isNeedsBuildOverrideError(error: unknown): boolean {
-  if (!hasStringBody(error)) {
-    return false
-  }
-  try {
-    const parsed: unknown = JSON.parse(error.body)
-    return (
-      isRecord(parsed) &&
-      parsed.code === 'needs_build_override'
-    )
-  } catch {
-    return false
-  }
-}
-
-export function parseFailedServiceNameFromError(error: unknown): string | null {
-  if (!hasStringBody(error)) {
-    return null
-  }
-  try {
-    const parsed: unknown = JSON.parse(error.body)
-    if (!isRecord(parsed) || typeof parsed.detail !== 'string') {
-      return null
-    }
-    const match = /Deploy failed on service '([^']+)'/.exec(parsed.detail)
-    return match?.[1] ?? null
-  } catch {
-    return null
-  }
-}
-
 export function isBuildOverrideLanguage(
   value: string,
 ): value is BuildOverrideLanguage {
