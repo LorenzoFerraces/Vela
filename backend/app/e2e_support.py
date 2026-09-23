@@ -11,6 +11,7 @@ from urllib.parse import unquote, urlparse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from app.core.auth.enums import UserRole
 from app.core.auth.passwords import hash_password
 from app.core.projects.bootstrap import ensure_personal_workspace
 from app.core.oauth.github import GitHubRepo
@@ -303,6 +304,7 @@ async def ensure_e2e_database() -> None:
                 id=E2E_USER_ID,
                 email=E2E_USER_EMAIL,
                 password_hash=hash_password(E2E_USER_PASSWORD),
+                role=UserRole.ADMIN,
             )
             session.add(user)
             await session.flush()
