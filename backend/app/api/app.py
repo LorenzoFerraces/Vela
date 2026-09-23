@@ -41,14 +41,22 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def _lifespan(_application: FastAPI):
     from app.api.deps import get_orchestrator, get_traffic_router
+    from app.core.auth.bootstrap import ensure_admin_user
     from app.core.exceptions import ProviderConnectionError, TrafficRouterError
     from app.core.logging.collector import LogCollector, COLLECTOR_ENABLED
     from app.core.notifications.container_monitor import run_monitoring_loop
     from app.core.monitoring.metrics_collector import run_metrics_collector
     from app.core.scaling.scaling_engine import run_scaling_loop
+    from app.db.engine import get_session_factory
     from app.e2e_support import ensure_e2e_database
 
     await ensure_e2e_database()
+    try:
+        async with get_session_factory()() as session:
+            await ensure_admin_user(session)
+    except ValueError as exc:
+        logger.error("Bootstrap admin configuration is invalid: %s", exc)
+        raise
 
     deploy_jobs = DeployJobRegistry()
     _application.state.deploy_jobs = deploy_jobs
