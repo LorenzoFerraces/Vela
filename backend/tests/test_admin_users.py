@@ -259,15 +259,22 @@ def test_duplicate_user_email_returns_conflict(
         "password": "password-min-8-chars",
         "role": "student",
     }
+    duplicate_payload = {
+        **payload,
+        "email": "  Duplicate@Example.COM  ",
+    }
 
     with TestClient(db_app) as client:
         created = client.post(
             "/api/admin/users", headers=_auth(admin_token), json=payload
         )
         duplicate = client.post(
-            "/api/admin/users", headers=_auth(admin_token), json=payload
+            "/api/admin/users",
+            headers=_auth(admin_token),
+            json=duplicate_payload,
         )
 
     assert created.status_code == 201
+    assert created.json()["email"] == "duplicate@example.com"
     assert duplicate.status_code == 409
     assert duplicate.json()["detail"] == "That email is already registered."
