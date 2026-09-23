@@ -1,15 +1,13 @@
 import type { ReactNode } from 'react'
 import { Navigate, useLocation } from 'react-router-dom'
-import type { UserPublic } from '../api/client'
 import { useAuth } from './AuthContext'
-import { isAdmin, isStaff } from './roles'
+import { isStaff } from './roles'
 
-interface RequireRoleProps {
-  canAccess: (user: UserPublic | null) => boolean
+interface RequireStaffProps {
   children: ReactNode
 }
 
-export function RequireRole({ canAccess, children }: RequireRoleProps) {
+export default function RequireStaff({ children }: RequireStaffProps) {
   const { status, user } = useAuth()
   const location = useLocation()
 
@@ -26,19 +24,9 @@ export function RequireRole({ canAccess, children }: RequireRoleProps) {
     return <Navigate to={`/login?next=${next}`} replace />
   }
 
-  if (!canAccess(user)) {
+  if (!isStaff(user)) {
     return <Navigate to="/dashboard" replace />
   }
 
   return <>{children}</>
 }
-
-export function RequireStaff({ children }: { children: ReactNode }) {
-  return <RequireRole canAccess={isStaff}>{children}</RequireRole>
-}
-
-export function RequireAdmin({ children }: { children: ReactNode }) {
-  return <RequireRole canAccess={isAdmin}>{children}</RequireRole>
-}
-
-export default RequireStaff

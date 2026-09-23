@@ -83,7 +83,11 @@ test.describe('role-gated routes', () => {
     await instructorPage.goto('/dashboard')
     const instructorNav = instructorPage.getByRole('navigation', { name: 'Main' })
     await expect(instructorNav.getByRole('link', { name: 'Teams' })).toBeVisible()
-    await expect(instructorNav.getByRole('link', { name: 'Admin' })).toHaveCount(0)
+    await instructorNav.getByRole('link', { name: 'Admin' }).click()
+    await expect(instructorPage).toHaveURL(`${baseURL}/admin`)
+    await expect(
+      instructorPage.getByRole('heading', { name: 'Admin', level: 1 }),
+    ).toBeVisible()
 
     const adminContext = await browser.newContext()
     const adminPage = await adminContext.newPage()

@@ -3,7 +3,7 @@ import { Route, Routes } from 'react-router-dom'
 import Layout from './components/Layout'
 import Navbar from './components/Navbar'
 import RequireAuth from './auth/RequireAuth'
-import RequireStaff, { RequireAdmin } from './auth/RequireRole'
+import RequireStaff from './auth/RequireRole'
 import Home from './pages/Home'
 import LoginPage from './pages/LoginPage'
 
@@ -91,9 +91,9 @@ export default function App() {
             path="/admin"
             element={
               <RequireAuth>
-                <RequireAdmin>
+                <RequireStaff>
                   <AdminPage />
-                </RequireAdmin>
+                </RequireStaff>
               </RequireAuth>
             }
           />

@@ -1,6 +1,6 @@
 import { NavLink, useNavigate } from 'react-router-dom'
 import { useAuth } from '../auth/AuthContext'
-import { canManageTeams, isAdmin } from '../auth/roles'
+import { canManageTeams, isStaff } from '../auth/roles'
 import { MoonIcon } from '@phosphor-icons/react/Moon'
 import { SunIcon } from '@phosphor-icons/react/Sun'
 import { useTheme } from '../hooks/useTheme'
@@ -23,7 +23,7 @@ export default function Navbar() {
   const navItems = [
     ...baseNavItems,
     ...(canManageTeams(user) ? [{ to: '/teams', label: 'Teams' }] : []),
-    ...(isAdmin(user) ? [{ to: '/admin', label: 'Admin' }] : []),
+    ...(isStaff(user) ? [{ to: '/admin', label: 'Admin' }] : []),
   ]
 
   function onLogout() {
