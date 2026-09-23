@@ -10,6 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased, selectinload
 
+from app.core.auth.enums import can_manage_users
 from app.core.exceptions import (
     AlreadyProjectMemberError,
     DuplicateInvitationError,
@@ -114,6 +115,21 @@ async def require_owner(
     return membership
 
 
+async def _require_project_manager(
+    session: AsyncSession,
+    *,
+    project_id: uuid.UUID,
+    actor_user_id: uuid.UUID,
+) -> None:
+    actor_role = await session.scalar(
+        select(User.role).where(User.id == actor_user_id)
+    )
+    if actor_role is None or not can_manage_users(actor_role):
+        await require_owner(
+            session, project_id=project_id, user_id=actor_user_id
+        )
+
+
 async def list_projects_for_user(
     session: AsyncSession,
     user_id: uuid.UUID,
@@ -199,7 +215,9 @@ async def update_member_role(
     target_user_id: uuid.UUID,
     role: ProjectRole,
 ) -> MemberRow:
-    await require_owner(session, project_id=project_id, user_id=actor_user_id)
+    await _require_project_manager(
+        session, project_id=project_id, actor_user_id=actor_user_id
+    )
     if role == ProjectRole.OWNER:
         raise ProjectAccessDeniedError("Cannot assign owner role via invitation flow.")
     membership = await require_membership(
@@ -266,7 +284,9 @@ async def create_invitation(
     invitee_email: str,
     role: ProjectRole,
 ) -> OutgoingInvitationRow:
-    await require_owner(session, project_id=project_id, user_id=actor_user_id)
+    await _require_project_manager(
+        session, project_id=project_id, actor_user_id=actor_user_id
+    )
     if role not in {ProjectRole.VIEWER, ProjectRole.OPERATOR}:
         raise ProjectAccessDeniedError("Invitations may only offer viewer or operator role.")
     invitee = await _user_by_email(session, invitee_email)
@@ -429,7 +449,9 @@ async def cancel_invitation(
     invitation_id: uuid.UUID,
     actor_user_id: uuid.UUID,
 ) -> None:
-    await require_owner(session, project_id=project_id, user_id=actor_user_id)
+    await _require_project_manager(
+        session, project_id=project_id, actor_user_id=actor_user_id
+    )
     invitation = await _load_invitation(session, invitation_id)
     if invitation.project_id != project_id:
         raise InvitationNotFoundError(str(invitation_id))

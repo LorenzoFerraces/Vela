@@ -8,7 +8,7 @@ from typing import Annotated, cast
 from fastapi import APIRouter, Depends, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_current_user, get_db, get_orchestrator
+from app.api.deps import get_current_user, get_db, get_orchestrator, require_instructor
 from app.api.schemas import (
     IncomingProjectInvitationPublic,
     InvitableRoleLiteral,
@@ -40,7 +40,6 @@ from app.core.projects import (
     reject_invitation,
     remove_member,
     require_membership,
-    require_owner,
     require_project,
     update_member_role,
     owner_email_for_project,
@@ -299,7 +298,7 @@ async def patch_project_member(
     project_id: uuid.UUID,
     user_id: uuid.UUID,
     body: ProjectMemberUpdate,
-    current_user: Annotated[User, Depends(get_current_user)],
+    current_user: Annotated[User, Depends(require_instructor)],
     session: Annotated[AsyncSession, Depends(get_db)],
 ) -> ProjectMemberPublic:
     row = await update_member_role(
@@ -353,10 +352,9 @@ async def leave_user_project(
 @router.get("/{project_id}/invitations", response_model=list[ProjectInvitationPublic])
 async def list_project_invitations(
     project_id: uuid.UUID,
-    current_user: Annotated[User, Depends(get_current_user)],
+    _current_user: Annotated[User, Depends(require_instructor)],
     session: Annotated[AsyncSession, Depends(get_db)],
 ) -> list[ProjectInvitationPublic]:
-    await require_owner(session, project_id=project_id, user_id=current_user.id)
     rows = await list_pending_invitations_for_project(session, project_id)
     return [
         ProjectInvitationPublic(
@@ -378,7 +376,7 @@ async def list_project_invitations(
 async def create_project_invitation(
     project_id: uuid.UUID,
     body: ProjectInvitationCreate,
-    current_user: Annotated[User, Depends(get_current_user)],
+    current_user: Annotated[User, Depends(require_instructor)],
     session: Annotated[AsyncSession, Depends(get_db)],
 ) -> ProjectInvitationPublic:
     row = await create_invitation(
@@ -404,7 +402,7 @@ async def create_project_invitation(
 async def delete_project_invitation(
     project_id: uuid.UUID,
     invitation_id: uuid.UUID,
-    current_user: Annotated[User, Depends(get_current_user)],
+    current_user: Annotated[User, Depends(require_instructor)],
     session: Annotated[AsyncSession, Depends(get_db)],
 ) -> Response:
     await cancel_invitation(

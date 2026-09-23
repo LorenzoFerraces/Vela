@@ -221,6 +221,19 @@ def provision_user(
     return _provision
 
 
+@pytest.fixture
+def register_user_client(provision_user: Any):
+    def _register(
+        email: str,
+        role: str = "instructor",
+        password: str = "password-min-8-chars",
+    ) -> str:
+        _, token = provision_user(email, role=role, password=password)
+        return token
+
+    return _register
+
+
 def _seed_user(
     factory: async_sessionmaker[AsyncSession],
     *,
