@@ -61,7 +61,7 @@ The E2E suite resets the database on API startup (`app/e2e_support.py` `ensure_e
 - **Virtualenv**: create at the **repo root** (`python -m venv .venv`), not inside `backend/`. Playwright's `webServer` resolves `<repoRoot>/.venv/Scripts/python.exe` to launch uvicorn.
 - **Install**: `pip install -e ".[dev]"` from `backend/`.
 - **Run**: `python run.py` from `backend/` (uvicorn on port 8000, reload on).
-- **Env file**: `backend/.env` — see README for full variable list.
+- **Env file**: root `.env` is the official config (read by docker compose and by direct runs); `backend/.env` is an optional dev-override file that wins over root for `python run.py`. See README for full variable list.
 
 ### Database
 

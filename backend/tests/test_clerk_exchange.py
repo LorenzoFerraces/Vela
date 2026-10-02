@@ -42,7 +42,7 @@ def _clerk_identities(db_session_factory: Any) -> list[Any]:
     return asyncio.run(run())
 
 
-def test_clerk_exchange_rejects_unknown_user(
+def test_clerk_exchange_provisions_unknown_user(
     db_app: Any, db_session_factory: Any, monkeypatch: Any
 ) -> None:
     monkeypatch.setenv("VELA_CLERK_PUBLISHABLE_KEY", TEST_CLERK_PUBLISHABLE_KEY)
@@ -56,18 +56,26 @@ def test_clerk_exchange_rejects_unknown_user(
                 json={"clerk_token": "fake.clerk.jwt"},
             )
 
-    assert response.status_code == 403
-    assert response.json()["detail"] == "Registration disabled"
+    assert response.status_code == 200
+    assert response.json()["user"]["email"] == "clerk-user@example.com"
 
-    async def no_user_was_created() -> None:
+    async def provisioned() -> None:
         async with db_session_factory() as session:
             user = await session.scalar(
                 select(User).where(User.email == "clerk-user@example.com")
             )
-            assert user is None
+            assert user is not None
+            assert user.role == "student"
+            assert user.is_active is True
+            assert user.password_hash is None
+            assert user.personal_project_id is not None
 
-    asyncio.run(no_user_was_created())
-    assert _clerk_identities(db_session_factory) == []
+    asyncio.run(provisioned())
+
+    identities = _clerk_identities(db_session_factory)
+    assert len(identities) == 1
+    assert identities[0].provider == "clerk"
+    assert identities[0].provider_subject == "user_2Xtest"
 
 
 def test_clerk_exchange_rejects_deactivated_user(

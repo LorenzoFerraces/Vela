@@ -76,7 +76,7 @@ Alembic uses the **sync** driver `postgresql+psycopg` (see `sync_database_url_fo
 
 ### Environment variables
 
-Create `backend/.env` as needed. Common variables:
+The repo-root `.env` is the official config (docker compose reads it; direct runs load it too). `backend/.env` is an optional dev-override file — keys there win over the root `.env` for `python run.py` only. Common variables:
 
 | Variable | Notes |
 |----------|--------|
@@ -142,7 +142,7 @@ Accounts are provisioned by admins or instructors on the Admin page. Bootstrap t
 - `POST /api/users/me/avatar` — multipart upload (`file` field); JPEG, PNG, or WebP, max 2 MB.
 - `DELETE /api/users/me/avatar` — remove profile photo.
 
-Profile photos are stored in object storage (Cloudflare R2 in production). Set in `backend/.env`:
+Profile photos are stored in object storage (Cloudflare R2 in production). Set in the root `.env`:
 
 - `VELA_OBJECT_STORAGE` — `memory` (default for dev/tests) or `r2`
 - `VELA_R2_ACCOUNT_ID`

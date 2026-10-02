@@ -28,6 +28,12 @@ os.environ.setdefault("VELA_LOG_COLLECTOR_ENABLED", "0")
 os.environ["VELA_CONTAINER_MONITOR_INTERVAL_SECONDS"] = "15"
 os.environ["VELA_METRICS_INTERVAL_SECONDS"] = "3600"
 os.environ.setdefault("VELA_OBJECT_STORAGE", "memory")
+# Keep the bootstrap admin out of tests (a dev .env would make the lifespan
+# hit the default dev Postgres engine).
+os.environ["VELA_ADMIN_EMAIL"] = ""
+os.environ["VELA_ADMIN_PASSWORD"] = ""
+# Force https public URLs so a dev .env cannot change generated URLs.
+os.environ["VELA_PUBLIC_URL_SCHEME"] = "https"
 
 import uuid
 from collections.abc import AsyncIterator, Iterator
