@@ -18,9 +18,14 @@ from app.api.schemas import (
     UserPublic,
 )
 from app.api.user_view import user_public_from_snapshot
-from app.core.auth.service import authenticate, register_user
+from app.core.auth.enums import UserRole
+from app.core.auth.service import authenticate
 from app.core.auth.tokens import create_access_token
-from app.core.exceptions import IntegrationConfigurationError
+from app.core.exceptions import (
+    AccountDeactivatedError,
+    IntegrationConfigurationError,
+    RegistrationDisabledError,
+)
 from app.core.oauth.clerk import clerk_available, verify_clerk_token
 from app.core.oauth.identity import upsert_clerk_identity
 from app.core.profile.service import user_to_snapshot
@@ -54,14 +59,8 @@ def _token_response(user: User, object_storage: ObjectStorage) -> TokenResponse:
     response_model=TokenResponse,
     status_code=status.HTTP_201_CREATED,
 )
-async def register(
-    body: RegisterRequest,
-    session: Annotated[AsyncSession, Depends(get_db)],
-    object_storage: Annotated[ObjectStorage, Depends(get_object_storage)],
-) -> TokenResponse:
-    """Create an account and return an access token for the new user."""
-    user = await register_user(session, email=body.email, password=body.password)
-    return _token_response(user, object_storage)
+async def register(body: RegisterRequest) -> TokenResponse:
+    raise RegistrationDisabledError()
 
 
 @router.post("/login", response_model=TokenResponse)
@@ -95,11 +94,19 @@ async def clerk_exchange(
     )
 
     if user is None:
-        user = User(email=claims.email, password_hash=None)
+        # Clerk is the membership authority: the org restricts Clerk sign-in to
+        # invited users, so a verified JWT may provision a student account.
+        user = User(
+            email=claims.email,
+            password_hash=None,
+            role=UserRole.STUDENT.value,
+        )
         session.add(user)
         await session.flush()
         await ensure_personal_workspace(session, user)
         await session.refresh(user)
+    elif not user.is_active:
+        raise AccountDeactivatedError()
 
     await upsert_clerk_identity(
         session,

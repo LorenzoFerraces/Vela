@@ -7,22 +7,24 @@ from typing import Any
 from fastapi.testclient import TestClient
 
 
-def _register(client: TestClient, email: str, password: str = "password-min-8-chars") -> str:
-    response = client.post(
-        "/api/auth/register",
-        json={"email": email, "password": password},
-    )
-    assert response.status_code == 201, response.text
-    return response.json()["access_token"]
+def _register(
+    register_user_client: Any,
+    email: str,
+    role: str = "student",
+    password: str = "password-min-8-chars",
+) -> str:
+    return register_user_client(email, role=role, password=password)
 
 
 def _auth_headers(token: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
 
 
-def test_create_shared_project(db_app: Any) -> None:
+def test_create_shared_project(
+    db_app: Any, register_user_client: Any
+) -> None:
     with TestClient(db_app) as client:
-        token = _register(client, "creator@example.com")
+        token = _register(register_user_client, "creator@example.com")
         client.headers.update(_auth_headers(token))
 
         create_response = client.post(
@@ -41,10 +43,13 @@ def test_create_shared_project(db_app: Any) -> None:
         assert shared["name"] == "Platform team"
 
 
-def test_member_can_leave_shared_project(db_app: Any) -> None:
+def test_member_can_leave_shared_project(
+    db_app: Any, register_user_client: Any) -> None:
     with TestClient(db_app) as owner_client, TestClient(db_app) as member_client:
-        owner_token = _register(owner_client, "leave-owner@example.com")
-        member_token = _register(member_client, "leave-member@example.com")
+        owner_token = _register(
+            register_user_client, "leave-owner@example.com", role="instructor"
+        )
+        member_token = _register(register_user_client, "leave-member@example.com")
         owner_client.headers.update(_auth_headers(owner_token))
         member_client.headers.update(_auth_headers(member_token))
 
@@ -79,9 +84,10 @@ def test_member_can_leave_shared_project(db_app: Any) -> None:
         assert all(project["id"] != project_id for project in member_projects)
 
 
-def test_register_creates_personal_project(db_app: Any) -> None:
+def test_register_creates_personal_project(
+    db_app: Any, register_user_client: Any) -> None:
     with TestClient(db_app) as client:
-        token = _register(client, "solo@example.com")
+        token = _register(register_user_client, "solo@example.com")
         response = client.get("/api/projects/", headers=_auth_headers(token))
     assert response.status_code == 200
     projects = response.json()
@@ -90,10 +96,13 @@ def test_register_creates_personal_project(db_app: Any) -> None:
     assert projects[0]["role"] == "owner"
 
 
-def test_invite_requires_accept_before_membership(db_app: Any) -> None:
+def test_invite_requires_accept_before_membership(
+    db_app: Any, register_user_client: Any) -> None:
     with TestClient(db_app) as owner_client, TestClient(db_app) as invitee_client:
-        owner_token = _register(owner_client, "owner@example.com")
-        invitee_token = _register(invitee_client, "invitee@example.com")
+        owner_token = _register(
+            register_user_client, "owner@example.com", role="instructor"
+        )
+        invitee_token = _register(register_user_client, "invitee@example.com")
         owner_client.headers.update(_auth_headers(owner_token))
         invitee_client.headers.update(_auth_headers(invitee_token))
 
@@ -130,10 +139,13 @@ def test_invite_requires_accept_before_membership(db_app: Any) -> None:
         assert len(invitee_projects_after) == 2
 
 
-def test_reject_invitation_does_not_add_member(db_app: Any) -> None:
+def test_reject_invitation_does_not_add_member(
+    db_app: Any, register_user_client: Any) -> None:
     with TestClient(db_app) as owner_client, TestClient(db_app) as invitee_client:
-        owner_token = _register(owner_client, "reject-owner@example.com")
-        invitee_token = _register(invitee_client, "reject-invitee@example.com")
+        owner_token = _register(
+            register_user_client, "reject-owner@example.com", role="instructor"
+        )
+        invitee_token = _register(register_user_client, "reject-invitee@example.com")
         owner_client.headers.update(_auth_headers(owner_token))
         invitee_client.headers.update(_auth_headers(invitee_token))
 
@@ -153,15 +165,18 @@ def test_reject_invitation_does_not_add_member(db_app: Any) -> None:
         assert "reject-invitee@example.com" not in [member["email"] for member in members]
 
 
-def test_non_owner_cannot_invite(db_app: Any) -> None:
+def test_student_cannot_invite(
+    db_app: Any, register_user_client: Any) -> None:
     with (
         TestClient(db_app) as owner_client,
         TestClient(db_app) as invitee_client,
         TestClient(db_app) as stranger_client,
     ):
-        owner_token = _register(owner_client, "perm-owner@example.com")
-        invitee_token = _register(invitee_client, "perm-invitee@example.com")
-        stranger_token = _register(stranger_client, "stranger@example.com")
+        owner_token = _register(
+            register_user_client, "perm-owner@example.com", role="instructor"
+        )
+        invitee_token = _register(register_user_client, "perm-invitee@example.com")
+        stranger_token = _register(register_user_client, "stranger@example.com")
         owner_client.headers.update(_auth_headers(owner_token))
         invitee_client.headers.update(_auth_headers(invitee_token))
         stranger_client.headers.update(_auth_headers(stranger_token))
@@ -179,12 +194,15 @@ def test_non_owner_cannot_invite(db_app: Any) -> None:
             f"/api/projects/{project_id}/invitations",
             json={"email": "stranger@example.com", "role": "viewer"},
         )
-        assert forbidden.status_code == 404
+        assert forbidden.status_code == 403
 
 
-def test_unknown_email_returns_400(db_app: Any) -> None:
+def test_unknown_email_returns_400(
+    db_app: Any, register_user_client: Any) -> None:
     with TestClient(db_app) as client:
-        token = _register(client, "unknown-owner@example.com")
+        token = _register(
+            register_user_client, "unknown-owner@example.com", role="instructor"
+        )
         client.headers.update(_auth_headers(token))
         project_id = client.get("/api/projects/").json()[0]["id"]
 
@@ -195,10 +213,13 @@ def test_unknown_email_returns_400(db_app: Any) -> None:
     assert response.status_code == 400
 
 
-def test_cancelled_invite_cannot_be_accepted(db_app: Any) -> None:
+def test_cancelled_invite_cannot_be_accepted(
+    db_app: Any, register_user_client: Any) -> None:
     with TestClient(db_app) as owner_client, TestClient(db_app) as invitee_client:
-        owner_token = _register(owner_client, "cancel-owner@example.com")
-        invitee_token = _register(invitee_client, "cancel-invitee@example.com")
+        owner_token = _register(
+            register_user_client, "cancel-owner@example.com", role="instructor"
+        )
+        invitee_token = _register(register_user_client, "cancel-invitee@example.com")
         owner_client.headers.update(_auth_headers(owner_token))
         invitee_client.headers.update(_auth_headers(invitee_token))
 

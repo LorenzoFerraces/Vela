@@ -20,6 +20,7 @@ export {
   getApiBaseUrl,
   getApiWebSocketUrl,
   getHealth,
+  isAccountDeactivated,
   notifyUnauthorized,
   onUnauthorized,
   setAccessToken,
@@ -99,7 +100,6 @@ export {
   listGithubRepoBranches,
   listGithubRepos,
   login,
-  registerUser,
   updateProfile,
   uploadAvatar,
 } from './auth'
@@ -123,6 +123,13 @@ export {
 export { exportLogs, getLogs } from './logs'
 
 export { getAuditLog } from './audit'
+
+export {
+  createAdminUser,
+  getGlobalAudit,
+  listAdminUsers,
+  patchAdminUser,
+} from './admin'
 
 export {
   getMetricPoints,
@@ -199,10 +206,10 @@ export type {
   GithubStatus,
   ListGithubReposParams,
   LoginRequest,
-  RegisterRequest,
   TokenResponse,
   UserProfileUpdate,
   UserPublic,
+  UserRole,
 } from './auth'
 
 export type {
@@ -235,6 +242,14 @@ export type {
   ProjectUsage,
   UsageSummary,
 } from './metrics'
+
+export type {
+  AdminUserCreate,
+  AdminUserListResponse,
+  AdminUserPatch,
+  AdminUserPublic,
+  AuditLogListResponse,
+} from './admin'
 
 export type {
   AuditLogEntry,

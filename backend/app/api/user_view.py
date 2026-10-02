@@ -14,4 +14,5 @@ def user_public_from_snapshot(snapshot: UserProfileSnapshot) -> UserPublic:
         display_name=snapshot.display_name,
         pronouns=snapshot.pronouns,
         avatar_url=snapshot.avatar_url,
+        role=snapshot.role,
     )

@@ -61,7 +61,7 @@ The E2E suite resets the database on API startup (`app/e2e_support.py` `ensure_e
 - **Virtualenv**: create at the **repo root** (`python -m venv .venv`), not inside `backend/`. Playwright's `webServer` resolves `<repoRoot>/.venv/Scripts/python.exe` to launch uvicorn.
 - **Install**: `pip install -e ".[dev]"` from `backend/`.
 - **Run**: `python run.py` from `backend/` (uvicorn on port 8000, reload on).
-- **Env file**: `backend/.env` — see README for full variable list.
+- **Env file**: root `.env` is the official config (read by docker compose and by direct runs); `backend/.env` is an optional dev-override file that wins over root for `python run.py`. See README for full variable list.
 
 ### Database
 
@@ -77,6 +77,7 @@ The E2E suite resets the database on API startup (`app/e2e_support.py` `ensure_e
 | `VELA_FAKE_ORCHESTRATOR=1` | Swaps real Docker for `FakeContainerOrchestrator` (tests, E2E) |
 | `VELA_E2E=1` | Enables E2E mode: seeds users, mocks GitHub, allows DB reset |
 | `VELA_E2E_ALLOW_DB_RESET=1` | Required alongside `VELA_E2E` to permit schema drop+create |
+| `VELA_ADMIN_EMAIL` / `VELA_ADMIN_PASSWORD` | Bootstrap admin credentials |
 | `VELA_TRAFFIC_ROUTER` | `noop` (default), `traefik_file`, or `kubernetes` |
 | `VELA_OBJECT_STORAGE` | `memory` (default for dev/tests) or `r2` |
 

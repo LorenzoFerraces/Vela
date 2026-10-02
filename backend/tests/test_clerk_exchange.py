@@ -12,7 +12,8 @@ from sqlalchemy import select
 import app.core.oauth.clerk as clerk_mod
 from app.core.exceptions import ProviderConnectionError
 from app.core.oauth.clerk import ClerkClaims, reset_jwks_cache_for_tests
-from app.db.models import UserOAuthIdentity
+from app.db.models import User, UserOAuthIdentity
+from tests.conftest import _seed_user
 
 TEST_CLERK_PUBLISHABLE_KEY = "pk_test_c2FtcGxlMTIzLmNsZXJrLmFjY291bnRzLmRldiQ"
 
@@ -41,7 +42,7 @@ def _clerk_identities(db_session_factory: Any) -> list[Any]:
     return asyncio.run(run())
 
 
-def test_clerk_exchange_creates_new_user(
+def test_clerk_exchange_provisions_unknown_user(
     db_app: Any, db_session_factory: Any, monkeypatch: Any
 ) -> None:
     monkeypatch.setenv("VELA_CLERK_PUBLISHABLE_KEY", TEST_CLERK_PUBLISHABLE_KEY)
@@ -56,37 +57,77 @@ def test_clerk_exchange_creates_new_user(
             )
 
     assert response.status_code == 200
-    body = response.json()
-    assert body["token_type"] == "bearer"
-    assert isinstance(body["access_token"], str)
-    assert body["user"]["email"] == "clerk-user@example.com"
+    assert response.json()["user"]["email"] == "clerk-user@example.com"
+
+    async def provisioned() -> None:
+        async with db_session_factory() as session:
+            user = await session.scalar(
+                select(User).where(User.email == "clerk-user@example.com")
+            )
+            assert user is not None
+            assert user.role == "student"
+            assert user.is_active is True
+            assert user.password_hash is None
+            assert user.personal_project_id is not None
+
+    asyncio.run(provisioned())
 
     identities = _clerk_identities(db_session_factory)
     assert len(identities) == 1
     assert identities[0].provider == "clerk"
     assert identities[0].provider_subject == "user_2Xtest"
-    assert identities[0].user_id == uuid.UUID(body["user"]["id"])
+
+
+def test_clerk_exchange_rejects_deactivated_user(
+    db_app: Any, db_session_factory: Any, monkeypatch: Any
+) -> None:
+    monkeypatch.setenv("VELA_CLERK_PUBLISHABLE_KEY", TEST_CLERK_PUBLISHABLE_KEY)
+    user = _seed_user(
+        db_session_factory,
+        user_id=uuid.uuid4(),
+        email="clerk-user@example.com",
+        password="supersecret123",
+    )
+
+    async def deactivate() -> None:
+        async with db_session_factory() as session:
+            stored_user = await session.get(User, user.id)
+            assert stored_user is not None
+            stored_user.is_active = False
+            await session.commit()
+
+    asyncio.run(deactivate())
+
+    from fastapi.testclient import TestClient
+
+    with _patch_clerk_verify():
+        with TestClient(db_app) as client:
+            response = client.post(
+                "/api/auth/clerk/exchange",
+                json={"clerk_token": "fake.clerk.jwt"},
+            )
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "Account deactivated."
+    assert "access_token" not in response.json()
+    assert _clerk_identities(db_session_factory) == []
 
 
 def test_clerk_exchange_links_existing_user(
     db_app: Any, db_session_factory: Any, monkeypatch: Any
 ) -> None:
     monkeypatch.setenv("VELA_CLERK_PUBLISHABLE_KEY", TEST_CLERK_PUBLISHABLE_KEY)
+    registered_user = _seed_user(
+        db_session_factory,
+        user_id=uuid.uuid4(),
+        email="clerk-user@example.com",
+        password="supersecret123",
+    )
 
     from fastapi.testclient import TestClient
 
     with _patch_clerk_verify():
         with TestClient(db_app) as client:
-            reg = client.post(
-                "/api/auth/register",
-                json={
-                    "email": "clerk-user@example.com",
-                    "password": "supersecret123",
-                },
-            )
-            assert reg.status_code == 201
-            registered_user_id = uuid.UUID(reg.json()["user"]["id"])
-
             response = client.post(
                 "/api/auth/clerk/exchange",
                 json={"clerk_token": "fake.clerk.jwt"},
@@ -99,7 +140,7 @@ def test_clerk_exchange_links_existing_user(
     assert len(identities) == 1
     assert identities[0].provider == "clerk"
     assert identities[0].provider_subject == "user_2Xtest"
-    assert identities[0].user_id == registered_user_id
+    assert identities[0].user_id == registered_user.id
 
 
 def test_clerk_exchange_missing_config_returns_503(db_app: Any, monkeypatch: Any) -> None:
@@ -175,6 +216,18 @@ def test_clerk_exchange_account_already_linked_returns_409(
     db_app: Any, db_session_factory: Any, monkeypatch: Any
 ) -> None:
     monkeypatch.setenv("VELA_CLERK_PUBLISHABLE_KEY", TEST_CLERK_PUBLISHABLE_KEY)
+    _seed_user(
+        db_session_factory,
+        user_id=uuid.uuid4(),
+        email="clerk-user@example.com",
+        password="supersecret123",
+    )
+    _seed_user(
+        db_session_factory,
+        user_id=uuid.uuid4(),
+        email="other@example.com",
+        password="supersecret123",
+    )
 
     def mock_verify_different_email(_token: str) -> ClerkClaims:
         return ClerkClaims(email="other@example.com", external_id="user_2Xtest")

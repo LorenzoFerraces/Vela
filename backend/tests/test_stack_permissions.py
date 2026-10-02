@@ -32,10 +32,17 @@ def _create_stack(client: TestClient, *, name: str, project_id: str | None = Non
     return response.json()
 
 
-def test_viewer_cannot_create_or_deploy_stack(integration_app: Any) -> None:
+def test_viewer_cannot_create_or_deploy_stack(
+    integration_app: Any, register_user_client: Any
+) -> None:
     with TestClient(integration_app) as owner_client, TestClient(integration_app) as viewer_client:
-        _, project_id, _ = _register(owner_client, "stack-owner@example.com")
-        _register(viewer_client, "stack-viewer@example.com")
+        _, project_id, _ = _register(
+            register_user_client,
+            owner_client,
+            "stack-owner@example.com",
+            role="instructor",
+        )
+        _register(register_user_client, viewer_client, "stack-viewer@example.com")
         _invite_and_accept(
             owner_client,
             viewer_client,
