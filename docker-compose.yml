@@ -112,14 +112,21 @@ services:
       - --providers.file.directory=/etc/traefik/dynamic
       - --providers.file.watch=true
       - --entrypoints.web.address=:80
+      - --entrypoints.websecure.address=:443
+      - --certificatesresolvers.letsencrypt.acme.email=${VELA_TRAEFIK_ACME_EMAIL:-}
+      - --certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json
+      - --certificatesresolvers.letsencrypt.acme.httpchallenge=true
+      - --certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=web
       - --api.dashboard=true
       - --api.insecure=true
     ports:
       - "80:80"
+      - "443:443"
       - "127.0.0.1:8080:8080"
     volumes:
       - traefik_dynamic:/etc/traefik/dynamic
       - ./traefik/static/spa.yaml:/etc/traefik/dynamic/spa.yaml:ro
+      - traefik_certs:/letsencrypt
     networks:
       - default
       - workloads
@@ -130,6 +137,7 @@ services:
 volumes:
   postgres_data:
   traefik_dynamic:
+  traefik_certs:
 
 networks:
   workloads:

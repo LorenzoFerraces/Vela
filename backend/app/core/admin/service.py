@@ -5,6 +5,7 @@ from __future__ import annotations
 import uuid
 
 from sqlalchemy import func, or_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth.enums import UserRole
@@ -12,6 +13,11 @@ from app.core.auth.passwords import hash_password
 from app.core.exceptions import EmailAlreadyRegisteredError, PermissionDeniedError
 from app.core.projects.bootstrap import ensure_personal_workspace
 from app.db.models import User
+
+
+def _like_pattern(text: str) -> str:
+    escaped = text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    return f"%{escaped}%"
 
 
 async def list_users(
@@ -25,11 +31,11 @@ async def list_users(
 ) -> tuple[list[User], int]:
     conditions = []
     if query:
-        pattern = f"%{query.strip().lower()}%"
+        pattern = _like_pattern(query.strip().lower())
         conditions.append(
             or_(
-                func.lower(User.email).like(pattern),
-                func.lower(User.display_name).like(pattern),
+                func.lower(User.email).like(pattern, escape="\\"),
+                func.lower(User.display_name).like(pattern, escape="\\"),
             )
         )
     if role is not None:
@@ -79,7 +85,13 @@ async def create_user(
         is_active=True,
     )
     session.add(user)
-    await session.flush()
+    # ponytail: the pre-check above is not atomic; the unique index is the real
+    # guard and only this insert can violate it.
+    try:
+        await session.flush()
+    except IntegrityError as exc:
+        await session.rollback()
+        raise EmailAlreadyRegisteredError(normalized_email) from exc
     await ensure_personal_workspace(session, user)
     await session.commit()
     await session.refresh(user)
@@ -100,6 +112,10 @@ async def update_user(
     user = await session.get(User, user_id)
     if user is None:
         raise LookupError("User not found")
+    if user.id == actor.id and (
+        (role is not None and role != UserRole.ADMIN) or is_active is False
+    ):
+        raise PermissionDeniedError("You cannot revoke your own admin access.")
     if role is not None:
         user.role = role.value
     if is_active is not None:

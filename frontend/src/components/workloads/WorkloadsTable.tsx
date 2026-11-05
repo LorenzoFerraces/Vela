@@ -3,6 +3,7 @@ import type { ReactNode } from 'react'
 import type { ContainerInfo, DeployJob } from '../../api/client'
 import type { WorkloadGroup } from '../../pages/containers/workloadGrouping'
 import { workloadInstances } from '../../pages/containers/workloadGrouping'
+import { copyToClipboard } from '../../utils/copyToClipboard'
 import { WorkloadRow, type WorkloadStatsCellProps } from './WorkloadRow'
 import { DeployJobRow } from './DeployJobRow'
 import { Skeleton } from '../Skeleton'
@@ -151,7 +152,7 @@ export function WorkloadsTable({
   )
 
   const copyAccessUrl = useCallback((accessUrl: string, rowId: string) => {
-    void navigator.clipboard.writeText(accessUrl).then(
+    void copyToClipboard(accessUrl).then(
       () => {
         setCopiedRowId(rowId)
         setCopyFailedRowId(null)

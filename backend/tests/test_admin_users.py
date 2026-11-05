@@ -206,6 +206,72 @@ def test_admin_creates_admin_and_deactivates(
     assert stored.is_active is False
 
 
+def test_admin_cannot_revoke_own_admin_access(
+    db_app: Any,
+    db_session_factory: async_sessionmaker[AsyncSession],
+    provision_user: Any,
+) -> None:
+    admin, admin_token = provision_user("self-revoke@example.com", role="admin")
+
+    with TestClient(db_app) as client:
+        demote = client.patch(
+            f"/api/admin/users/{admin.id}",
+            headers=_auth(admin_token),
+            json={"role": "student"},
+        )
+        deactivate = client.patch(
+            f"/api/admin/users/{admin.id}",
+            headers=_auth(admin_token),
+            json={"is_active": False},
+        )
+        keep_admin = client.patch(
+            f"/api/admin/users/{admin.id}",
+            headers=_auth(admin_token),
+            json={"role": "admin", "is_active": True},
+        )
+
+    assert demote.status_code == 403
+    assert deactivate.status_code == 403
+    assert keep_admin.status_code == 200
+    stored = _stored_user(db_session_factory, admin.id)
+    assert stored.role == "admin"
+    assert stored.is_active is True
+
+
+def test_admin_search_matches_wildcards_literally(
+    db_app: Any, provision_user: Any
+) -> None:
+    _, admin_token = provision_user("wildboss@example.com", role="admin")
+    provision_user("pct%_name@example.com", role="student")
+    provision_user("plain@example.com", role="student")
+
+    with TestClient(db_app) as client:
+        percent = client.get(
+            "/api/admin/users", params={"query": "%"}, headers=_auth(admin_token)
+        )
+        underscore = client.get(
+            "/api/admin/users", params={"query": "_"}, headers=_auth(admin_token)
+        )
+        literal = client.get(
+            "/api/admin/users",
+            params={"query": "pct%_name"},
+            headers=_auth(admin_token),
+        )
+
+    assert percent.status_code == 200
+    assert [user["email"] for user in percent.json()["users"]] == [
+        "pct%_name@example.com"
+    ]
+    assert underscore.status_code == 200
+    assert [user["email"] for user in underscore.json()["users"]] == [
+        "pct%_name@example.com"
+    ]
+    assert literal.status_code == 200
+    assert [user["email"] for user in literal.json()["users"]] == [
+        "pct%_name@example.com"
+    ]
+
+
 def test_instructor_cannot_patch_users(
     db_app: Any,
     db_session_factory: async_sessionmaker[AsyncSession],

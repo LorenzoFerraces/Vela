@@ -1,10 +1,24 @@
 http:
   routers:
+    # Plain HTTP, unchanged from before TLS was added.
     vela-spa:
       rule: "PathPrefix(`/`)"
       service: vela-spa-svc
       entryPoints:
         - web
+    # Same route over TLS. Separate router because a router with `tls` enabled
+    # will not also serve plain HTTP on its entryPoints.
+    vela-spa-tls:
+      rule: "PathPrefix(`/`)"
+      service: vela-spa-svc
+      entryPoints:
+        - websecure
+      tls:
+        certResolver: letsencrypt
+        # The rule has no Host matcher, so Traefik cannot infer which name to
+        # issue for. Must match VELA_GITHUB_OAUTH_REDIRECT_URI / VELA_FRONTEND_BASE_URL.
+        domains:
+          - main: velaunq.ddns.net
   services:
     vela-spa-svc:
       loadBalancer:

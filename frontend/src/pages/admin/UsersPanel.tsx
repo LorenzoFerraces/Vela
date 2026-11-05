@@ -11,6 +11,8 @@ import { Skeleton } from '../../components/Skeleton'
 import ConfirmDialog from '../../components/ConfirmDialog'
 import CreateUserModal from './CreateUserModal'
 
+const LIMIT = 50
+
 const ROLE_OPTIONS: AdminUserPublic['role'][] = ['admin', 'instructor', 'student']
 const STAFF_ROLE_OPTIONS: AdminUserPublic['role'][] = ['instructor', 'student']
 
@@ -45,6 +47,7 @@ export default function UsersPanel({ user }: UsersPanelProps) {
   const [users, setUsers] = useState<AdminUserPublic[]>([])
   const [total, setTotal] = useState(0)
   const [searchInput, setSearchInput] = useState('')
+  const [offset, setOffset] = useState(0)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
@@ -61,7 +64,11 @@ export default function UsersPanel({ user }: UsersPanelProps) {
     setLoading(true)
     setError(null)
     try {
-      const response = await listAdminUsers({ query: query || undefined, limit: 50 })
+      const response = await listAdminUsers({
+        query: query || undefined,
+        limit: LIMIT,
+        offset,
+      })
       if (request === requestSeq.current) {
         setUsers(response.users)
         setTotal(response.total)
@@ -71,7 +78,11 @@ export default function UsersPanel({ user }: UsersPanelProps) {
     } finally {
       if (request === requestSeq.current) setLoading(false)
     }
-  }, [])
+  }, [offset])
+
+  useEffect(() => {
+    setOffset(0)
+  }, [searchInput])
 
   useEffect(() => {
     const timeout = window.setTimeout(() => {
@@ -135,8 +146,35 @@ export default function UsersPanel({ user }: UsersPanelProps) {
             placeholder="Email or name"
           />
         </div>
-        <span className="admin-users__count">Showing {users.length} of {total}</span>
+        <span className="admin-users__count">
+          Showing {users.length} of {total}
+        </span>
       </div>
+
+      {!loading && !error && users.length > 0 && total > LIMIT ? (
+        <div className="admin-users__pagination">
+          <div>
+            {offset > 0 ? (
+              <button
+                type="button"
+                className="btn btn--ghost btn--sm"
+                onClick={() => setOffset(Math.max(0, offset - LIMIT))}
+              >
+                Previous
+              </button>
+            ) : null}
+            {offset + LIMIT < total ? (
+              <button
+                type="button"
+                className="btn btn--ghost btn--sm"
+                onClick={() => setOffset(offset + LIMIT)}
+              >
+                Next
+              </button>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
 
       {error ? <p className="settings-banner settings-banner--err" role="alert">{error}</p> : null}
       {notice ? <p className="settings-banner settings-banner--ok" role="status">{notice}</p> : null}

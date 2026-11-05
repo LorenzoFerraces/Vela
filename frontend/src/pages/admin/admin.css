@@ -232,6 +232,12 @@
   gap: 0.5rem;
 }
 
+.admin-users__pagination {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 0.75rem;
+}
+
 @media (max-width: 640px) {
   .admin-users__header,
   .admin-audit__header,

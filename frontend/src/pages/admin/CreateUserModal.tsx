@@ -44,8 +44,29 @@ export default function CreateUserModal({
     dialogRef.current?.focus()
     function onKeyDown(event: KeyboardEvent) {
       if (event.key === 'Escape') {
+        if (busy) return
         event.preventDefault()
         onCancel()
+        return
+      }
+      if (event.key !== 'Tab') return
+      const dialog = dialogRef.current
+      if (!dialog) return
+      const focusable = Array.from(
+        dialog.querySelectorAll<HTMLElement>(
+          'button:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])',
+        ),
+      )
+      if (focusable.length === 0) return
+      const first = focusable[0]
+      const last = focusable[focusable.length - 1]
+      const active = document.activeElement
+      if (event.shiftKey && (active === first || !dialog.contains(active))) {
+        event.preventDefault()
+        last.focus()
+      } else if (!event.shiftKey && active === last) {
+        event.preventDefault()
+        first.focus()
       }
     }
     window.addEventListener('keydown', onKeyDown)
@@ -53,7 +74,7 @@ export default function CreateUserModal({
       window.removeEventListener('keydown', onKeyDown)
       previouslyFocused?.focus()
     }
-  }, [open, onCancel])
+  }, [open, busy, onCancel])
 
   if (!open) return null
 

@@ -43,12 +43,12 @@ async def authenticate(session: AsyncSession, *, email: str, password: str) -> U
     user = await session.scalar(select(User).where(User.email == normalized_email))
     if user is None:
         raise InvalidCredentialsError()
-    if not user.is_active:
-        raise AccountDeactivatedError()
     if user.password_hash is None:
         raise InvalidCredentialsError()
     if not verify_password(password, user.password_hash):
         raise InvalidCredentialsError()
+    if not user.is_active:
+        raise AccountDeactivatedError()
     return user
 
 

@@ -97,4 +97,42 @@ test.describe('Containers page', () => {
     ).toBeVisible()
   })
 
+  test('Copy URL works without navigator.clipboard (plain HTTP host)', async ({
+    authenticatedPage,
+  }) => {
+    // Reproduces the deployment URL bug: on an insecure origin
+    // (http://vela.example:8081) `navigator.clipboard` is undefined, so the
+    // direct `navigator.clipboard.writeText` call threw a TypeError.
+    await authenticatedPage.addInitScript(() => {
+      Object.defineProperty(navigator, 'clipboard', {
+        configurable: true,
+        value: undefined,
+      })
+    })
+
+    await authenticatedPage.goto('/containers')
+    const sourceInput = authenticatedPage.getByLabel('Deploy source')
+    await sourceInput.click()
+    await sourceInput.fill('nginx')
+    await authenticatedPage
+      .getByRole('option', { name: 'nginx:alpine', exact: true })
+      .click()
+    await expect(
+      authenticatedPage.getByText('Image reference found.'),
+    ).toBeVisible()
+    await authenticatedPage.getByRole('button', { name: 'Build' }).click()
+    await expect(
+      authenticatedPage.getByRole('alert').filter({ hasText: 'Started' }),
+    ).toBeVisible()
+
+    // Scope to the banner: a name-filtered locator would stop matching the
+    // moment the button flips to "Copied".
+    const copyButton = authenticatedPage
+      .getByRole('alert')
+      .filter({ hasText: 'Started' })
+      .getByRole('button')
+    await expect(copyButton).toHaveText('Copy URL')
+    await copyButton.click()
+    await expect(copyButton).toHaveText('Copied')
+  })
 })
