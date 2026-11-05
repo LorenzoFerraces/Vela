@@ -27,6 +27,18 @@ FastAPI backend, Vite/React frontend, optional Traefik as an edge proxy, and Pos
 | `backend/alembic/` | Database migrations (Alembic) |
 | `frontend/` | UI (`npm run dev`) |
 | `docker-compose.dev.yml` | Optional local Postgres for development |
+| `docker-compose.yml` + `.env.example` | Full stack (API, SPA, Postgres, Traefik) in Docker |
+
+## Docker (full stack)
+
+```powershell
+cp .env.example .env   # fill in VELA_AUTH_SECRET and VELA_TOKEN_ENCRYPTION_KEY
+docker compose up -d --build
+```
+
+- **http://localhost** — SPA + public routes (Traefik, port 80); port **8081** reaches the SPA directly; Traefik dashboard at http://127.0.0.1:8080 (dev only).
+- The API drives the **host** Docker daemon via a bind-mounted socket, so workload containers run on the host engine. Works from Windows (Docker Desktop) or WSL2 — the api entrypoint grants its unprivileged user access to the socket on start.
+- All configuration lives in `.env` — see `.env.example` for the full annotated variable list.
 
 ## Backend
 
@@ -64,12 +76,14 @@ Alembic uses the **sync** driver `postgresql+psycopg` (see `sync_database_url_fo
 
 ### Environment variables
 
-Create `backend/.env` as needed. Common variables:
+The repo-root `.env` is the official config (docker compose reads it; direct runs load it too). `backend/.env` is an optional dev-override file — keys there win over the root `.env` for `python run.py` only. Common variables:
 
 | Variable | Notes |
 |----------|--------|
 | `VELA_DATABASE_URL` | Async SQLAlchemy URL (e.g. `postgresql+asyncpg://vela:vela@127.0.0.1:15432/Vela` when using this repo’s Compose port) |
 | `VELA_AUTH_SECRET` | Long random secret used to sign JWT access tokens |
+| `VELA_ADMIN_EMAIL` | Bootstrap admin email; creates the admin on first startup if missing |
+| `VELA_ADMIN_PASSWORD` | Password for bootstrap admin (required on first create) |
 | `VELA_AUTH_ACCESS_TOKEN_TTL_MINUTES` | Optional; access token lifetime in minutes (default sensible if omitted) |
 | `VELA_TRAFFIC_ROUTER` | `noop` (default), `traefik_file`, or `kubernetes` |
 | `VELA_TRAEFIK_DYNAMIC_FILE` | Absolute path to the JSON file Traefik loads (if using `traefik_file`) |
@@ -84,12 +98,21 @@ Create `backend/.env` as needed. Common variables:
 | `VELA_GITHUB_OAUTH_SCOPES` | Comma-separated scopes requested from GitHub (default `repo,read:user`) |
 | `VELA_TOKEN_ENCRYPTION_KEY` | Fernet key used to encrypt third-party access tokens at rest. Generate with `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"` |
 | `VELA_GEMINI_API_KEY` | Google Gemini API key for GitHub repo analysis (pre-fill on Containers). Optional; without it, analysis uses deterministic project detection |
-| `VELA_GEMINI_MODEL` | Optional Gemini model id (default `gemini-2.0-flash`) |
+| `VELA_GEMINI_MODEL` | Optional Gemini model id (default `gemini-3.1-flash-lite`) |
+| `VELA_VERTEX_API_KEY` / `VELA_VERTEX_PROJECT_ID` | Optional Vertex AI key + project ID; when both are set, Vertex is used instead of direct Gemini |
+| `VELA_VERTEX_LOCATION` / `VELA_VERTEX_MODEL` | Optional Vertex location and model (defaults `us-central1`, `gemini-3.1-flash-lite`) |
 | `BREVO_API_KEY` | Brevo transactional API key for container alert emails ([Python SDK](https://developers.brevo.com/guides/python); free tier ~300/day) |
 | `BREVO_SENDER_EMAIL` | Verified sender address in Brevo (required with `BREVO_API_KEY`) |
 | `BREVO_SENDER_NAME` | Optional From name (default `Vela`) |
 | `VELA_LOG_LEVEL` | App + uvicorn log level: `DEBUG`, `INFO`, `WARNING`, `ERROR` (default `INFO`) |
 | `VELA_CONTAINER_MONITOR_INTERVAL_SECONDS` | Container alert poll interval in seconds (default `15`) |
+| `VELA_TEAM_STORAGE_QUOTA_BYTES` | Per-team storage quota in bytes (unset = unlimited; a team setting can only restrict it) |
+| `VELA_METRICS_INTERVAL_SECONDS` | Background container-metrics collector poll interval in seconds (default `30`) |
+| `VELA_METRICS_RETENTION_DAYS` | Days to retain stored container metrics (default `30`) |
+| `VELA_LOG_COLLECTOR_ENABLED` | Background log collector; set `0` to disable (default: enabled) |
+| `VELA_LOG_COLLECTOR_INTERVAL_SECONDS` | Log collector poll interval in seconds (default `5`) |
+| `VELA_LOG_MAX_LINES_PER_POLL` | Max log lines pulled per container per poll (default `2000`) |
+| `VELA_EXEC_MAX_SESSION_SECONDS` | Max live exec terminal session length in seconds (default `3600`) |
 
 ```powershell
 python run.py
@@ -97,16 +120,29 @@ python run.py
 
 API: **http://127.0.0.1:8000** — health: `GET /api/health` (no auth).
 
+## Roles
+
+| Role | Can |
+|------|-----|
+| admin | Everything + manage users/roles, global audit |
+| instructor | Provision users (not admin role), manage teams |
+| student | Own projects only; no signup, no team management |
+
+Bootstrap: set `VELA_ADMIN_EMAIL` / `VELA_ADMIN_PASSWORD`. Public registration is disabled.
+
 ### Authentication
 
-- `POST /api/auth/register` — create an account; returns `{ access_token, token_type, user }`.
-- `POST /api/auth/login` — email + password; same response shape.
+- `POST /api/auth/register` — disabled; returns 403 `Registration disabled`.
+- `POST /api/auth/login` — email + password; returns `{ access_token, user }`.
+
+Accounts are provisioned by admins or instructors on the Admin page. Bootstrap the first admin with `VELA_ADMIN_EMAIL` / `VELA_ADMIN_PASSWORD`.
+
 - `GET /api/auth/me` — current user (`display_name`, `pronouns`, `avatar_url`, email, `created_at`); requires bearer token.
 - `PATCH /api/users/me` — update `display_name` and/or `pronouns`.
 - `POST /api/users/me/avatar` — multipart upload (`file` field); JPEG, PNG, or WebP, max 2 MB.
 - `DELETE /api/users/me/avatar` — remove profile photo.
 
-Profile photos are stored in object storage (Cloudflare R2 in production). Set in `backend/.env`:
+Profile photos are stored in object storage (Cloudflare R2 in production). Set in the root `.env`:
 
 - `VELA_OBJECT_STORAGE` — `memory` (default for dev/tests) or `r2`
 - `VELA_R2_ACCOUNT_ID`
@@ -202,7 +238,7 @@ Open **http://127.0.0.1:5173**. Override the API base URL in `frontend/.env.loca
 VITE_API_BASE_URL=http://127.0.0.1:8000
 ```
 
-**Sign-in:** use **Register** (`/register`) or **Log in** (`/login`). After a successful register or login, the UI stores the access token in **localStorage** under `vela.access_token` and sends it on API requests. Protected app routes redirect to `/login` when you are not signed in.
+**Sign-in:** use **Log in** (`/login`) with an account provisioned by an admin or instructor. After login, the UI stores the access token in **localStorage** under `vela.access_token` and sends it on API requests. Protected app routes redirect to `/login` when you are not signed in.
 
 **Git builds:** auto-detect Go, Python, Node, Java/Clojure, Rust, Ruby, PHP, .NET, and Elixir (root + shallow scan); Containers and Stacks open a build override modal when inference is insufficient.
 
@@ -252,9 +288,9 @@ The CI workflow (`.github/workflows/ci.yml`) installs Python + Node + Chromium a
 |-------|----------------|
 | Traefik JSON `is a directory` | Path must be a file, not a folder |
 | Traefik hot reload / stale routes | Set **`VELA_TRAEFIK_RELOAD_CONTAINER`** to the Traefik container name. Also prefer **mounting the parent directory** for the dynamic file; ensure `providers.file.watch` is true. |
-| API vs Docker | Docker running; socket reachable |
+| API vs Docker | Docker running; socket reachable. The api container starts as root so its entrypoint aligns the mounted socket's group (re-groups root:root sockets to `DOCKER_GROUP_ID`, or re-GIDs the in-image docker group to match a host docker group) before dropping to `vela`. Check `docker compose logs api` for `vela-entrypoint:` lines, and `DOCKER_SOCKET_PATH` in `.env` |
 | UI vs API | `VITE_API_BASE_URL`; backend on port 8000; CORS |
-| `401` on container or image routes | Register or log in; ensure requests send `Authorization: Bearer …` (the UI does this when a token is stored) |
+| `401` on container or image routes | Log in with a provisioned account; ensure requests send `Authorization: Bearer …` (the UI does this when a token is stored) |
 | Database connection errors | Postgres is running; `VELA_DATABASE_URL` matches your instance; run **`alembic upgrade head`** from `backend/` |
 | `WinError 64` / `ConnectionDoesNotExistError` from the **API** (asyncpg) on Windows | Docker Desktop / `localhost` / timing: prefer **`127.0.0.1`** in `VELA_DATABASE_URL` (the app maps `localhost` → `127.0.0.1` on Windows). `alembic upgrade` uses **sync psycopg** and is usually unaffected. |
 | `FATAL: password authentication failed` for user `vela` | `VELA_DATABASE_URL` must match **`POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB`** and the **published host port** in `docker-compose.dev.yml` (currently **15432**). If you changed those env vars **after** the first `up`, remove the volume and recreate: `docker compose -f docker-compose.dev.yml down -v` then `up -d`. Compose must map **`15432:5432`** (host:container), not `HOST:HOST`. |

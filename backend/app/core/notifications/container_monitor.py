@@ -21,6 +21,7 @@ from app.core.notifications.email_provider import EmailProvider, get_email_provi
 from app.core.enums import ContainerStatus, HealthStatus
 from app.core.exceptions import ProviderConnectionError
 from app.core.containers.orchestrator import ContainerOrchestrator
+from app.core.quotas import check_team_storage_quotas
 from app.db.engine import get_session_factory
 from app.db.models import DeploymentRecord, User
 
@@ -34,6 +35,7 @@ def get_monitor_interval_seconds() -> int:
 MONITOR_INTERVAL_SECONDS = get_monitor_interval_seconds()
 MONITOR_ENABLED = os.environ.get("VELA_CONTAINER_MONITOR_ENABLED", "1").strip() != "0"
 ALERT_LOG_TAIL_LINES = max(1, int(os.environ.get("VELA_ALERT_LOG_TAIL_LINES", "200")))
+STORAGE_QUOTA_CHECK_EVERY_N_PASSES = 20
 
 _tracked_container_count = 0
 
@@ -232,8 +234,8 @@ async def get_container_owner(session: AsyncSession, container_id: str) -> User 
         if not record:
             return None
 
-        stmt = select(User).where(User.id == record.user_id)
-        user = await session.scalar(stmt)
+        user_stmt = select(User).where(User.id == record.user_id)
+        user = await session.scalar(user_stmt)
         return user
     except Exception as e:
         logger.exception("Failed to get container owner: %s", e)
@@ -367,6 +369,7 @@ async def run_monitoring_loop() -> None:
     email_provider = get_email_provider(use_console=False)
     state = ContainerStateSnapshot()
 
+    storage_quota_passes = 0
     while True:
         try:
             orchestrator = get_orchestrator()
@@ -374,6 +377,11 @@ async def run_monitoring_loop() -> None:
                 await monitor_containers_once(
                     orchestrator, email_provider, session, state
                 )
+                storage_quota_passes += 1
+                if storage_quota_passes % STORAGE_QUOTA_CHECK_EVERY_N_PASSES == 0:
+                    await check_team_storage_quotas(
+                        session, orchestrator, email_provider
+                    )
         except asyncio.CancelledError:
             logger.info("Container monitoring stopped")
             break

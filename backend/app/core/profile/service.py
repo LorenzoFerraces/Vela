@@ -6,14 +6,15 @@ import logging
 import uuid
 from datetime import datetime, timezone
 
-logger = logging.getLogger(__name__)
-
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.auth.enums import UserRole
 from app.core.profile.models import UserProfileSnapshot
 from app.core.exceptions import AvatarValidationError
 from app.core.storage.object_storage import ObjectStorage
 from app.db.models import User
+
+logger = logging.getLogger(__name__)
 
 MAX_AVATAR_BYTES = 2 * 1024 * 1024
 ALLOWED_AVATAR_CONTENT_TYPES = frozenset(
@@ -50,6 +51,8 @@ def user_to_snapshot(user: User, object_storage: ObjectStorage) -> UserProfileSn
         display_name=user.display_name,
         pronouns=user.pronouns,
         avatar_url=avatar_public_url(user, object_storage),
+        role=UserRole(user.role),
+        is_active=user.is_active,
     )
 
 

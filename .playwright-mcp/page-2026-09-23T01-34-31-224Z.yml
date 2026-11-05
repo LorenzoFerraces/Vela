@@ -1,0 +1,17 @@
+- main [ref=e3]:
+  - generic [ref=e4]:
+    - heading "Sign in to Vela" [level=1] [ref=e5]
+    - generic [ref=e6]:
+      - generic [ref=e7]: Email
+      - textbox "Email" [ref=e8]
+      - generic [ref=e9]: Password
+      - textbox "Password" [ref=e10]
+      - button "Sign in" [ref=e11] [cursor=pointer]
+    - generic [ref=e12]:
+      - separator [ref=e13]
+      - generic [ref=e14]: or
+    - button "Sign in with Clerk" [ref=e15] [cursor=pointer]
+    - paragraph [ref=e16]:
+      - text: New to Vela?
+      - link "Create an account" [ref=e17] [cursor=pointer]:
+        - /url: /register

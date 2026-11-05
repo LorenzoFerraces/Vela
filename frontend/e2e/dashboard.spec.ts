@@ -76,8 +76,12 @@ test.describe('Dashboard page', () => {
       }),
     ).toBeVisible()
 
-    await authenticatedPage.getByRole('button', { name: 'Refresh' }).scrollIntoViewIfNeeded()
-    await authenticatedPage.getByRole('button', { name: 'Refresh' }).click()
+    await authenticatedPage
+      .getByRole('button', { name: 'Refresh', exact: true })
+      .scrollIntoViewIfNeeded()
+    await authenticatedPage
+      .getByRole('button', { name: 'Refresh', exact: true })
+      .click()
     await expect(
       workloadsSection.getByRole('cell', {
         name: deployBody.container.name,

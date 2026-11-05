@@ -70,6 +70,16 @@ def test_save_volume_upload_rejects_when_user_quota_exceeded(
         save_volume_upload(user_id, [("second.bin", b"x" * (60 * 1024 * 1024))])
 
 
+def test_resolve_remaps_to_host_root(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("VELA_VOLUME_UPLOADS_DIR", str(tmp_path))
+    monkeypatch.setenv("VELA_VOLUME_UPLOADS_HOST_DIR", str(tmp_path / "host"))
+    user_id = uuid.uuid4()
+    upload_id, *_ = save_volume_upload(user_id, [("project/data.txt", b"hello")])
+    resolved = resolve_volume_upload_path(user_id, upload_id)
+    assert resolved == tmp_path / "host" / str(user_id) / str(upload_id)
+    assert (upload_directory(user_id, upload_id) / "project" / "data.txt").read_text() == "hello"
+
+
 def test_resolve_missing_upload(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("VELA_VOLUME_UPLOADS_DIR", str(tmp_path))
     with pytest.raises(VolumeUploadNotFoundError):

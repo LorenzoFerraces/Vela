@@ -1,8 +1,8 @@
 import { useCallback, useState } from 'react'
 import { BuilderMessageBanner } from './builder/BuilderMessageBanner'
-import { DockerfileTemplatesSection } from './builder/DockerfileTemplatesSection'
 import type { BuilderBanner } from './builder/types'
-import { useDockerfileTemplates } from './builder/useDockerfileTemplates'
+import { DockerfileTemplatesSection } from '../components/DockerfileTemplatesSection'
+import { useDockerfileTemplates } from '../components/useDockerfileTemplates'
 
 /**
  * Page component that displays the Builder UI and manages its banner state.
@@ -46,6 +46,7 @@ export default function BuilderPage() {
         onCreate={dockerfiles.createTemplate}
         onSave={() => void dockerfiles.saveSelected()}
         onRemove={(templateId) => void dockerfiles.removeTemplate(templateId)}
+        leadText="Create and edit Dockerfiles to use when deploying containers."
       />
     </section>
   )

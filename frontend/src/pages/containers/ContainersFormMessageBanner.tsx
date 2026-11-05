@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { copyToClipboard } from '../../utils/copyToClipboard'
 import type { FormMessage } from './types'
 
 type CopyHint = 'idle' | 'copied' | 'failed'
@@ -35,10 +36,11 @@ export function ContainersFormMessageBanner({
           <button
             type="button"
             className="btn btn--ghost btn--sm"
+            aria-live="polite"
             onClick={() => {
               const url = message.publicUrl
               if (!url) return
-              void navigator.clipboard.writeText(url).then(
+              void copyToClipboard(url).then(
                 () => {
                   setCopyHint('copied')
                   window.setTimeout(() => {

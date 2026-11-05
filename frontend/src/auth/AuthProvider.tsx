@@ -12,12 +12,11 @@ import {
   clerkLogin as apiClerkLogin,
   getAccessToken,
   getMe,
+  isAccountDeactivated,
   login as apiLogin,
   onUnauthorized,
-  registerUser as apiRegister,
   setAccessToken,
   type LoginRequest,
-  type RegisterRequest,
   type UserPublic,
 } from '../api/client'
 import {
@@ -54,7 +53,10 @@ export function AuthProvider({ children }: AuthProviderProps) {
         setStatus('authenticated')
       } catch (error) {
         if (cancelledRef.current) return
-        if (error instanceof ApiError && error.status === 401) {
+        if (
+          error instanceof ApiError &&
+          (error.status === 401 || isAccountDeactivated(error))
+        ) {
           clearAccessToken()
         }
         setUser(null)
@@ -76,14 +78,6 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
   const login = useCallback(async (body: LoginRequest) => {
     const response = await apiLogin(body)
-    setAccessToken(response.access_token)
-    setUser(response.user)
-    setStatus('authenticated')
-    return response.user
-  }, [])
-
-  const register = useCallback(async (body: RegisterRequest) => {
-    const response = await apiRegister(body)
     setAccessToken(response.access_token)
     setUser(response.user)
     setStatus('authenticated')
@@ -116,8 +110,8 @@ export function AuthProvider({ children }: AuthProviderProps) {
   }, [])
 
   const value = useMemo<AuthContextValue>(
-    () => ({ status, user, login, register, clerkLogin, logout, refreshUser }),
-    [status, user, login, register, clerkLogin, logout, refreshUser]
+    () => ({ status, user, login, clerkLogin, logout, refreshUser }),
+    [status, user, login, clerkLogin, logout, refreshUser]
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
