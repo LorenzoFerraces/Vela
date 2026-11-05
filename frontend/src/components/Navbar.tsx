@@ -1,17 +1,17 @@
 import { NavLink, useNavigate } from 'react-router-dom'
 import { useAuth } from '../auth/AuthContext'
+import { canManageTeams, isStaff } from '../auth/roles'
 import { MoonIcon } from '@phosphor-icons/react/Moon'
 import { SunIcon } from '@phosphor-icons/react/Sun'
 import { useTheme } from '../hooks/useTheme'
 import UserMenu from './UserMenu'
 import { VelaMarkIcon } from './VelaMarkIcon'
 
-const navItems = [
+const baseNavItems = [
   { to: '/dashboard', label: 'Dashboard' },
   { to: '/containers', label: 'Containers' },
   { to: '/stacks', label: 'Stacks' },
   { to: '/builder', label: 'Builder' },
-  { to: '/teams', label: 'Teams' },
 ] as const
 
 export default function Navbar() {
@@ -20,6 +20,11 @@ export default function Navbar() {
   const { theme, toggle } = useTheme()
 
   const isAuthenticated = status === 'authenticated'
+  const navItems = [
+    ...baseNavItems,
+    ...(canManageTeams(user) ? [{ to: '/teams', label: 'Teams' }] : []),
+    ...(isStaff(user) ? [{ to: '/admin', label: 'Admin' }] : []),
+  ]
 
   function onLogout() {
     logout()

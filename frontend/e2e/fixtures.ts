@@ -2,6 +2,8 @@ import { test as baseTest, expect, type Page } from '@playwright/test'
 
 import { loginAndSeedToken } from './auth-helpers'
 import {
+  E2E_INSTRUCTOR_EMAIL,
+  E2E_INSTRUCTOR_PASSWORD,
   E2E_USER_EMAIL,
   E2E_USER_ID,
   E2E_USER_NO_GITHUB_EMAIL,
@@ -22,6 +24,7 @@ export const fakeUser = {
   display_name: null,
   pronouns: null,
   avatar_url: null,
+  role: 'admin',
 }
 
 export { loginAndSeedToken }
@@ -29,6 +32,7 @@ export { loginAndSeedToken }
 type AuthenticatedFixtures = {
   authenticatedPage: Page
   authenticatedPageNoGithub: Page
+  instructorPage: Page
 }
 
 export const test = baseTest.extend<AuthenticatedFixtures>({
@@ -48,6 +52,14 @@ export const test = baseTest.extend<AuthenticatedFixtures>({
     )
     await use(noGithubPage)
     await noGithubContext.close()
+  },
+  instructorPage: async ({ page }, use) => {
+    await loginAndSeedToken(
+      page,
+      E2E_INSTRUCTOR_EMAIL,
+      E2E_INSTRUCTOR_PASSWORD,
+    )
+    await use(page)
   },
 })
 

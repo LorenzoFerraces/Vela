@@ -9,6 +9,19 @@ from starlette.testclient import WebSocketDisconnect
 from app.api.routes import containers as containers_routes
 
 
+def _deactivate_user(db_session_factory, user_id) -> None:
+    async def run() -> None:
+        from app.db.models import User
+
+        async with db_session_factory() as session:
+            user = await session.get(User, user_id)
+            assert user is not None
+            user.is_active = False
+            await session.commit()
+
+    asyncio.run(run())
+
+
 def test_exec_ws_connects_and_receives_prompt(
     api_client: TestClient, auth_token: str
 ) -> None:
@@ -65,6 +78,36 @@ def test_exec_ws_rejects_invalid_token(
     ) as websocket:
         with pytest.raises(WebSocketDisconnect) as exc:
             websocket.receive_text()
+    assert exc.value.code == 1008
+
+
+def test_exec_ws_rejects_deactivated_user(
+    api_client: TestClient,
+    auth_token: str,
+    seeded_user,
+    db_session_factory,
+) -> None:
+    _deactivate_user(db_session_factory, seeded_user.id)
+    with api_client.websocket_connect(
+        f"/api/containers/cid-1/exec/ws?access_token={auth_token}"
+    ) as websocket:
+        with pytest.raises(WebSocketDisconnect) as exc:
+            websocket.receive_bytes()
+    assert exc.value.code == 1008
+
+
+def test_logs_stream_rejects_deactivated_user(
+    api_client: TestClient,
+    auth_token: str,
+    seeded_user,
+    db_session_factory,
+) -> None:
+    _deactivate_user(db_session_factory, seeded_user.id)
+    with api_client.websocket_connect(
+        f"/api/containers/cid-1/logs/stream?access_token={auth_token}&follow=false"
+    ) as websocket:
+        with pytest.raises(WebSocketDisconnect) as exc:
+            websocket.receive_bytes()
     assert exc.value.code == 1008
 
 

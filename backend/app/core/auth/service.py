@@ -8,7 +8,11 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth.passwords import hash_password, verify_password
-from app.core.exceptions import EmailAlreadyRegisteredError, InvalidCredentialsError
+from app.core.exceptions import (
+    AccountDeactivatedError,
+    EmailAlreadyRegisteredError,
+    InvalidCredentialsError,
+)
 from app.core.projects.bootstrap import ensure_personal_workspace
 from app.db.models import User
 
@@ -37,7 +41,11 @@ async def authenticate(session: AsyncSession, *, email: str, password: str) -> U
     """Look up the user and verify the password; raise on any mismatch."""
     normalized_email = _normalize_email(email)
     user = await session.scalar(select(User).where(User.email == normalized_email))
-    if user is None or user.password_hash is None:
+    if user is None:
+        raise InvalidCredentialsError()
+    if not user.is_active:
+        raise AccountDeactivatedError()
+    if user.password_hash is None:
         raise InvalidCredentialsError()
     if not verify_password(password, user.password_hash):
         raise InvalidCredentialsError()

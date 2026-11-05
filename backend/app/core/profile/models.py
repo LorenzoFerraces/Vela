@@ -6,6 +6,8 @@ import uuid
 from dataclasses import dataclass
 from datetime import datetime
 
+from app.core.auth.enums import UserRole
+
 
 @dataclass(frozen=True, slots=True)
 class UserProfileSnapshot:
@@ -15,3 +17,5 @@ class UserProfileSnapshot:
     display_name: str | None
     pronouns: str | None
     avatar_url: str | None
+    role: UserRole
+    is_active: bool

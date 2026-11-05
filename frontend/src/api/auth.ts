@@ -8,6 +8,8 @@ import {
   getAccessToken,
 } from './core'
 
+export type UserRole = 'admin' | 'instructor' | 'student'
+
 export interface UserPublic {
   id: string
   email: string
@@ -15,6 +17,7 @@ export interface UserPublic {
   display_name: string | null
   pronouns: string | null
   avatar_url: string | null
+  role: UserRole
 }
 
 export interface UserProfileUpdate {
@@ -28,24 +31,9 @@ export interface TokenResponse {
   user: UserPublic
 }
 
-export interface RegisterRequest {
-  email: string
-  password: string
-}
-
 export interface LoginRequest {
   email: string
   password: string
-}
-
-export async function registerUser(
-  body: RegisterRequest
-): Promise<TokenResponse> {
-  return apiPost<TokenResponse, RegisterRequest>(
-    '/api/auth/register',
-    body,
-    { skipAuth: true }
-  )
 }
 
 export async function login(body: LoginRequest): Promise<TokenResponse> {

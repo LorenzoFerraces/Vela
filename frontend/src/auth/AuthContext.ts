@@ -1,5 +1,5 @@
 import { createContext, use } from 'react'
-import type { LoginRequest, RegisterRequest, UserPublic } from '../api/client'
+import type { LoginRequest, UserPublic } from '../api/client'
 
 export type AuthStatus = 'loading' | 'authenticated' | 'anonymous'
 
@@ -7,7 +7,6 @@ export interface AuthContextValue {
   status: AuthStatus
   user: UserPublic | null
   login: (body: LoginRequest) => Promise<UserPublic>
-  register: (body: RegisterRequest) => Promise<UserPublic>
   clerkLogin: (clerkToken: string) => Promise<UserPublic>
   logout: () => void
   refreshUser: () => Promise<void>

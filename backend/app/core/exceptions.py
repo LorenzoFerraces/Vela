@@ -233,6 +233,21 @@ class NotAuthenticatedError(AuthError):
         super().__init__(message)
 
 
+class AccountDeactivatedError(AuthError):
+    def __init__(self, message: str = "Account deactivated.") -> None:
+        super().__init__(message)
+
+
+class RegistrationDisabledError(AuthError):
+    def __init__(self) -> None:
+        super().__init__("Registration disabled")
+
+
+class PermissionDeniedError(AuthError):
+    def __init__(self, message: str = "You do not have permission to perform this action.") -> None:
+        super().__init__(message)
+
+
 # ---------------------------------------------------------------------------
 # User library (Dockerfile templates)
 # ---------------------------------------------------------------------------

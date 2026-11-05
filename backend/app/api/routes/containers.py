@@ -157,6 +157,16 @@ _EXEC_START_FAILURE_MESSAGE = (
 _MAX_TERMINAL_DIMENSION = 500
 
 
+async def _get_websocket_user(session: AsyncSession, token: str | None) -> User:
+    if not token:
+        raise NotAuthenticatedError()
+    claims = decode_access_token(token)
+    user = await get_user_by_id(session, claims.user_id)
+    if user is None or not user.is_active:
+        raise NotAuthenticatedError()
+    return user
+
+
 def _exec_max_session_seconds() -> int:
     try:
         return max(1, int(os.getenv("VELA_EXEC_MAX_SESSION_SECONDS", "3600")))
@@ -1361,12 +1371,7 @@ async def container_logs_stream(
     )
 
     try:
-        if not token:
-            raise NotAuthenticatedError()
-        claims = decode_access_token(token)
-        user = await get_user_by_id(session, claims.user_id)
-        if user is None:
-            raise NotAuthenticatedError()
+        user = await _get_websocket_user(session, token)
     except NotAuthenticatedError:
         await websocket.close(code=1008)
         return
@@ -1410,12 +1415,7 @@ async def container_exec_ws(
         return
 
     try:
-        if not token:
-            raise NotAuthenticatedError()
-        claims = decode_access_token(token)
-        user = await get_user_by_id(session, claims.user_id)
-        if user is None:
-            raise NotAuthenticatedError()
+        user = await _get_websocket_user(session, token)
     except NotAuthenticatedError:
         await websocket.close(code=1008, reason="Unauthorized")
         return

@@ -89,6 +89,32 @@ export class ApiError extends Error {
   }
 }
 
+function hasErrorCode(body: string, code: string): boolean {
+  try {
+    return (JSON.parse(body) as { code?: unknown }).code === code
+  } catch {
+    return false
+  }
+}
+
+export function isAccountDeactivated(error: unknown): boolean {
+  return error instanceof ApiError && hasErrorCode(error.body, 'account_deactivated')
+}
+
+function endSessionForAuthError(
+  response: Response,
+  body: string,
+  skipAuth = false
+): void {
+  if (
+    !skipAuth &&
+    (response.status === 401 || hasErrorCode(body, 'account_deactivated'))
+  ) {
+    clearAccessToken()
+    notifyUnauthorized()
+  }
+}
+
 const networkErrorMessages: Record<'en' | 'es', string> = {
   en: 'Unable to reach the server. Check your connection and try again.',
   es: 'No se pudo conectar con el servidor. Comprueba tu conexión o que la API esté en marcha.',
@@ -153,10 +179,7 @@ async function parseJson<T>(response: Response): Promise<T> {
 async function readEmptyOk(response: Response): Promise<void> {
   if (!response.ok) {
     const body = await response.text()
-    if (response.status === 401) {
-      clearAccessToken()
-      notifyUnauthorized()
-    }
+    endSessionForAuthError(response, body)
     throw new ApiError(
       `Request failed: ${response.status} ${response.statusText}`,
       response.status,
@@ -219,10 +242,7 @@ export async function apiRequest<T>(
   }).then(async (response) => {
     if (!response.ok) {
       const body = await response.text()
-      if (response.status === 401 && !skipAuth) {
-        clearAccessToken()
-        notifyUnauthorized()
-      }
+      endSessionForAuthError(response, body, skipAuth)
       throw new ApiError(
         `Request failed: ${response.status} ${response.statusText}`,
         response.status,
@@ -346,10 +366,7 @@ export async function apiUploadFile<T>(
 
   if (!response.ok) {
     const body = await response.text()
-    if (response.status === 401) {
-      clearAccessToken()
-      notifyUnauthorized()
-    }
+    endSessionForAuthError(response, body)
     throw new ApiError(
       `Request failed: ${response.status} ${response.statusText}`,
       response.status,

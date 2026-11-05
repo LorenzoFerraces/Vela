@@ -12,6 +12,7 @@ from fastapi import Depends, Request
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from app.core.auth.enums import UserRole
 from app.core.auth.service import get_user_by_id
 from app.core.auth.tokens import decode_access_token
 from app.core.build.default_image_builder import DefaultImageBuilder
@@ -19,8 +20,10 @@ from app.core.containers.docker_orchestrator import DockerOrchestrator
 from app.core.containers.orchestrator import ContainerOrchestrator
 from app.core.deploy.jobs import DeployJobRegistry
 from app.core.exceptions import (
+    AccountDeactivatedError,
     NotAuthenticatedError,
     ObjectStorageError,
+    PermissionDeniedError,
     TrafficRouterError,
 )
 from app.core.traffic.kubernetes_traffic_router import KubernetesTrafficRouter
@@ -164,6 +167,20 @@ async def get_current_user(
     user = await get_user_by_id(session, claims.user_id)
     if user is None:
         raise NotAuthenticatedError("User no longer exists.")
+    if not user.is_active:
+        raise AccountDeactivatedError()
+    return user
+
+
+async def require_instructor(user: Annotated[User, Depends(get_current_user)]) -> User:
+    if user.role not in (UserRole.ADMIN, UserRole.INSTRUCTOR):
+        raise PermissionDeniedError("Instructor or admin access required.")
+    return user
+
+
+async def require_admin(user: Annotated[User, Depends(get_current_user)]) -> User:
+    if user.role != UserRole.ADMIN:
+        raise PermissionDeniedError("Admin access required.")
     return user
 
 

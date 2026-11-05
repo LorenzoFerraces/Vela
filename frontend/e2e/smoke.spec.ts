@@ -9,6 +9,7 @@ const protectedNavItems = [
   { label: 'Stacks', path: '/stacks', title: 'Stacks' },
   { label: 'Builder', path: '/builder', title: 'Builder' },
   { label: 'Teams', path: '/teams', title: 'Teams' },
+  { label: 'Admin', path: '/admin', title: 'Admin' },
 ] as const
 
 // Display label of the seeded E2E user (display_name is null, so the email is shown).
