@@ -60,9 +60,9 @@ export async function login(argv: string[]): Promise<number> {
 
 export async function logout(_argv: string[]): Promise<number> {
   const config = resolveConfig({})
-  if (config.token && config.tokenId) {
+  if (config.token && typeof config.tokenId === "string" && config.tokenId) {
     try {
-      await request(config, "DELETE", `/tokens/${config.tokenId}`)
+      await request(config, "DELETE", `/tokens/${encodeURIComponent(config.tokenId)}`)
     } catch {
       // Already revoked or unreachable; clearing the local file is what matters.
     }

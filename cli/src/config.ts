@@ -25,7 +25,11 @@ export function readStoredConfig(path: string = configPath()): StoredConfig | nu
   try {
     const parsed = JSON.parse(readFileSync(path, "utf8")) as Partial<StoredConfig>
     if (typeof parsed.server !== "string" || typeof parsed.token !== "string") return null
-    return { server: parsed.server, token: parsed.token, tokenId: parsed.tokenId }
+    return {
+      server: parsed.server,
+      token: parsed.token,
+      tokenId: typeof parsed.tokenId === "string" ? parsed.tokenId : undefined,
+    }
   } catch {
     return null
   }

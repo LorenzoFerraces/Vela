@@ -61,11 +61,19 @@ export function App({
       return
     }
     if (key.name === "s" && current && onStart) {
-      void onStart(current).then(() => setStatus(`started ${current.name}`))
+      void onStart(current)
+        .then(() => setStatus(`started ${current.name}`))
+        .catch((error: unknown) =>
+          setStatus(error instanceof Error ? error.message : String(error)),
+        )
       return
     }
     if (key.name === "x" && current && onStop) {
-      void onStop(current).then(() => setStatus(`stopped ${current.name}`))
+      void onStop(current)
+        .then(() => setStatus(`stopped ${current.name}`))
+        .catch((error: unknown) =>
+          setStatus(error instanceof Error ? error.message : String(error)),
+        )
       return
     }
     if (key.name === "l" && current) {

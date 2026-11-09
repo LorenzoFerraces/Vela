@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-import { exitCodeFor, isVelaError } from "./client"
+import { exitCodeFor, isVelaError, VelaError } from "./client"
 import { login, logout, whoami } from "./commands/auth"
 import { describe, ps } from "./commands/containers"
 import { deploys, run } from "./commands/deploy"
@@ -26,7 +26,55 @@ Commands:
   tui             Open the terminal UI (default with no command)
 `
 
-async function main(argv: string[]): Promise<number> {
+function isParseArgsError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false
+  const code = (error as unknown as { code?: unknown }).code
+  return typeof code === "string" && code.startsWith("ERR_PARSE_ARGS")
+}
+
+// Global --server/--token are honored anywhere before `--` by publishing
+// env overrides that resolveConfig() already prefers over the stored file.
+function applyGlobalConfig(argv: string[]): string[] {
+  const separator = argv.indexOf("--")
+  const head = separator >= 0 ? argv.slice(0, separator) : argv
+  const tail = separator >= 0 ? argv.slice(separator) : []
+  const rest: string[] = []
+  for (let index = 0; index < head.length; index++) {
+    const arg = head[index]
+    if (arg === "--server" || arg === "--token") {
+      const value = head[index + 1]
+      if (value === undefined) {
+        throw new VelaError(2, `Missing value for ${arg}.`)
+      }
+      if (arg === "--server") process.env.VELA_API_URL = value
+      else process.env.VELA_TOKEN = value
+      index++
+      continue
+    }
+    if (arg.startsWith("--server=")) {
+      process.env.VELA_API_URL = arg.slice("--server=".length)
+      continue
+    }
+    if (arg.startsWith("--token=")) {
+      process.env.VELA_TOKEN = arg.slice("--token=".length)
+      continue
+    }
+    rest.push(arg)
+  }
+  return [...rest, ...tail]
+}
+
+async function main(rawArgv: string[]): Promise<number> {
+  let argv: string[] = []
+  try {
+    argv = applyGlobalConfig(rawArgv)
+  } catch (error) {
+    if (isVelaError(error)) {
+      console.error(error.message)
+      return exitCodeFor(error)
+    }
+    throw error
+  }
   const [command, ...rest] = argv
   try {
     switch (command) {
@@ -71,6 +119,10 @@ async function main(argv: string[]): Promise<number> {
     if (isVelaError(error)) {
       console.error(error.message)
       return exitCodeFor(error)
+    }
+    if (isParseArgsError(error)) {
+      console.error(error instanceof Error ? error.message : String(error))
+      return 2
     }
     console.error(error instanceof Error ? error.message : String(error))
     if (process.env.VELA_DEBUG === "1" && error instanceof Error) {

@@ -27,6 +27,22 @@ export function toVelaError(
   if (typeof payload === "object" && payload !== null) {
     const record = payload as Record<string, unknown>
     if (typeof record.detail === "string") detail = record.detail
+    else if (Array.isArray(record.detail)) {
+      const parts = record.detail
+        .filter(
+          (entry): entry is { msg: string; loc?: unknown } =>
+            typeof entry === "object" &&
+            entry !== null &&
+            typeof (entry as { msg?: unknown }).msg === "string",
+        )
+        .map((entry) => {
+          const loc = Array.isArray(entry.loc)
+            ? entry.loc.map(String).join(".")
+            : ""
+          return loc ? `${loc}: ${entry.msg}` : entry.msg
+        })
+      if (parts.length > 0) detail = parts.join("; ")
+    }
     if (typeof record.code === "string") code = record.code
   }
   return new VelaError(status, detail, code)
