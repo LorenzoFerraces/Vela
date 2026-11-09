@@ -734,6 +734,21 @@ class TokenResponse(BaseModel):
     user: UserPublic
 
 
+class ApiTokenCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=100)
+
+
+class ApiTokenPublic(BaseModel):
+    id: uuid.UUID
+    name: str
+    prefix: str
+    created_at: datetime
+
+
+class ApiTokenCreated(ApiTokenPublic):
+    token: str
+
+
 class ClerkExchangeRequest(BaseModel):
     clerk_token: str = Field(..., min_length=1, max_length=4096)
 
