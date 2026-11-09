@@ -93,3 +93,52 @@ def test_tokens_require_auth(db_app: Any) -> None:
     with TestClient(db_app) as client:
         response = client.get("/api/tokens/")
     assert response.status_code == 401
+
+
+def test_pat_authenticates_like_a_jwt(db_app: Any, provision_user: Any) -> None:
+    _, jwt = provision_user("pat-auth@example.com")
+    with TestClient(db_app) as client:
+        pat = client.post(
+            "/api/tokens/", json={"name": "cli:test"}, headers=_auth(jwt)
+        ).json()["token"]
+        me = client.get("/api/auth/me", headers=_auth(pat))
+    assert me.status_code == 200
+    assert me.json()["email"] == "pat-auth@example.com"
+
+
+def test_revoked_pat_is_rejected(db_app: Any, provision_user: Any) -> None:
+    _, jwt = provision_user("revoked@example.com")
+    with TestClient(db_app) as client:
+        created = client.post(
+            "/api/tokens/", json={"name": "cli:test"}, headers=_auth(jwt)
+        ).json()
+        client.delete(f"/api/tokens/{created['id']}", headers=_auth(jwt))
+        me = client.get("/api/auth/me", headers=_auth(created["token"]))
+    assert me.status_code == 401
+
+
+def test_deactivated_user_pat_is_rejected(
+    db_app: Any, db_session_factory: Any, provision_user: Any
+) -> None:
+    import asyncio
+
+    from app.db.models import User
+
+    user, jwt = provision_user("inactive@example.com")
+    with TestClient(db_app) as client:
+        pat = client.post(
+            "/api/tokens/", json={"name": "cli:test"}, headers=_auth(jwt)
+        ).json()["token"]
+
+    async def deactivate() -> None:
+        async with db_session_factory() as session:
+            row = await session.get(User, user.id)
+            assert row is not None
+            row.is_active = False
+            await session.commit()
+
+    asyncio.run(deactivate())
+    with TestClient(db_app) as client:
+        me = client.get("/api/auth/me", headers=_auth(pat))
+    assert me.status_code == 403
+    assert me.json()["code"] == "account_deactivated"
