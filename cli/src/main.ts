@@ -4,7 +4,9 @@ import { login, logout, whoami } from "./commands/auth"
 import { describe, ps } from "./commands/containers"
 import { deploys, run } from "./commands/deploy"
 import { exec } from "./commands/exec"
+import { remove, restart, start, stop } from "./commands/lifecycle"
 import { logs } from "./commands/logs"
+import { tokens } from "./commands/tokens"
 
 const HELP = `Usage: vela <command> [options]
 
@@ -45,6 +47,16 @@ async function main(argv: string[]): Promise<number> {
         return await exec(rest)
       case "logs":
         return await logs(rest)
+      case "start":
+        return await start(rest)
+      case "stop":
+        return await stop(rest)
+      case "restart":
+        return await restart(rest)
+      case "rm":
+        return await remove(rest)
+      case "tokens":
+        return await tokens(rest)
       case "deploys":
         return await deploys(rest)
       case "tui":
