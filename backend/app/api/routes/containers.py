@@ -158,7 +158,21 @@ _EXEC_START_FAILURE_MESSAGE = (
 _MAX_TERMINAL_DIMENSION = 500
 
 
+def _websocket_token(websocket: WebSocket) -> str | None:
+    """Return the bearer token from the upgrade request, header first.
+
+    Non-browser clients send ``Authorization: Bearer <token>`` so secrets stay
+    out of URLs and access logs. Browser clients cannot set upgrade headers,
+    so they keep passing ``access_token`` in the query string (JWT only).
+    """
+    authorization = websocket.headers.get("authorization", "")
+    if authorization.startswith("Bearer "):
+        return authorization.removeprefix("Bearer ").strip() or None
+    return websocket.query_params.get("access_token")
+
+
 async def _get_websocket_user(session: AsyncSession, token: str | None) -> User:
+    """Resolve a WebSocket bearer token (JWT or PAT) to a :class:`User`."""
     if not token:
         raise NotAuthenticatedError()
     if token.startswith(API_TOKEN_PREFIX):
@@ -1365,9 +1379,13 @@ async def container_logs_stream(
     orchestrator: Annotated[ContainerOrchestrator, Depends(get_orchestrator)],
     session: Annotated[AsyncSession, Depends(get_db)],
 ) -> None:
-    """Stream container logs over WebSocket (binary frames). Authenticate with ``access_token`` query param."""
+    """Stream container logs over WebSocket (binary frames).
+
+    Authenticate with the ``Authorization: Bearer`` header, or with the
+    ``access_token`` query param for browser clients.
+    """
     await websocket.accept()
-    token = websocket.query_params.get("access_token")
+    token = _websocket_token(websocket)
     tail_raw = websocket.query_params.get("tail", "200")
     try:
         tail_parsed = int(tail_raw)
@@ -1414,8 +1432,12 @@ async def container_exec_ws(
     orchestrator: Annotated[ContainerOrchestrator, Depends(get_orchestrator)],
     session: Annotated[AsyncSession, Depends(get_db)],
 ) -> None:
-    """Bidirectional exec terminal over WebSocket. Authenticate with ``access_token`` query param."""
-    token = websocket.query_params.get("access_token")
+    """Bidirectional exec terminal over WebSocket.
+
+    Authenticate with the ``Authorization: Bearer`` header, or with the
+    ``access_token`` query param for browser clients.
+    """
+    token = _websocket_token(websocket)
 
     try:
         await websocket.accept()

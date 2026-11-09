@@ -71,9 +71,10 @@ def test_exec_ws_rejects_unauthenticated(
 
 
 def test_exec_ws_rejects_invalid_token(
-    api_client: TestClient
+    anonymous_client: TestClient,
 ) -> None:
-    with api_client.websocket_connect(
+    """The header wins when both are present, so this uses the bare client."""
+    with anonymous_client.websocket_connect(
         "/api/containers/cid-1/exec/ws?access_token=not-a-jwt"
     ) as websocket:
         with pytest.raises(WebSocketDisconnect) as exc:
@@ -318,6 +319,30 @@ def test_exec_ws_accepts_pat(
     ) as websocket:
         data = websocket.receive_bytes()
     assert b"root@" in data
+
+
+def test_exec_ws_accepts_pat_header(
+    api_client: TestClient, anonymous_client: TestClient
+) -> None:
+    pat = _create_pat(api_client)["token"]
+    with anonymous_client.websocket_connect(
+        "/api/containers/cid-1/exec/ws",
+        headers={"Authorization": f"Bearer {pat}"},
+    ) as websocket:
+        data = websocket.receive_bytes()
+    assert b"root@" in data
+
+
+def test_logs_stream_accepts_pat_header(
+    api_client: TestClient, anonymous_client: TestClient
+) -> None:
+    pat = _create_pat(api_client)["token"]
+    with anonymous_client.websocket_connect(
+        "/api/containers/cid-1/logs/stream?follow=false",
+        headers={"Authorization": f"Bearer {pat}"},
+    ) as websocket:
+        data = websocket.receive_bytes()
+    assert data.startswith(b"log line")
 
 
 def test_logs_stream_accepts_pat(
