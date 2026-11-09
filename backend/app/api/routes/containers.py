@@ -53,6 +53,7 @@ from app.api.schemas import (
 )
 from app.core.models import ScalingPolicyInfo
 from app.core import user_library
+from app.core.auth.api_tokens import API_TOKEN_PREFIX, get_user_by_api_token
 from app.core.auth.service import get_user_by_id
 from app.core.auth.tokens import decode_access_token
 from app.core.build.default_image_builder import DefaultImageBuilder
@@ -160,9 +161,16 @@ _MAX_TERMINAL_DIMENSION = 500
 async def _get_websocket_user(session: AsyncSession, token: str | None) -> User:
     if not token:
         raise NotAuthenticatedError()
-    claims = decode_access_token(token)
-    user = await get_user_by_id(session, claims.user_id)
-    if user is None or not user.is_active:
+    if token.startswith(API_TOKEN_PREFIX):
+        user = await get_user_by_api_token(session, token)
+        if user is None:
+            raise NotAuthenticatedError("Invalid or revoked API token.")
+    else:
+        claims = decode_access_token(token)
+        user = await get_user_by_id(session, claims.user_id)
+        if user is None:
+            raise NotAuthenticatedError("User no longer exists.")
+    if not user.is_active:
         raise NotAuthenticatedError()
     return user
 

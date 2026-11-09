@@ -30,10 +30,18 @@ export async function runTui(): Promise<number> {
     finish()
   }
 
+  let initialContainers: ContainerInfo[]
+  try {
+    initialContainers = await load()
+  } catch (error) {
+    renderer.destroy()
+    throw error
+  }
+
   root.render(
     <App
       load={load}
-      initialContainers={await load()}
+      initialContainers={initialContainers}
       onStart={act("start")}
       onStop={act("stop")}
       onExec={(container) => {
