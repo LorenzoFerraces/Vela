@@ -13,7 +13,7 @@ from sqlalchemy.pool import StaticPool
 from app.core.notifications.alert_service import AlertService
 from app.core.notifications.email_provider import ConsoleProvider
 from app.db.base import Base
-from app.db.models import AlertHistory, EmailPreference, User
+from app.db.models import EmailPreference, User
 
 
 @pytest_asyncio.fixture

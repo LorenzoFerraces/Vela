@@ -1,0 +1,81 @@
+- generic [ref=f1e3]:
+  - banner [ref=f1e4]:
+    - link "Vela" [ref=f1e5] [cursor=pointer]:
+      - /url: /
+    - navigation "Main" [ref=f1e15]:
+      - list [ref=f1e16]:
+        - listitem [ref=f1e17]:
+          - link "Dashboard" [ref=f1e18] [cursor=pointer]:
+            - /url: /dashboard
+        - listitem [ref=f1e19]:
+          - link "Containers" [ref=f1e20] [cursor=pointer]:
+            - /url: /containers
+        - listitem [ref=f1e21]:
+          - link "Stacks" [ref=f1e22] [cursor=pointer]:
+            - /url: /stacks
+        - listitem [ref=f1e23]:
+          - link "Builder" [ref=f1e24] [cursor=pointer]:
+            - /url: /builder
+        - listitem [ref=f1e25]:
+          - link "Teams" [ref=f1e26] [cursor=pointer]:
+            - /url: /teams
+    - button "Toggle color theme" [pressed] [ref=f1e10] [cursor=pointer]
+    - button "e2e@example.com" [ref=f1e29] [cursor=pointer]:
+      - generic [aria-hidden] [ref=f1e30]: E2
+  - main [ref=f1e13]:
+    - generic [ref=f1e34]:
+      - heading "[Containers]" [level=1] [ref=f1e35]
+      - paragraph [ref=f1e36]: Search for a registry image, GitHub repository, or saved Dockerfile, then build and run on the Vela network.
+      - generic [ref=f1e37]:
+        - generic [ref=f1e38]: Deploy source
+        - combobox "Deploy source" [ref=f1e40]
+        - generic [ref=f1e41]: Team / workspace
+        - combobox "Team / workspace" [ref=f1e42] [cursor=pointer]:
+          - option "Personal workspace" [selected]
+        - generic [ref=f1e43]:
+          - generic [ref=f1e44]: Container name (optional)
+          - textbox "Container name (optional)" [ref=f1e45]:
+            - /placeholder: my-service
+          - generic [ref=f1e46]: Container port
+          - spinbutton "Container port" [ref=f1e47]: "80"
+        - button "Advanced Options" [ref=f1e49] [cursor=pointer]:
+          - generic [aria-hidden] [ref=f1e51]: ›
+        - generic [ref=f1e52]:
+          - button "Build" [ref=f1e53] [cursor=pointer]
+          - button "Refresh" [ref=f1e54] [cursor=pointer]
+      - alert [ref=f1e91]:
+        - paragraph [ref=f1e92]: Started (image) as vela-7fa7f5f9 — image nginx:alpine. Traefik route registered.
+        - generic [ref=f1e93]:
+          - link "https://vela-356b82591984d5f1.apps.e2e.test/" [ref=f1e94] [cursor=pointer]:
+            - /url: https://vela-356b82591984d5f1.apps.e2e.test/
+          - button "Copy URL" [ref=f1e95] [cursor=pointer]
+      - heading "Running workloads" [level=2] [ref=f1e55]
+      - table [ref=f1e97]:
+        - rowgroup [ref=f1e98]:
+          - row [ref=f1e99]:
+            - columnheader "Name" [ref=f1e100]
+            - columnheader "Image" [ref=f1e101]
+            - columnheader "Status" [ref=f1e102]
+            - columnheader "Ports" [ref=f1e103]
+            - columnheader "Access URL" [ref=f1e104]
+            - columnheader "Logs" [ref=f1e105]
+            - columnheader [ref=f1e106]
+            - columnheader "Instances" [ref=f1e107]
+        - rowgroup [ref=f1e108]:
+          - row [ref=f1e109]:
+            - cell "vela-7fa7f5f9" [ref=f1e110]
+            - cell "nginx:alpine" [ref=f1e111]
+            - cell "running" [ref=f1e112]
+            - cell "—" [ref=f1e113]
+            - cell [ref=f1e114]:
+              - button "Copy" [ref=f1e115] [cursor=pointer]
+            - cell [ref=f1e116]:
+              - link "View logs" [ref=f1e117] [cursor=pointer]:
+                - /url: /logs?container_id=fake-22c07fa7f5f9
+                - text: Logs
+            - cell [ref=f1e118]:
+              - button "Open terminal" [ref=f1e119] [cursor=pointer]: ">"
+              - button "Start container" [disabled] [ref=f1e120]: Start
+              - button "Stop container" [ref=f1e121] [cursor=pointer]: Stop
+              - button "Remove container" [ref=f1e122] [cursor=pointer]: Remove
+            - cell [ref=f1e123]

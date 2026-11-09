@@ -11,6 +11,7 @@ from urllib.parse import unquote, urlparse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from app.core.auth.enums import UserRole
 from app.core.auth.passwords import hash_password
 from app.core.projects.bootstrap import ensure_personal_workspace
 from app.core.oauth.github import GitHubRepo
@@ -18,10 +19,11 @@ from app.core.oauth.identity import GITHUB_PROVIDER
 from app.core.security.secrets import encrypt_secret
 from app.db.base import Base
 from app.db.engine import get_engine
-from app.db.models import User, UserOAuthIdentity
+from app.db.models import StackService, User, UserOAuthIdentity
 
 if TYPE_CHECKING:
     from app.api.schemas import GitSourceAnalysis
+    from app.core.stacks.repo_analysis import RepoStackAnalysis
 
 E2E_NEEDS_MANUAL_BRANCH = "needs-manual"
 
@@ -31,6 +33,12 @@ E2E_USER_ID = uuid.UUID("11111111-1111-1111-1111-111111111111")
 E2E_USER_NO_GITHUB_EMAIL = "e2e-nogithub@example.com"
 E2E_USER_NO_GITHUB_PASSWORD = "e2e-nogithub-password-min-8"
 E2E_USER_NO_GITHUB_ID = uuid.UUID("22222222-2222-2222-2222-222222222222")
+E2E_ADMIN_EMAIL = "e2e-admin@example.com"
+E2E_ADMIN_PASSWORD = "e2e-admin-password-min-8"
+E2E_ADMIN_ID = uuid.UUID("33333333-3333-3333-3333-333333333333")
+E2E_INSTRUCTOR_EMAIL = "e2e-instructor@example.com"
+E2E_INSTRUCTOR_PASSWORD = "e2e-instructor-password-min-8"
+E2E_INSTRUCTOR_ID = uuid.UUID("44444444-4444-4444-4444-444444444444")
 E2E_GITHUB_FAKE_TOKEN = "e2e-fake-github-token"
 
 _E2E_GITHUB_REPOS = (
@@ -211,6 +219,49 @@ def e2e_git_source_analysis_if_enabled(
     )
 
 
+def e2e_stack_repo_analysis_if_enabled(
+    git_url: str,
+    git_branch: str,
+) -> RepoStackAnalysis | None:
+    if not e2e_mode_enabled():
+        return None
+    from app.core.stacks.repo_analysis import RepoStackAnalysis
+
+    _ = git_url, git_branch
+    return RepoStackAnalysis(
+        services=[
+            StackService(
+                service_name="web",
+                source_kind="image",
+                source_ref="nginx:alpine",
+                git_branch=None,
+                container_port=80,
+                env_vars={},
+                command=None,
+                public_route=True,
+                depends_on=None,
+                volumes=[],
+            ),
+            StackService(
+                service_name="redis",
+                source_kind="image",
+                source_ref="redis:7",
+                git_branch=None,
+                container_port=6379,
+                env_vars={},
+                command=None,
+                public_route=False,
+                depends_on=None,
+                volumes=[],
+            ),
+        ],
+        warnings=[],
+        manifest_kind="llm",
+        manifest_path=None,
+        summary_hint="E2E fixture: web application with Redis.",
+    )
+
+
 def e2e_git_shallow_clone_if_enabled(
     *,
     url: str,
@@ -259,6 +310,7 @@ async def ensure_e2e_database() -> None:
                 id=E2E_USER_ID,
                 email=E2E_USER_EMAIL,
                 password_hash=hash_password(E2E_USER_PASSWORD),
+                role=UserRole.ADMIN,
             )
             session.add(user)
             await session.flush()
@@ -278,6 +330,34 @@ async def ensure_e2e_database() -> None:
             await ensure_personal_workspace(session, user_no_github)
         else:
             await ensure_personal_workspace(session, no_github)
+
+        admin = await session.get(User, E2E_ADMIN_ID)
+        if admin is None:
+            admin = User(
+                id=E2E_ADMIN_ID,
+                email=E2E_ADMIN_EMAIL,
+                password_hash=hash_password(E2E_ADMIN_PASSWORD),
+                role=UserRole.ADMIN.value,
+            )
+            session.add(admin)
+            await session.flush()
+            await ensure_personal_workspace(session, admin)
+        else:
+            await ensure_personal_workspace(session, admin)
+
+        instructor = await session.get(User, E2E_INSTRUCTOR_ID)
+        if instructor is None:
+            instructor = User(
+                id=E2E_INSTRUCTOR_ID,
+                email=E2E_INSTRUCTOR_EMAIL,
+                password_hash=hash_password(E2E_INSTRUCTOR_PASSWORD),
+                role=UserRole.INSTRUCTOR.value,
+            )
+            session.add(instructor)
+            await session.flush()
+            await ensure_personal_workspace(session, instructor)
+        else:
+            await ensure_personal_workspace(session, instructor)
 
         identity_result = await session.execute(
             select(UserOAuthIdentity).where(

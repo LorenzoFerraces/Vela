@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
+import logging
 import uuid
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import user_library
@@ -26,7 +29,14 @@ from app.core.models import (
     VolumeMount,
 )
 from app.core.traffic.traffic_router import TrafficRouter
+from app.core.url_display import sanitize_url_for_display
 from app.db.models import DeploymentRecord, Stack, StackService, User
+
+logger = logging.getLogger(__name__)
+
+
+def _container_dns_name(stack: Stack, service: StackService) -> str:
+    return f"{stack.name}_{service.service_name}"
 
 
 def _build_override_from_service(service: StackService) -> BuildOverride | None:
@@ -44,6 +54,9 @@ async def deploy_stack(
     stack: Stack,
     user: User,
     child_stacks: list[Stack],
+    *,
+    on_phase: Callable[[str, str | None], None] | None = None,
+    on_service_state: Callable[[str, str], None] | None = None,
 ) -> dict[str, object]:
     """Deploy all services in a stack onto a shared network.
 
@@ -58,13 +71,25 @@ async def deploy_stack(
     if not services:
         return {"error": "Stack has no services to deploy."}
 
+    # Plain copies up front: a persist-retry rollback can expire the ORM
+    # objects, and an async session cannot lazy-load an expired attribute
+    # outside a greenlet.
+    service_names = [service.service_name for service in services]
+    network_name = stack.network_name
+
     deployed_containers: list[ContainerInfo] = []
+    deployed_records: list[DeploymentRecord] = []
 
     try:
-        await orchestrator.create_network(stack.network_name)
+        if on_phase is not None:
+            on_phase("deploying", None)
+
+        await orchestrator.create_network(network_name)
 
         for service in services:
-            container_name = f"{stack.name}_{service.service_name}"
+            container_name = _container_dns_name(stack, service)
+            if on_service_state is not None:
+                on_service_state(service.service_name, "building")
             image_tag = await _resolve_service_image(
                 session,
                 user,
@@ -79,6 +104,8 @@ async def deploy_stack(
                 image_tag=image_tag,
             )
 
+            if on_service_state is not None:
+                on_service_state(service.service_name, "starting")
             info = await orchestrator.deploy(config)
             deployed_containers.append(info)
 
@@ -98,13 +125,15 @@ async def deploy_stack(
                 except Exception:
                     pass
 
-            await _persist_deployment(
-                session,
-                user,
-                stack,
-                service,
-                info,
-                image_tag=image_tag,
+            deployed_records.append(
+                await _persist_deployment(
+                    session,
+                    user,
+                    stack,
+                    service,
+                    info,
+                    image_tag=image_tag,
+                )
             )
 
             if service.scaling_policy:
@@ -112,19 +141,25 @@ async def deploy_stack(
                     session, container_name, service.scaling_policy
                 )
 
-        await session.commit()
+            if on_service_state is not None:
+                on_service_state(service.service_name, "running")
+
+        await _commit_deployment_records(session, deployed_records)
         return {
             "containers": [
                 {
-                    "service_name": s.service_name,
+                    "service_name": name,
                     "container_id": c.id,
                     "container_name": c.name,
                 }
-                for s, c in zip(services, deployed_containers)
+                for name, c in zip(service_names, deployed_containers)
             ],
         }
 
     except Exception as exc:
+        if on_phase is not None:
+            on_phase("rolling_back", None)
+
         for container in deployed_containers:
             try:
                 await orchestrator.stop(container.id, timeout=5)
@@ -133,13 +168,16 @@ async def deploy_stack(
                 pass
 
         try:
-            await orchestrator.remove_network(stack.network_name)
+            await orchestrator.remove_network(network_name)
         except Exception:
             pass
 
         failed_service = None
         if len(deployed_containers) < len(services):
-            failed_service = services[len(deployed_containers)].service_name
+            failed_service = service_names[len(deployed_containers)]
+
+        if failed_service is not None and on_service_state is not None:
+            on_service_state(failed_service, "failed")
 
         if isinstance(exc, NeedsBuildOverrideError):
             if failed_service:
@@ -178,15 +216,15 @@ async def _resolve_service_image(
             )
             return build_result.image_tag
         case "git":
-            from app.api.routes.containers import (
-                _github_token_for_url,
-                _is_github_https_url,
-                _looks_like_auth_failure,
+            from app.core.deploy.github_auth import (
+                github_token_for_url,
+                is_github_https_url,
+                looks_like_auth_failure,
             )
 
             git_url = service.source_ref.strip()
             branch = (service.git_branch or "main").strip() or "main"
-            access_token = await _github_token_for_url(session, user, git_url)
+            access_token = await github_token_for_url(session, user, git_url)
             tag = f"vela/gitbuild:{uuid.uuid4().hex[:12]}"
             override = _build_override_from_service(service)
             try:
@@ -199,8 +237,8 @@ async def _resolve_service_image(
             except CloneError as exc:
                 if (
                     access_token is None
-                    and _is_github_https_url(git_url)
-                    and _looks_like_auth_failure(str(exc))
+                    and is_github_https_url(git_url)
+                    and looks_like_auth_failure(str(exc))
                 ):
                     raise CloneError(
                         git_url,
@@ -243,6 +281,7 @@ def _build_deploy_config(
         container_listen_port=service.container_port,
         command=service.command,
         network=stack.network_name,
+        network_aliases=[service.service_name],
         restart_policy=restart_policy,
         labels={
             "vela.stack_id": str(stack.id),
@@ -251,7 +290,7 @@ def _build_deploy_config(
             VELA_OWNER_LABEL: str(user.id),
             VELA_PROJECT_LABEL: str(stack.project_id),
             VELA_SOURCE_KIND_LABEL: service.source_kind,
-            VELA_SOURCE_REF_LABEL: service.source_ref,
+            VELA_SOURCE_REF_LABEL: sanitize_url_for_display(service.source_ref),
         },
         public_route=service.public_route,
     )
@@ -281,15 +320,15 @@ async def _persist_deployment(
     container_info: ContainerInfo,
     *,
     image_tag: str,
-) -> None:
-    """Persist a DeploymentRecord for a stack service deployment."""
+) -> DeploymentRecord:
+    """Stage a DeploymentRecord for a stack service deployment."""
     record = DeploymentRecord(
         user_id=user.id,
         project_id=stack.project_id,
         container_id=container_info.id,
         container_name=container_info.name,
         source_kind=service.source_kind,
-        source_ref=service.source_ref,
+        source_ref=sanitize_url_for_display(service.source_ref),
         image_tag=image_tag,
         container_port=service.container_port,
         env_vars={k: "<REDACTED>" for k in service.env_vars},
@@ -297,3 +336,101 @@ async def _persist_deployment(
         stack_id=stack.id,
     )
     session.add(record)
+    return record
+
+
+def _deployment_record_values(record: DeploymentRecord) -> dict[str, object]:
+    """Plain copy of a staged record's values, taken while its attributes
+    are still loaded. Retries build fresh instances from this snapshot
+    instead of re-reading ORM attributes (a session rollback expires them,
+    and an async session cannot lazy-load an expired attribute outside a
+    greenlet). Fresh instances also INSERT a new row where re-adding the
+    wiped record's known identity would not."""
+    return {
+        "user_id": record.user_id,
+        "project_id": record.project_id,
+        "container_id": record.container_id,
+        "container_name": record.container_name,
+        "source_kind": record.source_kind,
+        "source_ref": record.source_ref,
+        "image_tag": record.image_tag,
+        "container_port": record.container_port,
+        "env_vars": dict(record.env_vars),
+        "command": list(record.command) if record.command else None,
+        "stack_id": record.stack_id,
+    }
+
+
+async def _commit_deployment_records(
+    session: AsyncSession,
+    records: list[DeploymentRecord],
+) -> None:
+    """Persist the staged DeploymentRecords idempotently and verify the
+    rows landed. An intermediate commit on this session (e.g. the scaling
+    policy's upsert_policy) can already have landed some or all of the
+    rows, so every attempt stages only the snapshots still missing from
+    the database and verifies coverage by container_id — a partial
+    landing can neither fail verification nor insert duplicates. In
+    tests, a poll request's teardown ROLLBACK on the shared in-memory
+    connection can wipe the pending INSERTs between the worker's flush
+    and commit; the commit then succeeds on an empty transaction and the
+    records are silently lost. A persist failure must never fail the
+    deploy job."""
+    container_ids = [record.container_id for record in records]
+    snapshots = [_deployment_record_values(record) for record in records]
+    # Detach the originals first: some rows may already be committed by an
+    # intermediate commit, and unflushed ones must not INSERT twice
+    # alongside the fresh copies staged below.
+    session.expunge_all()
+    for attempt in range(3):
+        try:
+            present_rows = await session.execute(
+                select(DeploymentRecord.container_id).where(
+                    DeploymentRecord.container_id.in_(container_ids)
+                )
+            )
+            present = set(present_rows.scalars().all())
+            missing = [
+                values
+                for values in snapshots
+                if values["container_id"] not in present
+            ]
+            if not missing:
+                return
+            for values in missing:
+                session.add(DeploymentRecord(**values))
+            await session.commit()
+            landed_rows = await session.execute(
+                select(DeploymentRecord.container_id).where(
+                    DeploymentRecord.container_id.in_(container_ids)
+                )
+            )
+            if set(landed_rows.scalars().all()) >= set(container_ids):
+                return
+            logger.warning(
+                "Stack deploy persist attempt %d/3: records missing after commit for containers %s",
+                attempt + 1,
+                container_ids,
+            )
+        except Exception:
+            logger.exception(
+                "Stack deploy persist attempt %d/3 failed for containers %s",
+                attempt + 1,
+                container_ids,
+            )
+        try:
+            # Reset session state before retrying. expunge_all never raises
+            # for objects a failed commit already detached, unlike
+            # per-record expunge. A persist failure must never fail the
+            # deploy job.
+            session.expunge_all()
+            await session.rollback()
+        except Exception:
+            logger.exception(
+                "Could not reset session before stack deploy persist retry for containers %s",
+                container_ids,
+            )
+    logger.error(
+        "Stack deploy persist: records still missing after 3 attempts for containers %s",
+        container_ids,
+    )

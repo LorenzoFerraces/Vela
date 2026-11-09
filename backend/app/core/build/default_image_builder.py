@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import tempfile
+from collections.abc import Callable
 from pathlib import Path
 
 from app.core.build.builder import ImageBuilder
@@ -81,6 +82,7 @@ class DefaultImageBuilder(ImageBuilder):
         tag: str,
         access_token: str | None = None,
         override: BuildOverride | None = None,
+        on_phase: Callable[[str], None] | None = None,
     ) -> BuildResult:
         """
         Builds a container image from the given project source (either a Git repository or a local directory) and returns metadata about the completed build.
@@ -100,6 +102,8 @@ class DefaultImageBuilder(ImageBuilder):
         tmp_parent: Path | None = None
         project_path: str
         if source.git_url:
+            if on_phase is not None:
+                on_phase("preparing")
             project_path = await self.clone_repository(
                 source.git_url,
                 branch=source.branch,
@@ -130,6 +134,8 @@ class DefaultImageBuilder(ImageBuilder):
                 if dockerfile_path.is_file()
                 else None
             )
+            if on_phase is not None:
+                on_phase("building")
             image_id = await self._orchestrator.build_image(
                 str(build_root), tag=tag, dockerfile="Dockerfile"
             )

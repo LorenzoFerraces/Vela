@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from app.core.stacks.compose_parser import parse_compose, resolve_compose_interpolation
 
 
@@ -15,6 +17,12 @@ def test_resolve_compose_interpolation_defaults() -> None:
     assert resolve_compose_interpolation("${UNSET_VAR}") == ""
     assert resolve_compose_interpolation("prefix-$HOST-suffix") == "prefix--suffix"
     assert resolve_compose_interpolation("plain-value") == "plain-value"
+
+
+def test_resolve_compose_interpolation_uses_host_env() -> None:
+    host_env = {"POSTGRES_DB": "epersgeist", "HOST": "postgres"}
+    assert resolve_compose_interpolation("${POSTGRES_DB}", host_env) == "epersgeist"
+    assert resolve_compose_interpolation("prefix-$HOST-suffix", host_env) == "prefix-postgres-suffix"
 
 
 def test_parse_compose_resolves_env_interpolation_defaults() -> None:
@@ -145,6 +153,36 @@ services:
     assert services[0].source_kind == "git"
     assert services[0].source_ref == "https://github.com/LorenzoFerraces/Commit-y-me-voy.git"
     assert services[0].git_branch == "main"
+
+
+def test_parse_compose_env_file_merges_dotenv(tmp_path: Path) -> None:
+    (tmp_path / ".env").write_text(
+        "SPRING_PROFILES_ACTIVE=dev\nNEO4J_URI=bolt://neo4j:7687\n",
+        encoding="utf-8",
+    )
+    yaml_content = """
+services:
+  app:
+    build: .
+    env_file:
+      - .env
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/epersgeist
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: epersgeist
+"""
+    services, warnings = parse_compose(yaml_content, compose_dir=tmp_path)
+    assert warnings == []
+    by_name = {service.service_name: service for service in services}
+    assert by_name["app"].env_vars["SPRING_PROFILES_ACTIVE"] == "dev"
+    assert by_name["app"].env_vars["NEO4J_URI"] == "bolt://neo4j:7687"
+    assert (
+        by_name["app"].env_vars["SPRING_DATASOURCE_URL"]
+        == "jdbc:postgresql://postgres:5432/epersgeist"
+    )
+    assert by_name["postgres"].env_vars == {"POSTGRES_DB": "epersgeist"}
 
 
 def test_parse_compose_defaults_when_no_image_or_build() -> None:

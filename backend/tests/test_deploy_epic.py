@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 
 from app.core.containers.docker_orchestrator import VELA_OWNER_LABEL
 from app.core.containers.fake_orchestrator import FakeContainerOrchestrator
+from tests.test_deploy_jobs import wait_for_deploy
 
 
 def test_ai_prefill_defaults(api_client: TestClient) -> None:
@@ -65,7 +66,9 @@ def test_run_creates_deployment_record(
             "command": ["nginx", "-g", "daemon off;"],
         },
     )
-    assert response.status_code == 200
+    assert response.status_code == 202, response.text
+    job = wait_for_deploy(api_client, response.json()["job_id"])
+    assert job["status"] == "succeeded"
 
     listed = api_client.get("/api/deployments/")
     assert listed.status_code == 200
@@ -94,7 +97,9 @@ def test_deployment_diff(
             "env_vars": {"A": "1"},
         },
     )
-    assert first.status_code == 200
+    assert first.status_code == 202
+    first_job = wait_for_deploy(api_client, first.json()["job_id"])
+    assert first_job["status"] == "succeeded"
 
     second = api_client.post(
         "/api/containers/run",
@@ -105,7 +110,9 @@ def test_deployment_diff(
             "env_vars": {"A": "2", "B": "3"},
         },
     )
-    assert second.status_code == 200
+    assert second.status_code == 202
+    second_job = wait_for_deploy(api_client, second.json()["job_id"])
+    assert second_job["status"] == "succeeded"
 
     rows = api_client.get("/api/deployments/").json()
     assert len(rows) >= 2

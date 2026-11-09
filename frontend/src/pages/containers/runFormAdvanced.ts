@@ -1,9 +1,13 @@
+import { newId } from '../../utils/uid'
+
 export type EnvVarRow = {
+  id: string
   key: string
   value: string
 }
 
 export type VolumeMountRow = {
+  id: string
   uploadId: string | null
   folderName: string | null
   totalBytes: number | null
@@ -12,8 +16,13 @@ export type VolumeMountRow = {
   error: string | null
 }
 
+export function createEmptyEnvRow(): EnvVarRow {
+  return { id: newId(), key: '', value: '' }
+}
+
 export function createEmptyVolumeMountRow(): VolumeMountRow {
   return {
+    id: newId(),
     uploadId: null,
     folderName: null,
     totalBytes: null,
@@ -28,9 +37,13 @@ export function envRowsFromRecord(
 ): EnvVarRow[] {
   const entries = Object.entries(envVars)
   if (entries.length === 0) {
-    return [{ key: '', value: '' }]
+    return [createEmptyEnvRow()]
   }
-  return entries.map(([key, value]) => ({ key, value }))
+  return entries.map(([key, value]) => ({
+    id: newId(),
+    key,
+    value,
+  }))
 }
 
 export function recordFromEnvRows(rows: EnvVarRow[]): Record<string, string> {
@@ -51,9 +64,6 @@ export function volumesFromRows(
   const mounts: Array<{ upload_id: string; target: string }> = []
   for (const row of rows) {
     const target = row.target.trim()
-    if (!row.uploadId && !target) {
-      continue
-    }
     if (!row.uploadId || !target) {
       continue
     }

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Link, useLocation, useNavigate } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { ApiError, apiRequest, formatApiError } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 
@@ -11,6 +11,20 @@ function safeNextPath(rawNext: string | null): string {
   } catch {
     return '/containers'
   }
+}
+
+interface ClerkSession {
+  getToken: () => Promise<string>
+}
+
+interface ClerkGlobal {
+  load: () => Promise<void>
+  session?: ClerkSession | null
+  redirectToSignIn: (options: { afterSignInUrl: string }) => void
+}
+
+function getClerk(): ClerkGlobal | undefined {
+  return (window as Window & { Clerk?: ClerkGlobal }).Clerk
 }
 
 export default function LoginPage() {
@@ -92,7 +106,7 @@ export default function LoginPage() {
     let cancelled = false
     loadClerk().then(async () => {
       if (cancelled) return
-      const clerk = (window as any).Clerk
+      const clerk = getClerk()
       if (!clerk) return
       await clerk.load()
       if (cancelled) return
@@ -140,7 +154,7 @@ export default function LoginPage() {
   }
 
   function onClerkClick() {
-    const clerk = (window as any).Clerk
+    const clerk = getClerk()
     if (clerk) {
       clerk.redirectToSignIn({
         afterSignInUrl: `${window.location.origin}/login${location.search}`,
@@ -161,6 +175,7 @@ export default function LoginPage() {
             className="auth-form__input"
             type="email"
             autoComplete="email"
+            spellCheck={false}
             required
             value={email}
             onChange={(event) => setEmail(event.target.value)}
@@ -210,13 +225,6 @@ export default function LoginPage() {
             </button>
           </>
         ) : null}
-
-        <p className="auth-form__footer">
-          New to Vela?{' '}
-          <Link className="auth-form__footer-link" to="/register">
-            Create an account
-          </Link>
-        </p>
       </section>
     </main>
   )

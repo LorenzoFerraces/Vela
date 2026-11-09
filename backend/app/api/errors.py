@@ -1,21 +1,23 @@
 """Map domain exceptions to HTTP responses."""
 
+import json
 import logging
 
 from fastapi import Request, status
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
-
-logger = logging.getLogger(__name__)
 
 from app.core.exceptions import (
     AnalysisError,
     AuthError,
+    AccountDeactivatedError,
     AvatarValidationError,
     BuilderError,
     CloneError,
     ClerkAccountAlreadyLinkedError,
     ClerkTokenError,
-    ComposeImportError,
+    ManifestParseError,
     GitSourceAnalysisError,
     NeedsBuildOverrideError,
     UnsupportedProjectError,
@@ -36,6 +38,10 @@ from app.core.exceptions import (
     IntegrationConfigurationError,
     IntegrationError,
     InvalidCredentialsError,
+    LlmCallError,
+    LlmNotConfiguredError,
+    LlmProviderConfigError,
+    LlmProviderError,
     NotAuthenticatedError,
     ObjectStorageError,
     AlreadyProjectMemberError,
@@ -49,12 +55,15 @@ from app.core.exceptions import (
     UserNotRegisteredError,
     OrchestratorError,
     RegistryAccessDeniedError,
+    PermissionDeniedError,
     ProviderConnectionError,
+    RegistrationDisabledError,
     ResourceLimitError,
     RouteConfigurationError,
     RouteNotFoundError,
     StackCompositionCycleError,
     StackNotFoundError,
+    TeamStorageQuotaError,
     TrafficRouterError,
     UnsupportedLanguageError,
     VelaError,
@@ -62,9 +71,23 @@ from app.core.exceptions import (
     InvalidVolumeUploadPathError,
 )
 
+logger = logging.getLogger(__name__)
+
 
 def _project_error_payload(exc: ProjectError, error_code: str) -> dict[str, str]:
     return {"error": error_code, "detail": str(exc)}
+
+
+class _validation_error_response(JSONResponse):
+    # ponytail: pydantic echoes non-finite inputs (inf/nan) into 422 details; starlette's renderer rejects them
+    def render(self, content) -> bytes:
+        return json.dumps(
+            content,
+            ensure_ascii=False,
+            allow_nan=True,
+            indent=None,
+            separators=(",", ":"),
+        ).encode("utf-8")
 
 
 def register_exception_handlers(app) -> None:
@@ -76,6 +99,15 @@ def register_exception_handlers(app) -> None:
     Parameters:
         app (FastAPI): The FastAPI application on which to register the exception handlers.
     """
+
+    @app.exception_handler(RequestValidationError)
+    async def request_validation_error_handler(
+        _request: Request, exc: RequestValidationError
+    ) -> JSONResponse:
+        return _validation_error_response(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            content={"detail": jsonable_encoder(exc.errors())},
+        )
 
     @app.exception_handler(ImageNotFoundError)
     async def image_not_found_handler(
@@ -203,6 +235,15 @@ def register_exception_handlers(app) -> None:
             content={"detail": str(exc)},
         )
 
+    @app.exception_handler(TeamStorageQuotaError)
+    async def team_storage_quota_error_handler(
+        _request: Request, exc: TeamStorageQuotaError
+    ) -> JSONResponse:
+        return JSONResponse(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            content={"detail": str(exc)},
+        )
+
     @app.exception_handler(NeedsBuildOverrideError)
     async def needs_build_override_handler(
         _request: Request, exc: NeedsBuildOverrideError
@@ -278,6 +319,36 @@ def register_exception_handlers(app) -> None:
             content={"detail": str(exc)},
         )
 
+    @app.exception_handler(AccountDeactivatedError)
+    async def account_deactivated_handler(
+        _request: Request, exc: AccountDeactivatedError
+    ) -> JSONResponse:
+        return JSONResponse(
+            status_code=status.HTTP_403_FORBIDDEN,
+            content={
+                "detail": str(exc),
+                "code": "account_deactivated",
+            },
+        )
+
+    @app.exception_handler(RegistrationDisabledError)
+    async def registration_disabled_handler(
+        _request: Request, exc: RegistrationDisabledError
+    ) -> JSONResponse:
+        return JSONResponse(
+            status_code=status.HTTP_403_FORBIDDEN,
+            content={"detail": str(exc)},
+        )
+
+    @app.exception_handler(PermissionDeniedError)
+    async def permission_denied_handler(
+        _request: Request, exc: PermissionDeniedError
+    ) -> JSONResponse:
+        return JSONResponse(
+            status_code=status.HTTP_403_FORBIDDEN,
+            content={"detail": str(exc)},
+        )
+
     @app.exception_handler(InvalidCredentialsError)
     @app.exception_handler(NotAuthenticatedError)
     async def auth_unauthorized_handler(
@@ -344,11 +415,34 @@ def register_exception_handlers(app) -> None:
         )
 
     @app.exception_handler(GitSourceAnalysisError)
-    async def git_source_analysis_handler(
-        _request: Request, exc: GitSourceAnalysisError
+    @app.exception_handler(LlmCallError)
+    @app.exception_handler(LlmNotConfiguredError)
+    async def llm_analysis_handler(
+        _request: Request, exc: VelaError
     ) -> JSONResponse:
         return JSONResponse(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            content={"detail": str(exc)},
+        )
+
+    @app.exception_handler(LlmProviderError)
+    async def llm_provider_error_handler(
+        _request: Request, exc: LlmProviderError
+    ) -> JSONResponse:
+        return JSONResponse(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            content={
+                "detail": str(exc),
+                "fallback_available": exc.fallback_available,
+            },
+        )
+
+    @app.exception_handler(LlmProviderConfigError)
+    async def llm_provider_config_error_handler(
+        _request: Request, exc: LlmProviderConfigError
+    ) -> JSONResponse:
+        return JSONResponse(
+            status_code=status.HTTP_400_BAD_REQUEST,
             content={"detail": str(exc)},
         )
 
@@ -405,13 +499,12 @@ def register_exception_handlers(app) -> None:
             content={"detail": str(exc), "stack_names": exc.stack_names},
         )
 
-    @app.exception_handler(ComposeImportError)
-    async def handle_compose_import(
-        _request: Request, exc: ComposeImportError
+    @app.exception_handler(ManifestParseError)
+    async def manifest_parse_handler(
+        _request: Request, exc: ManifestParseError
     ) -> JSONResponse:
         return JSONResponse(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            content={"detail": str(exc), "warnings": exc.warnings},
+            status_code=status.HTTP_400_BAD_REQUEST, content={"detail": str(exc)}
         )
 
     @app.exception_handler(VelaError)

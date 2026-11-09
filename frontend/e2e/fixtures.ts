@@ -2,6 +2,8 @@ import { test as baseTest, expect, type Page } from '@playwright/test'
 
 import { loginAndSeedToken } from './auth-helpers'
 import {
+  E2E_INSTRUCTOR_EMAIL,
+  E2E_INSTRUCTOR_PASSWORD,
   E2E_USER_EMAIL,
   E2E_USER_ID,
   E2E_USER_NO_GITHUB_EMAIL,
@@ -22,6 +24,7 @@ export const fakeUser = {
   display_name: null,
   pronouns: null,
   avatar_url: null,
+  role: 'admin',
 }
 
 export { loginAndSeedToken }
@@ -29,6 +32,7 @@ export { loginAndSeedToken }
 type AuthenticatedFixtures = {
   authenticatedPage: Page
   authenticatedPageNoGithub: Page
+  instructorPage: Page
 }
 
 export const test = baseTest.extend<AuthenticatedFixtures>({
@@ -36,11 +40,24 @@ export const test = baseTest.extend<AuthenticatedFixtures>({
     await loginAndSeedToken(page)
     await use(page)
   },
-  authenticatedPageNoGithub: async ({ page }, use) => {
+  authenticatedPageNoGithub: async ({ browser }, use) => {
+    // Separate context, not just a second page: localStorage is per-context,
+    // so both fixtures must not share storage or the last seeded token wins.
+    const noGithubContext = await browser.newContext()
+    const noGithubPage = await noGithubContext.newPage()
     await loginAndSeedToken(
-      page,
+      noGithubPage,
       E2E_USER_NO_GITHUB_EMAIL,
       E2E_USER_NO_GITHUB_PASSWORD,
+    )
+    await use(noGithubPage)
+    await noGithubContext.close()
+  },
+  instructorPage: async ({ page }, use) => {
+    await loginAndSeedToken(
+      page,
+      E2E_INSTRUCTOR_EMAIL,
+      E2E_INSTRUCTOR_PASSWORD,
     )
     await use(page)
   },
