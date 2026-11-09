@@ -157,13 +157,8 @@ async def get_db() -> AsyncIterator[AsyncSession]:
 _oauth2_scheme = OAuth2PasswordBearer(tokenUrl="api/auth/login", auto_error=False)
 
 
-async def get_current_user(
-    token: Annotated[str | None, Depends(_oauth2_scheme)],
-    session: Annotated[AsyncSession, Depends(get_db)],
-) -> User:
-    """Resolve the bearer token (JWT or PAT) to a :class:`User`."""
-    if not token:
-        raise NotAuthenticatedError()
+async def _resolve_user(session: AsyncSession, token: str) -> User:
+    """Resolve a bearer token (JWT or PAT) to a :class:`User`."""
     if token.startswith(API_TOKEN_PREFIX):
         user = await get_user_by_api_token(session, token)
         if user is None:
@@ -176,6 +171,30 @@ async def get_current_user(
     if not user.is_active:
         raise AccountDeactivatedError()
     return user
+
+
+async def get_current_user(
+    token: Annotated[str | None, Depends(_oauth2_scheme)],
+    session: Annotated[AsyncSession, Depends(get_db)],
+) -> User:
+    """Resolve the bearer token (JWT or PAT) to a :class:`User`."""
+    if not token:
+        raise NotAuthenticatedError()
+    return await _resolve_user(session, token)
+
+
+async def get_jwt_authenticated_user(
+    token: Annotated[str | None, Depends(_oauth2_scheme)],
+    session: Annotated[AsyncSession, Depends(get_db)],
+) -> User:
+    """Resolve a JWT bearer token to a :class:`User`, rejecting PATs."""
+    if not token:
+        raise NotAuthenticatedError()
+    if token.startswith(API_TOKEN_PREFIX):
+        raise PermissionDeniedError(
+            "API tokens cannot create other tokens. Log in interactively."
+        )
+    return await _resolve_user(session, token)
 
 
 async def require_instructor(user: Annotated[User, Depends(get_current_user)]) -> User:

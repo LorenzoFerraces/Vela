@@ -32,7 +32,7 @@ export async function exec(argv: string[]): Promise<number> {
   const config = requireToken(resolveConfig({}))
   const container = await resolveContainerFromApi(config, query)
 
-  const url = websocketUrl(
+  const { url, headers } = websocketUrl(
     config.server,
     `/containers/${container.id}/exec/ws`,
     config.token,
@@ -41,7 +41,7 @@ export async function exec(argv: string[]): Promise<number> {
   const wasRaw = stdin.isRaw ?? false
 
   return await new Promise<number>((resolve, reject) => {
-    const socket = new WebSocket(url)
+    const socket = new WebSocket(url, { headers } as never)
     socket.binaryType = "arraybuffer"
 
     const restore = () => {
