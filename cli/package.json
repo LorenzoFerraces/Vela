@@ -1,0 +1,19 @@
+{
+  "name": "vela-cli",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "bin": {
+    "vela": "src/main.ts"
+  },
+  "scripts": {
+    "dev": "bun run src/main.ts",
+    "test": "bun test",
+    "typecheck": "tsc --noEmit",
+    "build": "bun build --compile src/main.ts --outfile dist/vela"
+  },
+  "devDependencies": {
+    "@types/bun": "1.4.4",
+    "typescript": "7.0.2"
+  }
+}
