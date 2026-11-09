@@ -3,6 +3,7 @@ import { exitCodeFor, isVelaError } from "./client"
 import { login, logout, whoami } from "./commands/auth"
 import { describe, ps } from "./commands/containers"
 import { deploys, run } from "./commands/deploy"
+import { exec } from "./commands/exec"
 import { logs } from "./commands/logs"
 
 const HELP = `Usage: vela <command> [options]
@@ -40,6 +41,8 @@ async function main(argv: string[]): Promise<number> {
         return await describe(rest)
       case "run":
         return await run(rest)
+      case "exec":
+        return await exec(rest)
       case "logs":
         return await logs(rest)
       case "deploys":
