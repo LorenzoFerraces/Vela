@@ -35,7 +35,7 @@ export function toVelaError(
 export function exitCodeFor(error: VelaError): number {
   if (error.status === 401 || error.status === 403) return 3
   if (error.status === 404) return 4
-  if (error.status === 400 || error.status === 422) return 2
+  if (error.status === 400 || error.status === 422 || error.status === 2) return 2
   return 1
 }
 

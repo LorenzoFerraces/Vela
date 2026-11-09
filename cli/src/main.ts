@@ -7,6 +7,7 @@ import { exec } from "./commands/exec"
 import { remove, restart, start, stop } from "./commands/lifecycle"
 import { logs } from "./commands/logs"
 import { tokens } from "./commands/tokens"
+import { runTui } from "./tui"
 
 const HELP = `Usage: vela <command> [options]
 
@@ -77,13 +78,6 @@ async function main(argv: string[]): Promise<number> {
     }
     return 1
   }
-}
-
-async function runTui(): Promise<number> {
-  // ponytail: stub until Task 11 wires the real TUI; exits 1 listing commands.
-  console.error("The TUI is not wired up yet.")
-  console.error(HELP)
-  return 1
 }
 
 process.exit(await main(process.argv.slice(2)))
