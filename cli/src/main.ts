@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
 import { exitCodeFor, isVelaError } from "./client"
 import { login, logout, whoami } from "./commands/auth"
+import { describe, ps } from "./commands/containers"
 
 const HELP = `Usage: vela <command> [options]
 
@@ -31,6 +32,10 @@ async function main(argv: string[]): Promise<number> {
         return await logout(rest)
       case "whoami":
         return await whoami(rest)
+      case "ps":
+        return await ps(rest)
+      case "describe":
+        return await describe(rest)
       case "tui":
         return await runTui()
       default:
