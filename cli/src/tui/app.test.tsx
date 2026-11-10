@@ -19,6 +19,21 @@ const container: ContainerInfo = {
   created_at: "2026-11-08T00:00:00Z",
 }
 
+test("renders an empty state when no containers exist", async () => {
+  const setup = await testRender(<App initialContainers={[]} />, {
+    width: 100,
+    height: 20,
+  })
+  try {
+    await setup.renderOnce()
+    const frame = setup.captureCharFrame()
+    expect(frame).toContain("no containers")
+    expect(frame).toContain("no container selected")
+  } finally {
+    setup.renderer.destroy()
+  }
+})
+
 test("renders the container list from initial data", async () => {
   const setup = await testRender(
     <App initialContainers={[container]} load={async () => [container]} />,

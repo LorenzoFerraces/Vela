@@ -13,6 +13,44 @@ export interface AppProps {
   onQuit?: () => void
 }
 
+const colors = {
+  background: "#0c0d12",
+  panel: "#111218",
+  border: "#2a2c3a",
+  borderActive: "#7c5cff",
+  text: "#e6e6f0",
+  dim: "#6f7186",
+  accent: "#7c5cff",
+  running: "#3ddc84",
+  stopped: "#ff6b6b",
+  pending: "#f5c451",
+}
+
+function statusColor(status: string): string {
+  if (status === "running") return colors.running
+  if (status === "starting" || status === "restarting") return colors.pending
+  if (status === "stopped" || status === "exited") return colors.stopped
+  return colors.dim
+}
+
+function Field({ label, value }: { label: string; value: string }) {
+  return (
+    <text>
+      <span fg={colors.dim}>{label.padEnd(8)}</span>
+      <span fg={colors.text}>{value}</span>
+    </text>
+  )
+}
+
+function Key({ name, label }: { name: string; label: string }) {
+  return (
+    <text>
+      <span fg={colors.accent}>{name}</span>
+      <span fg={colors.dim}> {label}</span>
+    </text>
+  )
+}
+
 export function App({
   initialContainers = [],
   load,
@@ -86,40 +124,120 @@ export function App({
   })
 
   return (
-    <box style={{ flexDirection: "column", flexGrow: 1, padding: 1 }}>
-      <text fg="#00FFFF">VELA // CONTAINERS</text>
-      <box style={{ flexDirection: "row", flexGrow: 1, gap: 2 }}>
-        <box style={{ flexDirection: "column", width: 42 }}>
-          {containers.map((container, index) => (
-            <text key={container.id} fg={index === selected ? "#00FF00" : "#FFFFFF"}>
-              {index === selected ? ">" : " "} {container.name} [{container.status}]
-            </text>
-          ))}
+    <box style={{ flexDirection: "column", flexGrow: 1, backgroundColor: colors.background, padding: 0 }}>
+      <box
+        style={{
+          flexDirection: "row",
+          justifyContent: "space-between",
+          paddingLeft: 1,
+          paddingRight: 1,
+          paddingTop: 1,
+        }}
+      >
+        <text>
+          <strong fg={colors.accent}>VELA</strong>
+          <span fg={colors.dim}> // containers</span>
+        </text>
+        <text fg={colors.dim}>
+          {containers.length} {containers.length === 1 ? "workload" : "workloads"}
+        </text>
+      </box>
+
+      <box style={{ flexDirection: "row", flexGrow: 1, gap: 1, padding: 1, paddingTop: 1 }}>
+        <box
+          title={` CONTAINERS `}
+          titleColor={colors.accent}
+          border
+          borderStyle="rounded"
+          borderColor={colors.border}
+          style={{ flexDirection: "column", width: 36, padding: 0, paddingLeft: 1 }}
+        >
+          {containers.length === 0 ? (
+            <text fg={colors.dim}>no containers · vela run &lt;image&gt;</text>
+          ) : (
+            containers.map((container, index) => (
+              <text key={container.id} bg={index === selected ? "#1a1730" : undefined}>
+                <span fg={index === selected ? colors.accent : colors.dim}>
+                  {index === selected ? "▸ " : "  "}
+                </span>
+                <span fg={statusColor(container.status)}>● </span>
+                <span fg={index === selected ? colors.text : colors.dim}>{container.name}</span>
+                <span fg={colors.border}> {container.status}</span>
+              </text>
+            ))
+          )}
         </box>
-        <box style={{ flexDirection: "column", flexGrow: 1 }}>
-          <text fg="#00FFFF">DETAIL</text>
+
+        <box
+          title={` DETAIL `}
+          titleColor={colors.accent}
+          border
+          borderStyle="rounded"
+          borderColor={colors.border}
+          style={{ flexDirection: "column", flexGrow: 1, padding: 1 }}
+        >
           {current ? (
             <>
-              <text>name   {current.name}</text>
-              <text>id     {current.id}</text>
-              <text>image  {current.image}</text>
-              <text>status {current.status} ({current.health})</text>
-              <text>ports  {formatPorts(current.ports)}</text>
-              <text>url    {current.access_url ?? ""}</text>
+              <text>
+                <strong fg={colors.text}>{current.name}</strong>
+              </text>
+              <text fg={colors.dim}>{current.id}</text>
+              <text> </text>
+              <Field label="image" value={current.image} />
+              <Field label="status" value={`${current.status} (${current.health})`} />
+              <Field label="ports" value={formatPorts(current.ports) || "-"} />
+              <Field label="url" value={current.access_url ?? "-"} />
             </>
           ) : (
-            <text>no containers</text>
+            <text fg={colors.dim}>no container selected</text>
           )}
-          <text fg="#FFFF00">LOGS</text>
-          {logs.slice(-8).map((line, index) => (
-            <text key={`${index}-${line}`}>{line}</text>
-          ))}
+          {logs.length > 0 ? (
+            <>
+              <text> </text>
+              <text fg={colors.accent}>LOGS</text>
+              {logs.slice(-8).map((line, index) => (
+                <text key={`${index}-${line}`} fg={colors.dim}>
+                  {line}
+                </text>
+              ))}
+            </>
+          ) : null}
         </box>
       </box>
-      <text fg="#999999">
-        up/down select  s start  x stop  l logs  e exec  q quit
-      </text>
-      {status ? <text fg="#FFFF00">{status}</text> : null}
+
+      <box
+        style={{
+          flexDirection: "row",
+          justifyContent: "space-between",
+          paddingLeft: 1,
+          paddingRight: 1,
+        }}
+      >
+        <text>
+          {status ? (
+            <span fg={colors.pending}>{status}</span>
+          ) : (
+            <span fg={colors.dim}>ready</span>
+          )}
+        </text>
+      </box>
+
+      <box
+        style={{
+          flexDirection: "row",
+          gap: 2,
+          paddingLeft: 1,
+          paddingRight: 1,
+          paddingBottom: 1,
+        }}
+      >
+        <Key name="↑↓" label="select" />
+        <Key name="s" label="start" />
+        <Key name="x" label="stop" />
+        <Key name="l" label="logs" />
+        <Key name="e" label="exec" />
+        <Key name="q" label="quit" />
+      </box>
     </box>
   )
 }

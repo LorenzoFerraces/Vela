@@ -12,7 +12,10 @@ export async function runTui(): Promise<number> {
   }
   const config = requireToken(resolveConfig({}))
 
-  const renderer = await createCliRenderer({ exitOnCtrlC: true })
+  const renderer = await createCliRenderer({
+    exitOnCtrlC: true,
+    backgroundColor: "#0c0d12",
+  })
   const root = createRoot(renderer)
 
   const load = async () =>
