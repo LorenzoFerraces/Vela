@@ -19,6 +19,35 @@ const container: ContainerInfo = {
   created_at: "2026-11-08T00:00:00Z",
 }
 
+test("n opens the deploy prompt and submits the source", async () => {
+  const sources: string[] = []
+  const setup = await testRender(
+    <App
+      initialContainers={[]}
+      load={async () => []}
+      onRun={async (source) => {
+        sources.push(source)
+      }}
+    />,
+    { width: 100, height: 24 },
+  )
+  try {
+    await setup.renderOnce()
+    setup.mockInput.pressKey("n")
+    await setup.renderOnce()
+    expect(setup.captureCharFrame()).toContain("DEPLOY")
+    await setup.mockInput.typeText("nginx:alpine")
+    await setup.renderOnce()
+    setup.mockInput.pressEnter()
+    await Bun.sleep(20)
+    await setup.renderOnce()
+    expect(sources).toEqual(["nginx:alpine"])
+    expect(setup.captureCharFrame()).toContain("queued deploy: nginx:alpine")
+  } finally {
+    setup.renderer.destroy()
+  }
+})
+
 test("renders an empty state when no containers exist", async () => {
   const setup = await testRender(<App initialContainers={[]} />, {
     width: 100,

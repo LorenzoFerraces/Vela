@@ -10,6 +10,7 @@ export interface AppProps {
   onStart?: (container: ContainerInfo) => Promise<void>
   onStop?: (container: ContainerInfo) => Promise<void>
   onExec?: (container: ContainerInfo) => void
+  onRun?: (source: string) => Promise<void>
   onQuit?: () => void
 }
 
@@ -57,12 +58,15 @@ export function App({
   onStart,
   onStop,
   onExec,
+  onRun,
   onQuit,
 }: AppProps) {
   const [containers, setContainers] = useState<ContainerInfo[]>(initialContainers)
   const [selected, setSelected] = useState(0)
   const [logs, setLogs] = useState<string[]>([])
   const [status, setStatus] = useState("")
+  const [deploying, setDeploying] = useState(false)
+  const [source, setSource] = useState("")
 
   useEffect(() => {
     if (!load) return
@@ -85,9 +89,32 @@ export function App({
 
   const current = containers[selected]
 
+  const submitSource = async () => {
+    const value = source.trim()
+    if (!value || !onRun) return
+    setDeploying(false)
+    setSource("")
+    setStatus(`queued deploy: ${value}`)
+    try {
+      await onRun(value)
+      if (load) setContainers(await load())
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : String(error))
+    }
+  }
+
   useKeyboard((key) => {
+    if (deploying) {
+      if (key.name === "escape") setDeploying(false)
+      return
+    }
     if (key.name === "q") {
       onQuit?.()
+      return
+    }
+    if (key.name === "n" && onRun) {
+      setSource("")
+      setDeploying(true)
       return
     }
     if (key.name === "down") {
@@ -153,7 +180,7 @@ export function App({
           style={{ flexDirection: "column", width: 36, padding: 0, paddingLeft: 1 }}
         >
           {containers.length === 0 ? (
-            <text fg={colors.dim}>no containers · vela run &lt;image&gt;</text>
+            <text fg={colors.dim}>no containers · press n to deploy</text>
           ) : (
             containers.map((container, index) => (
               <text key={container.id} bg={index === selected ? "#1a1730" : undefined}>
@@ -222,6 +249,33 @@ export function App({
         </text>
       </box>
 
+      {deploying ? (
+        <box
+          title=" DEPLOY "
+          titleColor={colors.accent}
+          border
+          borderStyle="rounded"
+          borderColor={colors.borderActive}
+          style={{
+            flexDirection: "column",
+            paddingLeft: 1,
+            paddingRight: 1,
+            marginLeft: 1,
+            marginRight: 1,
+            marginBottom: 1,
+          }}
+        >
+          <text fg={colors.dim}>image or git URL · enter deploy · esc cancel</text>
+          <input
+            focused
+            value={source}
+            onInput={setSource}
+            onSubmit={() => void submitSource()}
+            placeholder="nginx:alpine"
+          />
+        </box>
+      ) : null}
+
       <box
         style={{
           flexDirection: "row",
@@ -232,6 +286,7 @@ export function App({
         }}
       >
         <Key name="↑↓" label="select" />
+        <Key name="n" label="new" />
         <Key name="s" label="start" />
         <Key name="x" label="stop" />
         <Key name="l" label="logs" />
