@@ -248,6 +248,10 @@ class PermissionDeniedError(AuthError):
         super().__init__(message)
 
 
+class ApiTokenNotFoundError(VelaError):
+    """Raised when a personal access token does not exist for the caller."""
+
+
 # ---------------------------------------------------------------------------
 # User library (Dockerfile templates)
 # ---------------------------------------------------------------------------

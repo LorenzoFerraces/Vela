@@ -71,9 +71,10 @@ def test_exec_ws_rejects_unauthenticated(
 
 
 def test_exec_ws_rejects_invalid_token(
-    api_client: TestClient
+    anonymous_client: TestClient,
 ) -> None:
-    with api_client.websocket_connect(
+    """The header wins when both are present, so this uses the bare client."""
+    with anonymous_client.websocket_connect(
         "/api/containers/cid-1/exec/ws?access_token=not-a-jwt"
     ) as websocket:
         with pytest.raises(WebSocketDisconnect) as exc:
@@ -301,3 +302,122 @@ def test_exec_ws_init_invalid_numbers_not_injected_to_shell(
     assert b"probe" in data
     assert b"garbage" not in data
     assert seen == {"cols": 80, "rows": 24}
+
+
+def _create_pat(api_client: TestClient) -> dict:
+    response = api_client.post("/api/tokens/", json={"name": "ws-test"})
+    assert response.status_code == 201
+    return response.json()
+
+
+def test_exec_ws_rejects_pat_in_query(
+    api_client: TestClient, anonymous_client: TestClient
+) -> None:
+    """PATs must travel in the header so they never land in access logs."""
+    pat = _create_pat(api_client)["token"]
+    with anonymous_client.websocket_connect(
+        f"/api/containers/cid-1/exec/ws?access_token={pat}"
+    ) as websocket:
+        with pytest.raises(WebSocketDisconnect) as exc:
+            websocket.receive_text()
+    assert exc.value.code == 1008
+
+
+def test_exec_ws_accepts_pat_header(
+    api_client: TestClient, anonymous_client: TestClient
+) -> None:
+    pat = _create_pat(api_client)["token"]
+    with anonymous_client.websocket_connect(
+        "/api/containers/cid-1/exec/ws",
+        headers={"Authorization": f"Bearer {pat}"},
+    ) as websocket:
+        data = websocket.receive_bytes()
+    assert b"root@" in data
+
+
+def test_logs_stream_accepts_pat_header(
+    api_client: TestClient, anonymous_client: TestClient
+) -> None:
+    pat = _create_pat(api_client)["token"]
+    with anonymous_client.websocket_connect(
+        "/api/containers/cid-1/logs/stream?follow=false",
+        headers={"Authorization": f"Bearer {pat}"},
+    ) as websocket:
+        data = websocket.receive_bytes()
+    assert data.startswith(b"log line")
+
+
+def test_logs_stream_rejects_pat_in_query(
+    api_client: TestClient, anonymous_client: TestClient
+) -> None:
+    pat = _create_pat(api_client)["token"]
+    with anonymous_client.websocket_connect(
+        f"/api/containers/cid-1/logs/stream?access_token={pat}&follow=false"
+    ) as websocket:
+        with pytest.raises(WebSocketDisconnect) as exc:
+            websocket.receive_bytes()
+    assert exc.value.code == 1008
+
+
+def test_exec_ws_rejects_revoked_pat(
+    api_client: TestClient, anonymous_client: TestClient
+) -> None:
+    created = _create_pat(api_client)
+    pat = created["token"]
+    assert api_client.delete(f"/api/tokens/{created['id']}").status_code == 204
+    with anonymous_client.websocket_connect(
+        "/api/containers/cid-1/exec/ws",
+        headers={"Authorization": f"Bearer {pat}"},
+    ) as websocket:
+        with pytest.raises(WebSocketDisconnect) as exc:
+            websocket.receive_text()
+    assert exc.value.code == 1008
+
+
+def test_logs_stream_rejects_revoked_pat(
+    api_client: TestClient, anonymous_client: TestClient
+) -> None:
+    created = _create_pat(api_client)
+    pat = created["token"]
+    assert api_client.delete(f"/api/tokens/{created['id']}").status_code == 204
+    with anonymous_client.websocket_connect(
+        "/api/containers/cid-1/logs/stream?follow=false",
+        headers={"Authorization": f"Bearer {pat}"},
+    ) as websocket:
+        with pytest.raises(WebSocketDisconnect) as exc:
+            websocket.receive_bytes()
+    assert exc.value.code == 1008
+
+
+def test_exec_ws_rejects_pat_for_deactivated_user(
+    api_client: TestClient,
+    anonymous_client: TestClient,
+    seeded_user,
+    db_session_factory,
+) -> None:
+    pat = _create_pat(api_client)["token"]
+    _deactivate_user(db_session_factory, seeded_user.id)
+    with anonymous_client.websocket_connect(
+        "/api/containers/cid-1/exec/ws",
+        headers={"Authorization": f"Bearer {pat}"},
+    ) as websocket:
+        with pytest.raises(WebSocketDisconnect) as exc:
+            websocket.receive_text()
+    assert exc.value.code == 1008
+
+
+def test_logs_stream_rejects_pat_for_deactivated_user(
+    api_client: TestClient,
+    anonymous_client: TestClient,
+    seeded_user,
+    db_session_factory,
+) -> None:
+    pat = _create_pat(api_client)["token"]
+    _deactivate_user(db_session_factory, seeded_user.id)
+    with anonymous_client.websocket_connect(
+        "/api/containers/cid-1/logs/stream?follow=false",
+        headers={"Authorization": f"Bearer {pat}"},
+    ) as websocket:
+        with pytest.raises(WebSocketDisconnect) as exc:
+            websocket.receive_bytes()
+    assert exc.value.code == 1008

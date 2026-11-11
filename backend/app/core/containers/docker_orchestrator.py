@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import io
 import logging
 import os
 import re
@@ -16,6 +17,7 @@ import docker
 import docker.errors
 import requests.exceptions
 from docker.types import Healthcheck, Mount
+from docker.utils.socket import read as socket_read
 
 from app.core.containers.orchestrator import ContainerOrchestrator
 from app.core.enums import ContainerStatus, HealthStatus, RestartPolicy
@@ -977,7 +979,11 @@ class DockerOrchestrator(ContainerOrchestrator):
         def _reader() -> None:
             try:
                 while not closed.is_set():
-                    chunk = exec_runtime.read(4096)
+                    chunk = socket_read(exec_runtime, 4096)
+                    # docker's read returns None on a recoverable errno
+                    # (EINTR/EDEADLK/EWOULDBLOCK); retry instead of closing.
+                    if chunk is None:
+                        continue
                     if not chunk:
                         break
                     try:
@@ -1005,7 +1011,13 @@ class DockerOrchestrator(ContainerOrchestrator):
 
         def _write_blocking(data: bytes) -> None:
             try:
-                exec_runtime.write(data)
+                # exec_start(socket=True) returns a read-only SocketIO on Unix
+                # sockets and an NpipeSocket on Windows, so write through the
+                # underlying socket when the wrapper rejects writes.
+                try:
+                    exec_runtime.write(data)
+                except (AttributeError, io.UnsupportedOperation):
+                    getattr(exec_runtime, "_sock", exec_runtime).sendall(data)
             except Exception as exc:
                 logger.warning("exec write error for %s: %s", container_id, exc)
 
