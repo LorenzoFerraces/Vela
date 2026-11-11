@@ -33,6 +33,7 @@ from app.api.deps import (
     get_image_builder,
     get_orchestrator,
     get_traffic_router,
+    resolve_user,
 )
 from app.api.route_wiring import (
     backend_port_for_route,
@@ -53,8 +54,8 @@ from app.api.schemas import (
 )
 from app.core.models import ScalingPolicyInfo
 from app.core import user_library
+from app.core.auth.api_tokens import API_TOKEN_PREFIX
 from app.core.auth.service import get_user_by_id
-from app.core.auth.tokens import decode_access_token
 from app.core.build.default_image_builder import DefaultImageBuilder
 from app.core.build.registry_image_suggestions import (
     fetch_docker_hub_suggestions,
@@ -98,6 +99,7 @@ from app.core.deploy.deployment_history import (
 from app.core.scaling.policy_repository import upsert_policy
 from app.core.enums import ContainerStatus, RestartPolicy
 from app.core.exceptions import (
+    AccountDeactivatedError,
     CloneError,
     ContainerNotFoundError,
     ImageNotFoundError,
@@ -157,14 +159,31 @@ _EXEC_START_FAILURE_MESSAGE = (
 _MAX_TERMINAL_DIMENSION = 500
 
 
+def _websocket_token(websocket: WebSocket) -> str | None:
+    """Return the bearer token from the upgrade request, header first.
+
+    Non-browser clients send ``Authorization: Bearer <token>`` so secrets stay
+    out of URLs and access logs. Browser clients cannot set upgrade headers,
+    so they keep passing a JWT ``access_token`` in the query string; PATs are
+    rejected there because they would leak into access logs.
+    """
+    authorization = websocket.headers.get("authorization", "")
+    if authorization.startswith("Bearer "):
+        return authorization.removeprefix("Bearer ").strip() or None
+    token = websocket.query_params.get("access_token")
+    if token and token.startswith(API_TOKEN_PREFIX):
+        return None
+    return token
+
+
 async def _get_websocket_user(session: AsyncSession, token: str | None) -> User:
+    """Resolve a WebSocket bearer token (JWT or PAT) to a :class:`User`."""
     if not token:
         raise NotAuthenticatedError()
-    claims = decode_access_token(token)
-    user = await get_user_by_id(session, claims.user_id)
-    if user is None or not user.is_active:
-        raise NotAuthenticatedError()
-    return user
+    try:
+        return await resolve_user(session, token)
+    except AccountDeactivatedError as exc:
+        raise NotAuthenticatedError() from exc
 
 
 def _exec_max_session_seconds() -> int:
@@ -1357,9 +1376,13 @@ async def container_logs_stream(
     orchestrator: Annotated[ContainerOrchestrator, Depends(get_orchestrator)],
     session: Annotated[AsyncSession, Depends(get_db)],
 ) -> None:
-    """Stream container logs over WebSocket (binary frames). Authenticate with ``access_token`` query param."""
+    """Stream container logs over WebSocket (binary frames).
+
+    Authenticate with the ``Authorization: Bearer`` header, or with the
+    ``access_token`` query param for browser clients.
+    """
     await websocket.accept()
-    token = websocket.query_params.get("access_token")
+    token = _websocket_token(websocket)
     tail_raw = websocket.query_params.get("tail", "200")
     try:
         tail_parsed = int(tail_raw)
@@ -1406,8 +1429,12 @@ async def container_exec_ws(
     orchestrator: Annotated[ContainerOrchestrator, Depends(get_orchestrator)],
     session: Annotated[AsyncSession, Depends(get_db)],
 ) -> None:
-    """Bidirectional exec terminal over WebSocket. Authenticate with ``access_token`` query param."""
-    token = websocket.query_params.get("access_token")
+    """Bidirectional exec terminal over WebSocket.
+
+    Authenticate with the ``Authorization: Bearer`` header, or with the
+    ``access_token`` query param for browser clients.
+    """
+    token = _websocket_token(websocket)
 
     try:
         await websocket.accept()
