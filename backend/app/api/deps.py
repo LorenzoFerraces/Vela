@@ -157,7 +157,7 @@ async def get_db() -> AsyncIterator[AsyncSession]:
 _oauth2_scheme = OAuth2PasswordBearer(tokenUrl="api/auth/login", auto_error=False)
 
 
-async def _resolve_user(session: AsyncSession, token: str) -> User:
+async def resolve_user(session: AsyncSession, token: str) -> User:
     """Resolve a bearer token (JWT or PAT) to a :class:`User`."""
     if token.startswith(API_TOKEN_PREFIX):
         user = await get_user_by_api_token(session, token)
@@ -180,7 +180,7 @@ async def get_current_user(
     """Resolve the bearer token (JWT or PAT) to a :class:`User`."""
     if not token:
         raise NotAuthenticatedError()
-    return await _resolve_user(session, token)
+    return await resolve_user(session, token)
 
 
 async def get_jwt_authenticated_user(
@@ -194,7 +194,7 @@ async def get_jwt_authenticated_user(
         raise PermissionDeniedError(
             "API tokens cannot create other tokens. Log in interactively."
         )
-    return await _resolve_user(session, token)
+    return await resolve_user(session, token)
 
 
 async def require_instructor(user: Annotated[User, Depends(get_current_user)]) -> User:
