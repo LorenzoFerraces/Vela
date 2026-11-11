@@ -33,6 +33,7 @@ from app.api.deps import (
     get_image_builder,
     get_orchestrator,
     get_traffic_router,
+    resolve_user,
 )
 from app.api.route_wiring import (
     backend_port_for_route,
@@ -53,9 +54,8 @@ from app.api.schemas import (
 )
 from app.core.models import ScalingPolicyInfo
 from app.core import user_library
-from app.core.auth.api_tokens import API_TOKEN_PREFIX, get_user_by_api_token
+from app.core.auth.api_tokens import API_TOKEN_PREFIX
 from app.core.auth.service import get_user_by_id
-from app.core.auth.tokens import decode_access_token
 from app.core.build.default_image_builder import DefaultImageBuilder
 from app.core.build.registry_image_suggestions import (
     fetch_docker_hub_suggestions,
@@ -99,6 +99,7 @@ from app.core.deploy.deployment_history import (
 from app.core.scaling.policy_repository import upsert_policy
 from app.core.enums import ContainerStatus, RestartPolicy
 from app.core.exceptions import (
+    AccountDeactivatedError,
     CloneError,
     ContainerNotFoundError,
     ImageNotFoundError,
@@ -163,30 +164,26 @@ def _websocket_token(websocket: WebSocket) -> str | None:
 
     Non-browser clients send ``Authorization: Bearer <token>`` so secrets stay
     out of URLs and access logs. Browser clients cannot set upgrade headers,
-    so they keep passing ``access_token`` in the query string (JWT only).
+    so they keep passing a JWT ``access_token`` in the query string; PATs are
+    rejected there because they would leak into access logs.
     """
     authorization = websocket.headers.get("authorization", "")
     if authorization.startswith("Bearer "):
         return authorization.removeprefix("Bearer ").strip() or None
-    return websocket.query_params.get("access_token")
+    token = websocket.query_params.get("access_token")
+    if token and token.startswith(API_TOKEN_PREFIX):
+        return None
+    return token
 
 
 async def _get_websocket_user(session: AsyncSession, token: str | None) -> User:
     """Resolve a WebSocket bearer token (JWT or PAT) to a :class:`User`."""
     if not token:
         raise NotAuthenticatedError()
-    if token.startswith(API_TOKEN_PREFIX):
-        user = await get_user_by_api_token(session, token)
-        if user is None:
-            raise NotAuthenticatedError("Invalid or revoked API token.")
-    else:
-        claims = decode_access_token(token)
-        user = await get_user_by_id(session, claims.user_id)
-        if user is None:
-            raise NotAuthenticatedError("User no longer exists.")
-    if not user.is_active:
-        raise NotAuthenticatedError()
-    return user
+    try:
+        return await resolve_user(session, token)
+    except AccountDeactivatedError as exc:
+        raise NotAuthenticatedError() from exc
 
 
 def _exec_max_session_seconds() -> int:

@@ -980,6 +980,10 @@ class DockerOrchestrator(ContainerOrchestrator):
             try:
                 while not closed.is_set():
                     chunk = socket_read(exec_runtime, 4096)
+                    # docker's read returns None on a recoverable errno
+                    # (EINTR/EDEADLK/EWOULDBLOCK); retry instead of closing.
+                    if chunk is None:
+                        continue
                     if not chunk:
                         break
                     try:
