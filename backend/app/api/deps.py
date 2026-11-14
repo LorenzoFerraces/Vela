@@ -12,6 +12,7 @@ from fastapi import Depends, Request
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from app.core.auth.api_tokens import API_TOKEN_PREFIX, get_user_by_api_token
 from app.core.auth.enums import UserRole
 from app.core.auth.service import get_user_by_id
 from app.core.auth.tokens import decode_access_token
@@ -160,13 +161,18 @@ async def get_current_user(
     token: Annotated[str | None, Depends(_oauth2_scheme)],
     session: Annotated[AsyncSession, Depends(get_db)],
 ) -> User:
-    """Resolve the bearer token to a :class:`User`; raise on any failure."""
+    """Resolve the bearer token (JWT or PAT) to a :class:`User`."""
     if not token:
         raise NotAuthenticatedError()
-    claims = decode_access_token(token)
-    user = await get_user_by_id(session, claims.user_id)
-    if user is None:
-        raise NotAuthenticatedError("User no longer exists.")
+    if token.startswith(API_TOKEN_PREFIX):
+        user = await get_user_by_api_token(session, token)
+        if user is None:
+            raise NotAuthenticatedError("Invalid or revoked API token.")
+    else:
+        claims = decode_access_token(token)
+        user = await get_user_by_id(session, claims.user_id)
+        if user is None:
+            raise NotAuthenticatedError("User no longer exists.")
     if not user.is_active:
         raise AccountDeactivatedError()
     return user

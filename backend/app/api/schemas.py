@@ -176,11 +176,13 @@ class RunFromSourceRequest(BaseModel):
     cpu_limit: float | None = Field(
         default=None,
         gt=0,
+        le=64,
         description="CPU limit in cores (e.g. 0.5 for half a core).",
     )
     memory_limit: int | None = Field(
         default=None,
         gt=0,
+        le=65536,
         description="Memory limit in MB.",
     )
 
@@ -239,7 +241,7 @@ class RunFromSourceRequest(BaseModel):
             raise ValueError(msg)
         return value
 
-    @field_validator("cpu_limit")
+    @field_validator("cpu_limit", mode="before")
     @classmethod
     def cpu_limit_must_be_finite(cls, value: float | None) -> float | None:
         return validate_finite_number(value)
@@ -732,6 +734,21 @@ class TokenResponse(BaseModel):
     access_token: str
     token_type: Literal["bearer"] = "bearer"
     user: UserPublic
+
+
+class ApiTokenCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=100)
+
+
+class ApiTokenPublic(BaseModel):
+    id: uuid.UUID
+    name: str
+    prefix: str
+    created_at: datetime
+
+
+class ApiTokenCreated(ApiTokenPublic):
+    token: str
 
 
 class ClerkExchangeRequest(BaseModel):

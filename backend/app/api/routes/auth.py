@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
-from typing import Annotated
+import time
+from collections import defaultdict, deque
+from typing import Annotated, Deque
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -34,6 +36,25 @@ from app.core.storage.object_storage import ObjectStorage
 from app.db.models import User
 
 router = APIRouter()
+
+# ponytail: in-process sliding-window limiter; per-process only, resets on restart.
+# Upgrade to a shared store (Redis) if multiple API replicas or persistence needed.
+_LOGIN_ATTEMPTS: dict[str, Deque[float]] = defaultdict(deque)
+_LOGIN_WINDOW_SECONDS = 300.0
+_LOGIN_MAX_ATTEMPTS = 10
+
+
+def _check_login_rate_limit(client_ip: str) -> None:
+    now = time.monotonic()
+    bucket = _LOGIN_ATTEMPTS[client_ip]
+    while bucket and now - bucket[0] > _LOGIN_WINDOW_SECONDS:
+        bucket.popleft()
+    if len(bucket) >= _LOGIN_MAX_ATTEMPTS:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many login attempts. Try again later.",
+        )
+    bucket.append(now)
 
 
 @router.get("/config", response_model=AuthConfigResponse)
@@ -66,10 +87,13 @@ async def register(body: RegisterRequest) -> TokenResponse:
 @router.post("/login", response_model=TokenResponse)
 async def login(
     body: LoginRequest,
+    request: Request,
     session: Annotated[AsyncSession, Depends(get_db)],
     object_storage: Annotated[ObjectStorage, Depends(get_object_storage)],
 ) -> TokenResponse:
     """Verify credentials and return an access token."""
+    client_ip = request.client.host if request.client else "unknown"
+    _check_login_rate_limit(client_ip)
     user = await authenticate(session, email=body.email, password=body.password)
     return _token_response(user, object_storage)
 

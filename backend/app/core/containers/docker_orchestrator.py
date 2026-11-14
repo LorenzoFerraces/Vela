@@ -580,7 +580,7 @@ class DockerOrchestrator(ContainerOrchestrator):
         ports = self._port_bindings_from_config(config)
         restart = _docker_restart_policy(config.restart_policy)
         nano_cpus = (
-            int(config.cpu_limit * _NS_PER_SEC)
+            max(1, int(config.cpu_limit * _NS_PER_SEC))
             if config.cpu_limit is not None
             else None
         )

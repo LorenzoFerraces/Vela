@@ -77,6 +77,9 @@ class User(Base):
     dockerfiles: Mapped[list["Dockerfile"]] = relationship(
         back_populates="owner", cascade="all, delete-orphan"
     )
+    api_tokens: Mapped[list["ApiToken"]] = relationship(
+        back_populates="user", cascade="all, delete-orphan"
+    )
 
 
 class UserOAuthIdentity(Base):
@@ -649,3 +652,31 @@ class ContainerMetric(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=_utcnow,
     )
+
+
+class ApiToken(Base):
+    """Long-lived personal access token for the Vela CLI."""
+
+    __tablename__ = "api_tokens"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    name: Mapped[str] = mapped_column(String(100), nullable=False)
+    token_prefix: Mapped[str] = mapped_column(
+        String(16), nullable=False, unique=True, index=True
+    )
+    token_hash: Mapped[str] = mapped_column(
+        String(64), nullable=False, unique=True, index=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utcnow
+    )
+
+    user: Mapped[User] = relationship(back_populates="api_tokens")
