@@ -139,6 +139,23 @@ def create_app() -> FastAPI:
 
     application.add_middleware(GZipMiddleware)
 
+    # Security headers (SOC2 CC6.6/CC6.7). Applied to every response.
+    @application.middleware("http")
+    async def security_headers(request, call_next):
+        response = await call_next(request)
+        response.headers.setdefault("X-Content-Type-Options", "nosniff")
+        response.headers.setdefault("X-Frame-Options", "DENY")
+        response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+        response.headers.setdefault(
+            "Permissions-Policy", "geolocation=(), microphone=(), camera=()"
+        )
+        # HSTS only when served over HTTPS (infra terminates TLS); harmless otherwise.
+        if request.url.scheme == "https":
+            response.headers.setdefault(
+                "Strict-Transport-Security", "max-age=31536000; includeSubDomains"
+            )
+        return response
+
     application.add_middleware(
         CORSMiddleware,
         allow_origins=[

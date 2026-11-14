@@ -43,8 +43,16 @@ export async function exec(argv: string[]): Promise<number> {
   return await new Promise<number>((resolve, reject) => {
     const socket = new WebSocket(url)
     socket.binaryType = "arraybuffer"
+    const timeout = setTimeout(() => {
+      try {
+        socket.close()
+      } catch {
+        // ignore
+      }
+    }, 600_000)
 
     const restore = () => {
+      clearTimeout(timeout)
       stdin.off("data", onStdin)
       process.stdout.off("resize", onResize)
       stdin.setRawMode?.(wasRaw)
@@ -53,7 +61,7 @@ export async function exec(argv: string[]): Promise<number> {
 
     const onStdin = (chunk: Buffer) => {
       if (chunk.includes(3)) {
-        socket.close()
+        socket.send("\x03")
         return
       }
       socket.send(chunk.toString("utf8"))
@@ -98,8 +106,12 @@ export async function exec(argv: string[]): Promise<number> {
       }
     }
 
-    socket.onclose = () => {
+    socket.onclose = (event) => {
       restore()
+      if (event.code === 1008) {
+        reject(new Error("Access denied or session expired."))
+        return
+      }
       resolve(0)
     }
 

@@ -40,7 +40,13 @@ export async function streamLogs(
         process.stdout.write(Buffer.from(event.data).toString("utf8"))
       }
     }
-    socket.onclose = () => resolve()
+    socket.onclose = (event) => {
+      if (event.code !== 1000 && event.code !== 1001 && event.code !== 1005) {
+        reject(new Error(`Log stream closed (code ${event.code}).`))
+        return
+      }
+      resolve()
+    }
     socket.onerror = () => reject(new Error("Log stream failed."))
   })
 }

@@ -39,5 +39,5 @@ export async function resolveContainerFromApi(
     const names = resolution.candidates.map((container) => container.name).join(", ")
     throw new VelaError(2, `Ambiguous container "${query}": ${names}`)
   }
-  throw new VelaError(4, `Container "${query}" not found.`)
+  throw new VelaError(404, `Container "${query}" not found.`)
 }
