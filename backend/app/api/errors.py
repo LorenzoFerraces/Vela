@@ -61,6 +61,7 @@ from app.core.exceptions import (
     ResourceLimitError,
     RouteConfigurationError,
     RouteNotFoundError,
+    ApiTokenNotFoundError,
     StackCompositionCycleError,
     StackNotFoundError,
     TeamStorageQuotaError,
@@ -178,6 +179,7 @@ def register_exception_handlers(app) -> None:
         )
 
     @app.exception_handler(RouteNotFoundError)
+    @app.exception_handler(ApiTokenNotFoundError)
     @app.exception_handler(ContainerNotFoundError)
     @app.exception_handler(DockerfileTemplateNotFoundError)
     @app.exception_handler(VolumeUploadNotFoundError)

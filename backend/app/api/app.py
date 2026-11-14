@@ -31,6 +31,7 @@ from app.api.routes import (
     scaling,
     settings,
     stacks,
+    tokens,
     traffic,
     users,
 )
@@ -185,6 +186,11 @@ def create_app() -> FastAPI:
         auth.router,
         prefix=f"{API_PREFIX}/auth",
         tags=["auth"],
+    )
+    application.include_router(
+        tokens.router,
+        prefix=f"{API_PREFIX}/tokens",
+        tags=["tokens"],
     )
     application.include_router(
         admin.router,

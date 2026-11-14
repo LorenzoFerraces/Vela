@@ -5,11 +5,13 @@ on:
     paths:
       - "backend/**"
       - "frontend/**"
+      - "cli/**"
       - ".github/workflows/ci.yml"
   pull_request:
     paths:
       - "backend/**"
       - "frontend/**"
+      - "cli/**"
       - ".github/workflows/ci.yml"
 
 jobs:
@@ -36,6 +38,30 @@ jobs:
           VELA_DATABASE_URL: "sqlite+aiosqlite:///:memory:"
           VELA_AUTH_SECRET: test-secret-for-ci-only
           VELA_FAKE_ORCHESTRATOR: "1"
+
+  cli-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - name: Install dependencies
+        working-directory: cli
+        run: bun install --frozen-lockfile
+      - name: Typecheck
+        working-directory: cli
+        run: bunx tsc --noEmit
+      - name: Test
+        working-directory: cli
+        run: bun test
+      - name: Compile binary
+        working-directory: cli
+        run: bun build --compile src/main.ts --outfile dist/vela
+      - name: Smoke the binary
+        working-directory: cli
+        run: ./dist/vela bogus 2>&1 | grep -q "Unknown command"
 
   e2e:
     runs-on: ubuntu-latest

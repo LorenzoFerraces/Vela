@@ -242,6 +242,11 @@ VITE_API_BASE_URL=http://127.0.0.1:8000
 
 **Git builds:** auto-detect Go, Python, Node, Java/Clojure, Rust, Ruby, PHP, .NET, and Elixir (root + shallow scan); Containers and Stacks open a build override modal when inference is insufficient.
 
+## CLI
+
+`cli/` is a Bun-based terminal client for the same API, with an optional TUI
+(`vela` with no arguments). See `cli/README.md`.
+
 ## Useful commands
 
 | Action | Command |
