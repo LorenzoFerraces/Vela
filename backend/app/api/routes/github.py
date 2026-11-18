@@ -13,6 +13,7 @@ exposed as ``router_auth`` and ``router_resource`` for ``api/app.py`` to mount.
 
 from __future__ import annotations
 
+import logging
 import os
 from typing import Annotated
 from urllib.parse import urlencode
@@ -52,6 +53,8 @@ from app.db.models import User
 
 router_auth = APIRouter()
 router_resource = APIRouter()
+
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -110,11 +113,12 @@ async def github_oauth_callback(
             scopes=granted_scopes,
         )
     except GitHubOAuthError as exc:
-        return _redirect_with_error(target, exc.reason, str(exc))
-    except GitHubAccountAlreadyLinkedError as exc:
-        return _redirect_with_error(target, "account_already_linked", str(exc))
-    except Exception as exc:  # noqa: BLE001 — convert anything else to a friendly redirect
-        return _redirect_with_error(target, "callback_failed", str(exc))
+        return _redirect_with_error(target, exc.reason)
+    except GitHubAccountAlreadyLinkedError:
+        return _redirect_with_error(target, "account_already_linked")
+    except Exception:  # noqa: BLE001 — convert anything else to a friendly redirect
+        logger.exception("GitHub OAuth callback failed")
+        return _redirect_with_error(target, "callback_failed")
 
     return RedirectResponse(url=f"{target}?github=connected", status_code=302)
 

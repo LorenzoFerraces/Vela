@@ -69,6 +69,11 @@ services:
       VELA_TRAEFIK_DYNAMIC_FILE: /etc/traefik/dynamic/traefik-http.yml
       VELA_TRAEFIK_RELOAD_CONTAINER: vela-traefik
       VELA_DOCKER_NETWORK: vela-workloads
+      # uvicorn ProxyHeadersMiddleware: honor X-Forwarded-For / X-Forwarded-Proto
+      # only from peers on the internal Docker networks (the nginx `web` proxy)
+      # so login rate limiting keys on the real client IP. Override to a narrower
+      # list (e.g. the web container's fixed IP) if the network topology allows.
+      FORWARDED_ALLOW_IPS: ${VELA_FORWARDED_ALLOW_IPS:-127.0.0.1,::1,172.16.0.0/12,192.168.0.0/16,10.0.0.0/8}
       VELA_VOLUME_UPLOADS_DIR: ${VELA_VOLUME_UPLOADS_DIR:-/data/volume-uploads}
       VELA_VOLUME_UPLOADS_HOST_DIR: ${VELA_VOLUME_UPLOADS_HOST_DIR:-}
     volumes:
@@ -113,6 +118,9 @@ services:
       - --providers.file.watch=true
       - --entrypoints.web.address=:80
       - --entrypoints.websecure.address=:443
+      # HSTS belongs at the TLS-terminating edge: nginx sees internal HTTP, so
+      # the API app itself cannot decide this. Applies to every https router.
+      - --entrypoints.websecure.http.middlewares=vela-hsts@file
       - --certificatesresolvers.letsencrypt.acme.email=${VELA_TRAEFIK_ACME_EMAIL:-}
       - --certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json
       - --certificatesresolvers.letsencrypt.acme.httpchallenge=true

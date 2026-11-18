@@ -24,6 +24,7 @@ from app.core.containers.volume_uploads import (
 from app.core.models import (
     BuildOverride,
     ContainerInfo,
+    MIN_ENFORCEABLE_CPU_CORES,
     ProjectSource,
     ScalingPolicyConfig,
     ScalingPolicyInfo,
@@ -175,12 +176,14 @@ class RunFromSourceRequest(BaseModel):
     )
     cpu_limit: float | None = Field(
         default=None,
-        gt=0,
+        ge=MIN_ENFORCEABLE_CPU_CORES,
+        le=64,
         description="CPU limit in cores (e.g. 0.5 for half a core).",
     )
     memory_limit: int | None = Field(
         default=None,
         gt=0,
+        le=65536,
         description="Memory limit in MB.",
     )
 
@@ -239,10 +242,10 @@ class RunFromSourceRequest(BaseModel):
             raise ValueError(msg)
         return value
 
-    @field_validator("cpu_limit")
+    @field_validator("cpu_limit", mode="before")
     @classmethod
     def cpu_limit_must_be_finite(cls, value: float | None) -> float | None:
-        """Reject non-finite CPU limits (NaN and infinities)."""
+        """Reject non-finite CPU limits (NaN and infinities) before coercion."""
         return validate_finite_number(value)
 
     @model_validator(mode="after")

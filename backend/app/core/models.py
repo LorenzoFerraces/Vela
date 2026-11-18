@@ -84,11 +84,25 @@ def default_listen_port_health_check(listen_port: int) -> HealthCheckConfig:
     )
 
 
-def validate_finite_number(value: float | None) -> float | None:
-    """Reject NaN/inf (``gt=0`` already rejects NaN but not infinities)."""
-    if value is not None and not math.isfinite(value):
+def validate_finite_number(value: float | str | None) -> float | str | None:
+    """Reject NaN/inf (``gt=0`` already rejects NaN but not infinities).
+
+    Raw non-numeric input (e.g. a ``"0.5"`` string in ``mode="before"``
+    validators) is passed through so pydantic's own coercion produces a
+    validation error instead of this check raising ``TypeError``.
+    """
+    if (
+        value is not None
+        and not isinstance(value, str)
+        and not math.isfinite(value)
+    ):
         raise ValueError("Value must be a finite number")
     return value
+
+
+# Smallest CPU limit whose Docker CFS quota is non-zero at the 100 ms period
+# (quota_us = 100000 * cores); anything less converts to quota 0 = unlimited.
+MIN_ENFORCEABLE_CPU_CORES = 1e-5
 
 
 class DeployConfig(BaseModel):
@@ -108,7 +122,9 @@ class DeployConfig(BaseModel):
         ),
     )
     cpu_limit: float | None = Field(
-        default=None, gt=0, description="CPU limit in cores (e.g. 0.5 for half a core)."
+        default=None,
+        ge=MIN_ENFORCEABLE_CPU_CORES,
+        description="CPU limit in cores (e.g. 0.5 for half a core).",
     )
     memory_limit: int | None = Field(
         default=None, gt=0, description="Memory limit in MB."

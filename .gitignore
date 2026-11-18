@@ -41,3 +41,4 @@ opencode_requests.log
 .specify/
 
 docs/superpowers/
+backend/e2e-api-err.log

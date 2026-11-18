@@ -92,14 +92,16 @@ export function App({
   const submitSource = async () => {
     const value = source.trim()
     if (!value || !onRun) return
-    setDeploying(false)
     setSource("")
     setStatus(`queued deploy: ${value}`)
+    setDeploying(true)
     try {
       await onRun(value)
       if (load) setContainers(await load())
     } catch (error) {
       setStatus(error instanceof Error ? error.message : String(error))
+    } finally {
+      setDeploying(false)
     }
   }
 

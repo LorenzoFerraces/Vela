@@ -74,16 +74,24 @@ export async function request<T>(
   if (config.token) headers.Authorization = `Bearer ${config.token}`
   if (body !== undefined) headers["Content-Type"] = "application/json"
 
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), 30_000)
   let response: Response
   try {
     response = await fetch(`${config.server}/api${path}`, {
       method,
       headers,
       body: body === undefined ? undefined : JSON.stringify(body),
+      signal: controller.signal,
     })
-  } catch {
+  } catch (error) {
+    clearTimeout(timeout)
+    if (error instanceof Error && error.name === "AbortError") {
+      throw new VelaError(0, `Request to ${config.server} timed out.`)
+    }
     throw new VelaError(0, `Cannot reach ${config.server}. Is the API running?`)
   }
+  clearTimeout(timeout)
 
   const text = await response.text()
   let payload: unknown = null

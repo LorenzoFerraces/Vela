@@ -19,6 +19,14 @@ interface RawStdin {
 }
 
 export async function promptHidden(label: string): Promise<string> {
+  if (!process.stdin.isTTY) {
+    const readline = createInterface({ input: process.stdin, output: process.stdout })
+    try {
+      return (await readline.question(label)).trim()
+    } finally {
+      readline.close()
+    }
+  }
   process.stdout.write(label)
   const stdin = process.stdin as unknown as RawStdin
   const wasRaw = stdin.isRaw ?? false

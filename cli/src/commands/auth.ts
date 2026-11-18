@@ -38,8 +38,12 @@ export async function login(argv: string[]): Promise<number> {
   const server = (values.server ?? process.env.VELA_API_URL ?? stored?.server ?? DEFAULT_SERVER)
     .replace(/\/+$/, "")
 
-  const email = await promptLine("Email: ")
-  const password = await promptHidden("Password: ")
+  const email =
+    process.env.VELA_LOGIN_EMAIL?.trim() ||
+    (await promptLine("Email: "))
+  const password =
+    process.env.VELA_LOGIN_PASSWORD ||
+    (await promptHidden("Password: "))
   const auth = await request<LoginResponse>(
     { server },
     "POST",
