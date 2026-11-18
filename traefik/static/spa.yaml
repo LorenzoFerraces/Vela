@@ -1,4 +1,11 @@
 http:
+  middlewares:
+    # Referenced by the websecure entrypoint in docker-compose.yml: HSTS on all
+    # TLS-routed traffic (SPA + /api proxy), not just the routers defined here.
+    vela-hsts:
+      headers:
+        stsSeconds: 31536000
+        stsIncludeSubdomains: true
   routers:
     # Plain HTTP, unchanged from before TLS was added.
     vela-spa:

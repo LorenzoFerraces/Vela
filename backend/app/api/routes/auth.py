@@ -34,6 +34,7 @@ from app.core.profile.service import user_to_snapshot
 from app.core.projects.bootstrap import ensure_personal_workspace
 from app.core.storage.object_storage import ObjectStorage
 from app.db.models import User
+from app.e2e_support import e2e_mode_enabled
 
 router = APIRouter()
 
@@ -95,7 +96,10 @@ async def login(
 ) -> TokenResponse:
     """Verify credentials and return an access token."""
     client_ip = request.client.host if request.client else "unknown"
-    _check_login_rate_limit(client_ip)
+    # E2E runs log in from one loopback peer per test; the window budget would
+    # otherwise lock the whole suite out. Skip the limiter in E2E mode.
+    if not e2e_mode_enabled():
+        _check_login_rate_limit(client_ip)
     user = await authenticate(session, email=body.email, password=body.password)
     return _token_response(user, object_storage)
 
