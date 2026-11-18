@@ -97,6 +97,7 @@ def parse_k8s(yaml_content: str) -> tuple[list[StackService], list[str]]:
 
 
 def _file_has_workload_kind(path: Path) -> bool:
+    """True when any YAML document in the file is a supported workload kind."""
     try:
         text = path.read_text(encoding="utf-8", errors="replace")
         for document in yaml.safe_load_all(text):
@@ -112,6 +113,7 @@ def _file_has_workload_kind(path: Path) -> bool:
 
 
 def _doc_name(document: dict) -> str:
+    """Read metadata.name from a Kubernetes document."""
     metadata = document.get("metadata")
     if isinstance(metadata, dict):
         return str(metadata.get("name") or "")
@@ -122,6 +124,7 @@ def _parse_workload(
     document: dict,
     warnings: list[str],
 ) -> tuple[StackService, list[str], list[tuple[str, str, str]]]:
+    """Convert a workload document into a StackService plus config-map references."""
     raw_name = _doc_name(document)
     name = sanitize_container_name(raw_name) or "service"
 
@@ -229,6 +232,7 @@ def _parse_workload(
 
 
 def _ingress_backend_service_names(document: dict) -> set[str]:
+    """Collect the backend service names referenced by an Ingress document."""
     names: set[str] = set()
     rules = (document.get("spec") or {}).get("rules") or []
     for rule in rules:
@@ -248,6 +252,7 @@ def _ingress_backend_service_names(document: dict) -> set[str]:
 
 
 def _deduplicate_names(services: list[StackService]) -> list[StackService]:
+    """Rename duplicate service names with -2, -3, ... suffixes."""
     seen: set[str] = set()
     result: list[StackService] = []
     for service in services:

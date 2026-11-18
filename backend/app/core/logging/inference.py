@@ -13,6 +13,7 @@ _DEBUG_RE = re.compile(r"\b(DEBUG|TRACE)\b", re.IGNORECASE)
 
 
 def infer_log_level(message: str) -> LogLevel:
+    """Guess a log level from keywords in the message, defaulting to INFO."""
     if _ERROR_RE.search(message):
         return LogLevel.ERROR
     if _WARN_RE.search(message):

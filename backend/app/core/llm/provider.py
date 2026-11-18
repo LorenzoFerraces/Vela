@@ -14,6 +14,8 @@ DEFAULT_LLM_MODEL = "gemini-3.1-flash-lite"
 
 @dataclass(frozen=True)
 class LlmConfig:
+    """Resolved endpoint, credentials, and model for one LLM provider."""
+
     provider: str
     url: str
     headers: dict[str, str]
@@ -24,6 +26,7 @@ class LlmConfig:
 
 
 def _env(name: str) -> str | None:
+    """Read a stripped env var; None when unset or blank."""
     value = os.environ.get(name, "").strip()
     return value or None
 
@@ -40,6 +43,7 @@ def endpoint_fingerprint(config: LlmConfig) -> str:
 
 
 def resolve_llm_config() -> LlmConfig | None:
+    """Server LlmConfig from env: Vertex first, then Gemini, else None."""
     vertex_api_key = _env("VELA_VERTEX_API_KEY")
     vertex_project_id = _env("VELA_VERTEX_PROJECT_ID")
     if vertex_api_key and vertex_project_id:

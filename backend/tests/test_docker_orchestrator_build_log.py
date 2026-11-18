@@ -9,6 +9,7 @@ from app.core.containers.docker_orchestrator import (
 
 
 def test_build_log_tail_keeps_trailing_content_within_budget() -> None:
+    """The tail drops the oldest chunks to stay within the byte budget."""
     tail = _BuildLogTail()
     chunk = "x" * (_MAX_BUILD_LOG_BYTES // 2)
     for _ in range(4):
@@ -18,6 +19,7 @@ def test_build_log_tail_keeps_trailing_content_within_budget() -> None:
 
 
 def test_build_log_tail_truncates_oversized_chunk_to_trailing_budget() -> None:
+    """A single oversized chunk is cut down to the budget's tail."""
     tail = _BuildLogTail()
     oversized = "y" * (_MAX_BUILD_LOG_BYTES * 2)
     tail.append("seed")

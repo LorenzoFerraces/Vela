@@ -26,11 +26,13 @@ from app.db.models import ContainerMetric
 
 @pytest.fixture
 def test_user_id() -> uuid.UUID:
+    """Fixed owner user id used by the metrics fixtures."""
     return uuid.UUID("11111111-1111-1111-1111-111111111111")
 
 
 @pytest.fixture
 def seeded_orchestrator(test_user_id: uuid.UUID) -> FakeContainerOrchestrator:
+    """Fake orchestrator pre-seeded with one managed running container."""
     orch = FakeContainerOrchestrator()
     labels = {
         VELA_MANAGED_LABEL: VELA_MANAGED_VALUE,
@@ -55,6 +57,7 @@ def seeded_orchestrator(test_user_id: uuid.UUID) -> FakeContainerOrchestrator:
 async def test_collect_and_store_once_inserts_row(
     db_session_factory, seeded_orchestrator: FakeContainerOrchestrator
 ) -> None:
+    """A collection pass stores one metric row per managed container."""
     async with db_session_factory() as session:
         await collect_and_store_once(seeded_orchestrator, session)
 
@@ -74,6 +77,7 @@ async def test_collect_and_store_once_inserts_row(
 async def test_collect_and_store_once_skips_non_vela_containers(
     db_session_factory,
 ) -> None:
+    """Containers without Vela labels are not collected."""
     orch = FakeContainerOrchestrator()
     orch.seed_container(
         ContainerInfo(
@@ -99,6 +103,7 @@ async def test_collect_and_store_once_skips_non_vela_containers(
 async def test_cleanup_expired_metrics_removes_old_rows(
     db_session_factory,
 ) -> None:
+    """Cleanup drops rows past retention and keeps recent ones."""
     async with db_session_factory() as session:
         old_ts = datetime.now(timezone.utc) - timedelta(days=60)
         session.add(
@@ -145,6 +150,7 @@ async def test_cleanup_expired_metrics_removes_old_rows(
 
 
 def test_positive_int_setting(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Non-positive or malformed values raise; valid values parse."""
     setting_name = "VELA_TEST_METRIC_SETTING"
 
     monkeypatch.setenv(setting_name, "not-an-int")

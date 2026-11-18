@@ -25,6 +25,7 @@ from app.api.schemas import GitSourceAnalysis
 
 
 def test_context_order_prefers_env_examples_and_dockerfile(tmp_path: Path) -> None:
+    """Context excerpts put .env.example and Dockerfile ahead of the README."""
     (tmp_path / "README.md").write_text(
         "Run on port 8000.\nexport DATABASE_URL=postgres://local\n",
         encoding="utf-8",
@@ -53,6 +54,7 @@ def test_readme_variant_readme_without_extension(tmp_path: Path) -> None:
 
 
 def test_extract_readme_sections_reaches_env_table_past_head_truncation() -> None:
+    """Section extraction reaches an env table past the head truncation."""
     filler = "\n".join(
         f"## Changelog {index}\n\n"
         f"Release notes item {index} with enough filler text to pad the file.\n"
@@ -79,6 +81,7 @@ def test_extract_readme_sections_reaches_env_table_past_head_truncation() -> Non
 
 
 def test_select_readme_text_keeps_env_table_in_short_kept_section() -> None:
+    """A short env section keeps its table while changelog filler drops."""
     filler = "".join(f"## Changelog {index}\n\nPatched item {index}.\n" for index in range(400))
     readme = filler + (
         "## Environment\n\n"
@@ -95,6 +98,7 @@ def test_select_readme_text_keeps_env_table_in_short_kept_section() -> None:
 
 
 def test_extract_readme_sections_flat_file_keeps_env_lines_only() -> None:
+    """A heading-less readme reduces to just its env lines."""
     readme = "no headings here, just prose to pad the file.\n" * 700 + "PORT=3000\n"
     assert len(readme.encode("utf-8")) > 12_000
 
@@ -106,12 +110,14 @@ def test_extract_readme_sections_flat_file_keeps_env_lines_only() -> None:
 
 
 def test_select_readme_text_returns_small_readme_unchanged() -> None:
+    """A readme under the size limit is returned unchanged."""
     readme = "# Tiny\n\n## Environment\n\nPORT=3000\n"
 
     assert _select_readme_text(readme) == readme
 
 
 def test_repo_map_lists_files_and_skips_ignored(tmp_path: Path) -> None:
+    """The repo map lists source files and skips ignored and hidden paths."""
     (tmp_path / "app.py").write_text("x", encoding="utf-8")
     (tmp_path / "src").mkdir()
     (tmp_path / "src" / "main.py").write_text("x", encoding="utf-8")
@@ -125,6 +131,7 @@ def test_repo_map_lists_files_and_skips_ignored(tmp_path: Path) -> None:
 
 
 def test_repo_map_skips_symlink_cycles(tmp_path: Path) -> None:
+    """The repo map does not recurse into a symlinked parent directory."""
     (tmp_path / "app.py").write_text("x", encoding="utf-8")
     link = tmp_path / "loop"
     try:
@@ -139,6 +146,7 @@ def test_repo_map_skips_symlink_cycles(tmp_path: Path) -> None:
 
 
 def test_empty_repo_falls_back_to_analysis_block(tmp_path: Path) -> None:
+    """An empty repo's context falls back to the analysis block."""
     context = _collect_context_excerpts(tmp_path)
 
     assert "=== analysis ===" in context
@@ -146,6 +154,7 @@ def test_empty_repo_falls_back_to_analysis_block(tmp_path: Path) -> None:
 
 
 def test_repo_map_respects_entry_cap(tmp_path: Path) -> None:
+    """The repo map caps the list at 150 files plus an ellipsis marker."""
     for index in range(200):
         (tmp_path / f"file_{index:03d}.txt").write_text("x", encoding="utf-8")
 
@@ -157,6 +166,7 @@ def test_repo_map_respects_entry_cap(tmp_path: Path) -> None:
 
 
 def test_subdir_marker_files_on_sparse_root(tmp_path: Path) -> None:
+    """Subdir marker files are collected when the root has none."""
     (tmp_path / "api").mkdir()
     (tmp_path / "api" / "Dockerfile").write_text("FROM python:3.12\n", encoding="utf-8")
     (tmp_path / "web").mkdir()
@@ -174,6 +184,7 @@ def test_subdir_marker_files_on_sparse_root(tmp_path: Path) -> None:
 
 
 def test_subdir_marker_files_empty_when_root_has_markers(tmp_path: Path) -> None:
+    """The subdir scan returns nothing when the root already has markers."""
     (tmp_path / "package.json").write_text("{}", encoding="utf-8")
     (tmp_path / "web").mkdir()
     (tmp_path / "web" / "Dockerfile").write_text("FROM node\n", encoding="utf-8")
@@ -182,6 +193,7 @@ def test_subdir_marker_files_empty_when_root_has_markers(tmp_path: Path) -> None
 
 
 def test_dockerfile_facts_multi_stage_last_from_wins() -> None:
+    """Multi-stage facts use the last FROM base and merged EXPOSE ports."""
     text = (
         "# comment line\n"
         "FROM golang:1.22 AS build\n"
@@ -200,10 +212,12 @@ def test_dockerfile_facts_multi_stage_last_from_wins() -> None:
 
 
 def test_dockerfile_facts_none_when_no_instructions() -> None:
+    """A Dockerfile with only comments yields no facts."""
     assert _dockerfile_facts("# only a comment\n") is None
 
 
 def test_detected_facts_block_lists_language_and_documented_env(tmp_path: Path) -> None:
+    """The facts block lists the detected language and documented env vars."""
     (tmp_path / "requirements.txt").write_text("fastapi\n", encoding="utf-8")
     (tmp_path / "README.md").write_text(
         "## Environment\n\n| Variable | Notes |\n|---|---|\n"
@@ -276,6 +290,7 @@ def test_vela_repo_readme_yields_env_vars() -> None:
 
 
 def test_redact_secret_values_env_example_style() -> None:
+    """Env-style secret values redact while plain values stay intact."""
     text = (
         "PORT=8080\n"
         "DB_PASSWORD=hunter2\n"
@@ -300,6 +315,7 @@ def test_redact_secret_values_env_example_style() -> None:
 
 
 def test_redact_secret_values_dockerfile_forms() -> None:
+    """Dockerfile ENV and ARG secrets redact; benign ones stay."""
     text = (
         "ENV APP_ENV production\n"
         "ENV DB_PASSWORD supersecret\n"
@@ -320,6 +336,7 @@ def test_redact_secret_values_dockerfile_forms() -> None:
 
 
 def test_context_builder_redacts_secrets_before_prompt(tmp_path: Path) -> None:
+    """Collected context and facts never carry plaintext secret values."""
     (tmp_path / ".env.example").write_text(
         "PORT=8000\nDB_PASSWORD=hunter2\n", encoding="utf-8"
     )
@@ -345,6 +362,7 @@ def test_context_builder_redacts_secrets_before_prompt(tmp_path: Path) -> None:
 
 
 def test_env_vars_from_payload_drops_invalid_entries() -> None:
+    """Only well-formed env entries survive payload parsing."""
     env_vars = _env_vars_from_payload(
         {
             "env_var_entries": [
@@ -361,6 +379,7 @@ def test_env_vars_from_payload_drops_invalid_entries() -> None:
 
 
 def test_clean_command_list_drops_invalid_entries() -> None:
+    """A command list survives only when it holds valid non-empty strings."""
     assert _clean_command_list(None) is None
     assert _clean_command_list("not-a-list") is None
     assert _clean_command_list([]) is None
@@ -372,6 +391,7 @@ def test_clean_command_list_drops_invalid_entries() -> None:
 
 
 def test_dependency_evidence_excerpt_and_facts(tmp_path: Path) -> None:
+    """Dependency manifests and config feed evidence and service facts."""
     from app.core.git.git_source_analysis import (
         _collect_context_excerpts,
         _detected_facts_block,
@@ -403,6 +423,7 @@ def test_dependency_evidence_excerpt_and_facts(tmp_path: Path) -> None:
 
 
 def test_payload_to_analysis_validates_start_command() -> None:
+    """Payload parsing keeps a valid start command and rejects bad ones."""
     payload = {
         "git_branch": "main",
         "container_port": 8000,

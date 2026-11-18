@@ -17,6 +17,7 @@ def _register(
     email: str,
     role: str = "student",
 ) -> tuple[str, str, str]:
+    """Register a user, auth the client and return token, personal project id, user id."""
     token = register_user_client(email, role=role)
     client.headers.update({"Authorization": f"Bearer {token}"})
     projects_response = client.get("/api/projects/")

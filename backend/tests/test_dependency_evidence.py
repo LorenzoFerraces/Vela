@@ -12,6 +12,7 @@ from app.db.models import StackService
 
 
 def _write(root: Path, files: dict[str, str]) -> Path:
+    """Write the name/content map under root and return root."""
     for name, content in files.items():
         path = root / name
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -20,6 +21,7 @@ def _write(root: Path, files: dict[str, str]) -> Path:
 
 
 def test_pom_artifacts_map_to_kinds(tmp_path: Path) -> None:
+    """Postgres, Mongo, and Neo4j artifacts map to their service kinds."""
     root = _write(tmp_path, {
         "pom.xml": (
             "<project><dependencies>"
@@ -35,6 +37,7 @@ def test_pom_artifacts_map_to_kinds(tmp_path: Path) -> None:
 
 
 def test_pom_jpa_alone_does_not_imply_postgres(tmp_path: Path) -> None:
+    """A JPA starter without a driver dependency yields no evidence."""
     root = _write(tmp_path, {
         "pom.xml": (
             "<project><dependencies>"
@@ -46,6 +49,7 @@ def test_pom_jpa_alone_does_not_imply_postgres(tmp_path: Path) -> None:
 
 
 def test_pom_test_scope_ignored(tmp_path: Path) -> None:
+    """Test-scoped driver dependencies produce no evidence."""
     root = _write(tmp_path, {
         "pom.xml": (
             "<project><dependencies>"
@@ -57,6 +61,7 @@ def test_pom_test_scope_ignored(tmp_path: Path) -> None:
 
 
 def test_gradle_kotlin_dsl_and_test_scope(tmp_path: Path) -> None:
+    """Gradle Kotlin DSL dependencies are scanned and testImplementation ignored."""
     root = _write(tmp_path, {
         "build.gradle.kts": (
             'dependencies {\n'
@@ -70,6 +75,7 @@ def test_gradle_kotlin_dsl_and_test_scope(tmp_path: Path) -> None:
 
 
 def test_gradle_multiline_test_scope_ignored(tmp_path: Path) -> None:
+    """A multiline testImplementation call is ignored and absent from matched lines."""
     root = _write(tmp_path, {
         "build.gradle.kts": (
             'dependencies {\n'
@@ -86,6 +92,7 @@ def test_gradle_multiline_test_scope_ignored(tmp_path: Path) -> None:
 
 
 def test_matched_lines_are_per_kind(tmp_path: Path) -> None:
+    """Each evidence's matched_lines only contains lines of its own kind."""
     root = _write(tmp_path, {
         "src/main/resources/application.properties": (
             "spring.datasource.url=jdbc:postgresql://localhost:5432/commit\n"
@@ -98,6 +105,7 @@ def test_matched_lines_are_per_kind(tmp_path: Path) -> None:
 
 
 def test_redacts_userinfo_with_slash() -> None:
+    """Credential userinfo is redacted even when the password contains a slash."""
     from app.core.git.dependency_evidence import _redact_evidence_line
 
     assert (
@@ -111,6 +119,7 @@ def test_redacts_userinfo_with_slash() -> None:
 
 
 def test_application_properties_url_yields_host_and_env_key(tmp_path: Path) -> None:
+    """Property datasource URLs yield hostname, port, and the env key they belong to."""
     root = _write(tmp_path, {
         "src/main/resources/application.properties": (
             "spring.datasource.url=jdbc:postgresql://localhost:5432/commit\n"
@@ -127,6 +136,7 @@ def test_application_properties_url_yields_host_and_env_key(tmp_path: Path) -> N
 
 
 def test_spring_placeholder_defaults_yield_neo4j_env_key(tmp_path: Path) -> None:
+    """Placeholder defaults expose the Neo4j env key and Postgres container env vars."""
     root = _write(tmp_path, {
         "src/main/resources/application.properties": (
             "spring.neo4j.uri=${NEO_URL:bolt://localhost:7687}\n"
@@ -148,6 +158,7 @@ def test_spring_placeholder_defaults_yield_neo4j_env_key(tmp_path: Path) -> None
 
 
 def test_reconcile_commit_y_me_voy_style_stack(tmp_path: Path) -> None:
+    """Reconcile fills in Spring Neo4j env vars and Postgres container env for that stack."""
     root = _write(tmp_path, {
         "build.gradle": (
             "dependencies {\n"
@@ -201,6 +212,7 @@ def test_reconcile_commit_y_me_voy_style_stack(tmp_path: Path) -> None:
 
 
 def test_application_yaml_nested_url(tmp_path: Path) -> None:
+    """Nested application.yml URLs resolve to their flat SPRING_* env keys."""
     root = _write(tmp_path, {
         "src/main/resources/application.yml": (
             "spring:\n"
@@ -216,6 +228,7 @@ def test_application_yaml_nested_url(tmp_path: Path) -> None:
 
 
 def test_python_and_node_manifests(tmp_path: Path) -> None:
+    """Driver packages in requirements.txt and package.json map to service kinds."""
     py = _write(tmp_path / "py", {"requirements.txt": "fastapi\npsycopg2-binary\npymongo\n"})
     assert {"postgres", "mongo"} <= {e.kind for e in scan_dependency_evidence(py)}
     node = _write(tmp_path / "node", {
@@ -225,6 +238,7 @@ def test_python_and_node_manifests(tmp_path: Path) -> None:
 
 
 def test_pyproject_pep621_dependencies(tmp_path: Path) -> None:
+    """PEP 621 pyproject dependencies map to service kinds."""
     root = _write(tmp_path, {
         "pyproject.toml": (
             "[project]\n"
@@ -235,6 +249,7 @@ def test_pyproject_pep621_dependencies(tmp_path: Path) -> None:
 
 
 def test_build_subdir_is_scanned(tmp_path: Path) -> None:
+    """Manifests in build subdirectories are found via language detection info."""
     from app.core.git.language_detection import analyze_project
 
     root = _write(tmp_path, {
@@ -251,6 +266,7 @@ def test_build_subdir_is_scanned(tmp_path: Path) -> None:
 
 
 def test_one_evidence_per_kind_dedup(tmp_path: Path) -> None:
+    """The same kind found in several manifests yields a single evidence entry."""
     root = _write(tmp_path, {
         "pom.xml": "<project><dependencies><dependency><artifactId>postgresql</artifactId></dependency></dependencies></project>",
         "requirements.txt": "psycopg2\n",
@@ -260,11 +276,13 @@ def test_one_evidence_per_kind_dedup(tmp_path: Path) -> None:
 
 
 def test_no_evidence_for_plain_repo(tmp_path: Path) -> None:
+    """A repo without database drivers or URLs yields no evidence."""
     root = _write(tmp_path, {"README.md": "# Hi\n", "package.json": '{"dependencies": {"express": "^4"}}'})
     assert scan_dependency_evidence(root) == []
 
 
 def _app(name: str = "web", env: dict[str, str] | None = None) -> StackService:
+    """Build a minimal git-sourced web StackService for reconcile tests."""
     return StackService(
         service_name=name, source_kind="git", source_ref="https://github.com/o/r.git",
         git_branch="main", container_port=8080, env_vars=env or {}, command=None,
@@ -273,6 +291,7 @@ def _app(name: str = "web", env: dict[str, str] | None = None) -> StackService:
 
 
 def _evidence(kind: str, hostname: str | None, env_key: str | None = None) -> ServiceEvidence:
+    """Build ServiceEvidence for a kind using its default image and port."""
     from app.core.git.dependency_evidence import KIND_DEFAULTS
     image_ref, port = KIND_DEFAULTS[kind]
     return ServiceEvidence(kind=kind, image_ref=image_ref, port=port, hostname=hostname,
@@ -280,6 +299,7 @@ def _evidence(kind: str, hostname: str | None, env_key: str | None = None) -> Se
 
 
 def test_classify_host() -> None:
+    """Local, sibling, and external hostnames classify as local, sibling, external."""
     assert classify_host("localhost") == "local"
     assert classify_host("127.0.0.1") == "local"
     assert classify_host(None) == "local"
@@ -288,6 +308,7 @@ def test_classify_host() -> None:
 
 
 def test_reconcile_appends_missing_local_services() -> None:
+    """Missing local services get appended, linked as depends_on, and env URLs rewritten."""
     services = [_app(env={"SPRING_DATASOURCE_URL": "jdbc:postgresql://localhost:5432/commit"})]
     evidence = [_evidence("postgres", "localhost"), _evidence("neo4j", "localhost")]
     warnings: list[str] = []
@@ -302,6 +323,7 @@ def test_reconcile_appends_missing_local_services() -> None:
 
 
 def test_reconcile_skips_external_host() -> None:
+    """Evidence pointing at an external host adds no service and warns instead."""
     services = [_app()]
     evidence = [_evidence("mongo", "cluster0.abc.mongodb.net")]
     out, warns, detected = reconcile_detected_services(services, evidence, [])
@@ -311,6 +333,7 @@ def test_reconcile_skips_external_host() -> None:
 
 
 def test_reconcile_does_not_duplicate_covered_kind() -> None:
+    """A kind already served by an existing image service is not appended again."""
     db = StackService(
         service_name="db", source_kind="image", source_ref="postgres:16", git_branch=None,
         container_port=5432, env_vars={}, command=None, public_route=False,
@@ -325,6 +348,7 @@ def test_reconcile_does_not_duplicate_covered_kind() -> None:
 
 
 def _image(name: str, ref: str, port: int) -> StackService:
+    """Build an image-sourced StackService (database container) for tests."""
     return StackService(
         service_name=name, source_kind="image", source_ref=ref, git_branch=None,
         container_port=port, env_vars={}, command=None, public_route=False,
@@ -333,6 +357,7 @@ def _image(name: str, ref: str, port: int) -> StackService:
 
 
 def test_reconcile_rewrite_does_not_corrupt_scheme() -> None:
+    """Host rewriting keeps schemes intact and leaves sibling-named hosts alone."""
     services = [
         _app(env={
             "SPRING_DATASOURCE_URL": "jdbc:postgresql://db:5432/commit",
@@ -356,6 +381,7 @@ def test_reconcile_rewrite_does_not_corrupt_scheme() -> None:
 
 
 def test_reconcile_injects_missing_spring_env_key(tmp_path: Path) -> None:
+    """A Spring env key present only in evidence is injected into the app service."""
     root = _write(tmp_path, {
         "src/main/resources/application.properties": (
             "spring.datasource.url=jdbc:postgresql://localhost:5432/epersgeist\n"
@@ -390,6 +416,7 @@ def test_reconcile_injects_missing_spring_env_key(tmp_path: Path) -> None:
 
 
 def test_reconcile_no_self_dependency_for_alias_named_git_service() -> None:
+    """A git service named db is not made to depend on itself when rewriting its URL."""
     db = _app(name="db", env={"DATABASE_URL": "postgres://localhost:5432/app"})
     evidence = [_evidence("postgres", "localhost")]
     out, _, detected = reconcile_detected_services([db], evidence, [])

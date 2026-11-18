@@ -18,6 +18,7 @@ PREFIX_LENGTH = 16
 
 @dataclass(frozen=True)
 class MintedApiToken:
+    """Plaintext token plus the prefix and hash to store."""
     plaintext: str
     prefix: str
     token_hash: str

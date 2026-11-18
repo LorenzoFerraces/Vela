@@ -15,11 +15,13 @@ from app.db.models import AuditLog
 
 @pytest.fixture
 def user_a() -> uuid.UUID:
+    """First stable test user id."""
     return uuid.UUID("11111111-1111-1111-1111-111111111111")
 
 
 @pytest.fixture
 def user_b() -> uuid.UUID:
+    """Second stable test user id."""
     return uuid.UUID("22222222-2222-2222-2222-222222222222")
 
 
@@ -31,6 +33,7 @@ async def _emit(
     target_id: str,
     details: dict | None = None,
 ) -> None:
+    """Write one audit log entry for the given user and commit it."""
     async with factory() as session:
         await emit_audit_log(session, user_id, action, target_type, target_id, details)
         await session.commit()
@@ -40,6 +43,7 @@ async def _query(
     factory: async_sessionmaker[AsyncSession],
     **kwargs,
 ) -> list[AuditLog]:
+    """Call list_audit_logs and return its entries."""
     async with factory() as session:
         result = await list_audit_logs(session, **kwargs)
         return result.entries
@@ -49,7 +53,10 @@ def test_emit_and_list_basic(
     db_session_factory: async_sessionmaker[AsyncSession],
     user_a: uuid.UUID,
 ) -> None:
+    """Emitting an entry stores it and listing returns it with all fields."""
+
     async def run() -> None:
+        """Emit one entry and verify every stored field."""
         await _emit(
             db_session_factory,
             user_id=user_a,
@@ -76,7 +83,10 @@ def test_list_filters_by_user(
     user_a: uuid.UUID,
     user_b: uuid.UUID,
 ) -> None:
+    """Filtering by user_id returns only that user's entries."""
+
     async def run() -> None:
+        """Emit entries for two users, then list each user's entries."""
         await _emit(
             db_session_factory, user_a, "container.start", "container", "cid-1"
         )
@@ -102,7 +112,10 @@ def test_list_filters_by_action(
     db_session_factory: async_sessionmaker[AsyncSession],
     user_a: uuid.UUID,
 ) -> None:
+    """Filtering by action returns only entries with that action."""
+
     async def run() -> None:
+        """Emit two deploys and a start, then filter by each action."""
         await _emit(
             db_session_factory, user_a, "container.deploy", "container", "cid-1"
         )
@@ -126,7 +139,10 @@ def test_list_filters_by_target_type(
     db_session_factory: async_sessionmaker[AsyncSession],
     user_a: uuid.UUID,
 ) -> None:
+    """Filtering by target_type separates container from user entries."""
+
     async def run() -> None:
+        """Emit one container and one user entry, then filter by each type."""
         await _emit(
             db_session_factory, user_a, "container.deploy", "container", "cid-1"
         )
@@ -149,7 +165,10 @@ def test_list_orders_newest_first(
     db_session_factory: async_sessionmaker[AsyncSession],
     user_a: uuid.UUID,
 ) -> None:
+    """Listed entries are ordered newest first."""
+
     async def run() -> None:
+        """Emit two entries a sleep apart and assert the later one sorts first."""
         await _emit(
             db_session_factory, user_a, "container.deploy", "container", "cid-1"
         )
@@ -170,7 +189,10 @@ def test_list_limit_and_offset(
     db_session_factory: async_sessionmaker[AsyncSession],
     user_a: uuid.UUID,
 ) -> None:
+    """limit and offset page through the stored entries."""
+
     async def run() -> None:
+        """Emit five entries and fetch them in pages of two."""
         for i in range(5):
             await _emit(
                 db_session_factory,
@@ -196,7 +218,10 @@ def test_list_date_range_filter(
     db_session_factory: async_sessionmaker[AsyncSession],
     user_a: uuid.UUID,
 ) -> None:
+    """from_date/to_date restrict entries to the requested window."""
+
     async def run() -> None:
+        """Emit one entry and query a range that excludes and one that includes it."""
         now = datetime.now(timezone.utc)
         yesterday = now - timedelta(days=1)
         tomorrow = now + timedelta(days=1)
@@ -222,7 +247,10 @@ def test_emit_with_none_details(
     db_session_factory: async_sessionmaker[AsyncSession],
     user_a: uuid.UUID,
 ) -> None:
+    """Emitting with details=None stores an entry with null details."""
+
     async def run() -> None:
+        """Emit one entry without details and assert it stays None."""
         await _emit(
             db_session_factory,
             user_id=user_a,
@@ -244,6 +272,7 @@ def test_emit_persists_after_caller_commit(
 ) -> None:
     """emit_audit_log flushes only; the caller's commit persists the entry."""
     async def run() -> None:
+        """Emit through a session, commit, and read the entry back."""
         async with db_session_factory() as session:
             await emit_audit_log(
                 session,
@@ -267,6 +296,7 @@ def test_emit_failed_flush_drops_entry_keeps_session_usable(
 ) -> None:
     """A failed flush is logged and dropped; the caller's session stays usable."""
     async def run() -> None:
+        """Emit an entry that fails the flush, then a valid one, and commit."""
         async with db_session_factory() as session:
             await emit_audit_log(
                 session,

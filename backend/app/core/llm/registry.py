@@ -9,6 +9,7 @@ from app.core.llm.providers.openai_compatible import OpenAICompatibleProvider
 
 
 def get_provider(config: LlmConfig) -> LlmProvider:
+    """Return the provider implementation for a config's provider name."""
     match config.provider:
         case "gemini" | "vertex":
             return GeminiProvider()

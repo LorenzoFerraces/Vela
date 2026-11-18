@@ -17,6 +17,7 @@ logger = logging.getLogger(__name__)
 
 
 class AuditLogQueryResult(NamedTuple):
+    """One page of audit entries plus the total filtered count."""
     entries: list[AuditLog]
     total: int
 
@@ -28,6 +29,7 @@ def _build_conditions(
     from_date: datetime | None = None,
     to_date: datetime | None = None,
 ) -> list[sa.ColumnElement]:
+    """Translate the optional audit filters into SQL conditions."""
     conditions: list[sa.ColumnElement] = []
     if user_id is not None:
         conditions.append(AuditLog.user_id == user_id)

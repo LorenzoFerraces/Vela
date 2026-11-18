@@ -20,6 +20,7 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
+    """Add projects.storage_quota_bytes and make alert_history.container_id nullable."""
     op.add_column(
         "projects",
         sa.Column("storage_quota_bytes", sa.BigInteger(), nullable=True),
@@ -33,6 +34,7 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    """Restore alert_history.container_id NOT NULL and drop the quota column."""
     # Storage alerts persist NULL container_id; delete them so the NOT NULL
     # restore below succeeds.
     op.execute("DELETE FROM alert_history WHERE container_id IS NULL")

@@ -12,10 +12,12 @@ ALLOW_PRIVATE_ENV = "VELA_LLM_ALLOW_PRIVATE_ENDPOINTS"
 
 
 def allow_private_endpoints() -> bool:
+    """True when the env override allows private or plain-HTTP endpoints."""
     return os.environ.get(ALLOW_PRIVATE_ENV, "").strip() == "1"
 
 
 def _host_is_public(host: str) -> bool:
+    """Resolve the host and return False if any address is non-global."""
     try:
         infos = socket.getaddrinfo(host, None)
     except OSError:

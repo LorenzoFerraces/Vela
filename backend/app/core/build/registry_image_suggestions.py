@@ -16,6 +16,7 @@ _client: httpx.AsyncClient | None = None
 
 
 def _get_client() -> httpx.AsyncClient:
+    """Return the lazily created shared async HTTP client."""
     global _client
     if _client is None:
         _client = httpx.AsyncClient(timeout=5.0)

@@ -17,6 +17,7 @@ _client: httpx.AsyncClient | None = None
 
 
 def get_client() -> httpx.AsyncClient:
+    """Return the shared process-wide httpx client."""
     global _client
     if _client is None:
         _client = httpx.AsyncClient(timeout=60.0)
@@ -35,6 +36,7 @@ class LlmProvider(abc.ABC):
         """Raw model text from a generate response body."""
 
     def prepare_prompt(self, prompt: str, config: LlmConfig) -> str:
+        """Hook for providers that append instructions to the prompt."""
         return prompt
 
     def _assert_public_url(self, config: LlmConfig) -> None:
@@ -50,17 +52,20 @@ class LlmProvider(abc.ABC):
             ) from exc
 
     def parse_json_text(self, text: str) -> dict:
+        """Parse text as JSON and require an object root."""
         parsed = json.loads(text)
         if not isinstance(parsed, dict):
             raise ValueError("LLM JSON root must be an object.")
         return parsed
 
     def models_url(self, config: LlmConfig) -> str | None:
+        """Model listing URL for verify, or None when unsupported."""
         return None
 
     async def generate_json(
         self, config: LlmConfig, *, prompt: str, schema: dict
     ) -> dict:
+        """POST the generate request and parse the JSON response."""
         payload = self.build_request(
             config, self.prepare_prompt(prompt, config), schema
         )
@@ -101,6 +106,7 @@ class LlmProvider(abc.ABC):
             ) from exc
 
     async def verify(self, config: LlmConfig) -> list[str] | None:
+        """Verify credentials via the model listing; return model names."""
         url = self.models_url(config)
         if url is None:
             return None

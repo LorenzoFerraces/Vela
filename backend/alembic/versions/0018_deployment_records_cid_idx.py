@@ -19,8 +19,10 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
+    """Create the index on deployment_records.container_id."""
     op.create_index("ix_deployment_records_container_id", "deployment_records", ["container_id"])
 
 
 def downgrade() -> None:
+    """Drop the index on deployment_records.container_id."""
     op.drop_index("ix_deployment_records_container_id", table_name="deployment_records")

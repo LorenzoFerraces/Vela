@@ -124,6 +124,7 @@ def _warn_if_azp_unenforced() -> None:
 
 
 def _secret_key() -> str:
+    """Return the trimmed VELA_CLERK_SECRET_KEY environment value."""
     return os.environ.get("VELA_CLERK_SECRET_KEY", "").strip()
 
 

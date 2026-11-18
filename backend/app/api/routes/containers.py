@@ -187,6 +187,7 @@ async def _get_websocket_user(session: AsyncSession, token: str | None) -> User:
 
 
 def _exec_max_session_seconds() -> int:
+    """Return the max exec session lifetime in seconds (default 3600)."""
     try:
         return max(1, int(os.getenv("VELA_EXEC_MAX_SESSION_SECONDS", "3600")))
     except ValueError:
@@ -1513,6 +1514,7 @@ async def container_exec_ws(
             await asyncio.to_thread(stdin_write, pending_init.encode("utf-8"))
 
         async def _forward_to_client() -> None:
+            """Stream exec stdout chunks to the websocket until it disconnects."""
             try:
                 async for chunk in stdout_iter:
                     await websocket.send_bytes(chunk)
@@ -1522,6 +1524,7 @@ async def container_exec_ws(
                 logger.warning("exec forward error for %s", container_id)
 
         async def _forward_to_container() -> None:
+            """Send websocket input and resize frames to the exec session."""
             try:
                 while True:
                     msg = await _receive_terminal_text(websocket)

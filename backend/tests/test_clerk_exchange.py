@@ -45,6 +45,7 @@ def _clerk_identities(db_session_factory: Any) -> list[Any]:
 def test_clerk_exchange_provisions_unknown_user(
     db_app: Any, db_session_factory: Any, monkeypatch: Any
 ) -> None:
+    """Exchange for an unknown Clerk user provisions a passwordless student account."""
     monkeypatch.setenv("VELA_CLERK_PUBLISHABLE_KEY", TEST_CLERK_PUBLISHABLE_KEY)
 
     from fastapi.testclient import TestClient
@@ -60,6 +61,7 @@ def test_clerk_exchange_provisions_unknown_user(
     assert response.json()["user"]["email"] == "clerk-user@example.com"
 
     async def provisioned() -> None:
+        """Check the provisioned user row has student role and no password."""
         async with db_session_factory() as session:
             user = await session.scalar(
                 select(User).where(User.email == "clerk-user@example.com")
@@ -81,6 +83,7 @@ def test_clerk_exchange_provisions_unknown_user(
 def test_clerk_exchange_rejects_deactivated_user(
     db_app: Any, db_session_factory: Any, monkeypatch: Any
 ) -> None:
+    """Exchange for a deactivated user returns 403 and links no identity."""
     monkeypatch.setenv("VELA_CLERK_PUBLISHABLE_KEY", TEST_CLERK_PUBLISHABLE_KEY)
     user = _seed_user(
         db_session_factory,
@@ -90,6 +93,7 @@ def test_clerk_exchange_rejects_deactivated_user(
     )
 
     async def deactivate() -> None:
+        """Flip the seeded user to inactive directly in the database."""
         async with db_session_factory() as session:
             stored_user = await session.get(User, user.id)
             assert stored_user is not None
@@ -116,6 +120,7 @@ def test_clerk_exchange_rejects_deactivated_user(
 def test_clerk_exchange_links_existing_user(
     db_app: Any, db_session_factory: Any, monkeypatch: Any
 ) -> None:
+    """Exchange for a registered email links the identity to that user."""
     monkeypatch.setenv("VELA_CLERK_PUBLISHABLE_KEY", TEST_CLERK_PUBLISHABLE_KEY)
     registered_user = _seed_user(
         db_session_factory,

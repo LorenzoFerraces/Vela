@@ -13,6 +13,7 @@ def _register(
     role: str = "student",
     password: str = "password-min-8-chars",
 ) -> str:
+    """Register a user through the shared fixture and return their token."""
     return register_user_client(email, role=role, password=password)
 
 
@@ -23,6 +24,7 @@ def _auth_headers(token: str) -> dict[str, str]:
 def test_create_shared_project(
     db_app: Any, register_user_client: Any
 ) -> None:
+    """Creating a shared project returns it as non-personal with owner role."""
     with TestClient(db_app) as client:
         token = _register(register_user_client, "creator@example.com")
         client.headers.update(_auth_headers(token))
@@ -45,6 +47,7 @@ def test_create_shared_project(
 
 def test_member_can_leave_shared_project(
     db_app: Any, register_user_client: Any) -> None:
+    """An accepted member can leave a shared project and loses access."""
     with TestClient(db_app) as owner_client, TestClient(db_app) as member_client:
         owner_token = _register(
             register_user_client, "leave-owner@example.com", role="instructor"
@@ -86,6 +89,7 @@ def test_member_can_leave_shared_project(
 
 def test_register_creates_personal_project(
     db_app: Any, register_user_client: Any) -> None:
+    """Registration seeds exactly one personal project owned by the user."""
     with TestClient(db_app) as client:
         token = _register(register_user_client, "solo@example.com")
         response = client.get("/api/projects/", headers=_auth_headers(token))
@@ -98,6 +102,7 @@ def test_register_creates_personal_project(
 
 def test_invite_requires_accept_before_membership(
     db_app: Any, register_user_client: Any) -> None:
+    """An invitee only becomes a member after accepting the invitation."""
     with TestClient(db_app) as owner_client, TestClient(db_app) as invitee_client:
         owner_token = _register(
             register_user_client, "owner@example.com", role="instructor"
@@ -141,6 +146,7 @@ def test_invite_requires_accept_before_membership(
 
 def test_reject_invitation_does_not_add_member(
     db_app: Any, register_user_client: Any) -> None:
+    """Rejecting an invitation does not add the invitee as a member."""
     with TestClient(db_app) as owner_client, TestClient(db_app) as invitee_client:
         owner_token = _register(
             register_user_client, "reject-owner@example.com", role="instructor"
@@ -167,6 +173,7 @@ def test_reject_invitation_does_not_add_member(
 
 def test_student_cannot_invite(
     db_app: Any, register_user_client: Any) -> None:
+    """A non-member (student) gets 403 when inviting into a foreign project."""
     with (
         TestClient(db_app) as owner_client,
         TestClient(db_app) as invitee_client,
@@ -199,6 +206,7 @@ def test_student_cannot_invite(
 
 def test_unknown_email_returns_400(
     db_app: Any, register_user_client: Any) -> None:
+    """Inviting an unknown email address returns 400."""
     with TestClient(db_app) as client:
         token = _register(
             register_user_client, "unknown-owner@example.com", role="instructor"
@@ -215,6 +223,7 @@ def test_unknown_email_returns_400(
 
 def test_cancelled_invite_cannot_be_accepted(
     db_app: Any, register_user_client: Any) -> None:
+    """Accepting a cancelled invitation returns 409."""
     with TestClient(db_app) as owner_client, TestClient(db_app) as invitee_client:
         owner_token = _register(
             register_user_client, "cancel-owner@example.com", role="instructor"

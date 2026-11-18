@@ -55,6 +55,7 @@ def parse_manifest(
 
 
 def _is_k8s_document(document: object) -> bool:
+    """True when the document carries string apiVersion and kind fields."""
     return (
         isinstance(document, dict)
         and isinstance(document.get("apiVersion"), str)

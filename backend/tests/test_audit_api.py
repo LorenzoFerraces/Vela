@@ -18,12 +18,14 @@ async def _emit(
     target_type: str,
     target_id: str = "cid-1",
 ) -> None:
+    """Write one audit log entry for the test user and commit it."""
     async with factory() as session:
         await emit_audit_log(session, TEST_USER_ID, action, target_type, target_id)
         await session.commit()
 
 
 def test_get_audit_log_returns_200(api_client: TestClient) -> None:
+    """GET /api/audit/log responds with entries list and total."""
     response = api_client.get("/api/audit/log")
     assert response.status_code == 200
     data = response.json()
@@ -33,6 +35,7 @@ def test_get_audit_log_returns_200(api_client: TestClient) -> None:
 
 
 def test_get_audit_log_requires_auth(anonymous_client: TestClient) -> None:
+    """Anonymous requests to the audit log get 401."""
     response = anonymous_client.get("/api/audit/log")
     assert response.status_code == 401
 
@@ -41,7 +44,10 @@ def test_get_audit_log_filter_by_action(
     api_client: TestClient,
     db_session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
+    """The action query param filters entries to matching actions only."""
+
     async def run() -> None:
+        """Emit three entries, two with container.deploy."""
         await _emit(db_session_factory, "container.deploy", "container", "cid-1")
         await _emit(db_session_factory, "container.start", "container", "cid-2")
         await _emit(db_session_factory, "container.deploy", "container", "cid-3")
@@ -59,7 +65,10 @@ def test_get_audit_log_filter_by_target_type(
     api_client: TestClient,
     db_session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
+    """The target_type query param filters entries to that target kind."""
+
     async def run() -> None:
+        """Emit one container and one user entry."""
         await _emit(db_session_factory, "container.deploy", "container", "cid-1")
         await _emit(db_session_factory, "user.login", "user", str(TEST_USER_ID))
 
@@ -76,7 +85,10 @@ def test_get_audit_log_pagination(
     api_client: TestClient,
     db_session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
+    """limit/offset page through entries while total stays the full count."""
+
     async def run() -> None:
+        """Emit five distinct audit entries."""
         for i in range(5):
             await _emit(db_session_factory, f"action.{i}", "container", f"cid-{i}")
 

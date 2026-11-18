@@ -43,6 +43,7 @@ router = APIRouter()
 
 
 def _metric_point(row: ContainerMetric) -> MetricPoint:
+    """Convert a stored ContainerMetric row into the API's MetricPoint."""
     return MetricPoint(
         timestamp=row.timestamp,
         cpu_percent=row.cpu_percent,
@@ -55,6 +56,7 @@ def _metric_point(row: ContainerMetric) -> MetricPoint:
 
 
 def _aware(ts: datetime) -> datetime:
+    """Return the timestamp in UTC, stamping tzinfo onto naive SQLite reads."""
     # SQLite reads back naive UTC; Postgres returns aware datetimes.
     return ts if ts.tzinfo is not None else ts.replace(tzinfo=timezone.utc)
 
@@ -62,6 +64,7 @@ def _aware(ts: datetime) -> datetime:
 async def _rows_since(
     session: AsyncSession, container_id: str, hours: int
 ) -> list[ContainerMetric]:
+    """Return the container's metric rows from the last ``hours`` hours, oldest first."""
     since = datetime.now(timezone.utc) - timedelta(hours=hours)
     stmt = (
         select(ContainerMetric)

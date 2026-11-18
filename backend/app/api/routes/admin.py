@@ -26,6 +26,7 @@ router = APIRouter()
 
 
 def _to_public(user: User) -> AdminUserPublic:
+    """Convert a User row into the AdminUserPublic response schema."""
     return AdminUserPublic(
         id=user.id,
         email=user.email,
@@ -46,6 +47,7 @@ async def list_users(
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> AdminUserListResponse:
+    """List users with search, role, and active-status filters (admin only)."""
     users, total = await admin_service.list_users(
         session,
         query=query,
@@ -66,6 +68,7 @@ async def global_audit(
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> AuditLogListResponse:
+    """Return a paginated audit log across all users (admin only)."""
     result = await list_audit_logs(
         session,
         user_id=None,
@@ -90,6 +93,7 @@ async def create_user(
     session: Annotated[AsyncSession, Depends(get_db)],
     actor: Annotated[User, Depends(require_instructor)],
 ) -> AdminUserPublic:
+    """Create a user with the requested email, password, and role."""
     user = await admin_service.create_user(
         session,
         email=body.email,
@@ -108,6 +112,7 @@ async def patch_user(
     session: Annotated[AsyncSession, Depends(get_db)],
     actor: Annotated[User, Depends(require_admin)],
 ) -> AdminUserPublic:
+    """Update a user's role or active status; raise 404 if the user is unknown."""
     try:
         user = await admin_service.update_user(
             session,

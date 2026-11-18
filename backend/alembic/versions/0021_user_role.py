@@ -20,6 +20,7 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
+    """Add users.role (default student) and users.is_active (default true)."""
     op.add_column(
         "users",
         sa.Column("role", sa.String(length=20), nullable=False, server_default="student"),
@@ -31,5 +32,6 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    """Drop the users.is_active and users.role columns."""
     op.drop_column("users", "is_active")
     op.drop_column("users", "role")

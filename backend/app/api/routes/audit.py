@@ -27,6 +27,7 @@ async def get_audit_log(
     limit: Annotated[int, Query(ge=1, le=200, description="Max entries to return")] = 50,
     offset: Annotated[int, Query(ge=0, description="Offset for pagination")] = 0,
 ) -> AuditLogListResponse:
+    """Return the current user's audit entries with filters and pagination."""
     result = await list_audit_logs(
         session,
         user_id=current_user.id,

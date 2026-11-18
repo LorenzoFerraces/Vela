@@ -20,6 +20,7 @@ from app.db.models import ContainerMetric
 logger = logging.getLogger(__name__)
 
 def _positive_int_setting(setting_name: str, default_value: str) -> int:
+    """Read an env setting as a positive int, raising ValueError otherwise."""
     raw_value = os.environ.get(setting_name)
     if raw_value is None:
         return int(default_value)

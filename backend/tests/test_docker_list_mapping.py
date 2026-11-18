@@ -13,6 +13,7 @@ from app.core.containers.docker_orchestrator import (
 
 
 def test_inspect_to_container_info_maps_list_payload() -> None:
+    """A list payload maps to ContainerInfo with ports and created time."""
     created_unix = 1735689600  # 2025-01-01T00:00:00Z
     data = {
         "Id": "abc123def456",
@@ -44,6 +45,7 @@ def test_inspect_to_container_info_maps_list_payload() -> None:
 
 
 def test_inspect_to_container_info_maps_inspect_payload() -> None:
+    """An inspect payload maps image, labels, ports and mounts correctly."""
     data = {
         "Id": "abc123def456",
         "Name": "/vela-web",
@@ -82,6 +84,7 @@ def test_inspect_to_container_info_maps_inspect_payload() -> None:
 
 
 def test_ports_from_list_skips_unbound_entries() -> None:
+    """Port entries without a public binding are skipped."""
     data = {
         "Ports": [
             {"IP": "0.0.0.0", "PrivatePort": 3000, "PublicPort": 3000, "Type": "tcp"},
@@ -96,5 +99,6 @@ def test_ports_from_list_skips_unbound_entries() -> None:
 
 
 def test_ports_from_list_empty() -> None:
+    """Missing or empty port data maps to an empty list."""
     assert _ports_from_list({}) == []
     assert _ports_from_list({"Ports": []}) == []
