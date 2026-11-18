@@ -198,12 +198,14 @@ async def get_jwt_authenticated_user(
 
 
 async def require_instructor(user: Annotated[User, Depends(get_current_user)]) -> User:
+    """Return the user if instructor or admin; raise PermissionDeniedError otherwise."""
     if user.role not in (UserRole.ADMIN, UserRole.INSTRUCTOR):
         raise PermissionDeniedError("Instructor or admin access required.")
     return user
 
 
 async def require_admin(user: Annotated[User, Depends(get_current_user)]) -> User:
+    """Return the user if admin; raise PermissionDeniedError otherwise."""
     if user.role != UserRole.ADMIN:
         raise PermissionDeniedError("Admin access required.")
     return user

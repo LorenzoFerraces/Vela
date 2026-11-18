@@ -58,6 +58,7 @@ async def test_scale_up_copies_base_container_volumes() -> None:
 
 
 def test_scaling_policy_min_equal_to_max_is_accepted() -> None:
+    """min_instances equal to max_instances is a valid policy."""
     policy = ScalingPolicy(
         user_id="u1", target_cpu_min=70.0, max_instances=3, min_instances=3
     )
@@ -65,6 +66,7 @@ def test_scaling_policy_min_equal_to_max_is_accepted() -> None:
 
 
 def test_scaling_policy_min_greater_than_max_raises() -> None:
+    """min_instances above max_instances fails validation."""
     with pytest.raises(ValidationError):
         ScalingPolicy(
             user_id="u1", target_cpu_min=70.0, max_instances=2, min_instances=3
@@ -72,6 +74,7 @@ def test_scaling_policy_min_greater_than_max_raises() -> None:
 
 
 def test_scaling_policy_min_instances_zero_raises() -> None:
+    """min_instances of zero fails validation."""
     with pytest.raises(ValidationError):
         ScalingPolicy(
             user_id="u1", target_cpu_min=70.0, max_instances=2, min_instances=0

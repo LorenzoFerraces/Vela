@@ -26,6 +26,7 @@ class RestartPolicy(StrEnum):
 
 
 class EscalationPolicy(StrEnum):
+    """Escalation behavior on repeated failures; currently only NONE."""
     NONE = "none"
 
 

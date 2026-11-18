@@ -35,6 +35,7 @@ def _create_stack(client: TestClient, *, name: str, project_id: str | None = Non
 def test_viewer_cannot_create_or_deploy_stack(
     integration_app: Any, register_user_client: Any
 ) -> None:
+    """Viewers get 403 when creating or deploying stacks in a shared project."""
     with TestClient(integration_app) as owner_client, TestClient(integration_app) as viewer_client:
         _, project_id, _ = _register(
             register_user_client,

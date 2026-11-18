@@ -129,6 +129,7 @@ async def test_verify_clerk_token_success_with_real_key(monkeypatch: Any) -> Non
 async def test_verify_clerk_token_missing_email_without_secret_key_raises(
     monkeypatch: Any,
 ) -> None:
+    """A token without an email claim and no secret key raises a config error."""
     monkeypatch.setenv("VELA_CLERK_PUBLISHABLE_KEY", TEST_CLERK_PUBLISHABLE_KEY)
     monkeypatch.delenv("VELA_CLERK_SECRET_KEY", raising=False)
     kid, private_key = _make_rsa_kid()
@@ -146,6 +147,7 @@ async def test_verify_clerk_token_missing_email_without_secret_key_raises(
 
 @pytest.mark.asyncio
 async def test_verify_clerk_token_email_fetched_from_clerk_api(monkeypatch: Any) -> None:
+    """A missing email claim is fetched from the Clerk API, preferring the verified address."""
     monkeypatch.setenv("VELA_CLERK_PUBLISHABLE_KEY", TEST_CLERK_PUBLISHABLE_KEY)
     monkeypatch.setenv("VELA_CLERK_SECRET_KEY", "sk_test_secret")
     kid, private_key = _make_rsa_kid()
@@ -156,6 +158,7 @@ async def test_verify_clerk_token_email_fetched_from_clerk_api(monkeypatch: Any)
     captured: list[httpx.Request] = []
 
     def user_api_handler(request: httpx.Request) -> httpx.Response:
+        """Serve one user record with an unverified and a verified address."""
         captured.append(request)
         return httpx.Response(
             200,
@@ -178,12 +181,14 @@ async def test_verify_clerk_token_email_fetched_from_clerk_api(monkeypatch: Any)
     original_client = httpx.AsyncClient
 
     def patched_client(*args: Any, **kwargs: Any) -> httpx.AsyncClient:
+        """Build real httpx clients that use the mock transport."""
         kwargs["transport"] = transport
         return original_client(*args, **kwargs)
 
     monkeypatch.setattr(httpx, "AsyncClient", patched_client)
 
     async def fake_fetch() -> dict[str, object]:
+        """Serve the signing key as Clerk's JWKS."""
         return _jwks_for(kid, private_key)
 
     with patch.object(clerk_mod, "_fetch_jwks", new=fake_fetch):
@@ -319,6 +324,7 @@ async def test_verify_clerk_token_allowed_azp_accepted(monkeypatch: Any) -> None
 
 @pytest.mark.asyncio
 async def test_verify_clerk_token_without_aud_accepted(monkeypatch: Any) -> None:
+    """A token with no aud claim verifies successfully."""
     monkeypatch.setenv("VELA_CLERK_PUBLISHABLE_KEY", TEST_CLERK_PUBLISHABLE_KEY)
     kid, private_key = _make_rsa_kid()
     claims = _full_claims()
@@ -326,6 +332,7 @@ async def test_verify_clerk_token_without_aud_accepted(monkeypatch: Any) -> None
     token = pyjwt.encode(claims, private_key, algorithm="RS256", headers={"kid": kid})
 
     async def fake_fetch() -> dict[str, object]:
+        """Serve the signing key as Clerk's JWKS."""
         return _jwks_for(kid, private_key)
 
     with patch.object(clerk_mod, "_fetch_jwks", new=fake_fetch):
@@ -338,6 +345,7 @@ async def test_verify_clerk_token_without_aud_accepted(monkeypatch: Any) -> None
 async def test_verify_clerk_token_accepts_slightly_future_iat_within_leeway(
     monkeypatch: Any,
 ) -> None:
+    """iat/nbf 30 seconds in the future still verifies thanks to the leeway."""
     monkeypatch.setenv("VELA_CLERK_PUBLISHABLE_KEY", TEST_CLERK_PUBLISHABLE_KEY)
     kid, private_key = _make_rsa_kid()
     now = int(time.time())
@@ -347,6 +355,7 @@ async def test_verify_clerk_token_accepts_slightly_future_iat_within_leeway(
     token = pyjwt.encode(claims, private_key, algorithm="RS256", headers={"kid": kid})
 
     async def fake_fetch() -> dict[str, object]:
+        """Serve the signing key as Clerk's JWKS."""
         return _jwks_for(kid, private_key)
 
     with patch.object(clerk_mod, "_fetch_jwks", new=fake_fetch):
@@ -359,6 +368,7 @@ async def test_verify_clerk_token_accepts_slightly_future_iat_within_leeway(
 async def test_verify_clerk_token_azp_skipped_when_allowlist_empty(
     monkeypatch: Any,
 ) -> None:
+    """azp is not checked when VELA_ALLOWED_ORIGINS is unset."""
     monkeypatch.setenv("VELA_CLERK_PUBLISHABLE_KEY", TEST_CLERK_PUBLISHABLE_KEY)
     monkeypatch.delenv("VELA_ALLOWED_ORIGINS", raising=False)
     kid, private_key = _make_rsa_kid()
@@ -367,6 +377,7 @@ async def test_verify_clerk_token_azp_skipped_when_allowlist_empty(
     token = pyjwt.encode(claims, private_key, algorithm="RS256", headers={"kid": kid})
 
     async def fake_fetch() -> dict[str, object]:
+        """Serve the signing key as Clerk's JWKS."""
         return _jwks_for(kid, private_key)
 
     with patch.object(clerk_mod, "_fetch_jwks", new=fake_fetch):
@@ -377,6 +388,7 @@ async def test_verify_clerk_token_azp_skipped_when_allowlist_empty(
 
 @pytest.mark.asyncio
 async def test_verify_clerk_token_wrong_audience_raises(monkeypatch: Any) -> None:
+    """A string aud that is not the publishable key raises a token error."""
     monkeypatch.setenv("VELA_CLERK_PUBLISHABLE_KEY", TEST_CLERK_PUBLISHABLE_KEY)
     kid, private_key = _make_rsa_kid()
     claims = _full_claims()
@@ -384,6 +396,7 @@ async def test_verify_clerk_token_wrong_audience_raises(monkeypatch: Any) -> Non
     token = pyjwt.encode(claims, private_key, algorithm="RS256", headers={"kid": kid})
 
     async def fake_fetch() -> dict[str, object]:
+        """Serve the signing key as Clerk's JWKS."""
         return _jwks_for(kid, private_key)
 
     with patch.object(clerk_mod, "_fetch_jwks", new=fake_fetch):
@@ -393,6 +406,7 @@ async def test_verify_clerk_token_wrong_audience_raises(monkeypatch: Any) -> Non
 
 @pytest.mark.asyncio
 async def test_verify_clerk_token_aud_list_with_key_accepted(monkeypatch: Any) -> None:
+    """An aud list containing the publishable key verifies successfully."""
     monkeypatch.setenv("VELA_CLERK_PUBLISHABLE_KEY", TEST_CLERK_PUBLISHABLE_KEY)
     kid, private_key = _make_rsa_kid()
     claims = _full_claims()
@@ -400,6 +414,7 @@ async def test_verify_clerk_token_aud_list_with_key_accepted(monkeypatch: Any) -
     token = pyjwt.encode(claims, private_key, algorithm="RS256", headers={"kid": kid})
 
     async def fake_fetch() -> dict[str, object]:
+        """Serve the signing key as Clerk's JWKS."""
         return _jwks_for(kid, private_key)
 
     with patch.object(clerk_mod, "_fetch_jwks", new=fake_fetch):
@@ -410,6 +425,7 @@ async def test_verify_clerk_token_aud_list_with_key_accepted(monkeypatch: Any) -
 
 @pytest.mark.asyncio
 async def test_verify_clerk_token_aud_list_missing_key_raises(monkeypatch: Any) -> None:
+    """An aud list without the publishable key raises a token error."""
     monkeypatch.setenv("VELA_CLERK_PUBLISHABLE_KEY", TEST_CLERK_PUBLISHABLE_KEY)
     kid, private_key = _make_rsa_kid()
     claims = _full_claims()
@@ -417,6 +433,7 @@ async def test_verify_clerk_token_aud_list_missing_key_raises(monkeypatch: Any) 
     token = pyjwt.encode(claims, private_key, algorithm="RS256", headers={"kid": kid})
 
     async def fake_fetch() -> dict[str, object]:
+        """Serve the signing key as Clerk's JWKS."""
         return _jwks_for(kid, private_key)
 
     with patch.object(clerk_mod, "_fetch_jwks", new=fake_fetch):
@@ -426,15 +443,18 @@ async def test_verify_clerk_token_aud_list_missing_key_raises(monkeypatch: Any) 
 
 @pytest.mark.asyncio
 async def test_fetch_clerk_email_404_raises_token_error(monkeypatch: Any) -> None:
+    """A 404 from the Clerk user API raises a ClerkTokenError."""
     monkeypatch.setenv("VELA_CLERK_SECRET_KEY", "sk_test_secret")
 
     def user_api_handler(request: httpx.Request) -> httpx.Response:
+        """Answer the user lookup with 404 not found."""
         return httpx.Response(404, json={"message": "User not found"})
 
     transport = httpx.MockTransport(user_api_handler)
     original_client = httpx.AsyncClient
 
     def patched_client(*args: Any, **kwargs: Any) -> httpx.AsyncClient:
+        """Build real httpx clients that use the mock transport."""
         kwargs["transport"] = transport
         return original_client(*args, **kwargs)
 
@@ -452,6 +472,7 @@ async def test_fetch_clerk_email_404_raises_token_error(monkeypatch: Any) -> Non
     ],
 )
 def test_malformed_publishable_key_raises_config_error(bad_key: str) -> None:
+    """A publishable key whose base64 payload cannot be decoded raises a config error."""
     with pytest.raises(
         IntegrationConfigurationError,
         match="VELA_CLERK_PUBLISHABLE_KEY is malformed",

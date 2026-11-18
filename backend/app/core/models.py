@@ -164,6 +164,7 @@ class DeployConfig(BaseModel):
     @field_validator("cpu_limit")
     @classmethod
     def cpu_limit_must_be_finite(cls, value: float | None) -> float | None:
+        """Reject a cpu_limit that is not a finite number."""
         return validate_finite_number(value)
 
 

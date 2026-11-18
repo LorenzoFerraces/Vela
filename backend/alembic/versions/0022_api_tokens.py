@@ -17,6 +17,7 @@ depends_on: str | None = None
 
 
 def upgrade() -> None:
+    """Create the api_tokens table with user, prefix, and hash indexes."""
     op.create_table(
         "api_tokens",
         sa.Column("id", sa.Uuid(), nullable=False),
@@ -36,6 +37,7 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    """Drop the api_tokens indexes and table."""
     op.drop_index("ix_api_tokens_token_hash", table_name="api_tokens")
     op.drop_index("ix_api_tokens_token_prefix", table_name="api_tokens")
     op.drop_index("ix_api_tokens_user_id", table_name="api_tokens")

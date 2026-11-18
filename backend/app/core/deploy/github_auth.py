@@ -35,6 +35,7 @@ async def github_token_for_url(
 
 
 def looks_like_auth_failure(error_message: str) -> bool:
+    """Heuristically decide a git error message is an auth failure."""
     lowered = error_message.lower()
     auth_markers = (
         "authentication failed",

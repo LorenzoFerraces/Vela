@@ -76,6 +76,7 @@ LLM_PAYLOAD = {
 
 
 def test_root_docker_compose_wins(tmp_path: Path) -> None:
+    """docker-compose.yml at the repo root beats compose.yaml."""
     (tmp_path / "compose.yaml").write_text(COMPOSE_FILE, encoding="utf-8")
     (tmp_path / "docker-compose.yml").write_text(COMPOSE_FILE, encoding="utf-8")
     path, kind = detect_manifest_file(tmp_path) or (None, None)
@@ -84,6 +85,7 @@ def test_root_docker_compose_wins(tmp_path: Path) -> None:
 
 
 def test_top_level_compose_is_found(tmp_path: Path) -> None:
+    """A compose file in a top-level subdirectory is detected."""
     directory = tmp_path / "deploy"
     directory.mkdir()
     (directory / "compose.yml").write_text(COMPOSE_FILE, encoding="utf-8")
@@ -92,6 +94,7 @@ def test_top_level_compose_is_found(tmp_path: Path) -> None:
 
 
 def test_preferred_k8s_directory_wins(tmp_path: Path) -> None:
+    """Manifests in the k8s/ directory beat loose yaml files."""
     (tmp_path / "random.yaml").write_text(K8S_FILE, encoding="utf-8")
     directory = tmp_path / "k8s"
     directory.mkdir()
@@ -100,6 +103,7 @@ def test_preferred_k8s_directory_wins(tmp_path: Path) -> None:
 
 
 def test_non_manifest_yaml_and_ignored_directories_are_skipped(tmp_path: Path) -> None:
+    """Plain yaml files and ignored directories yield no manifest."""
     ignored = tmp_path / "node_modules"
     ignored.mkdir()
     (ignored / "compose.yml").write_text(COMPOSE_FILE, encoding="utf-8")
@@ -108,6 +112,7 @@ def test_non_manifest_yaml_and_ignored_directories_are_skipped(tmp_path: Path) -
 
 
 def test_compose_wins_over_k8s(tmp_path: Path) -> None:
+    """Compose manifests take priority over k8s manifests."""
     (tmp_path / "docker-compose.yml").write_text(COMPOSE_FILE, encoding="utf-8")
     (tmp_path / "k8s.yaml").write_text(K8S_FILE, encoding="utf-8")
     result = detect_manifest_file(tmp_path)
@@ -116,6 +121,7 @@ def test_compose_wins_over_k8s(tmp_path: Path) -> None:
 
 
 def test_payload_to_services_git_service_uses_repo_url() -> None:
+    """Git-kind services get the repo URL and branch as their source."""
     warnings: list[str] = []
     services = _payload_to_services(
         LLM_PAYLOAD,
@@ -140,6 +146,7 @@ def test_payload_to_services_git_service_uses_repo_url() -> None:
 
 
 def test_payload_to_services_skips_invalid_source_kind() -> None:
+    """Services with an unknown source_kind are dropped with a warning."""
     warnings: list[str] = []
     payload = {
         "services": [
@@ -164,6 +171,7 @@ def test_payload_to_services_skips_invalid_source_kind() -> None:
 
 
 def test_payload_to_services_invalid_port_becomes_80() -> None:
+    """An out-of-range container port falls back to 80."""
     payload = {
         "services": [
             {
@@ -184,6 +192,7 @@ def test_payload_to_services_invalid_port_becomes_80() -> None:
 
 
 def test_payload_to_services_empty_result_raises() -> None:
+    """Raise LlmCallError when no valid services remain."""
     with pytest.raises(LlmCallError):
         _payload_to_services(
             {"services": []},
@@ -194,7 +203,10 @@ def test_payload_to_services_empty_result_raises() -> None:
 
 
 class StubImageBuilder(DefaultImageBuilder):
+    """Image builder stub whose clone returns a prepared local directory."""
+
     def __init__(self, root: Path) -> None:
+        """Store the local directory to hand out as the clone result."""
         self._root = root
 
     async def clone_repository(
@@ -204,6 +216,7 @@ class StubImageBuilder(DefaultImageBuilder):
         branch: str = "main",
         access_token: str | None = None,
     ) -> str:
+        """Ignore the URL and return the stub root path."""
         _ = git_url, branch, access_token
         return str(self._root)
 
@@ -212,6 +225,7 @@ def _post_analyze_repo(
     api_client: TestClient,
     stub_root: Path,
 ) -> httpx.Response:
+    """POST /api/stacks/analyze-repo with the stub builder overriding clone."""
     fastapi_app = cast(FastAPI, api_client.app)
     fastapi_app.dependency_overrides[get_image_builder] = lambda: StubImageBuilder(
         stub_root
@@ -226,6 +240,7 @@ def _post_analyze_repo(
 
 
 def test_analyze_repo_e2e_fixture(api_client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    """In E2E mode analyze-repo returns the canned web/redis fixture."""
     monkeypatch.setenv("VELA_E2E", "1")
     response = api_client.post(
         "/api/stacks/analyze-repo",
@@ -241,6 +256,7 @@ def test_analyze_repo_no_manifest_without_llm_returns_503(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Without a manifest and without LLM keys the endpoint returns 503."""
     root = tmp_path / "repo"
     root.mkdir()
     (root / "README.md").write_text("No deployment markers.\n", encoding="utf-8")
@@ -258,6 +274,7 @@ def test_analyze_repo_compose_manifest(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """A compose repo returns parsed services with image refs and ports."""
     root = tmp_path / "repo"
     root.mkdir()
     (root / "docker-compose.yml").write_text(COMPOSE_FILE, encoding="utf-8")
@@ -280,6 +297,7 @@ def test_analyze_repo_compose_enriches_app_env_from_env_example(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """App service env vars are merged from .env.example alongside compose."""
     root = tmp_path / "repo"
     root.mkdir()
     (root / ".env.example").write_text(
@@ -329,6 +347,7 @@ def test_compose_manifest_path_skips_head_commit(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """A detected compose manifest short-circuits before any git commit lookup."""
     root = tmp_path / "repo"
     root.mkdir()
     (root / "docker-compose.yml").write_text(COMPOSE_FILE, encoding="utf-8")
@@ -353,6 +372,7 @@ def test_generate_services_prompt_contains_detected_facts(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """The LLM prompt includes the detected-facts block with README vars."""
     root = tmp_path / "repo"
     root.mkdir()
     (root / "README.md").write_text(
@@ -367,6 +387,7 @@ def test_generate_services_prompt_contains_detected_facts(
     async def fake_generate_json(
         *, prompt: str, schema: dict, config: LlmConfig | None = None
     ) -> dict:
+        """Capture the prompt and return the canned payload."""
         captured["prompt"] = prompt
         return LLM_PAYLOAD
 
@@ -391,6 +412,7 @@ def test_generate_services_prompt_redacts_git_url_credentials(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Tokens in the git URL never reach the LLM prompt."""
     root = tmp_path / "repo"
     root.mkdir()
     (root / "README.md").write_text("No markers.\n", encoding="utf-8")
@@ -400,6 +422,7 @@ def test_generate_services_prompt_redacts_git_url_credentials(
     async def fake_generate_json(
         *, prompt: str, schema: dict, config: LlmConfig | None = None
     ) -> dict:
+        """Capture the prompt and return the canned payload."""
         captured["prompt"] = prompt
         return LLM_PAYLOAD
 
@@ -422,6 +445,7 @@ def test_generate_services_prompt_redacts_git_url_credentials(
 
 
 def test_payload_to_services_drops_invalid_env_and_command_entries() -> None:
+    """Invalid env keys/values and command items are filtered out silently."""
     warnings: list[str] = []
     payload = {
         "services": [
@@ -455,6 +479,7 @@ def test_payload_to_services_drops_invalid_env_and_command_entries() -> None:
 
 
 def test_payload_to_services_all_invalid_command_becomes_none() -> None:
+    """A command where every entry is invalid becomes None with a warning."""
     warnings: list[str] = []
     payload = {
         "services": [
@@ -487,6 +512,7 @@ def test_analyze_repo_k8s_manifest(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """A k8s repo returns the deployment container as a parsed service."""
     root = tmp_path / "repo"
     directory = root / "k8s"
     directory.mkdir(parents=True)
@@ -504,6 +530,7 @@ def test_analyze_repo_k8s_manifest(
 
 
 def test_orm_service_to_create_marks_detected() -> None:
+    """Services named in detected_names are flagged detected on conversion."""
     from app.api.routes.stacks import _orm_service_to_create
     from app.db.models import StackService
 

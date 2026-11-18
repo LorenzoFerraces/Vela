@@ -463,6 +463,8 @@ class AlertHistory(Base):
 
 
 class AuditLog(Base):
+    """Persisted record of a user action on a target resource."""
+
     __tablename__ = "audit_log"
 
     id: Mapped[uuid.UUID] = mapped_column(
@@ -488,11 +490,15 @@ class AuditLog(Base):
 
 
 class LogSource(str, enum.Enum):
+    """Stream a captured container log line came from."""
+
     STDOUT = "stdout"
     STDERR = "stderr"
 
 
 class LogLevel(str, enum.Enum):
+    """Severity level of a stored container log line."""
+
     INFO = "info"
     WARN = "warn"
     ERROR = "error"
@@ -500,6 +506,8 @@ class LogLevel(str, enum.Enum):
 
 
 class ContainerLog(Base):
+    """One stored container log line with inferred level and source stream."""
+
     __tablename__ = "container_logs"
 
     id: Mapped[uuid.UUID] = mapped_column(
@@ -631,6 +639,8 @@ class StackComposition(Base):
 
 
 class ContainerMetric(Base):
+    """One CPU/memory/network stats sample for a container."""
+
     __tablename__ = "container_metrics"
     __table_args__ = (
         sa.Index("ix_container_metrics_container_timestamp", "container_id", "timestamp"),

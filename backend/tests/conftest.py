@@ -200,16 +200,20 @@ def db_session_factory() -> Iterator[async_sessionmaker[AsyncSession]]:
 def provision_user(
     db_session_factory: async_sessionmaker[AsyncSession],
 ):
+    """Fixture returning a helper that persists a user and returns (user, token)."""
+
     def _provision(
         email: str,
         *,
         role: str = "student",
         password: str | None = "password-min-8-chars",
     ) -> tuple[User, str]:
+        """Create the user, ensure their workspace, and return them with a token."""
         from app.core.auth.enums import UserRole
         from app.core.projects.bootstrap import ensure_personal_workspace
 
         async def run() -> tuple[User, str]:
+            """Persist the user in the test database and build their access token."""
             async with db_session_factory() as session:
                 user = User(
                     email=email,
@@ -229,11 +233,14 @@ def provision_user(
 
 @pytest.fixture
 def register_user_client(provision_user: Any):
+    """Fixture returning a helper that provisions a user and returns their token."""
+
     def _register(
         email: str,
         role: str = "instructor",
         password: str = "password-min-8-chars",
     ) -> str:
+        """Provision a user and return just the access token."""
         _, token = provision_user(email, role=role, password=password)
         return token
 

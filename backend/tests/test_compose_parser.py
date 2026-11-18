@@ -20,6 +20,7 @@ def test_resolve_compose_interpolation_defaults() -> None:
 
 
 def test_resolve_compose_interpolation_uses_host_env() -> None:
+    """${VAR} and $VAR forms resolve from the supplied host environment dict."""
     host_env = {"POSTGRES_DB": "epersgeist", "HOST": "postgres"}
     assert resolve_compose_interpolation("${POSTGRES_DB}", host_env) == "epersgeist"
     assert resolve_compose_interpolation("prefix-$HOST-suffix", host_env) == "prefix-postgres-suffix"
@@ -156,6 +157,7 @@ services:
 
 
 def test_parse_compose_env_file_merges_dotenv(tmp_path: Path) -> None:
+    """env_file entries are merged into each service's env_vars alongside inline ones."""
     (tmp_path / ".env").write_text(
         "SPRING_PROFILES_ACTIVE=dev\nNEO4J_URI=bolt://neo4j:7687\n",
         encoding="utf-8",

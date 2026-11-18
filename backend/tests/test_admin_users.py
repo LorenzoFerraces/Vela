@@ -13,13 +13,17 @@ from app.db.models import User
 
 
 def _auth(token: str) -> dict[str, str]:
+    """Build an Authorization header for the given token."""
     return {"Authorization": f"Bearer {token}"}
 
 
 def _stored_user(
     factory: async_sessionmaker[AsyncSession], user_id: uuid.UUID
 ) -> User:
+    """Reload the user from the database by id."""
+
     async def run() -> User:
+        """Fetch the stored user row and assert it exists."""
         async with factory() as session:
             user = await session.get(User, user_id)
             assert user is not None
@@ -31,6 +35,7 @@ def _stored_user(
 def test_student_cannot_list_users(
     db_app: Any, provision_user: Any
 ) -> None:
+    """Students get 403 from GET /api/admin/users."""
     _, token = provision_user("stu-admin-api@example.com", role="student")
 
     with TestClient(db_app) as client:
@@ -43,6 +48,7 @@ def test_student_cannot_list_users(
 def test_instructor_cannot_list_users(
     db_app: Any, provision_user: Any
 ) -> None:
+    """Instructors get 403 from GET /api/admin/users."""
     _, token = provision_user("inst@example.com", role="instructor")
 
     with TestClient(db_app) as client:
@@ -53,6 +59,7 @@ def test_instructor_cannot_list_users(
 
 
 def test_admin_lists_users(db_app: Any, provision_user: Any) -> None:
+    """Admins list all users with roles and a correct total."""
     _, admin_token = provision_user("boss@example.com", role="admin")
     provision_user("kid@example.com", role="student")
     provision_user("teacher@example.com", role="instructor")
@@ -78,6 +85,7 @@ def test_admin_lists_users(db_app: Any, provision_user: Any) -> None:
 def test_admin_filters_and_paginates_users(
     db_app: Any, provision_user: Any
 ) -> None:
+    """User listing honors query search, role/active filters and limit/offset."""
     _, admin_token = provision_user("filter-admin@example.com", role="admin")
     provision_user("alpha@example.com", role="student")
     provision_user("beta@example.com", role="student")
@@ -106,6 +114,7 @@ def test_admin_filters_and_paginates_users(
 def test_student_cannot_create_users(
     db_app: Any, provision_user: Any
 ) -> None:
+    """Students get 403 when posting to /api/admin/users."""
     _, token = provision_user("stu-create@example.com", role="student")
 
     with TestClient(db_app) as client:
@@ -128,6 +137,7 @@ def test_instructor_creates_student_and_instructor(
     db_session_factory: async_sessionmaker[AsyncSession],
     provision_user: Any,
 ) -> None:
+    """Instructors may create students/instructors but not admins."""
     _, token = provision_user("teach@example.com", role="instructor")
 
     with TestClient(db_app) as client:
@@ -178,6 +188,7 @@ def test_admin_creates_admin_and_deactivates(
     db_session_factory: async_sessionmaker[AsyncSession],
     provision_user: Any,
 ) -> None:
+    """Admins create admins and can deactivate users via PATCH."""
     _, admin_token = provision_user("root2@example.com", role="admin")
 
     with TestClient(db_app) as client:
@@ -211,6 +222,7 @@ def test_admin_cannot_revoke_own_admin_access(
     db_session_factory: async_sessionmaker[AsyncSession],
     provision_user: Any,
 ) -> None:
+    """Admins cannot demote or deactivate themselves; no-op patches succeed."""
     admin, admin_token = provision_user("self-revoke@example.com", role="admin")
 
     with TestClient(db_app) as client:
@@ -241,6 +253,7 @@ def test_admin_cannot_revoke_own_admin_access(
 def test_admin_search_matches_wildcards_literally(
     db_app: Any, provision_user: Any
 ) -> None:
+    """Search queries treat % and _ as literal characters, not wildcards."""
     _, admin_token = provision_user("wildboss@example.com", role="admin")
     provision_user("pct%_name@example.com", role="student")
     provision_user("plain@example.com", role="student")
@@ -277,6 +290,7 @@ def test_instructor_cannot_patch_users(
     db_session_factory: async_sessionmaker[AsyncSession],
     provision_user: Any,
 ) -> None:
+    """Instructors get 403 patching roles or status; stored user is unchanged."""
     _, instructor_token = provision_user("inst2@example.com", role="instructor")
     victim, _ = provision_user("victim@example.com", role="student")
 
@@ -303,6 +317,7 @@ def test_instructor_cannot_patch_users(
 def test_admin_patch_returns_404_for_missing_user(
     db_app: Any, provision_user: Any
 ) -> None:
+    """Patching a nonexistent user id returns 404."""
     _, admin_token = provision_user("missing-admin@example.com", role="admin")
 
     with TestClient(db_app) as client:
@@ -319,6 +334,7 @@ def test_admin_patch_returns_404_for_missing_user(
 def test_duplicate_user_email_returns_conflict(
     db_app: Any, provision_user: Any
 ) -> None:
+    """Duplicate emails (normalized) are rejected with 409."""
     _, admin_token = provision_user("duplicate-admin@example.com", role="admin")
     payload = {
         "email": "duplicate@example.com",
@@ -347,6 +363,7 @@ def test_duplicate_user_email_returns_conflict(
 
 
 def test_global_audit_admin_only(db_app: Any, provision_user: Any) -> None:
+    """GET /api/admin/audit is admin-only; instructors get 403."""
     _, admin_token = provision_user("audit-admin@example.com", role="admin")
     _, inst_token = provision_user("audit-inst@example.com", role="instructor")
 

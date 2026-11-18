@@ -15,6 +15,7 @@ async def generate_json(
     schema: dict,
     config: LlmConfig | None = None,
 ) -> dict:
+    """Generate JSON via the resolved provider, wrapping user-config errors."""
     resolved = config if config is not None else resolve_llm_config()
     if resolved is None:
         raise LlmNotConfiguredError("AI analysis is not configured on this server.")

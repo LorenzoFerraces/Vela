@@ -16,6 +16,7 @@ from app.db.models import User
 
 
 def _like_pattern(text: str) -> str:
+    """Escape LIKE wildcards and wrap the text in a contains pattern."""
     escaped = text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
     return f"%{escaped}%"
 
@@ -29,6 +30,7 @@ async def list_users(
     limit: int = 50,
     offset: int = 0,
 ) -> tuple[list[User], int]:
+    """Return a filtered page of users with the total match count."""
     conditions = []
     if query:
         pattern = _like_pattern(query.strip().lower())
@@ -67,6 +69,7 @@ async def create_user(
     role: UserRole,
     actor: User,
 ) -> User:
+    """Persist a new user with hashed password and personal workspace."""
     if role == UserRole.ADMIN and actor.role != UserRole.ADMIN:
         raise PermissionDeniedError("Only admins can create admin accounts.")
 
@@ -106,6 +109,7 @@ async def update_user(
     is_active: bool | None,
     actor: User,
 ) -> User:
+    """Apply admin-driven role/active changes to a user."""
     if actor.role != UserRole.ADMIN:
         raise PermissionDeniedError("Admin access required.")
 

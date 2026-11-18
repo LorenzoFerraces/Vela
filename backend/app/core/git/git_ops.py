@@ -97,6 +97,7 @@ def _sanitize_message(message: str) -> str:
 
 
 def head_commit(root: Path) -> str | None:
+    """Return the repo's HEAD commit SHA, or None when unavailable."""
     try:
         proc = subprocess.run(
             ["git", "-C", str(root), "rev-parse", "HEAD"],

@@ -48,15 +48,19 @@ VALID_PAYLOAD = {
 
 @pytest.fixture(autouse=True)
 def _clean_llm_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Clear the E2E flag and all server LLM env vars."""
     monkeypatch.delenv("VELA_E2E", raising=False)
     for name in _NO_LLM_VARS:
         monkeypatch.delenv(name, raising=False)
 
 
 def _record_fake(record: dict):
+    """Build a generate_json fake that records the config and returns the git payload."""
+
     async def fake_generate_json(
         *, prompt: str, schema: dict, config: LlmConfig | None = None
     ) -> dict:
+        """Store the received config and return the fixture git-source payload."""
         record["config"] = config
         return dict(VALID_PAYLOAD)
 
@@ -64,17 +68,22 @@ def _record_fake(record: dict):
 
 
 async def fake_head_ref(*, url: str, branch: str, access_token: str | None = None) -> str:
+    """Fake head-ref lookup returning a constant commit."""
     return "abc123"
 
 
 class _StubBuilder(DefaultImageBuilder):
+    """Builder stub whose clone just creates an empty repo directory."""
+
     def __init__(self, tmp_dir: Path) -> None:
+        """Store the temp dir that clone targets are created under."""
         self._tmp_dir = tmp_dir
         self._counter = 0
 
     async def clone_repository(
         self, git_url: str, *, branch: str = "main", access_token: str | None = None
     ) -> str:
+        """Create a fresh fake clone directory and return its path."""
         _ = git_url, branch, access_token
         self._counter += 1
         dest = self._tmp_dir / f"clone-{self._counter}" / "repo"
@@ -83,6 +92,7 @@ class _StubBuilder(DefaultImageBuilder):
 
 
 def test_call_gemini_uses_explicit_user_config(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An explicit config is passed straight through to generate_json."""
     record: dict = {}
     monkeypatch.setattr(git_source_analysis, "generate_json", _record_fake(record))
     analysis = asyncio.run(
@@ -97,7 +107,10 @@ def test_call_gemini_uses_explicit_user_config(monkeypatch: pytest.MonkeyPatch) 
 def test_call_gemini_without_config_or_env_raises_not_configured(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """With no config or env, _call_gemini errors without calling generate_json."""
+
     def _no_call(*args: object, **kwargs: object) -> None:
+        """Fail the test if generate_json runs without a config."""
         raise AssertionError("generate_json must not run without a config")
 
     monkeypatch.setattr(git_source_analysis, "generate_json", _no_call)
@@ -114,7 +127,10 @@ def test_call_gemini_without_config_or_env_raises_not_configured(
 def test_call_gemini_user_provider_error_propagates(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """A user-origin provider error propagates with its fallback flag intact."""
+
     def _boom(*, prompt: str, schema: dict, config: LlmConfig | None = None) -> dict:
+        """Raise a user-origin LlmProviderError offering fallback."""
         raise LlmProviderError(
             "Could not complete AI analysis. Try again later.",
             fallback_available=True,
@@ -136,6 +152,7 @@ async def test_analyze_git_source_prefers_user_row_over_env(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
+    """Git-source analysis resolves the user's provider row over env config."""
     monkeypatch.setenv("VELA_GEMINI_API_KEY", "env-key")
     monkeypatch.setenv("VELA_LLM_CACHE_DIR", str(tmp_path))
     monkeypatch.setattr(git_source_analysis, "git_head_ref", fake_head_ref)
@@ -172,6 +189,7 @@ async def test_analyze_git_source_use_server_default_skips_user_row(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
+    """use_server_default makes git-source analysis resolve the env config."""
     monkeypatch.setenv("VELA_GEMINI_API_KEY", "env-key")
     monkeypatch.setenv("VELA_LLM_CACHE_DIR", str(tmp_path))
     monkeypatch.setattr(git_source_analysis, "git_head_ref", fake_head_ref)
@@ -237,9 +255,12 @@ STACKS_PAYLOAD = {
 
 
 def _record_stacks_fake(record: dict):
+    """Build a generate_json fake that records the config and returns the stacks payload."""
+
     async def fake_generate_json(
         *, prompt: str, schema: dict, config: LlmConfig | None = None
     ) -> dict:
+        """Store the received config and return the fixture stacks payload."""
         record["config"] = config
         return dict(STACKS_PAYLOAD)
 
@@ -247,6 +268,7 @@ def _record_stacks_fake(record: dict):
 
 
 def _call_generate_services(root: Path, config: LlmConfig | None = None):
+    """Run repo_analysis._generate_services with fixed sample arguments."""
     return asyncio.run(
         repo_analysis._generate_services(
             context="",
@@ -265,7 +287,10 @@ def _call_generate_services(root: Path, config: LlmConfig | None = None):
 def test_generate_services_without_config_or_env_raises_not_configured(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """Service generation raises LlmNotConfiguredError with no config or env."""
+
     def _no_call(*args: object, **kwargs: object) -> None:
+        """Fail the test if generate_json runs without a config."""
         raise AssertionError("generate_json must not run without a config")
 
     monkeypatch.setattr(repo_analysis, "generate_json", _no_call)
@@ -276,6 +301,7 @@ def test_generate_services_without_config_or_env_raises_not_configured(
 def test_generate_services_uses_explicit_user_config(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """An explicit config reaches generate_json and the payload parses to services."""
     monkeypatch.setenv("VELA_LLM_CACHE_DIR", str(tmp_path))
     record: dict = {}
     monkeypatch.setattr(repo_analysis, "generate_json", _record_stacks_fake(record))
@@ -288,9 +314,11 @@ def test_generate_services_uses_explicit_user_config(
 def test_generate_services_user_provider_error_is_not_cached(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """A provider error propagates and nothing is written to the stacks cache."""
     monkeypatch.setenv("VELA_LLM_CACHE_DIR", str(tmp_path))
 
     def _boom(*, prompt: str, schema: dict, config: LlmConfig | None = None) -> dict:
+        """Raise a user-origin LlmProviderError offering fallback."""
         raise LlmProviderError(
             "Could not complete AI analysis. Try again later.",
             fallback_available=True,
@@ -317,6 +345,7 @@ async def test_analyze_repo_stack_prefers_user_row_over_env(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
+    """Stack analysis resolves the user's provider row over env config."""
     monkeypatch.setenv("VELA_GEMINI_API_KEY", "env-key")
     monkeypatch.setenv("VELA_LLM_CACHE_DIR", str(tmp_path))
     record: dict = {}
@@ -353,6 +382,7 @@ async def test_analyze_repo_stack_use_server_default_skips_user_row(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
+    """use_server_default makes stack analysis resolve the env config."""
     monkeypatch.setenv("VELA_GEMINI_API_KEY", "env-key")
     monkeypatch.setenv("VELA_LLM_CACHE_DIR", str(tmp_path))
     record: dict = {}

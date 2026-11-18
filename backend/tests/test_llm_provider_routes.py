@@ -19,28 +19,35 @@ _LLM_VARS = (
 
 @pytest.fixture(autouse=True)
 def _clean_llm_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Clear server LLM env vars so routes see only per-user config."""
     for name in _LLM_VARS:
         monkeypatch.delenv(name, raising=False)
 
 
 class _StubProvider:
+    """Fake provider that returns a canned model list or raises a canned error."""
+
     def __init__(
         self, models: list[str] | None = None, error: Exception | None = None
     ) -> None:
+        """Store the models to return and the error verify should raise."""
         self.models = models
         self.error = error
 
     async def verify(self, config: object) -> list[str] | None:
+        """Raise the stored error if set, otherwise return the stored models."""
         if self.error is not None:
             raise self.error
         return self.models
 
 
 def _use_provider(monkeypatch: pytest.MonkeyPatch, provider: _StubProvider) -> None:
+    """Point the settings route's provider lookup at the stub."""
     monkeypatch.setattr(settings_routes, "get_provider", lambda config: provider)
 
 
 def _status_error(status_code: int) -> httpx.HTTPStatusError:
+    """Build an httpx HTTPStatusError carrying the given status code."""
     request = httpx.Request("GET", "https://provider.test/models")
     return httpx.HTTPStatusError(
         "boom", request=request, response=httpx.Response(status_code, request=request)
@@ -48,6 +55,7 @@ def _status_error(status_code: int) -> httpx.HTTPStatusError:
 
 
 def test_get_llm_provider_empty(api_client) -> None:
+    """GET returns null when no provider is configured."""
     api_client.delete("/api/settings/llm-provider")
     response = api_client.get("/api/settings/llm-provider")
     assert response.status_code == 200
@@ -55,6 +63,7 @@ def test_get_llm_provider_empty(api_client) -> None:
 
 
 def test_put_and_get_llm_provider_roundtrip(api_client) -> None:
+    """PUT stores the provider settings and GET returns the same redacted body."""
     response = api_client.put(
         "/api/settings/llm-provider",
         json={"provider": "gemini", "model": "gemini-2.5-flash", "api_key": "sk-test"},
@@ -73,6 +82,7 @@ def test_put_and_get_llm_provider_roundtrip(api_client) -> None:
 
 
 def test_put_llm_provider_without_key_when_absent_returns_400(api_client) -> None:
+    """PUT without a key fails with 400 when no key is stored yet."""
     api_client.delete("/api/settings/llm-provider")
     response = api_client.put(
         "/api/settings/llm-provider",
@@ -83,6 +93,7 @@ def test_put_llm_provider_without_key_when_absent_returns_400(api_client) -> Non
 
 
 def test_put_llm_provider_blank_key_keeps_existing(api_client) -> None:
+    """PUT omitting the key keeps the stored key and updates the model."""
     api_client.put(
         "/api/settings/llm-provider",
         json={"provider": "gemini", "model": "old-model", "api_key": "sk-old"},
@@ -98,6 +109,7 @@ def test_put_llm_provider_blank_key_keeps_existing(api_client) -> None:
 
 
 def test_put_openai_compatible_requires_base_url(api_client) -> None:
+    """PUT for openai_compatible without a base URL is rejected with 422."""
     response = api_client.put(
         "/api/settings/llm-provider",
         json={"provider": "openai_compatible", "model": "gpt-4o-mini", "api_key": "k"},
@@ -106,6 +118,7 @@ def test_put_openai_compatible_requires_base_url(api_client) -> None:
 
 
 def test_put_openai_compatible_stores_base_url(api_client) -> None:
+    """PUT for openai_compatible stores the base URL with the trailing slash trimmed."""
     response = api_client.put(
         "/api/settings/llm-provider",
         json={
@@ -120,6 +133,7 @@ def test_put_openai_compatible_stores_base_url(api_client) -> None:
 
 
 def test_put_non_openai_drops_base_url(api_client) -> None:
+    """PUT for a non-openai provider ignores the base URL and stores null."""
     response = api_client.put(
         "/api/settings/llm-provider",
         json={
@@ -134,6 +148,7 @@ def test_put_non_openai_drops_base_url(api_client) -> None:
 
 
 def test_delete_llm_provider(api_client) -> None:
+    """DELETE removes the stored provider and returns 204."""
     api_client.put(
         "/api/settings/llm-provider",
         json={"provider": "gemini", "model": "m", "api_key": "k"},
@@ -144,6 +159,7 @@ def test_delete_llm_provider(api_client) -> None:
 
 
 def test_test_llm_provider_success(api_client, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The test endpoint returns ok with the provider's model list."""
     _use_provider(monkeypatch, _StubProvider(models=["m1", "m2"]))
     response = api_client.post(
         "/api/settings/llm-provider/test",
@@ -156,6 +172,7 @@ def test_test_llm_provider_success(api_client, monkeypatch: pytest.MonkeyPatch) 
 def test_test_llm_provider_invalid_key_returns_400(
     api_client, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """A 401 from the provider maps to the invalid-key error detail."""
     error = LlmCallError("Could not reach the provider.")
     error.__cause__ = _status_error(401)
     _use_provider(monkeypatch, _StubProvider(error=error))
@@ -170,6 +187,7 @@ def test_test_llm_provider_invalid_key_returns_400(
 def test_test_llm_provider_rejected_returns_400(
     api_client, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """A 400 from the provider maps to the rejected-request error detail."""
     error = LlmCallError("Could not reach the provider.")
     error.__cause__ = _status_error(400)
     _use_provider(monkeypatch, _StubProvider(error=error))
@@ -184,6 +202,7 @@ def test_test_llm_provider_rejected_returns_400(
 def test_test_llm_provider_unreachable_returns_400(
     api_client, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """A connection error maps to the unreachable-endpoint error detail."""
     error = LlmCallError("Could not reach the provider.")
     error.__cause__ = httpx.ConnectError("no route")
     _use_provider(monkeypatch, _StubProvider(error=error))
@@ -198,6 +217,7 @@ def test_test_llm_provider_unreachable_returns_400(
 
 
 def test_gemini_status_reports_user_provider(api_client) -> None:
+    """Gemini status reports the configured user provider and its key flag."""
     api_client.put(
         "/api/settings/llm-provider",
         json={"provider": "anthropic", "model": "claude-sonnet-4-5", "api_key": "k"},
@@ -211,6 +231,7 @@ def test_gemini_status_reports_user_provider(api_client) -> None:
 
 
 def test_gemini_status_unconfigured(api_client) -> None:
+    """Gemini status reports unconfigured with no user provider and no env."""
     api_client.delete("/api/settings/llm-provider")
     response = api_client.get("/api/settings/gemini-status")
     assert response.status_code == 200

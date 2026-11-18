@@ -10,6 +10,7 @@ import { tokens } from "./commands/tokens"
 import { runTui } from "./tui"
 
 const HELP = `Usage: vela <command> [options]
+       vela [-h | --help | help]
 
 Commands:
   login           Log in and store a personal access token
@@ -24,6 +25,10 @@ Commands:
   deploys         Deployment history
   tokens <list|create|revoke>
   tui             Open the terminal UI (default with no command)
+
+Global options (anywhere before --):
+  --server <url>  API base URL (default http://127.0.0.1:8000)
+  --token <pat>   Personal access token (default from ~/.vela/config.json)
 `
 
 function isParseArgsError(error: unknown): boolean {
@@ -76,6 +81,10 @@ async function main(rawArgv: string[]): Promise<number> {
     throw error
   }
   const [command, ...rest] = argv
+  if (command === "-h" || command === "--help" || command === "help") {
+    console.log(HELP)
+    return 0
+  }
   try {
     switch (command) {
       case undefined:

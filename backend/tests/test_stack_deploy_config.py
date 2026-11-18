@@ -9,6 +9,7 @@ from app.db.models import Stack, StackService, User
 
 
 def test_build_deploy_config_registers_service_name_as_network_alias() -> None:
+    """Build a deploy config whose network aliases contain the service name."""
     user = User(id=uuid.uuid4(), email="deploy@example.com")
     stack = Stack(
         id=uuid.uuid4(),

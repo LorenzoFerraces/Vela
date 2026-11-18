@@ -10,7 +10,10 @@ from app.api.routes import containers as containers_routes
 
 
 def _deactivate_user(db_session_factory, user_id) -> None:
+    """Flip the user's is_active flag to false in the database."""
+
     async def run() -> None:
+        """Load the user, deactivate it, and commit."""
         from app.db.models import User
 
         async with db_session_factory() as session:
@@ -25,6 +28,7 @@ def _deactivate_user(db_session_factory, user_id) -> None:
 def test_exec_ws_connects_and_receives_prompt(
     api_client: TestClient, auth_token: str
 ) -> None:
+    """Connecting to the exec websocket yields the shell prompt."""
     with api_client.websocket_connect(
         f"/api/containers/cid-1/exec/ws?access_token={auth_token}"
     ) as websocket:
@@ -36,6 +40,7 @@ def test_exec_ws_connects_and_receives_prompt(
 def test_exec_ws_sends_input_and_gets_echo(
     api_client: TestClient, auth_token: str
 ) -> None:
+    """Text sent to the exec websocket is echoed back."""
     with api_client.websocket_connect(
         f"/api/containers/cid-1/exec/ws?access_token={auth_token}"
     ) as websocket:
@@ -49,6 +54,7 @@ def test_exec_ws_sends_input_and_gets_echo(
 def test_exec_ws_sends_carriage_return_and_gets_echo(
     api_client: TestClient, auth_token: str
 ) -> None:
+    """A command ending in a carriage return is echoed back."""
     with api_client.websocket_connect(
         f"/api/containers/cid-1/exec/ws?access_token={auth_token}"
     ) as websocket:
@@ -62,6 +68,7 @@ def test_exec_ws_sends_carriage_return_and_gets_echo(
 def test_exec_ws_rejects_unauthenticated(
     anonymous_client: TestClient
 ) -> None:
+    """The exec websocket closes with 1008 without a token."""
     with anonymous_client.websocket_connect(
         "/api/containers/cid-1/exec/ws"
     ) as websocket:
@@ -88,6 +95,7 @@ def test_exec_ws_rejects_deactivated_user(
     seeded_user,
     db_session_factory,
 ) -> None:
+    """The exec websocket closes with 1008 for a deactivated user."""
     _deactivate_user(db_session_factory, seeded_user.id)
     with api_client.websocket_connect(
         f"/api/containers/cid-1/exec/ws?access_token={auth_token}"
@@ -103,6 +111,7 @@ def test_logs_stream_rejects_deactivated_user(
     seeded_user,
     db_session_factory,
 ) -> None:
+    """The logs websocket closes with 1008 for a deactivated user."""
     _deactivate_user(db_session_factory, seeded_user.id)
     with api_client.websocket_connect(
         f"/api/containers/cid-1/logs/stream?access_token={auth_token}&follow=false"
@@ -115,6 +124,7 @@ def test_logs_stream_rejects_deactivated_user(
 def test_exec_ws_rejects_invalid_container(
     api_client: TestClient, auth_token: str
 ) -> None:
+    """The exec websocket closes with 1008 for an unknown container."""
     with api_client.websocket_connect(
         f"/api/containers/nonexistent/exec/ws?access_token={auth_token}"
     ) as websocket:
@@ -126,6 +136,7 @@ def test_exec_ws_rejects_invalid_container(
 def test_exec_ws_semaphore_timeout_rejects(
     make_authed_client, auth_token: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """The socket closes with 1013 when exec slot acquisition times out."""
     monkeypatch.setattr(containers_routes, "_exec_semaphore", asyncio.Semaphore(0))
     monkeypatch.setattr(
         containers_routes, "_EXEC_SEMAPHORE_ACQUIRE_TIMEOUT", 0.1
@@ -142,7 +153,10 @@ def test_exec_ws_semaphore_timeout_rejects(
 def test_exec_ws_surfaces_start_failure(
     make_authed_client, fake_orchestrator, auth_token: str
 ) -> None:
+    """A failing exec start sends an error message and closes with 1011."""
+
     async def broken_stream_exec(*args: object, **kwargs: object) -> object:
+        """Exec stub that always raises a runtime start failure."""
         raise RuntimeError("OCI runtime exec failed: sh not found")
 
     fake_orchestrator.stream_exec = broken_stream_exec
@@ -161,6 +175,7 @@ def test_exec_ws_surfaces_start_failure(
 def test_exec_ws_session_max_lifetime(
     make_authed_client, auth_token: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """The session is closed with an expiry notice after its max lifetime."""
     monkeypatch.setenv("VELA_EXEC_MAX_SESSION_SECONDS", "1")
     with make_authed_client() as client:
         with client.websocket_connect(
@@ -181,6 +196,7 @@ def test_exec_ws_session_max_lifetime(
 
 
 def test_exec_ws_strict_resize_validation() -> None:
+    """Resize JSON is accepted only when exactly shaped and in range."""
     from app.api.routes.containers import _parse_resize_message
 
     assert (
@@ -206,6 +222,7 @@ def test_exec_ws_strict_resize_validation() -> None:
 def test_exec_ws_invalid_resize_forwarded_to_stdin(
     api_client: TestClient, auth_token: str
 ) -> None:
+    """An invalid resize message is sent to the shell as plain input."""
     with api_client.websocket_connect(
         f"/api/containers/cid-1/exec/ws?access_token={auth_token}"
     ) as websocket:
@@ -223,6 +240,7 @@ def test_exec_ws_invalid_resize_forwarded_to_stdin(
 def test_exec_ws_valid_resize_swallowed(
     api_client: TestClient, auth_token: str
 ) -> None:
+    """A valid resize message is applied and never reaches the shell."""
     with api_client.websocket_connect(
         f"/api/containers/cid-1/exec/ws?access_token={auth_token}"
     ) as websocket:
@@ -239,10 +257,12 @@ def test_exec_ws_valid_resize_swallowed(
 
 
 def _recording_stream_exec(fake_orchestrator) -> tuple[dict, object]:
+    """Wrap the fake's stream_exec to record the kwargs it receives."""
     seen: dict[str, int] = {}
     original = fake_orchestrator.stream_exec
 
     async def recording(container_id: str, **kwargs: int) -> object:
+        """Merge kwargs into the record, then delegate to the original."""
         seen.update(kwargs)
         return await original(container_id, **kwargs)
 
@@ -252,6 +272,7 @@ def _recording_stream_exec(fake_orchestrator) -> tuple[dict, object]:
 def test_exec_ws_binary_init_frame(
     make_authed_client, fake_orchestrator, auth_token: str
 ) -> None:
+    """A binary init frame sets the cols/rows passed to the exec stream."""
     seen, recording = _recording_stream_exec(fake_orchestrator)
     fake_orchestrator.stream_exec = recording
     with make_authed_client() as client:
@@ -272,6 +293,7 @@ def test_exec_ws_binary_init_frame(
 def test_exec_ws_init_out_of_range_falls_back_to_defaults(
     make_authed_client, fake_orchestrator, auth_token: str
 ) -> None:
+    """Out-of-range init cols fall back to the default; valid rows are kept."""
     seen, recording = _recording_stream_exec(fake_orchestrator)
     fake_orchestrator.stream_exec = recording
     with make_authed_client() as client:
@@ -286,6 +308,7 @@ def test_exec_ws_init_out_of_range_falls_back_to_defaults(
 def test_exec_ws_init_invalid_numbers_not_injected_to_shell(
     make_authed_client, fake_orchestrator, auth_token: str
 ) -> None:
+    """Non-numeric init values fall back to defaults and never reach the shell."""
     seen, recording = _recording_stream_exec(fake_orchestrator)
     fake_orchestrator.stream_exec = recording
     with make_authed_client() as client:
@@ -305,6 +328,7 @@ def test_exec_ws_init_invalid_numbers_not_injected_to_shell(
 
 
 def _create_pat(api_client: TestClient) -> dict:
+    """Create a personal access token via the API and return its JSON."""
     response = api_client.post("/api/tokens/", json={"name": "ws-test"})
     assert response.status_code == 201
     return response.json()
@@ -326,6 +350,7 @@ def test_exec_ws_rejects_pat_in_query(
 def test_exec_ws_accepts_pat_header(
     api_client: TestClient, anonymous_client: TestClient
 ) -> None:
+    """The exec websocket authenticates with a PAT in the Authorization header."""
     pat = _create_pat(api_client)["token"]
     with anonymous_client.websocket_connect(
         "/api/containers/cid-1/exec/ws",
@@ -338,6 +363,7 @@ def test_exec_ws_accepts_pat_header(
 def test_logs_stream_accepts_pat_header(
     api_client: TestClient, anonymous_client: TestClient
 ) -> None:
+    """The logs websocket authenticates with a PAT in the Authorization header."""
     pat = _create_pat(api_client)["token"]
     with anonymous_client.websocket_connect(
         "/api/containers/cid-1/logs/stream?follow=false",
@@ -350,6 +376,7 @@ def test_logs_stream_accepts_pat_header(
 def test_logs_stream_rejects_pat_in_query(
     api_client: TestClient, anonymous_client: TestClient
 ) -> None:
+    """The logs websocket closes with 1008 for a PAT in the query string."""
     pat = _create_pat(api_client)["token"]
     with anonymous_client.websocket_connect(
         f"/api/containers/cid-1/logs/stream?access_token={pat}&follow=false"
@@ -362,6 +389,7 @@ def test_logs_stream_rejects_pat_in_query(
 def test_exec_ws_rejects_revoked_pat(
     api_client: TestClient, anonymous_client: TestClient
 ) -> None:
+    """The exec websocket closes with 1008 for a revoked PAT."""
     created = _create_pat(api_client)
     pat = created["token"]
     assert api_client.delete(f"/api/tokens/{created['id']}").status_code == 204
@@ -377,6 +405,7 @@ def test_exec_ws_rejects_revoked_pat(
 def test_logs_stream_rejects_revoked_pat(
     api_client: TestClient, anonymous_client: TestClient
 ) -> None:
+    """The logs websocket closes with 1008 for a revoked PAT."""
     created = _create_pat(api_client)
     pat = created["token"]
     assert api_client.delete(f"/api/tokens/{created['id']}").status_code == 204
@@ -395,6 +424,7 @@ def test_exec_ws_rejects_pat_for_deactivated_user(
     seeded_user,
     db_session_factory,
 ) -> None:
+    """The exec websocket closes with 1008 when the PAT owner is deactivated."""
     pat = _create_pat(api_client)["token"]
     _deactivate_user(db_session_factory, seeded_user.id)
     with anonymous_client.websocket_connect(
@@ -412,6 +442,7 @@ def test_logs_stream_rejects_pat_for_deactivated_user(
     seeded_user,
     db_session_factory,
 ) -> None:
+    """The logs websocket closes with 1008 when the PAT owner is deactivated."""
     pat = _create_pat(api_client)["token"]
     _deactivate_user(db_session_factory, seeded_user.id)
     with anonymous_client.websocket_connect(
