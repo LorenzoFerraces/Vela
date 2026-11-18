@@ -81,6 +81,7 @@ def _token_response(user: User, object_storage: ObjectStorage) -> TokenResponse:
     status_code=status.HTTP_201_CREATED,
 )
 async def register(body: RegisterRequest) -> TokenResponse:
+    """Reject password registration; accounts come from Clerk sign-in."""
     raise RegistrationDisabledError()
 
 

@@ -244,6 +244,7 @@ class RunFromSourceRequest(BaseModel):
     @field_validator("cpu_limit", mode="before")
     @classmethod
     def cpu_limit_must_be_finite(cls, value: float | None) -> float | None:
+        """Reject non-finite CPU limits (NaN and infinities)."""
         return validate_finite_number(value)
 
     @model_validator(mode="after")
@@ -462,6 +463,7 @@ LlmProviderKind = Literal["openai_compatible", "gemini", "anthropic"]
 
 
 class LlmProviderGet(BaseModel):
+    """Stored LLM provider settings; reports key presence, never the key."""
     provider: LlmProviderKind
     base_url: str | None = None
     model: str
@@ -469,6 +471,7 @@ class LlmProviderGet(BaseModel):
 
 
 class LlmProviderSet(BaseModel):
+    """Request to store LLM provider settings, including a plaintext API key."""
     provider: LlmProviderKind
     base_url: str | None = Field(default=None, max_length=1024, validate_default=True)
     model: str = Field(min_length=1, max_length=255)
@@ -479,6 +482,7 @@ class LlmProviderSet(BaseModel):
     def _validate_base_url(
         cls, value: str | None, info: ValidationInfo
     ) -> str | None:
+        """Require a safe base URL for openai_compatible; clear it for other providers."""
         provider = info.data.get("provider")
         if provider != "openai_compatible":
             return None
@@ -490,6 +494,7 @@ class LlmProviderSet(BaseModel):
 
 
 class LlmProviderTestRequest(BaseModel):
+    """Credentials for testing an LLM provider before storing it."""
     provider: LlmProviderKind
     base_url: str | None = Field(default=None, max_length=1024)
     model: str = Field(min_length=1, max_length=255)
@@ -500,6 +505,7 @@ class LlmProviderTestRequest(BaseModel):
     def _validate_base_url(
         cls, value: str | None, info: ValidationInfo
     ) -> str | None:
+        """Require a safe base URL for openai_compatible; clear it for other providers."""
         provider = info.data.get("provider")
         if provider != "openai_compatible":
             return None
@@ -511,6 +517,7 @@ class LlmProviderTestRequest(BaseModel):
 
 
 class LlmProviderTestResponse(BaseModel):
+    """Provider test outcome with the reachable model list on success."""
     ok: bool = True
     models: list[str] | None = None
 
@@ -581,6 +588,7 @@ class MyProjectRolePublic(BaseModel):
 
 
 class ProjectStorageQuotaPublic(BaseModel):
+    """Team storage quota with usage broken down by container disk and uploads."""
     quota_bytes: int | None
     used_bytes: int
     container_disk_bytes: int
@@ -590,6 +598,7 @@ class ProjectStorageQuotaPublic(BaseModel):
 
 
 class ProjectStorageQuotaUpdate(BaseModel):
+    """Request to set team quota bytes, or null to fall back to the platform default."""
     storage_quota_bytes: int | None = Field(
         ..., ge=1, description="Bytes, or null to fall back to the platform default."
     )
@@ -646,6 +655,7 @@ class RunAcceptedResponse(BaseModel):
 
 
 class DeployServiceStatePublic(BaseModel):
+    """Per-service runtime state inside a deploy job."""
     model_config = ConfigDict(from_attributes=True)
 
     name: str
@@ -653,6 +663,7 @@ class DeployServiceStatePublic(BaseModel):
 
 
 class DeployJobPublic(BaseModel):
+    """Status snapshot of an async container or stack deploy job."""
     model_config = ConfigDict(from_attributes=True)
 
     job_id: str
@@ -700,6 +711,7 @@ class UserPublic(BaseModel):
 
 
 class AdminUserPublic(BaseModel):
+    """User row as shown in the admin user list."""
     id: uuid.UUID
     email: EmailStr
     display_name: str | None = None
@@ -709,6 +721,7 @@ class AdminUserPublic(BaseModel):
 
 
 class AdminUserCreate(BaseModel):
+    """Request to create a user with email, password, and role."""
     email: EmailStr
     password: str = Field(..., min_length=8, max_length=128)
     display_name: str | None = Field(default=None, max_length=120)
@@ -716,11 +729,13 @@ class AdminUserCreate(BaseModel):
 
 
 class AdminUserPatch(BaseModel):
+    """Request to change a user's role or active status."""
     role: UserRole | None = None
     is_active: bool | None = None
 
 
 class AdminUserListResponse(BaseModel):
+    """A page of admin-visible users plus the total match count."""
     users: list[AdminUserPublic]
     total: int
 
@@ -737,10 +752,12 @@ class TokenResponse(BaseModel):
 
 
 class ApiTokenCreate(BaseModel):
+    """Request to mint a named API token."""
     name: str = Field(min_length=1, max_length=100)
 
 
 class ApiTokenPublic(BaseModel):
+    """API token metadata without the secret."""
     id: uuid.UUID
     name: str
     prefix: str
@@ -748,6 +765,7 @@ class ApiTokenPublic(BaseModel):
 
 
 class ApiTokenCreated(ApiTokenPublic):
+    """Token metadata plus the plaintext token, shown exactly once at creation."""
     token: str
 
 
@@ -884,6 +902,7 @@ class ContainerMonitoringStatus(BaseModel):
 
 
 class AuditLogEntry(BaseModel):
+    """One audit log entry, validated from the AuditLog ORM row."""
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
@@ -896,6 +915,7 @@ class AuditLogEntry(BaseModel):
 
 
 class AuditLogListResponse(BaseModel):
+    """A page of audit entries plus the total match count."""
     entries: list[AuditLogEntry]
     total: int
 
@@ -959,22 +979,26 @@ class StackPublic(BaseModel):
 
 
 class ManifestParseRequest(BaseModel):
+    """Raw compose or k8s YAML to parse into stack services."""
     yaml_content: str
 
 
 class ManifestParseResponse(BaseModel):
+    """Services parsed from a manifest with warnings and its detected kind."""
     services: list[StackServiceCreate]
     warnings: list[str] = []
     manifest_kind: Literal["compose", "k8s"]
 
 
 class AnalyzeRepoRequest(BaseModel):
+    """Request to analyze a git repository into stack services."""
     git_url: str = Field(min_length=1, max_length=2048)
     git_branch: str = Field(default="main", max_length=256)
     use_server_default: bool = False
 
 
 class AnalyzeRepoResponse(BaseModel):
+    """Services detected in a repository plus manifest info and warnings."""
     services: list[StackServiceCreate]
     warnings: list[str] = []
     manifest_kind: Literal["compose", "k8s", "llm"]

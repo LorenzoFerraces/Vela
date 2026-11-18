@@ -192,6 +192,7 @@ async def get_project(
 def _storage_quota_public(
     summary: TeamStorageQuotaSummary,
 ) -> ProjectStorageQuotaPublic:
+    """Map a TeamStorageQuotaSummary onto the ProjectStorageQuotaPublic response."""
     return ProjectStorageQuotaPublic(
         quota_bytes=summary.quota_bytes,
         used_bytes=summary.used_bytes,
@@ -209,6 +210,7 @@ async def get_project_storage_quota(
     current_user: Annotated[User, Depends(get_current_user)],
     session: Annotated[AsyncSession, Depends(get_db)],
 ) -> ProjectStorageQuotaPublic:
+    """Return the team's storage quota summary (members only)."""
     membership = await get_membership(
         session, project_id=project_id, user_id=current_user.id
     )
@@ -231,6 +233,7 @@ async def update_project_storage_quota(
     current_user: Annotated[User, Depends(get_current_user)],
     session: Annotated[AsyncSession, Depends(get_db)],
 ) -> ProjectStorageQuotaPublic:
+    """Set the team storage quota (owner only) and return the updated summary."""
     membership = await require_membership(
         session, project_id=project_id, user_id=current_user.id
     )

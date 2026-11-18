@@ -121,6 +121,7 @@ async def _require_project_manager(
     project_id: uuid.UUID,
     actor_user_id: uuid.UUID,
 ) -> None:
+    """Pass platform user-managers; require project ownership for everyone else."""
     actor_role = await session.scalar(
         select(User.role).where(User.id == actor_user_id)
     )

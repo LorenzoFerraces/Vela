@@ -57,6 +57,8 @@ STACKS_PROMPT_VERSION = "v4"  # ponytail: bumped for dependency-evidence facts
 
 @dataclass(frozen=True)
 class RepoStackAnalysis:
+    """Services, warnings and manifest provenance detected from a repository."""
+
     services: list[StackService]
     warnings: list[str]
     manifest_kind: RepoAnalysisKind
@@ -66,10 +68,12 @@ class RepoStackAnalysis:
 
 
 def _is_ignored(path: Path) -> bool:
+    """True when any path part is an ignored or dot-prefixed directory."""
     return any(part in _IGNORED_DIRECTORIES or part.startswith(".") for part in path.parts)
 
 
 def _yaml_files(root: Path) -> list[Path]:
+    """List .yml/.yaml files under root, skipping ignored dirs, sorted by path."""
     return sorted(
         (
             path
@@ -81,6 +85,7 @@ def _yaml_files(root: Path) -> list[Path]:
 
 
 def _is_compose_file(path: Path) -> bool:
+    """True when the file parses to a mapping with a services mapping."""
     try:
         document = yaml.safe_load(path.read_text(encoding="utf-8", errors="replace"))
     except (OSError, yaml.YAMLError):
@@ -92,6 +97,7 @@ def _is_compose_file(path: Path) -> bool:
 
 
 def _classify_yaml_file(path: Path) -> ManifestKind | None:
+    """Label a file as 'compose', 'k8s' or None."""
     if _is_compose_file(path):
         return "compose"
     if _file_has_workload_kind(path):
@@ -100,6 +106,7 @@ def _classify_yaml_file(path: Path) -> ManifestKind | None:
 
 
 def _immediate_compose_files(root: Path) -> list[Path]:
+    """List compose-named YAML files in the repo's top-level directories."""
     directories = sorted(
         (
             path
@@ -124,6 +131,7 @@ def _immediate_compose_files(root: Path) -> list[Path]:
 
 
 def detect_manifest_file(root: Path) -> tuple[Path, ManifestKind] | None:
+    """Find the repo's deploy manifest, preferring compose over k8s."""
     for name in _COMPOSE_NAMES:
         path = root / name
         if path.is_file() and _is_compose_file(path):
@@ -158,6 +166,7 @@ def detect_manifest_file(root: Path) -> tuple[Path, ManifestKind] | None:
 
 
 def _generation_schema() -> dict:
+    """Return the JSON schema for the LLM-generated services payload."""
     return {
         "type": "OBJECT",
         "properties": {
@@ -212,6 +221,7 @@ def _generation_schema() -> dict:
 
 
 def _is_repo_built_service(service: StackService) -> bool:
+    """True when the service is built from the repo rather than an image."""
     return service.source_kind in {"git", "dockerfile_template"}
 
 
@@ -221,6 +231,7 @@ def _enrich_compose_services(
     root: Path,
     warnings: list[str],
 ) -> tuple[list[StackService], list[str], tuple[str, ...]]:
+    """Backfill repo-built services' env vars from context and reconcile evidence."""
     info = analyze_project(root)
     evidence = scan_dependency_evidence(root, info)
     context = _collect_context_excerpts(root, info, evidence)
@@ -239,6 +250,7 @@ def _payload_to_services(
     warnings: list[str],
     env_fallback: dict[str, str] | None = None,
 ) -> list[StackService]:
+    """Build StackServices from an LLM payload, warning past invalid entries."""
     raw_services = payload.get("services")
     if not isinstance(raw_services, list):
         raise LlmCallError("AI analysis returned no usable services.")
@@ -333,6 +345,7 @@ async def _generate_services(
     commit: str = "",
     config: LlmConfig | None = None,
 ) -> tuple[list[StackService], str | None, tuple[str, ...], list[str]]:
+    """Generate services via a cache-backed LLM call and reconcile detected facts."""
     # ponytail: prompt-only redaction; the raw url is still used as the git source_ref
     redacted_url = _CREDENTIALS_IN_URL.sub(r"\1", git_url)
     prompt = (
@@ -404,6 +417,7 @@ async def analyze_repo_stack(
     user_id: uuid.UUID | None = None,
     use_server_default: bool = False,
 ) -> RepoStackAnalysis:
+    """Clone a repo and return its stack from a manifest or AI analysis."""
     fixture = e2e_stack_repo_analysis_if_enabled(git_url, git_branch)
     if fixture is not None:
         return fixture

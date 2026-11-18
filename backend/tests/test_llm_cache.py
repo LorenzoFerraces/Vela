@@ -40,12 +40,14 @@ VALID_GIT_SOURCE_PAYLOAD = {
 
 @pytest.fixture(autouse=True)
 def isolated_cache_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Point the LLM cache at an isolated temp dir for each test."""
     monkeypatch.setenv("VELA_LLM_CACHE_DIR", str(tmp_path))
     monkeypatch.delenv("VELA_LLM_CACHE", raising=False)
 
 
 @pytest.mark.asyncio
 async def test_store_then_load_returns_same_payload() -> None:
+    """Stored payloads load back unchanged for the same key."""
     payload = {"services": [], "summary_hint": "ok"}
     await cache_module.store_cached("stacks", "abc123", "v2", payload)
     assert await cache_module.load_cached("stacks", "abc123", "v2") == payload
@@ -53,6 +55,7 @@ async def test_store_then_load_returns_same_payload() -> None:
 
 @pytest.mark.asyncio
 async def test_wrong_commit_or_version_returns_none() -> None:
+    """A different commit or version misses the stored entry."""
     await cache_module.store_cached("stacks", "abc123", "v2", {"a": 1})
     assert await cache_module.load_cached("stacks", "def456", "v2") is None
     assert await cache_module.load_cached("stacks", "abc123", "v1") is None
@@ -60,6 +63,7 @@ async def test_wrong_commit_or_version_returns_none() -> None:
 
 @pytest.mark.asyncio
 async def test_disabled_cache_noops(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """With caching disabled, stores write nothing and loads miss."""
     monkeypatch.setenv("VELA_LLM_CACHE", "0")
     await cache_module.store_cached("stacks", "abc123", "v2", {"a": 1})
     assert list(tmp_path.glob("llm_analysis_*.json")) == []
@@ -70,6 +74,7 @@ async def test_disabled_cache_noops(tmp_path: Path, monkeypatch: pytest.MonkeyPa
 async def test_eviction_keeps_newest_entries(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """Eviction drops the oldest entries beyond the max count."""
     monkeypatch.setattr(cache_module, "_MAX_ENTRIES", 3)
     stamps = iter([1, 2, 3, 4, 5])
     monkeypatch.setattr(
@@ -88,12 +93,14 @@ async def test_eviction_keeps_newest_entries(
 
 @pytest.mark.asyncio
 async def test_empty_commit_is_not_cached() -> None:
+    """An empty commit sha is never stored."""
     await cache_module.store_cached("stacks", "", "v2", {"a": 1})
     assert await cache_module.load_cached("stacks", "", "v2") is None
 
 
 @pytest.mark.asyncio
 async def test_delete_removes_entry() -> None:
+    """Deleting a stored key removes that entry."""
     await cache_module.store_cached("stacks", "abc123", "v2", {"a": 1})
     await cache_module.delete_cached("stacks", "abc123", "v2")
     assert await cache_module.load_cached("stacks", "abc123", "v2") is None
@@ -101,6 +108,7 @@ async def test_delete_removes_entry() -> None:
 
 @pytest.mark.asyncio
 async def test_delete_missing_key_or_file_is_noop(tmp_path: Path) -> None:
+    """Deleting an unknown key or kind leaves other entries alone."""
     await cache_module.store_cached("stacks", "abc123", "v2", {"a": 1})
     await cache_module.delete_cached("stacks", "def456", "v2")
     await cache_module.delete_cached("git_source", "abc123", "v1")
@@ -110,6 +118,7 @@ async def test_delete_missing_key_or_file_is_noop(tmp_path: Path) -> None:
 
 @pytest.mark.asyncio
 async def test_delete_disabled_is_noop(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """With caching disabled, delete does not touch the legacy file."""
     monkeypatch.setenv("VELA_LLM_CACHE", "0")
     path = tmp_path / "llm_analysis_stacks.json"
     path.write_text('{"v2:abc123": {"ts": 1, "payload": {"a": 1}}}', encoding="utf-8")
@@ -121,6 +130,7 @@ async def test_delete_disabled_is_noop(tmp_path: Path, monkeypatch: pytest.Monke
 
 @pytest.mark.asyncio
 async def test_legacy_json_is_imported_on_store_and_removed(tmp_path: Path) -> None:
+    """Storing imports the legacy JSON file into SQLite and deletes it."""
     legacy = tmp_path / "llm_analysis_stacks.json"
     legacy.write_text(
         json.dumps(
@@ -139,6 +149,7 @@ async def test_legacy_json_is_imported_on_store_and_removed(tmp_path: Path) -> N
 
 @pytest.mark.asyncio
 async def test_legacy_json_invalid_entries_are_skipped(tmp_path: Path) -> None:
+    """Malformed legacy JSON entries are skipped during import."""
     legacy = tmp_path / "llm_analysis_stacks.json"
     legacy.write_text(
         json.dumps(
@@ -159,6 +170,7 @@ async def test_legacy_json_invalid_entries_are_skipped(tmp_path: Path) -> None:
 
 @pytest.mark.asyncio
 async def test_migration_imports_only_missing_keys(tmp_path: Path) -> None:
+    """Legacy import adds missing keys without overwriting stored rows."""
     conn = sqlite3.connect(tmp_path / cache_module._DB_FILENAME)
     try:
         conn.execute(cache_module._CREATE_TABLE)
@@ -187,6 +199,7 @@ async def test_migration_imports_only_missing_keys(tmp_path: Path) -> None:
 
 @pytest.mark.asyncio
 async def test_eviction_at_500_is_per_kind(tmp_path: Path) -> None:
+    """The 500-entry eviction cap is enforced per cache kind."""
     conn = sqlite3.connect(tmp_path / cache_module._DB_FILENAME)
     try:
         conn.execute(cache_module._CREATE_TABLE)
@@ -221,11 +234,13 @@ async def test_eviction_at_500_is_per_kind(tmp_path: Path) -> None:
 def test_git_source_cache_key_includes_requested_branch(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """Re-analyzing one branch reuses the cache; a new branch misses."""
     calls = 0
 
     async def fake_generate_json(
         *, prompt: str, schema: dict, config: LlmConfig | None = None
     ) -> dict:
+        """Stub LLM call that returns the valid payload and counts calls."""
         nonlocal calls
         calls += 1
         return dict(VALID_GIT_SOURCE_PAYLOAD)
@@ -233,6 +248,7 @@ def test_git_source_cache_key_includes_requested_branch(
     async def fake_head_ref(
         *, url: str, branch: str, access_token: str | None = None
     ) -> str:
+        """Stub remote lookup returning a fixed head sha."""
         _ = url, branch, access_token
         return "abc123"
 
@@ -259,11 +275,13 @@ def test_git_source_cache_key_includes_requested_branch(
 def test_git_source_cache_key_isolates_distinct_repositories(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """Same commit in different repositories is cached separately."""
     calls = 0
 
     async def fake_generate_json(
         *, prompt: str, schema: dict, config: LlmConfig | None = None
     ) -> dict:
+        """Stub LLM call that returns the valid payload and counts calls."""
         nonlocal calls
         calls += 1
         return dict(VALID_GIT_SOURCE_PAYLOAD)
@@ -271,6 +289,7 @@ def test_git_source_cache_key_isolates_distinct_repositories(
     async def fake_head_ref(
         *, url: str, branch: str, access_token: str | None = None
     ) -> str:
+        """Stub remote lookup returning a fixed head sha."""
         _ = url, branch, access_token
         return "abc123"
 
@@ -297,9 +316,11 @@ def test_git_source_cache_key_isolates_distinct_repositories(
 async def test_git_source_invalid_payload_is_not_cached(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """An invalid git-source payload raises and stores nothing."""
     async def bad_generate_json(
         *, prompt: str, schema: dict, config: LlmConfig | None = None
     ) -> dict:
+        """Stub LLM call returning a payload that fails validation."""
         return {"container_port": "not-a-port"}
 
     monkeypatch.setenv("VELA_GEMINI_API_KEY", "test-key")
@@ -324,9 +345,11 @@ async def test_git_source_invalid_payload_is_not_cached(
 async def test_stacks_invalid_payload_is_not_cached(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """An invalid stacks payload raises and stores nothing."""
     async def bad_generate_json(
         *, prompt: str, schema: dict, config: LlmConfig | None = None
     ) -> dict:
+        """Stub LLM call returning a payload that fails validation."""
         return {"services": []}
 
     monkeypatch.setenv("VELA_GEMINI_API_KEY", "test-key")
@@ -355,7 +378,9 @@ async def test_stacks_invalid_payload_is_not_cached(
 
 
 class _StubImageBuilder(DefaultImageBuilder):
+    """Image builder stub whose clone target is a temp directory."""
     def __init__(self, root: Path) -> None:
+        """Remember the temp root and start with no clones."""
         self._root = root
         self._counter = 0
 
@@ -366,6 +391,7 @@ class _StubImageBuilder(DefaultImageBuilder):
         branch: str = "main",
         access_token: str | None = None,
     ) -> str:
+        """Create and return a fresh fake clone directory per call."""
         _ = git_url, branch, access_token
         self._counter += 1
         dest = self._root / f"clone-{self._counter}" / "repo"
@@ -374,6 +400,7 @@ class _StubImageBuilder(DefaultImageBuilder):
 
 
 def _disable_llm_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Unset every env var that would resolve an LLM config."""
     monkeypatch.delenv("VELA_E2E", raising=False)
     monkeypatch.delenv("VELA_GEMINI_API_KEY", raising=False)
     monkeypatch.delenv("VELA_VERTEX_API_KEY", raising=False)
@@ -383,7 +410,9 @@ def _disable_llm_env(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_git_source_fallback_path_skips_commit_and_facts(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """Without an LLM config the analysis skips head-ref and facts."""
     def boom(*args: object, **kwargs: object) -> None:
+        """Fail the test if an LLM-only helper is reached."""
         raise AssertionError("LLM-only work ran on the fallback path")
 
     monkeypatch.setattr(git_source_analysis, "git_head_ref", boom)
@@ -403,12 +432,15 @@ def test_git_source_fallback_path_skips_commit_and_facts(
 
 
 def test_head_commit_without_git_repo_returns_none(tmp_path: Path) -> None:
+    """A plain directory has no head commit."""
     assert head_commit(tmp_path) is None
 
 
 @pytest.mark.skipif(shutil.which("git") is None, reason="git not installed")
 def test_head_commit_returns_head_sha(tmp_path: Path) -> None:
+    """head_commit reports the sha that git HEAD points at."""
     def run(*args: str) -> None:
+        """Run a git command and check its exit status."""
         subprocess.run(args, check=True, capture_output=True)
 
     run("git", "init", str(tmp_path))

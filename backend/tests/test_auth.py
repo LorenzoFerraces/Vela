@@ -10,6 +10,7 @@ from app.core.auth.tokens import create_access_token
 
 
 def test_register_disabled_returns_403(db_app: Any) -> None:
+    """Registration endpoint returns 403 when registration is disabled."""
     with TestClient(db_app) as client:
         response = client.post(
             "/api/auth/register",
@@ -22,6 +23,8 @@ def test_register_disabled_returns_403(db_app: Any) -> None:
 def test_deactivated_login_and_token_rejected(
     db_app: Any, seeded_user: Any, db_session_factory: Any
 ) -> None:
+    """A deactivated user is blocked from logging in and from using an old token."""
+
     import asyncio
 
     with TestClient(db_app) as client:
@@ -36,6 +39,7 @@ def test_deactivated_login_and_token_rejected(
         token = response.json()["access_token"]
 
         async def deactivate() -> None:
+            """Flip the seeded user to inactive directly in the database."""
             from sqlalchemy import select
 
             from app.db.models import User
@@ -70,6 +74,7 @@ def test_deactivated_login_and_token_rejected(
 
 
 def test_login_returns_token_and_user(db_app: Any, seeded_user: Any) -> None:
+    """Valid credentials return an access token and the user's email."""
     with TestClient(db_app) as client:
         response = client.post(
             "/api/auth/login",
@@ -85,6 +90,7 @@ def test_login_returns_token_and_user(db_app: Any, seeded_user: Any) -> None:
 
 
 def test_login_rejects_unknown_email(db_app: Any) -> None:
+    """Login with an email that has no account returns 401."""
     with TestClient(db_app) as client:
         response = client.post(
             "/api/auth/login",
@@ -94,6 +100,7 @@ def test_login_rejects_unknown_email(db_app: Any) -> None:
 
 
 def test_login_rejects_bad_password(db_app: Any, seeded_user: Any) -> None:
+    """Wrong password returns 401 with a Bearer WWW-Authenticate header."""
     with TestClient(db_app) as client:
         response = client.post(
             "/api/auth/login",
@@ -104,6 +111,7 @@ def test_login_rejects_bad_password(db_app: Any, seeded_user: Any) -> None:
 
 
 def test_login_normalizes_email_case(db_app: Any, seeded_user: Any) -> None:
+    """Login succeeds when the email is submitted in uppercase."""
     with TestClient(db_app) as client:
         response = client.post(
             "/api/auth/login",
@@ -116,6 +124,7 @@ def test_login_normalizes_email_case(db_app: Any, seeded_user: Any) -> None:
 
 
 def test_me_returns_current_user(db_app: Any, seeded_user: Any) -> None:
+    """GET /api/auth/me with a valid token returns the token's user."""
     with TestClient(db_app) as client:
         token = create_access_token(seeded_user.id)
         response = client.get(
@@ -133,6 +142,7 @@ def test_me_without_token_is_unauthorized(db_app: Any) -> None:
 
 
 def test_me_includes_role(db_app: Any, seeded_user: Any) -> None:
+    """GET /api/auth/me reports the user's role."""
     with TestClient(db_app) as client:
         token = create_access_token(seeded_user.id)
         me = client.get("/api/auth/me", headers={"Authorization": f"Bearer {token}"})

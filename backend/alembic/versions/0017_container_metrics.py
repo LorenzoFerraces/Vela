@@ -18,6 +18,7 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
+    """Create the container_metrics time-series table and its container/timestamp index."""
     op.create_table(
         "container_metrics",
         sa.Column("id", sa.Uuid(as_uuid=True), nullable=False),
@@ -41,6 +42,7 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    """Drop the container_metrics index and table."""
     op.drop_index(
         "ix_container_metrics_container_timestamp", table_name="container_metrics"
     )

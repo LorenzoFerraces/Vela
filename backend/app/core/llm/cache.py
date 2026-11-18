@@ -24,6 +24,7 @@ _CREATE_TABLE = (
 
 
 def _cache_root() -> Path:
+    """Cache directory from env override or the repo data folder."""
     override = os.environ.get(_CACHE_DIR_ENV, "").strip()
     if override:
         return Path(override)
@@ -31,6 +32,7 @@ def _cache_root() -> Path:
 
 
 def _enabled() -> bool:
+    """Whether the LLM result cache is enabled by env."""
     return os.environ.get("VELA_LLM_CACHE", "1").strip() != "0"
 
 
@@ -39,6 +41,7 @@ _ensured_root: Path | None = None
 
 
 def _ensure_db() -> Path:
+    """Create the cache DB once per root and return its path."""
     # Runs once per process per cache root; re-runs only if the root changes (tests swap dirs)
     global _ensured_root
     root = _cache_root()
@@ -62,6 +65,7 @@ def _ensure_db() -> Path:
 
 @contextmanager
 def _connection() -> Iterator[sqlite3.Connection]:
+    """Yield a sqlite connection to the ensured cache DB."""
     conn = sqlite3.connect(_ensure_db())
     try:
         yield conn
@@ -70,6 +74,7 @@ def _connection() -> Iterator[sqlite3.Connection]:
 
 
 def _migrate_legacy_files(conn: sqlite3.Connection, root: Path) -> None:
+    """Move legacy JSON cache files into the DB, then delete them."""
     for path in sorted(root.glob(_LEGACY_FILE_GLOB)):
         kind = path.stem.removeprefix("llm_analysis_")
         data: object
@@ -99,6 +104,7 @@ def _migrate_legacy_files(conn: sqlite3.Connection, root: Path) -> None:
 
 
 def _load_cached_sync(kind: str, commit: str, version: str) -> dict | None:
+    """Read a cached payload from sqlite; None on miss or error."""
     if not _enabled() or not commit:
         return None
     try:
@@ -120,10 +126,12 @@ def _load_cached_sync(kind: str, commit: str, version: str) -> dict | None:
 
 
 async def load_cached(kind: str, commit: str, version: str) -> dict | None:
+    """Load a cached payload off the event loop."""
     return await asyncio.to_thread(_load_cached_sync, kind, commit, version)
 
 
 def _delete_cached_sync(kind: str, commit: str, version: str) -> None:
+    """Delete one cache entry from sqlite."""
     if not _enabled() or not commit:
         return
     try:
@@ -138,10 +146,12 @@ def _delete_cached_sync(kind: str, commit: str, version: str) -> None:
 
 
 async def delete_cached(kind: str, commit: str, version: str) -> None:
+    """Delete a cache entry off the event loop."""
     await asyncio.to_thread(_delete_cached_sync, kind, commit, version)
 
 
 def _store_cached_sync(kind: str, commit: str, version: str, payload: dict) -> None:
+    """Upsert a payload and trim each kind to _MAX_ENTRIES."""
     if not _enabled() or not commit:
         return
     try:
@@ -165,4 +175,5 @@ def _store_cached_sync(kind: str, commit: str, version: str, payload: dict) -> N
 
 
 async def store_cached(kind: str, commit: str, version: str, payload: dict) -> None:
+    """Store a payload off the event loop."""
     await asyncio.to_thread(_store_cached_sync, kind, commit, version, payload)

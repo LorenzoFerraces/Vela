@@ -13,7 +13,10 @@ _JSON_ONLY_TAIL = (
 
 
 class AnthropicProvider(LlmProvider):
+    """Anthropic Messages API wire format."""
+
     def build_request(self, config: LlmConfig, prompt: str, schema: dict) -> dict:
+        """Build an Anthropic messages request body."""
         return {
             "model": config.model,
             "max_tokens": 8192,
@@ -21,9 +24,11 @@ class AnthropicProvider(LlmProvider):
         }
 
     def prepare_prompt(self, prompt: str, config: LlmConfig) -> str:
+        """Append the JSON-only instruction to the prompt."""
         return prompt + _JSON_ONLY_TAIL
 
     def extract_text(self, body: dict) -> str:
+        """Concatenate the text blocks of an Anthropic response."""
         blocks = body.get("content")
         if not isinstance(blocks, list):
             raise TypeError("Anthropic response content must be a list.")
@@ -34,6 +39,7 @@ class AnthropicProvider(LlmProvider):
         )
 
     def parse_json_text(self, text: str) -> dict:
+        """Strip markdown fences, then parse the JSON object."""
         stripped = text.strip()
         if stripped.startswith("```"):
             lines = stripped.splitlines()
@@ -45,6 +51,7 @@ class AnthropicProvider(LlmProvider):
         return super().parse_json_text(stripped)
 
     async def verify(self, config: LlmConfig) -> None:
+        """Prove the key works with a 1-token completion."""
         # No model-listing endpoint; a 1-token completion proves the key works.
         self._assert_public_url(config)
         try:
