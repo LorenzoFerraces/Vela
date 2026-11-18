@@ -670,7 +670,7 @@ class ApiToken(Base):
     )
     name: Mapped[str] = mapped_column(String(100), nullable=False)
     token_prefix: Mapped[str] = mapped_column(
-        String(16), nullable=False, unique=True, index=True
+        String(16), nullable=False, index=True
     )
     token_hash: Mapped[str] = mapped_column(
         String(64), nullable=False, unique=True, index=True

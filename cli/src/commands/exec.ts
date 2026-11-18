@@ -28,11 +28,17 @@ export async function exec(argv: string[]): Promise<number> {
     console.error("Usage: vela exec <name> [-- cmd...]")
     return 2
   }
+  if (!process.stdin.isTTY && command.length === 0) {
+    console.error(
+      "Interactive exec needs a terminal. Pass a command: vela exec <name> -- <cmd>",
+    )
+    return 2
+  }
 
   const config = requireToken(resolveConfig({}))
   const container = await resolveContainerFromApi(config, query)
 
-  const url = websocketUrl(
+  const { url, headers } = websocketUrl(
     config.server,
     `/containers/${container.id}/exec/ws`,
     config.token,
@@ -41,7 +47,7 @@ export async function exec(argv: string[]): Promise<number> {
   const wasRaw = stdin.isRaw ?? false
 
   return await new Promise<number>((resolve, reject) => {
-    const socket = new WebSocket(url)
+    const socket = new WebSocket(url, { headers } as never)
     socket.binaryType = "arraybuffer"
     const timeout = setTimeout(() => {
       try {
@@ -91,10 +97,11 @@ export async function exec(argv: string[]): Promise<number> {
       )
       if (command.length > 0) {
         // The exec endpoint always starts a shell; commands are typed into it.
+        // `; exit` closes the shell (and the socket) once the command finishes.
         const line = command
           .map((part) => (/\s/.test(part) ? JSON.stringify(part) : part))
           .join(" ")
-        socket.send(`${line}\n`)
+        socket.send(`${line}; exit\n`)
       }
     }
 

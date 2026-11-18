@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, Response, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_current_user, get_db
+from app.api.deps import get_current_user, get_db, get_jwt_authenticated_user
 from app.api.schemas import ApiTokenCreate, ApiTokenCreated, ApiTokenPublic
 from app.core.auth.api_tokens import create_api_token
 from app.core.exceptions import ApiTokenNotFoundError
@@ -21,9 +21,10 @@ router = APIRouter()
 @router.post("/", response_model=ApiTokenCreated, status_code=status.HTTP_201_CREATED)
 async def create_token(
     body: ApiTokenCreate,
-    user: Annotated[User, Depends(get_current_user)],
+    user: Annotated[User, Depends(get_jwt_authenticated_user)],
     session: Annotated[AsyncSession, Depends(get_db)],
 ) -> ApiTokenCreated:
+    """Create a token from an interactive JWT login; PATs cannot mint tokens."""
     record, minted = await create_api_token(session, user.id, body.name)
     return ApiTokenCreated(
         id=record.id,
@@ -39,6 +40,7 @@ async def list_tokens(
     user: Annotated[User, Depends(get_current_user)],
     session: Annotated[AsyncSession, Depends(get_db)],
 ) -> list[ApiTokenPublic]:
+    """List the caller's tokens without secrets, newest first."""
     result = await session.execute(
         select(ApiToken)
         .where(ApiToken.user_id == user.id)
@@ -61,6 +63,7 @@ async def revoke_token(
     user: Annotated[User, Depends(get_current_user)],
     session: Annotated[AsyncSession, Depends(get_db)],
 ) -> Response:
+    """Revoke one of the caller's tokens by id."""
     result = await session.execute(
         select(ApiToken).where(
             ApiToken.id == token_id, ApiToken.user_id == user.id

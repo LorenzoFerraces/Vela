@@ -24,10 +24,12 @@ class MintedApiToken:
 
 
 def hash_api_token(plaintext: str) -> str:
+    """Return the SHA-256 hex digest stored in place of a plaintext token."""
     return hashlib.sha256(plaintext.encode("utf-8")).hexdigest()
 
 
 def mint_api_token() -> MintedApiToken:
+    """Build a new token plaintext with the prefix and digest to store."""
     plaintext = API_TOKEN_PREFIX + secrets.token_urlsafe(32)
     return MintedApiToken(
         plaintext=plaintext,
@@ -39,6 +41,7 @@ def mint_api_token() -> MintedApiToken:
 async def create_api_token(
     session: AsyncSession, user_id: uuid.UUID, name: str
 ) -> tuple[ApiToken, MintedApiToken]:
+    """Persist a freshly minted token and return it with its plaintext."""
     minted = mint_api_token()
     record = ApiToken(
         user_id=user_id,
@@ -55,6 +58,7 @@ async def create_api_token(
 async def get_user_by_api_token(
     session: AsyncSession, plaintext: str
 ) -> User | None:
+    """Return the token owner for a plaintext PAT, or None if revoked/unknown."""
     result = await session.execute(
         select(User)
         .join(ApiToken, ApiToken.user_id == User.id)

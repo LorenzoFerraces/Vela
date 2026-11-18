@@ -95,6 +95,21 @@ def test_tokens_require_auth(db_app: Any) -> None:
     assert response.status_code == 401
 
 
+def test_pat_cannot_create_another_token(db_app: Any, provision_user: Any) -> None:
+    _, jwt = provision_user("pat-mint@example.com")
+    with TestClient(db_app) as client:
+        pat = client.post(
+            "/api/tokens/", json={"name": "cli:test"}, headers=_auth(jwt)
+        ).json()["token"]
+        response = client.post(
+            "/api/tokens/", json={"name": "second"}, headers=_auth(pat)
+        )
+    assert response.status_code == 403
+    assert response.json()["detail"] == (
+        "API tokens cannot create other tokens. Log in interactively."
+    )
+
+
 def test_pat_authenticates_like_a_jwt(db_app: Any, provision_user: Any) -> None:
     _, jwt = provision_user("pat-auth@example.com")
     with TestClient(db_app) as client:

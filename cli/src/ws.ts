@@ -3,14 +3,13 @@ export function websocketUrl(
   path: string,
   token: string,
   params: Record<string, string> = {},
-): string {
+): { url: string; headers: Record<string, string> } {
   const url = new URL(`${server}/api${path}`)
   url.protocol = url.protocol === "https:" ? "wss:" : "ws:"
-  url.searchParams.set("access_token", token)
   for (const [key, value] of Object.entries(params)) {
     url.searchParams.set(key, value)
   }
-  return url.toString()
+  return { url: url.toString(), headers: { Authorization: `Bearer ${token}` } }
 }
 
 export interface LogStreamOptions {
@@ -23,7 +22,7 @@ export async function streamLogs(
   containerId: string,
   options: LogStreamOptions,
 ): Promise<void> {
-  const url = websocketUrl(
+  const { url, headers } = websocketUrl(
     config.server,
     `/containers/${containerId}/logs/stream`,
     config.token,
@@ -31,7 +30,7 @@ export async function streamLogs(
   )
 
   await new Promise<void>((resolve, reject) => {
-    const socket = new WebSocket(url)
+    const socket = new WebSocket(url, { headers } as never)
     socket.binaryType = "arraybuffer"
     socket.onmessage = (event) => {
       if (typeof event.data === "string") {

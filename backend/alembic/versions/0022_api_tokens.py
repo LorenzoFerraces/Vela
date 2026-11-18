@@ -29,9 +29,7 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint("id"),
     )
     op.create_index("ix_api_tokens_user_id", "api_tokens", ["user_id"])
-    op.create_index(
-        "ix_api_tokens_token_prefix", "api_tokens", ["token_prefix"], unique=True
-    )
+    op.create_index("ix_api_tokens_token_prefix", "api_tokens", ["token_prefix"])
     op.create_index(
         "ix_api_tokens_token_hash", "api_tokens", ["token_hash"], unique=True
     )
