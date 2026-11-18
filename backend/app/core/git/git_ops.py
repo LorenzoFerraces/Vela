@@ -17,6 +17,7 @@ _ALLOWED_SCHEMES = ("https://", "http://", "ssh://", "git://", "git@")
 
 
 def _validate_git_url(url: str) -> None:
+    """Reject unsupported or ``file://`` git URL schemes before cloning."""
     lowered = url.strip().lower()
     if not lowered.startswith(_ALLOWED_SCHEMES):
         raise CloneError(url, "Unsupported git URL scheme.")

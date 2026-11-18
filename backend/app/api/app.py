@@ -142,6 +142,7 @@ def create_app() -> FastAPI:
     # Security headers (SOC2 CC6.6/CC6.7). Applied to every response.
     @application.middleware("http")
     async def security_headers(request, call_next):
+        """Attach baseline security headers (nosniff, frame deny, HSTS on https) to each response."""
         response = await call_next(request)
         response.headers.setdefault("X-Content-Type-Options", "nosniff")
         response.headers.setdefault("X-Frame-Options", "DENY")

@@ -45,6 +45,7 @@ _LOGIN_MAX_ATTEMPTS = 10
 
 
 def _check_login_rate_limit(client_ip: str) -> None:
+    """Reject with 429 once a client IP exceeds the sliding-window login attempt budget."""
     now = time.monotonic()
     bucket = _LOGIN_ATTEMPTS[client_ip]
     while bucket and now - bucket[0] > _LOGIN_WINDOW_SECONDS:
