@@ -55,6 +55,7 @@ from app.core.stacks.repository import (
     delete_stack,
     get_stack,
     list_stacks,
+    require_stack_write_access,
     resolve_composition,
     update_stack,
 )
@@ -239,6 +240,7 @@ async def delete_user_stack(
     if stack is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Stack not found.")
 
+    await require_stack_write_access(session, stack, current_user.id)
     containers = await orchestrator.list()
     containers_by_name = {container.name: container for container in containers}
     for service in stack.services:

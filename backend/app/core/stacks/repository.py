@@ -12,9 +12,11 @@ from sqlalchemy.orm import selectinload
 
 from app.core.exceptions import (
     DuplicateStackNameError,
+    ProjectAccessDeniedError,
     StackCompositionCycleError,
     StackNotFoundError,
 )
+from app.core.projects.enums import can_write
 from app.core.projects.repository import list_project_ids_for_user, require_membership
 from app.db.models import Stack, StackComposition, StackService
 
@@ -149,6 +151,19 @@ async def update_stack(
     return stack
 
 
+async def require_stack_write_access(
+    session: AsyncSession,
+    stack: Stack,
+    user_id: uuid.UUID,
+) -> None:
+    """Raise ProjectAccessDeniedError unless ``user_id`` may write to ``stack``'s project."""
+    membership = await require_membership(
+        session, project_id=stack.project_id, user_id=user_id
+    )
+    if not can_write(membership.role):
+        raise ProjectAccessDeniedError("You do not have permission to modify this stack.")
+
+
 async def delete_stack(
     session: AsyncSession,
     stack_id: uuid.UUID,
@@ -158,15 +173,7 @@ async def delete_stack(
     stack = await get_stack(session, stack_id, user_id)
     if stack is None:
         raise StackNotFoundError(str(stack_id))
-
-    from app.core.projects.enums import can_write
-
-    membership = await require_membership(session, project_id=stack.project_id, user_id=user_id)
-    if not can_write(membership.role):
-        from app.core.exceptions import ProjectAccessDeniedError
-
-        raise ProjectAccessDeniedError("You do not have permission to delete this stack.")
-
+    await require_stack_write_access(session, stack, user_id)
     await session.delete(stack)
 
 
