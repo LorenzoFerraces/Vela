@@ -383,6 +383,7 @@ async def _persist_run_deployment(
     image_tag: str,
     dockerfile_snapshot: str | None,
     public_url: str | None,
+    deploy_config: dict,
 ) -> None:
     sanitized_env_vars = _redacted_env_vars_for_history(body.env_vars)
     for attempt in range(3):
@@ -408,6 +409,7 @@ async def _persist_run_deployment(
                         if body.build_override
                         else None
                     ),
+                    deploy_config=deploy_config,
                 ),
             )
             return
@@ -932,6 +934,7 @@ async def _run_container_deploy_worker(
                     image_tag=image_ref,
                     dockerfile_snapshot=None,
                     public_url=public_url,
+                    deploy_config=cfg.model_dump(mode="json"),
                 )
                 saved_policy, scaling_policy_warning = await _persist_scaling_policy(
                     session, info.name, body
@@ -1018,6 +1021,7 @@ async def _run_container_deploy_worker(
                         build_result.dockerfile_snapshot or template.contents
                     ),
                     public_url=public_url,
+                    deploy_config=cfg.model_dump(mode="json"),
                 )
                 saved_policy, scaling_policy_warning = await _persist_scaling_policy(
                     session, info.name, body
@@ -1112,6 +1116,7 @@ async def _run_container_deploy_worker(
                 image_tag=build_result.image_tag,
                 dockerfile_snapshot=build_result.dockerfile_snapshot,
                 public_url=public_url,
+                deploy_config=cfg.model_dump(mode="json"),
             )
             saved_policy, scaling_policy_warning = await _persist_scaling_policy(
                 session, info.name, body

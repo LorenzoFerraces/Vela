@@ -338,6 +338,7 @@ class DeploymentRecord(Base):
     command: Mapped[list | None] = mapped_column(JSON, nullable=True)
     dockerfile_snapshot: Mapped[str | None] = mapped_column(Text, nullable=True)
     build_override: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    deploy_config: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     public_url: Mapped[str | None] = mapped_column(String(2048), nullable=True)
     stack_id: Mapped[uuid.UUID | None] = mapped_column(
         Uuid(as_uuid=True),

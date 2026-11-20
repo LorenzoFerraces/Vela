@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.schemas import DeploymentDiffResponse, DeploymentEnvDiff, DeploymentRecordPublic
 from app.core.deploy.deploy_source_display import resolve_deploy_source_label
+from app.core.models import DeployConfig
 from app.db.models import DeploymentRecord, User
 
 
@@ -29,6 +30,7 @@ class DeploymentSnapshot:
     dockerfile_snapshot: str | None
     public_url: str | None
     build_override: dict | None = None
+    deploy_config: dict | None = None
 
 
 async def record_deployment(
@@ -52,12 +54,29 @@ async def record_deployment(
         command=list(snapshot.command) if snapshot.command else None,
         dockerfile_snapshot=snapshot.dockerfile_snapshot,
         build_override=snapshot.build_override,
+        deploy_config=snapshot.deploy_config,
         public_url=snapshot.public_url,
     )
     session.add(row)
     await session.commit()
     await session.refresh(row)
     return row
+
+
+async def load_deploy_config_snapshot(
+    session: AsyncSession, container_id: str
+) -> DeployConfig | None:
+    """Return the full DeployConfig recorded for ``container_id``, or None."""
+    result = await session.execute(
+        select(DeploymentRecord.deploy_config)
+        .where(DeploymentRecord.container_id == container_id)
+        .order_by(DeploymentRecord.created_at.desc())
+        .limit(1)
+    )
+    raw = result.scalar_one_or_none()
+    if raw is None:
+        return None
+    return DeployConfig.model_validate(raw)
 
 
 async def _to_public(
