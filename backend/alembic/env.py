@@ -8,13 +8,13 @@ from __future__ import annotations
 
 from logging.config import fileConfig
 
-from alembic import context
 from sqlalchemy import create_engine
 from sqlalchemy.engine import Connection
 
 import app.bootstrap_env  # noqa: F401 — load backend/.env before reading env vars.
-from app.db.base import Base
+from alembic import context
 from app.db import models  # noqa: F401 — register models on Base.metadata.
+from app.db.base import Base
 from app.db.engine import sync_database_url_for_alembic
 
 config = context.config

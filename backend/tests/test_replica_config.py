@@ -10,7 +10,7 @@ from app.core.scaling.scaling_engine import _base_container_info, build_replica_
 
 def test_replica_config_preserves_env_command_limits_and_network() -> None:
     config = DeployConfig(
-        image="nginx:alpine", name="api", container_port=8080,
+        image="nginx:alpine", name="api", container_listen_port=8080,
         env_vars={"MODE": "prod"}, command=["nginx", "-g", "daemon off;"],
         cpu_limit=0.5, memory_limit=256, labels={"vela.project_id": "p1"},
     )
@@ -27,7 +27,7 @@ def test_replica_config_preserves_env_command_limits_and_network() -> None:
 def test_deploy_config_snapshot_round_trip(db_session_factory, seeded_user) -> None:
     import asyncio
 
-    config = DeployConfig(image="nginx:alpine", name="api", container_port=80, env_vars={"A": "B"})
+    config = DeployConfig(image="nginx:alpine", name="api", container_listen_port=80, env_vars={"A": "B"})
 
     async def run() -> None:
         async with db_session_factory() as session:

@@ -4,13 +4,13 @@ from __future__ import annotations
 
 import logging
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth.enums import UserRole
-from app.core.profile.models import UserProfileSnapshot
 from app.core.exceptions import AvatarValidationError
+from app.core.profile.models import UserProfileSnapshot
 from app.core.storage.object_storage import ObjectStorage
 from app.db.models import User
 
@@ -119,7 +119,7 @@ async def upload_avatar(
     )
 
     user.avatar_object_key = new_key
-    user.avatar_updated_at = datetime.now(timezone.utc)
+    user.avatar_updated_at = datetime.now(UTC)
 
     try:
         await session.commit()
@@ -128,7 +128,7 @@ async def upload_avatar(
         await session.rollback()
         try:
             await object_storage.delete_object(key=new_key)
-        except Exception as cleanup_error:
+        except Exception as cleanup_error:  # noqa: BLE001
             logger.warning(
                 "Failed to clean up orphaned avatar object %r after DB rollback: %s",
                 new_key,
@@ -139,7 +139,7 @@ async def upload_avatar(
     if previous_key and previous_key != new_key:
         try:
             await object_storage.delete_object(key=previous_key)
-        except Exception as delete_error:
+        except Exception as delete_error:  # noqa: BLE001
             logger.warning(
                 "Failed to delete previous avatar object %r: %s",
                 previous_key,
@@ -164,7 +164,7 @@ async def delete_avatar(
     if previous_key:
         try:
             await object_storage.delete_object(key=previous_key)
-        except Exception as delete_error:
+        except Exception as delete_error:  # noqa: BLE001
             logger.warning(
                 "Failed to delete avatar object %r during removal: %s",
                 previous_key,

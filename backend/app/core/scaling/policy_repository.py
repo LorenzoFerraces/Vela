@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from pydantic import BaseModel
 from sqlalchemy import select
@@ -150,7 +150,7 @@ async def record_scale_event(session: AsyncSession, container_name: str) -> None
     )
     row = result.scalar_one_or_none()
     if row is not None:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         row.last_scaled_at = now
         row.scale_up_condition_since = None
         row.scale_down_condition_since = None

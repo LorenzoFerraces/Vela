@@ -9,7 +9,7 @@ import re
 import time
 from collections import deque
 from collections.abc import Callable
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from itertools import islice
 from typing import Any, Protocol
 
@@ -69,7 +69,7 @@ async def batch_insert_logs(session, logs: list[ContainerLog]) -> None:
 
 
 async def cleanup_old_logs(session, retention_days: int = RETENTION_DAYS) -> int:
-    cutoff = datetime.now(timezone.utc) - timedelta(days=retention_days)
+    cutoff = datetime.now(UTC) - timedelta(days=retention_days)
     result = await session.execute(
         sa.delete(ContainerLog).where(ContainerLog.created_at < cutoff)
     )
@@ -101,7 +101,7 @@ def _split_log_timestamp(line: str) -> tuple[datetime | None, str]:
         parsed = datetime.fromisoformat(text)
     except ValueError:
         return None, line
-    return parsed.astimezone(timezone.utc), line[match.end() :]
+    return parsed.astimezone(UTC), line[match.end() :]
 
 
 def _fresh_lines(window: list[str], seen: deque[str]) -> list[str]:
@@ -191,7 +191,7 @@ class LogCollector:
         containers = await self._orchestrator.list()
         running = [c for c in containers if c.status == "running"]
         all_logs: list[ContainerLog] = []
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         async def _bounded_collect(container: Any) -> None:
             async with self._fetch_semaphore:

@@ -14,10 +14,14 @@ from urllib.parse import quote, urlencode, urlparse
 
 import httpx
 
-from app.core.exceptions import GitHubAPIError, GitHubOAuthError, IntegrationConfigurationError
+from app.core.exceptions import (
+    GitHubAPIError,
+    GitHubOAuthError,
+    IntegrationConfigurationError,
+)
 
 _AUTHORIZE_URL = "https://github.com/login/oauth/authorize"
-_TOKEN_URL = "https://github.com/login/oauth/access_token"  # noqa: S105 - public endpoint, not a secret
+_TOKEN_URL = "https://github.com/login/oauth/access_token"
 _API_BASE = "https://api.github.com"
 _DEFAULT_TIMEOUT = httpx.Timeout(15.0)
 _DEFAULT_SCOPES = "repo,read:user"
@@ -151,6 +155,8 @@ async def exchange_code_for_token(
 
 async def fetch_github_user(access_token: str) -> GitHubProfile:
     payload = await _api_get(access_token, "/user")
+    if not isinstance(payload, dict):
+        raise GitHubAPIError("Unexpected response from GitHub /user.")
     raw_id = payload.get("id")
     raw_login = payload.get("login")
     if not isinstance(raw_id, int) or not isinstance(raw_login, str):
@@ -499,7 +505,7 @@ async def _api_get(
     access_token: str,
     path: str,
     *,
-    params: dict[str, object] | None = None,
+    params: dict[str, str | int | float | bool | None] | None = None,
 ) -> dict[str, object] | list[object]:
     headers = {
         "Authorization": f"Bearer {access_token}",
@@ -541,8 +547,7 @@ def _parse_github_sso_authorize_url(response: httpx.Response) -> str | None:
 
 def _github_repo_ref_from_path(path: str) -> GitHubRepoRef | None:
     cleaned = path.strip().strip("/")
-    if cleaned.endswith(".git"):
-        cleaned = cleaned[:-4]
+    cleaned = cleaned.removesuffix(".git")
     parts = [segment for segment in cleaned.split("/") if segment]
     if len(parts) < 2:
         return None

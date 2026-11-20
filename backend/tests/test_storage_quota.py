@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import AsyncGenerator, Iterator
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 import pytest
@@ -86,7 +86,7 @@ async def test_alert_history_container_id_nullable(quota_db: AsyncSession) -> No
         container_id=None,
         event_type="storage",
         alert_hash="0" * 64,
-        sent_at=datetime.now(timezone.utc),
+        sent_at=datetime.now(UTC),
         status="sent",
     )
     quota_db.add(history)
@@ -137,7 +137,7 @@ def _make_info(
             "name": "vela-quota-test",
             "image": "nginx:alpine",
             "status": ContainerStatus.RUNNING,
-            "created_at": datetime(2026, 4, 1, tzinfo=timezone.utc),
+            "created_at": datetime(2026, 4, 1, tzinfo=UTC),
             "ports": [],
             "labels": labels,
             "health": HealthStatus.NONE,
@@ -563,9 +563,8 @@ async def test_check_team_storage_quotas_alerts_rising_edge_once(
 async def test_project_storage_alert_sent_and_deduplicated(
     quota_db: AsyncSession,
 ) -> None:
-    from app.core.notifications.email_provider import ConsoleProvider
-
     from app.core.notifications.alert_service import AlertService
+    from app.core.notifications.email_provider import ConsoleProvider
 
     user = User(id=uuid.uuid4(), email="storage-alert@example.com")
     quota_db.add(user)

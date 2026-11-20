@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import cast
 
 from sqlalchemy import delete
@@ -88,7 +88,7 @@ async def collect_and_store_once(
 
 async def cleanup_expired_metrics(session: AsyncSession) -> None:
     """Delete metric rows older than METRICS_RETENTION_DAYS."""
-    cutoff = datetime.now(timezone.utc) - timedelta(days=METRICS_RETENTION_DAYS)
+    cutoff = datetime.now(UTC) - timedelta(days=METRICS_RETENTION_DAYS)
     result = cast(
         CursorResult, await session.execute(
             delete(ContainerMetric).where(ContainerMetric.timestamp < cutoff)

@@ -10,7 +10,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import get_current_user, get_db, get_orchestrator
 from app.core.containers.orchestrator import ContainerOrchestrator
 from app.core.models import ScalingPolicyConfig, ScalingPolicyInfo
-from app.core.projects.access import list_accessible_project_ids, require_container_access
+from app.core.projects.access import (
+    list_accessible_project_ids,
+    require_container_access,
+)
 from app.core.scaling.policy_repository import (
     get_policy,
     list_policies_for_container_names,

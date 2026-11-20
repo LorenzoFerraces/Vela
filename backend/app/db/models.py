@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-import uuid
-from datetime import datetime, timezone
-
 import enum
+import uuid
+from datetime import UTC, datetime
 
 import sqlalchemy as sa
 from sqlalchemy import (
@@ -28,7 +27,7 @@ from app.db.base import Base
 
 
 def _utcnow() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 class User(Base):
@@ -71,13 +70,13 @@ class User(Base):
         index=True,
     )
 
-    oauth_identities: Mapped[list["UserOAuthIdentity"]] = relationship(
+    oauth_identities: Mapped[list[UserOAuthIdentity]] = relationship(
         back_populates="user", cascade="all, delete-orphan"
     )
-    dockerfiles: Mapped[list["Dockerfile"]] = relationship(
+    dockerfiles: Mapped[list[Dockerfile]] = relationship(
         back_populates="owner", cascade="all, delete-orphan"
     )
-    api_tokens: Mapped[list["ApiToken"]] = relationship(
+    api_tokens: Mapped[list[ApiToken]] = relationship(
         back_populates="user", cascade="all, delete-orphan"
     )
 
@@ -196,7 +195,7 @@ class Organization(Base):
         DateTime(timezone=True), nullable=False, default=_utcnow
     )
 
-    projects: Mapped[list["Project"]] = relationship(back_populates="organization")
+    projects: Mapped[list[Project]] = relationship(back_populates="organization")
 
 
 class Project(Base):
@@ -226,10 +225,10 @@ class Project(Base):
     )
 
     organization: Mapped[Organization] = relationship(back_populates="projects")
-    memberships: Mapped[list["ProjectMembership"]] = relationship(
+    memberships: Mapped[list[ProjectMembership]] = relationship(
         back_populates="project", cascade="all, delete-orphan"
     )
-    invitations: Mapped[list["ProjectInvitation"]] = relationship(
+    invitations: Mapped[list[ProjectInvitation]] = relationship(
         back_populates="project", cascade="all, delete-orphan"
     )
 
@@ -568,14 +567,14 @@ class Stack(Base):
         DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow,
     )
 
-    project: Mapped["Project"] = relationship()
-    services: Mapped[list["StackService"]] = relationship(
+    project: Mapped[Project] = relationship()
+    services: Mapped[list[StackService]] = relationship(
         back_populates="stack", cascade="all, delete-orphan",
     )
-    compositions_parent: Mapped[list["StackComposition"]] = relationship(
+    compositions_parent: Mapped[list[StackComposition]] = relationship(
         foreign_keys="StackComposition.parent_stack_id", cascade="all, delete-orphan",
     )
-    compositions_child: Mapped[list["StackComposition"]] = relationship(
+    compositions_child: Mapped[list[StackComposition]] = relationship(
         foreign_keys="StackComposition.child_stack_id", cascade="all, delete-orphan",
     )
 
@@ -610,7 +609,7 @@ class StackService(Base):
         DateTime(timezone=True), nullable=False, default=_utcnow,
     )
 
-    stack: Mapped["Stack"] = relationship(back_populates="services")
+    stack: Mapped[Stack] = relationship(back_populates="services")
 
 
 class StackComposition(Base):

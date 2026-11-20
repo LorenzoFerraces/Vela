@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from app import bootstrap_env  # loads backend/.env before other app imports.
-
 import asyncio
 import logging
 import os
@@ -13,16 +11,16 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.gzip import GZipMiddleware
 
+from app import bootstrap_env  # loads backend/.env before other app imports.
 from app.api.errors import register_exception_handlers
-from app.core.deploy.jobs import DeployJobRegistry
 from app.api.routes import (
     admin,
     audit,
     auth,
     builder,
     containers,
-    deploys,
     deployments,
+    deploys,
     dockerfile_templates,
     github,
     images,
@@ -36,6 +34,7 @@ from app.api.routes import (
     traffic,
     users,
 )
+from app.core.deploy.jobs import DeployJobRegistry
 
 API_PREFIX = "/api"
 logger = logging.getLogger(__name__)
@@ -46,9 +45,9 @@ async def _lifespan(_application: FastAPI):
     from app.api.deps import get_orchestrator, get_traffic_router
     from app.core.auth.bootstrap import ensure_admin_user
     from app.core.exceptions import ProviderConnectionError, TrafficRouterError
-    from app.core.logging.collector import LogCollector, COLLECTOR_ENABLED
-    from app.core.notifications.container_monitor import run_monitoring_loop
+    from app.core.logging.collector import COLLECTOR_ENABLED, LogCollector
     from app.core.monitoring.metrics_collector import run_metrics_collector
+    from app.core.notifications.container_monitor import run_monitoring_loop
     from app.core.scaling.scaling_engine import run_scaling_loop
     from app.db.engine import get_session_factory
     from app.e2e_support import ensure_e2e_database

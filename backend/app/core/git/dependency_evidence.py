@@ -692,11 +692,11 @@ def reconcile_detected_services(
                     rewritten = _rewrite_local_host(value, item.kind, target_name)
                     app_service.env_vars[key] = rewritten
         for service in _repo_built_services(result):
-            rewritten = {
+            rewritten_env = {
                 key: _rewrite_local_host(value, item.kind, target_name)
                 for key, value in service.env_vars.items()
             }
-            if rewritten != service.env_vars:
-                service.env_vars = rewritten
+            if rewritten_env != service.env_vars:
+                service.env_vars = rewritten_env
 
     return result, new_warnings, tuple(detected_names)

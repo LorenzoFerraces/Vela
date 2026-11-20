@@ -12,9 +12,10 @@ from __future__ import annotations
 
 import asyncio
 import uuid
+from collections.abc import Coroutine
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
-from typing import Any, Coroutine, Literal
+from datetime import UTC, datetime, timedelta
+from typing import Any, Literal
 
 from app.core.exceptions import (
     ImageBuildError,
@@ -74,7 +75,7 @@ class DeployJob:
     error: dict[str, Any] | None = None
     result: dict[str, Any] | None = None
     created_at: datetime = field(
-        default_factory=lambda: datetime.now(timezone.utc)
+        default_factory=lambda: datetime.now(UTC)
     )
     finished_at: datetime | None = None
 
@@ -145,7 +146,7 @@ class DeployJobRegistry:
             return
         job.status = "succeeded"
         job.result = result
-        job.finished_at = datetime.now(timezone.utc)
+        job.finished_at = datetime.now(UTC)
 
     def complete_failure(self, job_id: str, error: dict[str, Any]) -> None:
         job = self._jobs.get(job_id)
@@ -153,7 +154,7 @@ class DeployJobRegistry:
             return
         job.status = "failed"
         job.error = error
-        job.finished_at = datetime.now(timezone.utc)
+        job.finished_at = datetime.now(UTC)
 
     def active(self, *, project_ids: set[uuid.UUID]) -> list[DeployJob]:
         """Visible jobs for the given projects, sweeping expired terminals."""
@@ -177,7 +178,7 @@ class DeployJobRegistry:
         self._tasks.clear()
 
     def _sweep(self) -> None:
-        cutoff = datetime.now(timezone.utc) - timedelta(
+        cutoff = datetime.now(UTC) - timedelta(
             seconds=TERMINAL_JOB_TTL
         )
         expired = [

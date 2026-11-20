@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import time
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, cast
 
@@ -38,8 +38,8 @@ def _registry() -> DeployJobRegistry:
     return DeployJobRegistry()
 
 
-def _job(registry: DeployJobRegistry, **overrides: object):
-    params: dict[str, object] = {
+def _job(registry: DeployJobRegistry, **overrides: Any):
+    params: dict[str, Any] = {
         "kind": "container",
         "project_id": PROJECT_ID,
         "user_id": USER_ID,
@@ -87,7 +87,7 @@ def test_terminal_jobs_swept_after_ttl() -> None:
     registry = _registry()
     job = _job(registry)
     registry.complete_failure(job.job_id, {"code": "deploy_failed", "detail": "boom"})
-    job.finished_at = datetime.now(timezone.utc) - timedelta(
+    job.finished_at = datetime.now(UTC) - timedelta(
         seconds=TERMINAL_JOB_TTL + 1
     )
     assert registry.active(project_ids={PROJECT_ID}) == []

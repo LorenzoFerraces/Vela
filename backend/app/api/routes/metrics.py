@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query
@@ -23,6 +23,7 @@ from app.core.containers.docker_orchestrator import (
 )
 from app.core.containers.orchestrator import ContainerOrchestrator
 from app.core.enums import ContainerStatus
+from app.core.models import ContainerInfo
 from app.core.projects.access import (
     list_accessible_project_ids,
     require_container_access,
@@ -31,7 +32,6 @@ from app.core.quotas import (
     effective_quota_bytes,
     usage_from_containers,
 )
-from app.core.models import ContainerInfo
 from app.db.models import (
     ContainerMetric,
     Organization,
@@ -56,13 +56,13 @@ def _metric_point(row: ContainerMetric) -> MetricPoint:
 
 def _aware(ts: datetime) -> datetime:
     # SQLite reads back naive UTC; Postgres returns aware datetimes.
-    return ts if ts.tzinfo is not None else ts.replace(tzinfo=timezone.utc)
+    return ts if ts.tzinfo is not None else ts.replace(tzinfo=UTC)
 
 
 async def _rows_since(
     session: AsyncSession, container_id: str, hours: int
 ) -> list[ContainerMetric]:
-    since = datetime.now(timezone.utc) - timedelta(hours=hours)
+    since = datetime.now(UTC) - timedelta(hours=hours)
     stmt = (
         select(ContainerMetric)
         .where(

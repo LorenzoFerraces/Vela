@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import uuid
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import jwt
 from jwt import InvalidTokenError
@@ -54,7 +54,7 @@ def _ttl() -> timedelta:
 
 def create_access_token(user_id: uuid.UUID) -> str:
     """Sign a short-lived JWT for ``user_id``."""
-    issued_at = datetime.now(timezone.utc)
+    issued_at = datetime.now(UTC)
     expires_at = issued_at + _ttl()
     payload = {
         "sub": str(user_id),
@@ -98,8 +98,8 @@ def decode_access_token(token: str) -> AccessTokenClaims:
 
     return AccessTokenClaims(
         user_id=user_id,
-        issued_at=datetime.fromtimestamp(issued_at_raw, tz=timezone.utc),
-        expires_at=datetime.fromtimestamp(expires_at_raw, tz=timezone.utc),
+        issued_at=datetime.fromtimestamp(issued_at_raw, tz=UTC),
+        expires_at=datetime.fromtimestamp(expires_at_raw, tz=UTC),
         issuer=_ISSUER,
         audience=_AUDIENCE,
     )

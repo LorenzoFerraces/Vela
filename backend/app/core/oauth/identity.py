@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.exceptions import ClerkAccountAlreadyLinkedError, GitHubAccountAlreadyLinkedError
+from app.core.exceptions import (
+    ClerkAccountAlreadyLinkedError,
+    GitHubAccountAlreadyLinkedError,
+)
 from app.core.oauth.github import GitHubProfile
 from app.core.security.secrets import decrypt_secret, encrypt_secret
 from app.db.models import UserOAuthIdentity
@@ -59,7 +62,7 @@ async def upsert_github_identity(
         raise GitHubAccountAlreadyLinkedError()
 
     encrypted = encrypt_secret(access_token)
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     if identity is None:
         identity = UserOAuthIdentity(
@@ -150,7 +153,7 @@ async def upsert_clerk_identity(
     if owner is not None and owner.user_id != user_id:
         raise ClerkAccountAlreadyLinkedError()
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     identity = await get_clerk_identity(session, user_id)
 
     if identity is None:

@@ -143,15 +143,15 @@ async def disconnect_github(
 ) -> None:
     identity = await delete_github_identity(session, current_user.id)
     if identity is None or identity.access_token_encrypted is None:
-        return None
+        return
     try:
         token = decrypt_identity_token(identity)
         if token is not None:
             config = load_config()
             await revoke_user_grant(config, token)
     except Exception:  # noqa: BLE001 — best-effort revoke; local row is already gone
-        return None
-    return None
+        return
+    return
 
 
 # ---------------------------------------------------------------------------

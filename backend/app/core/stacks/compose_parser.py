@@ -126,10 +126,7 @@ def _parse_service(
 def _looks_like_git_url(value: str) -> bool:
     stripped = value.strip()
     return (
-        stripped.startswith("git@")
-        or stripped.startswith("http://")
-        or stripped.startswith("https://")
-        or stripped.startswith("ssh://")
+        stripped.startswith(("git@", "http://", "https://", "ssh://"))
     )
 
 

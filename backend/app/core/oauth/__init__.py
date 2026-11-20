@@ -10,6 +10,7 @@ from app.core.oauth.github import (
     GitHubProfile,
     GitHubRepo,
     GitHubRepoRef,
+    build_authorize_url,
     exchange_code_for_token,
     fetch_github_user,
     fetch_user_repo_if_accessible,
@@ -19,7 +20,6 @@ from app.core.oauth.github import (
     parse_github_repo_url,
     revoke_user_grant,
 )
-from app.core.oauth.github import build_authorize_url
 from app.core.oauth.identity import (
     CLERK_PROVIDER,
     GITHUB_PROVIDER,
@@ -38,11 +38,11 @@ from app.core.oauth.state import (
 
 __all__ = [
     "CLERK_PROVIDER",
+    "GITHUB_PROVIDER",
     "ClerkClaims",
     "GitHubOAuthConfig",
     "GitHubProfile",
     "GitHubRepo",
-    "GITHUB_PROVIDER",
     "GitHubRepoRef",
     "build_authorize_url",
     "decode_state",
@@ -51,15 +51,15 @@ __all__ = [
     "encode_state",
     "exchange_code_for_token",
     "fetch_github_user",
+    "fetch_user_repo_if_accessible",
     "get_clerk_identity",
     "get_clerk_identity_by_subject",
-    "fetch_user_repo_if_accessible",
     "get_github_identity",
     "list_repo_branches",
     "list_user_repos",
     "load_config",
-    "reset_jwks_cache_for_tests",
     "parse_github_repo_url",
+    "reset_jwks_cache_for_tests",
     "revoke_user_grant",
     "upsert_clerk_identity",
     "upsert_github_identity",

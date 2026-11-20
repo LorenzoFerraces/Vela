@@ -7,8 +7,9 @@ import json
 import logging
 import os
 import uuid
+from collections.abc import Callable
 from contextlib import suppress
-from typing import Annotated, Callable
+from typing import Annotated
 
 from fastapi import (
     APIRouter,
@@ -52,8 +53,8 @@ from app.api.schemas import (
     VolumeMountRequest,
     VolumeUploadResponse,
 )
-from app.core.models import ScalingPolicyInfo
 from app.core import user_library
+from app.core.audit.service import emit_audit_log
 from app.core.auth.service import get_user_by_id
 from app.core.auth.ws_tickets import consume_ws_ticket, issue_ws_ticket
 from app.core.build.default_image_builder import DefaultImageBuilder
@@ -61,7 +62,6 @@ from app.core.build.registry_image_suggestions import (
     fetch_docker_hub_suggestions,
     merge_image_suggestions,
 )
-from app.core.audit.service import emit_audit_log
 from app.core.containers.docker_orchestrator import (
     VELA_OWNER_LABEL,
     VELA_PROJECT_LABEL,
@@ -80,15 +80,6 @@ from app.core.containers.volume_uploads import (
     volume_upload_user_quota_bytes,
 )
 from app.core.deploy.deploy_source_display import source_ref_looks_like_uuid
-from app.core.deploy.github_auth import (
-    github_token_for_url,
-    is_github_https_url,
-    looks_like_auth_failure,
-)
-from app.core.deploy.jobs import (
-    DeployJobRegistry,
-    classify_deploy_error,
-)
 from app.core.deploy.deploy_source_suggestions import (
     DeploySourcesResponse,
     collect_deploy_source_suggestions,
@@ -98,7 +89,15 @@ from app.core.deploy.deployment_history import (
     latest_source_by_container_ids,
     record_deployment,
 )
-from app.core.scaling.policy_repository import upsert_policy
+from app.core.deploy.github_auth import (
+    github_token_for_url,
+    is_github_https_url,
+    looks_like_auth_failure,
+)
+from app.core.deploy.jobs import (
+    DeployJobRegistry,
+    classify_deploy_error,
+)
 from app.core.enums import ContainerStatus, RestartPolicy
 from app.core.exceptions import (
     CloneError,
@@ -115,17 +114,12 @@ from app.core.models import (
     ContainerInfo,
     ContainerStats,
     DeployConfig,
-    default_listen_port_health_check,
     HealthResult,
     PortMapping,
     ProjectSource,
+    ScalingPolicyInfo,
     VolumeMount,
-)
-from app.core.quotas import (
-    effective_quota_bytes,
-    enforce_team_storage_capacity,
-    format_gib,
-    team_storage_usage,
+    default_listen_port_health_check,
 )
 from app.core.projects.access import (
     list_accessible_project_ids,
@@ -133,6 +127,13 @@ from app.core.projects.access import (
 )
 from app.core.projects.enums import ProjectRole, can_write
 from app.core.projects.repository import get_personal_project_id, require_membership
+from app.core.quotas import (
+    effective_quota_bytes,
+    enforce_team_storage_capacity,
+    format_gib,
+    team_storage_usage,
+)
+from app.core.scaling.policy_repository import upsert_policy
 from app.core.traffic.public_route_host import (
     apply_public_route_to_deploy_config,
     build_public_url,
@@ -1142,7 +1143,7 @@ async def _run_container_deploy_worker(
                 ).model_dump(mode="json"),
             )
             return
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001
         registry.complete_failure(job_id, classify_deploy_error(exc))
 
 
@@ -1391,7 +1392,7 @@ async def _stream_logs_to_websocket(
             await websocket.send_bytes(chunk)
     except WebSocketDisconnect:
         pass
-    except Exception:
+    except Exception:  # noqa: BLE001
         with suppress(Exception):
             await websocket.close(code=1011)
 
@@ -1499,7 +1500,7 @@ async def container_exec_ws(
             init_raw = await asyncio.wait_for(
                 _receive_terminal_text(websocket), timeout=5.0
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             init_raw = None
         if init_raw is not None:
             try:
@@ -1516,12 +1517,12 @@ async def container_exec_ws(
             stdout_iter, stdin_write, exec_close_fn, exec_id = await orchestrator.stream_exec(
                 container_id, cols=cols, rows=rows
             )
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001
             logger.warning("exec start failed for %s: %s", container_id, exc)
             try:
                 await websocket.send_text(_EXEC_START_FAILURE_MESSAGE)
                 await websocket.close(code=1011)
-            except Exception:
+            except Exception:  # noqa: BLE001, S110
                 pass
             return
 
@@ -1534,7 +1535,7 @@ async def container_exec_ws(
                     await websocket.send_bytes(chunk)
             except WebSocketDisconnect:
                 pass
-            except Exception:
+            except Exception:  # noqa: BLE001
                 logger.warning("exec forward error for %s", container_id)
 
         async def _forward_to_container() -> None:
@@ -1554,7 +1555,7 @@ async def container_exec_ws(
                     await asyncio.to_thread(stdin_write, msg.encode("utf-8"))
             except WebSocketDisconnect:
                 pass
-            except Exception:
+            except Exception:  # noqa: BLE001
                 logger.warning("exec input error for %s", container_id)
 
         task_client = asyncio.create_task(_forward_to_client())
@@ -1574,7 +1575,7 @@ async def container_exec_ws(
                     websocket.send_text("[session expired]"), timeout=5.0
                 )
                 await websocket.close(code=1000, reason="Session timeout")
-            except Exception:
+            except Exception:  # noqa: BLE001, S110
                 pass
         for t in pending:
             t.cancel()
@@ -1582,7 +1583,7 @@ async def container_exec_ws(
                 await t
     except WebSocketDisconnect:
         pass
-    except Exception:
+    except Exception:  # noqa: BLE001
         logger.error("exec session error for %s", container_id)
     finally:
         if exec_close_fn is not None:

@@ -7,11 +7,11 @@ Create Date: 2026-07-31 21:19:16.201021
 """
 from __future__ import annotations
 
-from typing import Sequence
+from collections.abc import Sequence
 
-from alembic import op
 import sqlalchemy as sa
 
+from alembic import op
 
 revision: str = 'ea51f2f64578'
 down_revision: str | Sequence[str] | None = '0014_stacks'

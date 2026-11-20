@@ -52,7 +52,7 @@ class LlmProvider(abc.ABC):
     def parse_json_text(self, text: str) -> dict:
         parsed = json.loads(text)
         if not isinstance(parsed, dict):
-            raise ValueError("LLM JSON root must be an object.")
+            raise ValueError("LLM JSON root must be an object.")  # noqa: TRY004
         return parsed
 
     def models_url(self, config: LlmConfig) -> str | None:

@@ -32,13 +32,13 @@ spec:
 
 
 def test_parse_manifest_compose() -> None:
-    services, warnings, kind = parse_manifest(COMPOSE_YAML)
+    services, _warnings, kind = parse_manifest(COMPOSE_YAML)
     assert kind == "compose"
     assert {s.service_name for s in services} == {"web", "redis"}
 
 
 def test_parse_manifest_k8s() -> None:
-    services, warnings, kind = parse_manifest(K8S_YAML)
+    services, _warnings, kind = parse_manifest(K8S_YAML)
     assert kind == "k8s"
     assert services[0].service_name == "web"
     assert services[0].container_port == 8080

@@ -10,17 +10,17 @@ from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import user_library
+from app.core.build.registry_image_suggestions import (
+    fetch_docker_hub_suggestions,
+    merge_image_suggestions,
+)
+from app.core.containers.orchestrator import ContainerOrchestrator
 from app.core.exceptions import ProviderConnectionError
 from app.core.oauth import decrypt_identity_token, get_github_identity, list_user_repos
 from app.core.oauth.github import (
     GitHubRepo,
     find_accessible_repo_by_name,
     parse_github_repo_url,
-)
-from app.core.containers.orchestrator import ContainerOrchestrator
-from app.core.build.registry_image_suggestions import (
-    fetch_docker_hub_suggestions,
-    merge_image_suggestions,
 )
 from app.db.models import User, UserOAuthIdentity
 
@@ -126,6 +126,8 @@ async def _load_github_repos(
     if identity is None or not identity.access_token_encrypted:
         return []
     token = decrypt_identity_token(identity)
+    if token is None:
+        return []
     try:
         return await list_user_repos(
             token,
@@ -133,7 +135,7 @@ async def _load_github_repos(
             page=1,
             per_page=git_slots,
         )
-    except Exception:
+    except Exception:  # noqa: BLE001
         return []
 
 
@@ -147,6 +149,8 @@ async def _resolve_pasted_github_repo(
     if identity is None or not identity.access_token_encrypted:
         return None, "Connect GitHub in Settings to deploy private repositories."
     token = decrypt_identity_token(identity)
+    if token is None:
+        return None, None
     preferred_owners = [repo_ref.owner]
     if identity.username:
         preferred_owners.append(identity.username)
@@ -156,14 +160,14 @@ async def _resolve_pasted_github_repo(
             repo_name=repo_ref.repo,
             preferred_owners=preferred_owners,
         )
-    except Exception:
+    except Exception:  # noqa: BLE001
         return None, None
     if outcome.repo is None or not outcome.repo.html_url:
         if outcome.org_sso_authorize_url:
             return (
                 None,
-                "Authorize Vela for your GitHub organization, then retry. "
-                "Open GitHub → Settings → Applications → Vela → Configure SSO.",
+                ("Authorize Vela for your GitHub organization, then retry. "
+                "Open GitHub → Settings → Applications → Vela → Configure SSO."),
             )
         return None, None
     return (

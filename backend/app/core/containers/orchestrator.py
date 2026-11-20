@@ -1,9 +1,9 @@
 from __future__ import annotations
 
+import builtins
 import uuid
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator, Callable
-from typing import List
 
 from app.core.enums import ContainerStatus
 from app.core.models import ContainerInfo, ContainerStats, DeployConfig, HealthResult
@@ -147,7 +147,7 @@ class ContainerOrchestrator(ABC):
         """
 
     @abstractmethod
-    async def list_images(self) -> List[str]:
+    async def list_images(self) -> builtins.list[str]:
         """List available image tags on the host."""
 
     @abstractmethod
@@ -165,7 +165,7 @@ class ContainerOrchestrator(ABC):
     # ------------------------------------------------------------------
 
     @abstractmethod
-    async def list_replicas(self, base_name: str) -> List[ContainerInfo]:
+    async def list_replicas(self, base_name: str) -> builtins.list[ContainerInfo]:
         """Return all running replica containers for a base service name.
 
         Replicas are identified by the ``vela.replica_of`` label matching ``base_name``.

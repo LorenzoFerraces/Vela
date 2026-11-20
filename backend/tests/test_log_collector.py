@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from sqlalchemy import select
@@ -27,7 +27,7 @@ def test_batch_insert_logs(
             ContainerLog(
                 container_id="cid-1",
                 container_name="test",
-                timestamp=datetime.now(timezone.utc),
+                timestamp=datetime.now(UTC),
                 source=LogSource.STDOUT,
                 level=LogLevel.INFO,
                 message="hello",
@@ -35,7 +35,7 @@ def test_batch_insert_logs(
             ContainerLog(
                 container_id="cid-2",
                 container_name="test2",
-                timestamp=datetime.now(timezone.utc),
+                timestamp=datetime.now(UTC),
                 source=LogSource.STDERR,
                 level=LogLevel.ERROR,
                 message="fail",
@@ -71,7 +71,7 @@ def test_cleanup_old_logs(
     db_session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     async def run() -> None:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         old_logs = [
             ContainerLog(
                 container_id="cid-1",
@@ -168,7 +168,7 @@ class StubOrchestrator:
 
     @staticmethod
     def _stamp(ts: float) -> str:
-        return datetime.fromtimestamp(ts, tz=timezone.utc).strftime(
+        return datetime.fromtimestamp(ts, tz=UTC).strftime(
             "%Y-%m-%dT%H:%M:%S.%fZ"
         )
 
@@ -222,7 +222,7 @@ def _log_rows(factory: async_sessionmaker[AsyncSession]) -> list[ContainerLog]:
 def _naive_utc(value: datetime) -> datetime:
     # ponytail: sqlite round-trips strip tzinfo (naive UTC wall time); Postgres returns aware
     if value.tzinfo is not None:
-        value = value.astimezone(timezone.utc).replace(tzinfo=None)
+        value = value.astimezone(UTC).replace(tzinfo=None)
     return value
 
 
@@ -399,15 +399,15 @@ def test_default_session_factory_inserts_logs(
 
 def test_split_log_timestamp_prefix() -> None:
     ts, message = _split_log_timestamp("2026-09-04T12:34:56.789012Z hello world")
-    assert ts == datetime(2026, 9, 4, 12, 34, 56, 789012, tzinfo=timezone.utc)
+    assert ts == datetime(2026, 9, 4, 12, 34, 56, 789012, tzinfo=UTC)
     assert message == "hello world"
 
     ts, message = _split_log_timestamp("2026-09-04T14:34:56+02:00 offset line")
-    assert ts == datetime(2026, 9, 4, 12, 34, 56, tzinfo=timezone.utc)
+    assert ts == datetime(2026, 9, 4, 12, 34, 56, tzinfo=UTC)
     assert message == "offset line"
 
     ts, message = _split_log_timestamp("2026-09-04T12:34:56.5Z short fraction")
-    assert ts == datetime(2026, 9, 4, 12, 34, 56, 500000, tzinfo=timezone.utc)
+    assert ts == datetime(2026, 9, 4, 12, 34, 56, 500000, tzinfo=UTC)
     assert message == "short fraction"
 
     assert _split_log_timestamp("plain line without prefix") == (
@@ -415,7 +415,7 @@ def test_split_log_timestamp_prefix() -> None:
         "plain line without prefix",
     )
     assert _split_log_timestamp("2026-09-04T12:34:56.987654321Z nine digits") == (
-        datetime(2026, 9, 4, 12, 34, 56, 987654, tzinfo=timezone.utc),
+        datetime(2026, 9, 4, 12, 34, 56, 987654, tzinfo=UTC),
         "nine digits",
     )
     assert _split_log_timestamp("2026-13-45T99:99:99Z not a date") == (
@@ -451,7 +451,7 @@ def test_prefixed_lines_use_line_timestamps() -> None:
     rows = _log_rows(factory)
     assert [row.message for row in rows] == ["d"]
     assert _naive_utc(rows[0].timestamp) == datetime.fromtimestamp(
-        t0 + 3, tz=timezone.utc
+        t0 + 3, tz=UTC
     ).replace(tzinfo=None)
     assert orchestrator.log_calls[0][2] is None
     assert orchestrator.log_calls[1][2] == t0 + 2
@@ -484,14 +484,14 @@ def test_mixed_prefixed_and_unprefixed_lines() -> None:
     rows = _log_rows(factory)
     assert [row.message for row in rows] == ["p1", "u1", "p2", "p3"]
     assert _naive_utc(rows[0].timestamp) == datetime.fromtimestamp(
-        t0 + 1, tz=timezone.utc
+        t0 + 1, tz=UTC
     ).replace(tzinfo=None)
     assert _naive_utc(rows[2].timestamp) == datetime.fromtimestamp(
-        t0 + 3, tz=timezone.utc
+        t0 + 3, tz=UTC
     ).replace(tzinfo=None)
     assert (
         abs(
-            (_naive_utc(datetime.now(timezone.utc)) - _naive_utc(rows[1].timestamp))
+            (_naive_utc(datetime.now(UTC)) - _naive_utc(rows[1].timestamp))
             .total_seconds()
         )
         < 60

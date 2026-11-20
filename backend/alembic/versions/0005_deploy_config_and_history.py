@@ -7,9 +7,10 @@ Create Date: 2026-05-25
 """
 from __future__ import annotations
 
-from typing import Sequence
+from collections.abc import Sequence
 
 import sqlalchemy as sa
+
 from alembic import op
 
 revision: str = "0005_deploy_config_and_history"

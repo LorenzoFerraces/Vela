@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from typing import Optional
-
 from pydantic import BaseModel, Field, model_validator
 
 
@@ -10,7 +8,7 @@ class ScalingPolicy(BaseModel):
     target_cpu_min: float = Field(..., ge=0.0, le=100.0)
     max_instances: int = Field(..., gt=0)
     min_instances: int = Field(..., ge=1)
-    auto_stop_after: Optional[int] = None
+    auto_stop_after: int | None = None
 
     @model_validator(mode="after")
     def min_must_be_lte_max(self) -> ScalingPolicy:

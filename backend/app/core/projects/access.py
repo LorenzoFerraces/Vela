@@ -8,11 +8,11 @@ from typing import Literal
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.containers.docker_orchestrator import VELA_OWNER_LABEL, VELA_PROJECT_LABEL
+from app.core.containers.orchestrator import ContainerOrchestrator
 from app.core.exceptions import ContainerNotFoundError, ProjectAccessDeniedError
 from app.core.models import ContainerInfo
 from app.core.projects.enums import ProjectRole, can_read, can_write
 from app.core.projects.repository import get_membership, get_personal_project_id
-from app.core.containers.orchestrator import ContainerOrchestrator
 from app.db.models import User
 
 

@@ -38,12 +38,12 @@ from app.core.projects import (
     list_members,
     list_pending_invitations_for_project,
     list_projects_for_user,
+    owner_email_for_project,
     reject_invitation,
     remove_member,
     require_membership,
     require_project,
     update_member_role,
-    owner_email_for_project,
 )
 from app.core.quotas import (
     TeamStorageQuotaSummary,

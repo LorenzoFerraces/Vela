@@ -7,9 +7,10 @@ Create Date: 2026-06-13
 """
 from __future__ import annotations
 
-from typing import Sequence
+from collections.abc import Sequence
 
 import sqlalchemy as sa
+
 from alembic import op
 
 revision: str = "0010_organization_name_320"

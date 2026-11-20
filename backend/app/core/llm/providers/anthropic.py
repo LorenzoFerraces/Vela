@@ -60,4 +60,3 @@ class AnthropicProvider(LlmProvider):
             response.raise_for_status()
         except httpx.HTTPError as exc:
             raise LlmCallError("Could not reach the provider.") from exc
-        return None

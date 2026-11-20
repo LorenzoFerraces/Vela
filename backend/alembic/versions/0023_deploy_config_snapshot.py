@@ -6,6 +6,7 @@ Revises: 0022_api_tokens
 from __future__ import annotations
 
 import sqlalchemy as sa
+
 from alembic import op
 
 revision: str = "0023_deploy_config_snapshot"

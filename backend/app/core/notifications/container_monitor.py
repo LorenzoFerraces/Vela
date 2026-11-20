@@ -15,12 +15,12 @@ from typing import Any, Literal, NamedTuple
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.notifications.alert_service import AlertService
 from app.core.containers.docker_orchestrator import VELA_OWNER_LABEL
-from app.core.notifications.email_provider import EmailProvider, get_email_provider
+from app.core.containers.orchestrator import ContainerOrchestrator
 from app.core.enums import ContainerStatus, HealthStatus
 from app.core.exceptions import ProviderConnectionError
-from app.core.containers.orchestrator import ContainerOrchestrator
+from app.core.notifications.alert_service import AlertService
+from app.core.notifications.email_provider import EmailProvider, get_email_provider
 from app.core.quotas import check_team_storage_quotas
 from app.db.engine import get_session_factory
 from app.db.models import DeploymentRecord, User
@@ -237,8 +237,8 @@ async def get_container_owner(session: AsyncSession, container_id: str) -> User 
         user_stmt = select(User).where(User.id == record.user_id)
         user = await session.scalar(user_stmt)
         return user
-    except Exception as e:
-        logger.exception("Failed to get container owner: %s", e)
+    except Exception:
+        logger.exception("Failed to get container owner")
         return None
 
 
@@ -343,8 +343,8 @@ async def monitor_containers_once(
             alerts_queued,
         )
 
-    except Exception as e:
-        logger.exception("Error during monitoring pass: %s", e)
+    except Exception:
+        logger.exception("Error during monitoring pass")
 
 
 async def run_monitoring_loop() -> None:
@@ -387,7 +387,7 @@ async def run_monitoring_loop() -> None:
             break
         except ProviderConnectionError:
             logger.debug("Docker unavailable; skipping container monitor pass")
-        except Exception as e:
-            logger.exception("Unexpected error in monitoring loop: %s", e)
+        except Exception:
+            logger.exception("Unexpected error in monitoring loop")
 
         await asyncio.sleep(get_monitor_interval_seconds())

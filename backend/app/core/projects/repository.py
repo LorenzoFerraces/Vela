@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -23,11 +23,17 @@ from app.core.exceptions import (
 )
 from app.core.projects.bootstrap import ensure_personal_workspace
 from app.core.projects.enums import InvitationStatus, ProjectRole, is_owner
-from app.db.models import Organization, Project, ProjectInvitation, ProjectMembership, User
+from app.db.models import (
+    Organization,
+    Project,
+    ProjectInvitation,
+    ProjectMembership,
+    User,
+)
 
 
 def _utcnow() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 @dataclass(frozen=True)

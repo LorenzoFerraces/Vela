@@ -49,12 +49,11 @@ def test_clerk_exchange_provisions_unknown_user(
 
     from fastapi.testclient import TestClient
 
-    with _patch_clerk_verify():
-        with TestClient(db_app) as client:
-            response = client.post(
-                "/api/auth/clerk/exchange",
-                json={"clerk_token": "fake.clerk.jwt"},
-            )
+    with _patch_clerk_verify(), TestClient(db_app) as client:
+        response = client.post(
+            "/api/auth/clerk/exchange",
+            json={"clerk_token": "fake.clerk.jwt"},
+        )
 
     assert response.status_code == 200
     assert response.json()["user"]["email"] == "clerk-user@example.com"
@@ -100,12 +99,11 @@ def test_clerk_exchange_rejects_deactivated_user(
 
     from fastapi.testclient import TestClient
 
-    with _patch_clerk_verify():
-        with TestClient(db_app) as client:
-            response = client.post(
-                "/api/auth/clerk/exchange",
-                json={"clerk_token": "fake.clerk.jwt"},
-            )
+    with _patch_clerk_verify(), TestClient(db_app) as client:
+        response = client.post(
+            "/api/auth/clerk/exchange",
+            json={"clerk_token": "fake.clerk.jwt"},
+        )
 
     assert response.status_code == 403
     assert response.json()["detail"] == "Account deactivated."
@@ -126,12 +124,11 @@ def test_clerk_exchange_links_existing_user(
 
     from fastapi.testclient import TestClient
 
-    with _patch_clerk_verify():
-        with TestClient(db_app) as client:
-            response = client.post(
-                "/api/auth/clerk/exchange",
-                json={"clerk_token": "fake.clerk.jwt"},
-            )
+    with _patch_clerk_verify(), TestClient(db_app) as client:
+        response = client.post(
+            "/api/auth/clerk/exchange",
+            json={"clerk_token": "fake.clerk.jwt"},
+        )
 
     assert response.status_code == 200
     assert response.json()["user"]["email"] == "clerk-user@example.com"
@@ -168,12 +165,11 @@ def test_clerk_exchange_jwks_provider_failure_returns_503(
     async def failing_fetch() -> dict[str, object]:
         raise ProviderConnectionError("Clerk is temporarily unavailable.")
 
-    with patch.object(clerk_mod, "_fetch_jwks", new=failing_fetch):
-        with TestClient(db_app) as client:
-            response = client.post(
-                "/api/auth/clerk/exchange",
-                json={"clerk_token": "fake.clerk.jwt"},
-            )
+    with patch.object(clerk_mod, "_fetch_jwks", new=failing_fetch), TestClient(db_app) as client:
+        response = client.post(
+            "/api/auth/clerk/exchange",
+            json={"clerk_token": "fake.clerk.jwt"},
+        )
 
     assert response.status_code == 503
     assert "temporarily unavailable" in response.json()["detail"]
@@ -182,20 +178,20 @@ def test_clerk_exchange_jwks_provider_failure_returns_503(
 def test_clerk_exchange_invalid_token_returns_400(db_app: Any, monkeypatch: Any) -> None:
     monkeypatch.setenv("VELA_CLERK_PUBLISHABLE_KEY", TEST_CLERK_PUBLISHABLE_KEY)
 
-    from app.core.exceptions import ClerkTokenError
     from fastapi.testclient import TestClient
+
+    from app.core.exceptions import ClerkTokenError
 
     async def raise_clerk_error(_token: str):
         raise ClerkTokenError("Clerk token verification failed: bad signature")
 
     with patch(
         "app.api.routes.auth.verify_clerk_token", new=raise_clerk_error
-    ):
-        with TestClient(db_app) as client:
-            response = client.post(
-                "/api/auth/clerk/exchange",
-                json={"clerk_token": "bad.token"},
-            )
+    ), TestClient(db_app) as client:
+        response = client.post(
+            "/api/auth/clerk/exchange",
+            json={"clerk_token": "bad.token"},
+        )
 
     assert response.status_code == 400
 

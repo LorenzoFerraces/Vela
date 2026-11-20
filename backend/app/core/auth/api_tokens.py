@@ -6,7 +6,7 @@ import hashlib
 import secrets
 import uuid
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -63,7 +63,7 @@ async def create_api_token(
 async def get_user_by_api_token(
     session: AsyncSession, plaintext: str
 ) -> User | None:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     result = await session.execute(
         select(User, ApiToken.id)
         .join(ApiToken, ApiToken.user_id == User.id)

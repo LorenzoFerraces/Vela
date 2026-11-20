@@ -80,7 +80,7 @@ metadata:
 
 
 def test_parse_k8s_workloads() -> None:
-    services, warnings = parse_k8s(MULTI_DOC_YAML)
+    services, _warnings = parse_k8s(MULTI_DOC_YAML)
     by_name = {s.service_name: s for s in services}
 
     assert set(by_name) == {"web", "cache"}

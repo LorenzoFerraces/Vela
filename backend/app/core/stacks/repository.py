@@ -220,7 +220,7 @@ def resolve_composition(
                             graph[other_key].add(key)
 
     in_degree = {key: 0 for key in graph}
-    for node, deps in graph.items():
+    for deps in graph.values():
         for dep in deps:
             in_degree[dep] = in_degree.get(dep, 0) + 1
 
@@ -275,12 +275,12 @@ async def detect_cycle(
 
         visited.add(current)
 
-        stmt = (
+        child_stmt = (
             select(StackComposition.child_stack_id)
             .where(StackComposition.parent_stack_id == current)
         )
-        result = await session.execute(stmt)
-        for row in result.mappings():
+        child_result = await session.execute(child_stmt)
+        for row in child_result.mappings():
             next_id = row["child_stack_id"]
             if next_id not in visited:
                 path[next_id] = current

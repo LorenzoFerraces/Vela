@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
 import logging
 import uuid
+from collections.abc import Callable
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -122,7 +122,7 @@ async def deploy_stack(
                         backend_port=service.container_port,
                         tls_enabled=False,
                     )
-                except Exception:
+                except Exception:  # noqa: BLE001, S110
                     pass
 
             deployed_records.append(
@@ -164,12 +164,12 @@ async def deploy_stack(
             try:
                 await orchestrator.stop(container.id, timeout=5)
                 await orchestrator.remove(container.id, force=True)
-            except Exception:
+            except Exception:  # noqa: BLE001, S110
                 pass
 
         try:
             await orchestrator.remove_network(network_name)
-        except Exception:
+        except Exception:  # noqa: BLE001, S110
             pass
 
         failed_service = None
@@ -308,7 +308,7 @@ async def _persist_scaling_policy(
     try:
         config = ScalingPolicyConfig(**policy_dict)
         await upsert_policy(session, container_name, config)
-    except Exception:
+    except Exception:  # noqa: BLE001, S110
         pass
 
 

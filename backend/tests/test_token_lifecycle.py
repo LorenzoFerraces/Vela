@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -11,7 +11,7 @@ async def test_expired_token_is_rejected(db_session_factory, seeded_user) -> Non
     async with db_session_factory() as session:
         _, minted = await create_api_token(
             session, seeded_user.id, "old",
-            expires_at=datetime.now(timezone.utc) - timedelta(days=1),
+            expires_at=datetime.now(UTC) - timedelta(days=1),
         )
         assert await get_user_by_api_token(session, minted.plaintext) is None
 

@@ -34,7 +34,10 @@ from app.core.llm.user_config import (
     get_user_llm_provider,
     set_user_llm_provider,
 )
-from app.core.notifications.alert_service import DEFAULT_ALERT_FREQUENCY, DEFAULT_ALERT_TYPES
+from app.core.notifications.alert_service import (
+    DEFAULT_ALERT_FREQUENCY,
+    DEFAULT_ALERT_TYPES,
+)
 from app.core.notifications.container_monitor import (
     MONITOR_ENABLED,
     get_monitor_interval_seconds,

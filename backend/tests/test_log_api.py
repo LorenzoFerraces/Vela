@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from fastapi.testclient import TestClient
 from sqlalchemy.ext.asyncio import async_sessionmaker
@@ -48,7 +48,7 @@ def test_query_logs_with_entries(
     api_client: TestClient,
     db_session_factory: async_sessionmaker,
 ) -> None:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     logs = [
         ContainerLog(
             container_id="cid-1",
@@ -86,7 +86,7 @@ def test_query_logs_filter_by_level(
     api_client: TestClient,
     db_session_factory: async_sessionmaker,
 ) -> None:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     logs = [
         ContainerLog(
             container_id="cid-1",
@@ -125,7 +125,7 @@ def test_query_logs_search(
     api_client: TestClient,
     db_session_factory: async_sessionmaker,
 ) -> None:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     logs = [
         ContainerLog(
             container_id="cid-1",

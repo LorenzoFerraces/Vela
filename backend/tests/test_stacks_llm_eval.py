@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import json
 import os
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -301,7 +301,7 @@ def _score(fixture: dict, analysis: RepoStackAnalysis) -> tuple[list[str], dict[
 def _record_history(fixture_name: str, metrics: dict[str, str], hard_failures: list[str]) -> None:
     config = resolve_llm_config()
     entry = {
-        "ts": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "ts": datetime.now(UTC).isoformat(timespec="seconds"),
         "provider": config.provider if config else None,
         "model": config.model if config else None,
         "fixture": fixture_name,

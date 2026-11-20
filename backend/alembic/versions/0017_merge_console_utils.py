@@ -7,9 +7,7 @@ Create Date: 2026-08-15
 """
 from __future__ import annotations
 
-from typing import Sequence
-
-
+from collections.abc import Sequence
 
 revision: str = "0017_merge_console_utils"
 down_revision: str | Sequence[str] | None = ("0016_build_override", "0016_container_logs")

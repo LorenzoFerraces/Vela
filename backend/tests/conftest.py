@@ -38,7 +38,7 @@ os.environ["VELA_PUBLIC_URL_SCHEME"] = "https"
 import uuid
 from collections.abc import AsyncIterator, Iterator
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 import pytest
@@ -67,10 +67,10 @@ from app.core.containers.docker_orchestrator import (
     VELA_MANAGED_VALUE,
     VELA_OWNER_LABEL,
 )
-from app.core.enums import ContainerStatus, HealthStatus
 from app.core.containers.fake_orchestrator import FakeContainerOrchestrator
-from app.core.storage.memory import InMemoryObjectStorage
+from app.core.enums import ContainerStatus, HealthStatus
 from app.core.models import ContainerInfo
+from app.core.storage.memory import InMemoryObjectStorage
 from app.core.traffic.traffic_router import NoopTrafficRouter
 from app.db.base import Base
 from app.db.models import User
@@ -106,7 +106,7 @@ def make_container_info(
         "name": "vela-test",
         "image": "nginx:alpine",
         "status": ContainerStatus.RUNNING,
-        "created_at": datetime(2026, 4, 1, 12, 0, 0, tzinfo=timezone.utc),
+        "created_at": datetime(2026, 4, 1, 12, 0, 0, tzinfo=UTC),
         "ports": [],
         "labels": labels,
         "health": HealthStatus.NONE,

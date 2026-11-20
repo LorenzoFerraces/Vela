@@ -13,9 +13,9 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.auth.enums import UserRole
 from app.core.auth.passwords import hash_password
-from app.core.projects.bootstrap import ensure_personal_workspace
 from app.core.oauth.github import GitHubRepo
 from app.core.oauth.identity import GITHUB_PROVIDER
+from app.core.projects.bootstrap import ensure_personal_workspace
 from app.core.security.secrets import encrypt_secret
 from app.db.base import Base
 from app.db.engine import get_engine

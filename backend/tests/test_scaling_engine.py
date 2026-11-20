@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 from pydantic import ValidationError
@@ -26,7 +26,7 @@ async def test_scale_up_copies_base_container_volumes() -> None:
         name=base_name,
         image="myapp:latest",
         status=ContainerStatus.RUNNING,
-        created_at=datetime(2026, 6, 1, tzinfo=timezone.utc),
+        created_at=datetime(2026, 6, 1, tzinfo=UTC),
         volumes=base_volumes,
         labels={"vela.managed": "true"},
     )

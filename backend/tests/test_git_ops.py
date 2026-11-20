@@ -9,8 +9,8 @@ from pathlib import Path
 
 import pytest
 
-from app.core.git import git_ops
 from app.core.exceptions import CloneError
+from app.core.git import git_ops
 
 
 def test_clone_command_without_token_keeps_classic_shape(tmp_path: Path) -> None:

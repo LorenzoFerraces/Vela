@@ -146,9 +146,8 @@ async def test_verify_clerk_token_missing_email_without_secret_key_raises(
     async def fake_fetch() -> dict[str, object]:
         return _jwks_for(kid, private_key)
 
-    with patch.object(clerk_mod, "_fetch_jwks", new=fake_fetch):
-        with pytest.raises(IntegrationConfigurationError, match="VELA_CLERK_SECRET_KEY"):
-            await verify_clerk_token(token)
+    with patch.object(clerk_mod, "_fetch_jwks", new=fake_fetch), pytest.raises(IntegrationConfigurationError, match="VELA_CLERK_SECRET_KEY"):
+        await verify_clerk_token(token)
 
 
 @pytest.mark.asyncio
@@ -216,9 +215,8 @@ async def test_verify_clerk_token_unknown_kid_raises(monkeypatch: Any) -> None:
     async def fake_fetch() -> dict[str, object]:
         return _jwks_for(f"{kid}-other", private_key)
 
-    with patch.object(clerk_mod, "_fetch_jwks", new=fake_fetch):
-        with pytest.raises(ClerkTokenError, match="no matching key"):
-            await verify_clerk_token(token)
+    with patch.object(clerk_mod, "_fetch_jwks", new=fake_fetch), pytest.raises(ClerkTokenError, match="no matching key"):
+        await verify_clerk_token(token)
 
 
 @pytest.mark.asyncio
@@ -237,9 +235,8 @@ async def test_verify_clerk_token_wrong_key_raises(monkeypatch: Any) -> None:
     async def fake_fetch() -> dict[str, object]:
         return _jwks_for(kid, other_key)
 
-    with patch.object(clerk_mod, "_fetch_jwks", new=fake_fetch):
-        with pytest.raises(ClerkTokenError, match="invalid"):
-            await verify_clerk_token(token)
+    with patch.object(clerk_mod, "_fetch_jwks", new=fake_fetch), pytest.raises(ClerkTokenError, match="invalid"):
+        await verify_clerk_token(token)
 
 
 @pytest.mark.asyncio
@@ -249,9 +246,8 @@ async def test_fetch_jwks_network_error_raises_provider_error(monkeypatch: Any) 
     def failing_client(*args: Any, **kwargs: Any) -> Any:
         raise httpx.ConnectError("boom")
 
-    with patch.object(clerk_mod.httpx, "AsyncClient", side_effect=failing_client):
-        with pytest.raises(ProviderConnectionError, match="temporarily unavailable"):
-            await clerk_mod._fetch_jwks()
+    with patch.object(clerk_mod.httpx, "AsyncClient", side_effect=failing_client), pytest.raises(ProviderConnectionError, match="temporarily unavailable"):
+        await clerk_mod._fetch_jwks()
 
 
 @pytest.mark.asyncio
@@ -268,9 +264,8 @@ async def test_verify_clerk_token_missing_required_claim_raises(
     async def fake_fetch() -> dict[str, object]:
         return _jwks_for(kid, private_key)
 
-    with patch.object(clerk_mod, "_fetch_jwks", new=fake_fetch):
-        with pytest.raises(ClerkTokenError, match="invalid"):
-            await verify_clerk_token(token)
+    with patch.object(clerk_mod, "_fetch_jwks", new=fake_fetch), pytest.raises(ClerkTokenError, match="invalid"):
+        await verify_clerk_token(token)
 
 
 @pytest.mark.asyncio
@@ -284,9 +279,8 @@ async def test_verify_clerk_token_wrong_issuer_raises(monkeypatch: Any) -> None:
     async def fake_fetch() -> dict[str, object]:
         return _jwks_for(kid, private_key)
 
-    with patch.object(clerk_mod, "_fetch_jwks", new=fake_fetch):
-        with pytest.raises(ClerkTokenError, match="invalid"):
-            await verify_clerk_token(token)
+    with patch.object(clerk_mod, "_fetch_jwks", new=fake_fetch), pytest.raises(ClerkTokenError, match="invalid"):
+        await verify_clerk_token(token)
 
 
 @pytest.mark.asyncio
@@ -301,9 +295,8 @@ async def test_verify_clerk_token_disallowed_azp_raises(monkeypatch: Any) -> Non
     async def fake_fetch() -> dict[str, object]:
         return _jwks_for(kid, private_key)
 
-    with patch.object(clerk_mod, "_fetch_jwks", new=fake_fetch):
-        with pytest.raises(ClerkTokenError, match="azp"):
-            await verify_clerk_token(token)
+    with patch.object(clerk_mod, "_fetch_jwks", new=fake_fetch), pytest.raises(ClerkTokenError, match="azp"):
+        await verify_clerk_token(token)
 
 
 @pytest.mark.asyncio
@@ -410,9 +403,8 @@ async def test_verify_clerk_token_wrong_audience_raises(monkeypatch: Any) -> Non
     async def fake_fetch() -> dict[str, object]:
         return _jwks_for(kid, private_key)
 
-    with patch.object(clerk_mod, "_fetch_jwks", new=fake_fetch):
-        with pytest.raises(ClerkTokenError, match="audience"):
-            await verify_clerk_token(token)
+    with patch.object(clerk_mod, "_fetch_jwks", new=fake_fetch), pytest.raises(ClerkTokenError, match="audience"):
+        await verify_clerk_token(token)
 
 
 @pytest.mark.asyncio
@@ -443,9 +435,8 @@ async def test_verify_clerk_token_aud_list_missing_key_raises(monkeypatch: Any) 
     async def fake_fetch() -> dict[str, object]:
         return _jwks_for(kid, private_key)
 
-    with patch.object(clerk_mod, "_fetch_jwks", new=fake_fetch):
-        with pytest.raises(ClerkTokenError, match="audience"):
-            await verify_clerk_token(token)
+    with patch.object(clerk_mod, "_fetch_jwks", new=fake_fetch), pytest.raises(ClerkTokenError, match="audience"):
+        await verify_clerk_token(token)
 
 
 @pytest.mark.asyncio

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import builtins
 import logging
 import os
 import re
@@ -9,8 +10,8 @@ import threading
 import uuid
 from collections.abc import AsyncIterator, Callable
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timezone
-from typing import Any, List, TypeVar
+from datetime import UTC, datetime
+from typing import Any, TypeVar
 
 import docker
 import docker.errors
@@ -198,7 +199,7 @@ def _parse_created(created: str) -> datetime:
         created = created[:-1] + "+00:00"
     dt = datetime.fromisoformat(created)
     if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
+        dt = dt.replace(tzinfo=UTC)
     return dt
 
 
@@ -321,7 +322,7 @@ def _inspect_to_container_info(data: dict[str, Any]) -> ContainerInfo:
 
     created_raw = data.get("Created")
     if isinstance(created_raw, (int, float)):
-        created_at = datetime.fromtimestamp(created_raw, tz=timezone.utc)
+        created_at = datetime.fromtimestamp(created_raw, tz=UTC)
     else:
         created_at = _parse_created(created_raw or "")
 
@@ -358,8 +359,7 @@ def _cpu_percent_from_stats(stats: dict[str, Any]) -> float:
         pre_system = precpu.get("system_cpu_usage", 0)
         percpu = (cpu_stats.get("cpu_usage") or {}).get("percpu_usage") or []
         online = len(percpu) if percpu else int(cpu_stats.get("online_cpus") or 1)
-        if online < 1:
-            online = 1
+        online = max(online, 1)
         cpu_delta = total - pre_total
         system_delta = system - pre_system
         if system_delta > 0 and cpu_delta >= 0:
@@ -878,14 +878,14 @@ class DockerOrchestrator(ContainerOrchestrator):
                     loop,
                 )
                 fut_done.result(timeout=30)
-            except BaseException as exc:
+            except BaseException as exc:  # noqa: BLE001
                 fut_err = asyncio.run_coroutine_threadsafe(
                     queue.put(("err", exc)),
                     loop,
                 )
                 try:
                     fut_err.result(timeout=30)
-                except BaseException:
+                except BaseException:  # noqa: BLE001, S110
                     pass
 
         thread = threading.Thread(
@@ -967,14 +967,14 @@ class DockerOrchestrator(ContainerOrchestrator):
                             container_id,
                         )
                         break
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001
                 logger.warning("exec reader error for %s: %s", container_id, exc)
             finally:
                 try:
                     asyncio.run_coroutine_threadsafe(queue.put(None), loop).result(
                         timeout=5
                     )
-                except Exception:
+                except Exception:  # noqa: BLE001, S110
                     pass
                 exec_runtime.close()
 
@@ -983,7 +983,7 @@ class DockerOrchestrator(ContainerOrchestrator):
         def _write_blocking(data: bytes) -> None:
             try:
                 exec_runtime.write(data)
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001
                 logger.warning("exec write error for %s: %s", container_id, exc)
 
         def _write(data: bytes) -> None:
@@ -999,7 +999,7 @@ class DockerOrchestrator(ContainerOrchestrator):
         def _close_blocking() -> None:
             try:
                 exec_runtime.close()
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001
                 logger.warning("exec close error for %s: %s", container_id, exc)
 
         def _close() -> None:
@@ -1027,7 +1027,7 @@ class DockerOrchestrator(ContainerOrchestrator):
     ) -> None:
         try:
             self._client.api.exec_resize(exec_id, height=rows, width=cols)
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001
             logger.warning("exec resize error for %s: %s", container_id, exc)
 
     async def get_stats(self, container_id: str) -> ContainerStats:
@@ -1047,7 +1047,7 @@ class DockerOrchestrator(ContainerOrchestrator):
             for iface in (stats.get("networks") or {}).values():
                 rx += int(iface.get("rx_bytes", 0))
                 tx += int(iface.get("tx_bytes", 0))
-            now = datetime.now(timezone.utc)
+            now = datetime.now(UTC)
             return ContainerStats(
                 container_id=c.id,
                 timestamp=now,
@@ -1078,7 +1078,7 @@ class DockerOrchestrator(ContainerOrchestrator):
             data = c.attrs
             state = data.get("State") or {}
             health = state.get("Health")
-            now = datetime.now(timezone.utc)
+            now = datetime.now(UTC)
             if not health:
                 return HealthResult(
                     status=HealthStatus.NONE,
@@ -1222,8 +1222,8 @@ class DockerOrchestrator(ContainerOrchestrator):
         except docker.errors.DockerException as e:
             raise ProviderConnectionError(str(e)) from e
 
-    async def list_images(self) -> List[str]:
-        def sync() -> List[str]:
+    async def list_images(self) -> builtins.list[str]:
+        def sync() -> list[str]:
             tags: list[str] = []
             for img in self._client.images.list():
                 tags.extend(img.tags or [])
@@ -1236,13 +1236,13 @@ class DockerOrchestrator(ContainerOrchestrator):
         except docker.errors.DockerException as e:
             raise ProviderConnectionError(str(e)) from e
 
-    async def list_replicas(self, base_name: str) -> List[ContainerInfo]:
+    async def list_replicas(self, base_name: str) -> builtins.list[ContainerInfo]:
         label_filter = [
             f"{VELA_MANAGED_LABEL}={VELA_MANAGED_VALUE}",
             f"{VELA_REPLICA_OF_LABEL}={base_name}",
         ]
 
-        def sync() -> List[ContainerInfo]:
+        def sync() -> list[ContainerInfo]:
             containers = self._client.containers.list(
                 all=True,
                 filters={"label": label_filter},

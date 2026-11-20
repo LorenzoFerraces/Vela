@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -60,7 +60,7 @@ def _is_in_cooldown(runtime: ScalingPolicyRuntime) -> bool:
     policy = runtime.policy
     if policy.last_scaled_at is None:
         return False
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     elapsed = (now - policy.last_scaled_at).total_seconds()
     return elapsed < policy.cooldown_seconds
 
@@ -221,11 +221,10 @@ async def tick(
     for runtime in policies:
         try:
             await _evaluate_policy(session, orchestrator, traffic_router, runtime)
-        except Exception as exc:
+        except Exception:
             logger.exception(
-                "Unhandled error evaluating scaling policy for %s: %s",
+                "Unhandled error evaluating scaling policy for %s",
                 runtime.policy.container_name,
-                exc,
             )
 
 
@@ -248,7 +247,7 @@ async def _evaluate_policy(
         logger.warning("Scale-up skipped: no stored deploy config for %s", base_name)
         return
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     in_cooldown = _is_in_cooldown(runtime)
 
     metric_value = await _measure_metric(orchestrator, base_name, policy.metric)
@@ -363,5 +362,5 @@ async def run_scaling_loop(
                 await tick(session, orchestrator, traffic_router)
         except asyncio.CancelledError:
             raise
-        except Exception as exc:
-            logger.exception("Scaling loop iteration failed: %s", exc)
+        except Exception:
+            logger.exception("Scaling loop iteration failed")

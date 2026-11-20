@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pytest
+
 from app.bootstrap_env import require_deployment_secrets
 
 

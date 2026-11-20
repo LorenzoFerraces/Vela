@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Request, Response, status
@@ -30,7 +30,7 @@ async def create_token(
 ) -> ApiTokenCreated:
     check_rate_limit(client_identity(request))
     expires_at = (
-        datetime.now(timezone.utc) + timedelta(days=body.expires_in_days)
+        datetime.now(UTC) + timedelta(days=body.expires_in_days)
         if body.expires_in_days is not None
         else None
     )

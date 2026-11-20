@@ -85,7 +85,7 @@ def _build_clone_command(
     if access_token and url.lower().startswith("https://"):
         # Send credentials via header so the URL stays clean. ``x-access-token``
         # is GitHub's documented username for OAuth/PAT Basic auth.
-        token_pair = f"x-access-token:{access_token}".encode("utf-8")
+        token_pair = f"x-access-token:{access_token}".encode()
         encoded = base64.b64encode(token_pair).decode("ascii")
         cmd.extend(["-c", f"http.extraheader=Authorization: Basic {encoded}"])
     cmd.extend(
@@ -129,7 +129,7 @@ async def git_head_ref(*, url: str, branch: str, access_token: str | None = None
     ref = branch if branch.startswith("refs/") else f"refs/heads/{branch}"
     cmd: list[str] = ["git"]
     if access_token and url.lower().startswith("https://"):
-        token_pair = f"x-access-token:{access_token}".encode("utf-8")
+        token_pair = f"x-access-token:{access_token}".encode()
         encoded = base64.b64encode(token_pair).decode("ascii")
         cmd.extend(["-c", f"http.extraheader=Authorization: Basic {encoded}"])
     cmd.extend(["ls-remote", url, ref])
@@ -144,7 +144,7 @@ async def git_head_ref(*, url: str, branch: str, access_token: str | None = None
         return None
     try:
         stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=30)
-    except asyncio.TimeoutError:
+    except TimeoutError:
         proc.terminate()
         await proc.wait()
         return None

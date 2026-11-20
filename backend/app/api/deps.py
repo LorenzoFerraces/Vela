@@ -27,12 +27,12 @@ from app.core.exceptions import (
     PermissionDeniedError,
     TrafficRouterError,
 )
-from app.core.traffic.kubernetes_traffic_router import KubernetesTrafficRouter
 from app.core.storage.memory import InMemoryObjectStorage
 from app.core.storage.object_storage import ObjectStorage
 from app.core.storage.r2 import CloudflareR2ObjectStorage
-from app.core.traffic.traffic_router import NoopTrafficRouter, TrafficRouter
+from app.core.traffic.kubernetes_traffic_router import KubernetesTrafficRouter
 from app.core.traffic.traefik_file_traffic_router import TraefikFileTrafficRouter
+from app.core.traffic.traffic_router import NoopTrafficRouter, TrafficRouter
 from app.db.engine import get_session_factory
 from app.db.models import User
 
