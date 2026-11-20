@@ -1,6 +1,6 @@
 # Defect remediation — design spec
 
-- **Status:** Approved in chat (2026-11-20); implementation plan to follow.
+- **Status:** Approved 2026-11-20; implemented via docs/plans/2026-11-20-defect-remediation.md.
 - **Branch/workspace:** `fix/review-defect-remediation`, an isolated worktree whose branch points at `dev` (`4b59b57`). This baseline deliberately does **not** contain the three commits that exist only on `fix/security-and-cli-hardening` (`c03fcbd` security hardening, `f1517bb` docstrings, `aad7943` Linux deploy fix). Those commits must be merged into this branch separately; this work neither reverts them nor re-applies their unrelated parts. One expected overlap: `aad7943` fixed the Linux volume-upload bind, so Unit 14 must implement an equivalent fix on this `dev` baseline — resolving the merge conflict later is acceptable.
 - **Goal:** Fix every defect found in the full-project review — all findings in Waves A (security/correctness), B (medium bugs and frontend UX/a11y), and C (CLI, infra, CI, docs). Wave D (new features) is specified separately in `2026-11-20-platform-features-design.md` and is explicitly out of scope here.
 

@@ -86,7 +86,7 @@ The repo-root `.env` is the official config (docker compose reads it; direct run
 | `VELA_ADMIN_PASSWORD` | Password for bootstrap admin (required on first create) |
 | `VELA_AUTH_ACCESS_TOKEN_TTL_MINUTES` | Optional; access token lifetime in minutes (default sensible if omitted) |
 | `VELA_TRAFFIC_ROUTER` | `noop` (default), `traefik_file`, or `kubernetes` |
-| `VELA_TRAEFIK_DYNAMIC_FILE` | Absolute path to the JSON file Traefik loads (if using `traefik_file`) |
+| `VELA_TRAEFIK_DYNAMIC_FILE` | Absolute path to the dynamic YAML file Traefik loads (if using `traefik_file`) |
 | `VELA_TRAEFIK_RELOAD_CONTAINER` | Optional Docker **container name** (as in `docker ps`) for Traefik; after each route write, Vela sends **SIGHUP** so Traefik reloads the file when fsnotify misses changes (typical on Docker Desktop) |
 | `VELA_DOCKER_NETWORK` | Docker network name so Traefik can reach workload containers |
 | `VELA_PUBLIC_ROUTE_DOMAIN` | Base domain for generated public hostnames (optional) |
@@ -131,12 +131,12 @@ API: **http://127.0.0.1:8000** — health: `GET /api/health` (no auth).
 
 Bootstrap: set `VELA_ADMIN_EMAIL` / `VELA_ADMIN_PASSWORD`. Public registration is disabled.
 
-Instructors may manage members and invitations across projects; every such mutation is recorded in the audit log.
-
 ### Authentication
 
 - `POST /api/auth/register` — disabled; returns 403 `Registration disabled`.
 - `POST /api/auth/login` — email + password; returns `{ access_token, user }`.
+- `GET /api/auth/config` — public; reports which sign-in providers are enabled (Clerk publishable key/frontend API when configured).
+- `POST /api/auth/clerk/exchange` — exchanges a Clerk session token (`{ clerk_token }`) for a Vela `{ access_token, user }`. Clerk must be configured, and `VELA_ALLOWED_ORIGINS` must list the SPA origin: the token `azp` allowlist is enforced (fail-closed when empty).
 
 Accounts are provisioned by admins or instructors on the Admin page. Bootstrap the first admin with `VELA_ADMIN_EMAIL` / `VELA_ADMIN_PASSWORD`.
 
@@ -154,7 +154,7 @@ Profile photos are stored in object storage (Cloudflare R2 in production). Set i
 - `VELA_R2_BUCKET`
 - `VELA_R2_PUBLIC_BASE_URL` — public CDN or custom domain base URL (no trailing slash)
 
-Most **`/api/containers/**`** routes require that bearer token. Containers are scoped per user (Docker label `vela.owner_id`).
+Most `/api/containers/**` routes require a bearer token; access is scoped by project membership and the Docker labels `vela.owner_id` / `vela.project_id`. Instructors may manage members and invitations across projects; every mutation is audit-logged.
 
 ### User library (Dockerfile templates)
 
@@ -188,14 +188,14 @@ By default the API uses `VELA_TRAFFIC_ROUTER=noop` (no public hostnames). To tur
 docker network create vela-net
 ```
 
-2. **Dynamic config file** — a **single JSON file** (not a directory). Create an empty object once, then let Vela overwrite it:
+2. **Dynamic config file** — a **single YAML file** (not a directory): `traefik-http.yml` in the compose stack, or the absolute path you set in `VELA_TRAEFIK_DYNAMIC_FILE` for a manual Traefik. Create an empty object once, then let Vela overwrite it:
 
 ```powershell
 New-Item -ItemType Directory -Force resources | Out-Null
-Set-Content -Path resources\traefik-http.json -Value '{}' -NoNewline
+Set-Content -Path resources\traefik-http.yml -Value '{}' -NoNewline
 ```
 
-3. **Run Traefik** (v3). Mount the **parent directory** of the JSON file (more reliable than a single-file bind on Docker Desktop). Entry points must be named `web` / `websecure` (what Vela writes when TLS is on). Use an **absolute** host path — if you run this from `backend/`, `${PWD}\resources` points at the wrong folder and Traefik will keep serving `404`:
+3. **Run Traefik** (v3). Mount the **parent directory** of the YAML file (more reliable than a single-file bind on Docker Desktop). Entry points must be named `web` / `websecure` (what Vela writes when TLS is on). Use an **absolute** host path — if you run this from `backend/`, `${PWD}\resources` points at the wrong folder and Traefik will keep serving `404`:
 
 ```powershell
 # From the repo root (or substitute your absolute path to resources\).
@@ -204,7 +204,7 @@ docker run -d --name traefik --restart unless-stopped `
   -p 80:80 -p 443:443 -p 8080:8080 `
   -v "F:\path\to\Vela\resources:/etc/traefik/dynamic" `
   traefik:v3.2 `
-  --providers.file.filename=/etc/traefik/dynamic/traefik-http.json `
+  --providers.file.filename=/etc/traefik/dynamic/traefik-http.yml `
   --providers.file.watch=true `
   --entrypoints.web.address=:80 `
   --entrypoints.websecure.address=:443 `
@@ -218,7 +218,7 @@ Dashboard (dev only): **http://127.0.0.1:8080**. Confirm routes loaded: `http://
 
 ```env
 VELA_TRAFFIC_ROUTER=traefik_file
-VELA_TRAEFIK_DYNAMIC_FILE=F:\path\to\Vela\resources\traefik-http.json
+VELA_TRAEFIK_DYNAMIC_FILE=F:\path\to\Vela\resources\traefik-http.yml
 VELA_TRAEFIK_RELOAD_CONTAINER=traefik
 VELA_DOCKER_NETWORK=vela-net
 VELA_PUBLIC_ROUTE_DOMAIN=apps.example.com
@@ -261,7 +261,7 @@ VITE_API_BASE_URL=http://127.0.0.1:8000
 
 ## End-to-end tests (Playwright)
 
-The `frontend/e2e/` suite drives the SPA in a real browser against a real FastAPI process. Playwright's `webServer` config starts both the API (`python -m uvicorn app.api.app:app`) and Vite dev server on the test ports automatically.
+The `frontend/e2e/` suite drives the real SPA in a real browser against a real FastAPI process. Playwright's `webServer` config starts both the API (`python -m uvicorn app.api.app:app`, port 8000) and the Vite dev server (port 5173) automatically.
 
 ```powershell
 cd frontend
@@ -270,7 +270,7 @@ npx playwright install --with-deps chromium
 npm run test:e2e
 ```
 
-Most specs (auth, settings, dashboard, containers) work entirely against mocked HTTP responses installed via `page.route(...)` — the only test that actually hits the live backend is `e2e/api.spec.ts` (`GET /api/health`). That means **no Postgres or Docker is required to run the suite**.
+Specs hit the live backend with seeded E2E users (see `frontend/e2e/constants.ts`, kept in sync with `backend/app/e2e_support.py`); the API runs in E2E mode on SQLite with a fake container orchestrator. App flows are **not mocked** — network interception is only used for external OAuth redirects.
 
 **Python interpreter selection.** Playwright auto-detects the repo's virtualenv: if `<repoRoot>/.venv/Scripts/python.exe` (Windows) or `<repoRoot>/.venv/bin/python` (Unix) exists, it is used to launch uvicorn. So after the standard `Backend` setup above (which creates `.venv` and installs `pip install -e ".[dev]"`), `npm run test:e2e` works without further configuration. If neither is found, plain `python` on `PATH` is used. To force a specific interpreter, set `PW_API_SERVER_COMMAND`, e.g.:
 
@@ -294,7 +294,7 @@ The CI workflow (`.github/workflows/ci.yml`) installs Python + Node + Chromium a
 
 | Issue | What to check |
 |-------|----------------|
-| Traefik JSON `is a directory` | Path must be a file, not a folder |
+| Traefik dynamic file `is a directory` | Path must be a file, not a folder |
 | Traefik hot reload / stale routes | Set **`VELA_TRAEFIK_RELOAD_CONTAINER`** to the Traefik container name. Also prefer **mounting the parent directory** for the dynamic file; ensure `providers.file.watch` is true. |
 | API vs Docker | Docker running; socket reachable. The api container starts as root so its entrypoint aligns the mounted socket's group (re-groups root:root sockets to `DOCKER_GROUP_ID`, or re-GIDs the in-image docker group to match a host docker group) before dropping to `vela`. Check `docker compose logs api` for `vela-entrypoint:` lines, and `DOCKER_SOCKET_PATH` in `.env` |
 | UI vs API | `VITE_API_BASE_URL`; backend on port 8000; CORS |
