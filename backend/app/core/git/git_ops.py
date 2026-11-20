@@ -16,11 +16,9 @@ from app.e2e_support import e2e_git_shallow_clone_if_enabled
 _CREDENTIALS_IN_URL = re.compile(r"(https?://)([^/@:\s]+:)?[^/@\s]+@", re.IGNORECASE)
 
 
-def _guard_git_url(url: str) -> None:
-    from app.core.exceptions import CloneError
-
+def _guard_git_url(url: str) -> str:
     try:
-        validate_git_remote(url)
+        return validate_git_remote(url)
     except ValueError as exc:
         raise CloneError(url, str(exc)) from exc
 
@@ -47,7 +45,7 @@ async def git_shallow_clone(
     ):
         return
 
-    _guard_git_url(url)
+    url = _guard_git_url(url)
 
     cmd = _build_clone_command(url=url, branch=branch, dest=dest, access_token=access_token)
 
@@ -126,7 +124,7 @@ def head_commit(root: Path) -> str | None:
 
 async def git_head_ref(*, url: str, branch: str, access_token: str | None = None) -> str | None:
     """Resolve the head commit sha of ``branch`` in ``url`` via ``git ls-remote`` (no clone)."""
-    _guard_git_url(url)
+    url = _guard_git_url(url)
     # ponytail: ref pattern assumes a branch name (full refs pass through via the startswith check)
     ref = branch if branch.startswith("refs/") else f"refs/heads/{branch}"
     cmd: list[str] = ["git"]

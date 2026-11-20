@@ -56,12 +56,14 @@ def validate_outbound_url(
 
 def validate_git_remote(url: str) -> str:
     """Apply the outbound SSRF guard to Git clone URLs (SSH remotes use host checks)."""
-    from urllib.parse import urlsplit
-
     stripped = url.strip()
     lowered = stripped.lower()
     if lowered.startswith("git@"):
-        host = stripped.split("@", 1)[1].split(":", 1)[0]
+        hostport = stripped.split("@", 1)[1]
+        if hostport.startswith("["):
+            host = hostport[1:].split("]", 1)[0]
+        else:
+            host = hostport.split(":", 1)[0]
     elif lowered.startswith(("ssh://", "git://")):
         host = urlsplit(stripped).hostname or ""
     elif lowered.startswith(("http://", "https://")):
