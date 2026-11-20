@@ -13,7 +13,6 @@ from app.api.schemas import (
     AuthConfigResponse,
     ClerkExchangeRequest,
     LoginRequest,
-    RegisterRequest,
     TokenResponse,
     UserPublic,
 )
@@ -60,7 +59,7 @@ def _token_response(user: User, object_storage: ObjectStorage) -> TokenResponse:
     response_model=TokenResponse,
     status_code=status.HTTP_201_CREATED,
 )
-async def register(body: RegisterRequest) -> TokenResponse:
+async def register() -> TokenResponse:
     raise RegistrationDisabledError()
 
 
