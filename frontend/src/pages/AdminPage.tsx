@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { useAuth } from '../auth/AuthContext'
 import { isAdmin } from '../auth/roles'
 import AuditPanel from './admin/AuditPanel'
@@ -9,9 +9,20 @@ type AdminTab = 'users' | 'audit'
 
 export default function AdminPage() {
   const { user } = useAuth()
-  const [activeTab, setActiveTab] = useState<AdminTab>('users')
+  const [searchParams, setSearchParams] = useSearchParams()
   const canViewAudit = isAdmin(user)
+  const activeTab: AdminTab = searchParams.get('tab') === 'audit' && canViewAudit ? 'audit' : 'users'
   const tabs: AdminTab[] = canViewAudit ? ['users', 'audit'] : ['users']
+
+  function selectTab(tab: AdminTab) {
+    const next = new URLSearchParams(searchParams)
+    if (tab === 'users') {
+      next.delete('tab')
+    } else {
+      next.set('tab', 'audit')
+    }
+    setSearchParams(next, { replace: true })
+  }
 
   function onTabKeyDown(event: React.KeyboardEvent<HTMLButtonElement>) {
     if (event.key !== 'ArrowRight' && event.key !== 'ArrowLeft') return
@@ -19,7 +30,7 @@ export default function AdminPage() {
     const index = tabs.indexOf(activeTab)
     const delta = event.key === 'ArrowRight' ? 1 : -1
     const next = tabs[(index + delta + tabs.length) % tabs.length]
-    setActiveTab(next)
+    selectTab(next)
     document.getElementById(`admin-${next}-tab`)?.focus()
   }
 
@@ -39,7 +50,7 @@ export default function AdminPage() {
           aria-selected={activeTab === 'users'}
           aria-controls="admin-users-panel"
           tabIndex={activeTab === 'users' ? 0 : -1}
-          onClick={() => setActiveTab('users')}
+          onClick={() => selectTab('users')}
           onKeyDown={onTabKeyDown}
         >
           Users
@@ -53,7 +64,7 @@ export default function AdminPage() {
             aria-selected={activeTab === 'audit'}
             aria-controls="admin-audit-panel"
             tabIndex={activeTab === 'audit' ? 0 : -1}
-            onClick={() => setActiveTab('audit')}
+            onClick={() => selectTab('audit')}
             onKeyDown={onTabKeyDown}
           >
             Audit

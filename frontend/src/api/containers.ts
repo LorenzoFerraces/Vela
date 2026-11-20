@@ -149,24 +149,29 @@ export type ContainerLogWebSocketOptions = {
   follow?: boolean
 }
 
-/**
- * Open an authenticated WebSocket for live container logs.
- * Pass `access_token` query param (required for browser WebSocket auth).
- */
-export function openContainerLogWebSocket(
+export async function issueWsTicket(
+  containerId: string,
+  purpose: 'logs' | 'exec',
+): Promise<string> {
+  const response = await apiPost<{ ticket: string }>(
+    `/api/containers/${encodeURIComponent(containerId)}/ws-ticket?purpose=${purpose}`,
+    {},
+    { dedupe: false },
+  )
+  return response.ticket
+}
+
+export async function openContainerLogWebSocket(
   containerId: string,
   options: ContainerLogWebSocketOptions = {}
-): WebSocket {
-  const token = getAccessToken()
-  if (!token) {
-    throw new Error('Sign in to view logs.')
-  }
+): Promise<WebSocket> {
+  const ticket = await issueWsTicket(containerId, 'logs')
   const tail =
     options.tail != null
       ? Math.min(Math.max(1, options.tail), MAX_CONTAINER_LOG_TAIL)
       : 400
   const params = new URLSearchParams({
-    access_token: token,
+    ticket,
     tail: String(tail),
   })
   if (options.follow === false) {
@@ -181,18 +186,15 @@ export interface ExecWebSocketHandle {
   dispose: () => void
 }
 
-export function openContainerExecWebSocket(
+export async function openContainerExecWebSocket(
   containerId: string,
   onOpen: () => void,
   onMessage: (data: Uint8Array) => void,
   onClose: () => void,
   onError: () => void,
-): ExecWebSocketHandle {
-  const token = getAccessToken()
-  if (!token) {
-    throw new Error('Sign in to open a terminal.')
-  }
-  const params = new URLSearchParams({ access_token: token })
+): Promise<ExecWebSocketHandle> {
+  const ticket = await issueWsTicket(containerId, 'exec')
+  const params = new URLSearchParams({ ticket })
   const path = `/api/containers/${encodeURIComponent(containerId)}/exec/ws?${params.toString()}`
   const ws = new WebSocket(getApiWebSocketUrl(path))
   ws.binaryType = 'arraybuffer'

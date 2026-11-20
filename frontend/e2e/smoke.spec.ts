@@ -19,7 +19,7 @@ test.describe('home page (anonymous)', () => {
   test('shows the Vela greeting and API health', async ({ page }) => {
     await page.goto('/')
     await expect(
-      page.getByRole('heading', { name: 'Hola, esto es Vela' }),
+      page.getByRole('heading', { name: 'Hello, this is Vela' }),
     ).toBeVisible()
     await expect(page.getByText('API: ok')).toBeVisible()
   })

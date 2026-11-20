@@ -1,19 +1,19 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { listActiveDeploys, type DeployJob } from '../api/client'
 
-const DEPLOY_POLL_INTERVAL_MS = 2500
+const DEPLOY_POLL_INTERVAL_MS = 1000
 
 /**
- * Polls GET /api/deploys/active: once on mount (restores in-flight jobs
- * after reload/route change), then every 2.5s while any returned job is
- * in_progress; paused while the tab is hidden. Errors keep the last state.
+ * Polls GET /api/deploys/active once on mount and every second while the tab
+ * is visible, so jobs submitted via the API or another tab show up here.
+ * Errors keep the last state.
  */
 export function useActiveDeployJobs(): {
   jobs: DeployJob[]
+  hasInFlightJob: boolean
   refresh: () => Promise<void>
 } {
   const [jobs, setJobs] = useState<DeployJob[]>([])
-  const anyInFlight = jobs.some((job) => job.status === 'in_progress')
 
   const refresh = useCallback(() => {
     return listActiveDeploys()
@@ -28,7 +28,6 @@ export function useActiveDeployJobs(): {
   }, [refresh])
 
   useEffect(() => {
-    if (!anyInFlight) return
     const interval = setInterval(() => {
       if (document.visibilityState === 'visible') void refresh()
     }, DEPLOY_POLL_INTERVAL_MS)
@@ -40,7 +39,12 @@ export function useActiveDeployJobs(): {
       clearInterval(interval)
       document.removeEventListener('visibilitychange', onVisibilityChange)
     }
-  }, [anyInFlight, refresh])
+  }, [refresh])
 
-  return { jobs, refresh }
+  const hasInFlightJob = useMemo(
+    () => jobs.some((job) => job.status === 'in_progress'),
+    [jobs],
+  )
+
+  return { jobs, hasInFlightJob, refresh }
 }
