@@ -60,12 +60,13 @@ async def create_api_token(
     return record, minted
 
 
-async def get_user_by_api_token(
+async def get_api_token_principal(
     session: AsyncSession, plaintext: str
-) -> User | None:
+) -> tuple[User, str] | None:
+    """Resolve a live PAT to its owner and scope, recording last use."""
     now = datetime.now(UTC)
     result = await session.execute(
-        select(User, ApiToken.id)
+        select(User, ApiToken.id, ApiToken.scope)
         .join(ApiToken, ApiToken.user_id == User.id)
         .where(
             ApiToken.token_hash == hash_api_token(plaintext),
@@ -75,9 +76,16 @@ async def get_user_by_api_token(
     row = result.one_or_none()
     if row is None:
         return None
-    user, token_id = row
+    user, token_id, scope = row
     await session.execute(
         update(ApiToken).where(ApiToken.id == token_id).values(last_used_at=now)
     )
     await session.commit()
-    return user
+    return user, scope
+
+
+async def get_user_by_api_token(
+    session: AsyncSession, plaintext: str
+) -> User | None:
+    principal = await get_api_token_principal(session, plaintext)
+    return principal[0] if principal is not None else None

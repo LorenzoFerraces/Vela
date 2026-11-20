@@ -28,6 +28,7 @@ def client_identity(request: Request) -> str:
 
 
 def check_rate_limit(key: str) -> None:
+    # VELA_DISABLE_RATE_LIMIT is test-only; production must keep the limiter on.
     if os.environ.get("VELA_DISABLE_RATE_LIMIT", "").strip() == "1":
         return
     now = time.monotonic()

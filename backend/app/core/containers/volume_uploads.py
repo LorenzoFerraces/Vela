@@ -46,7 +46,7 @@ async def read_upload_limited(upload: UploadFile, limit: int) -> bytes:
             break
         total += len(chunk)
         if total > limit:
-            limit_megabytes = limit // (1024 * 1024)
+            limit_megabytes = max(1, limit // (1024 * 1024))
             raise VolumeUploadTooLargeError(
                 f"Folder exceeds the {limit_megabytes} MB upload limit."
             )

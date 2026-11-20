@@ -52,6 +52,59 @@ def test_deploy_config_snapshot_round_trip(db_session_factory, seeded_user) -> N
     asyncio.run(run())
 
 
+def test_deploy_config_snapshot_encrypted_at_rest(db_session_factory, seeded_user) -> None:
+    import asyncio
+
+    from sqlalchemy import select
+
+    from app.db.models import DeploymentRecord
+
+    secret = "db-password-do-not-store-in-clear"
+    config = DeployConfig(
+        image="nginx:alpine", name="api", container_listen_port=80,
+        env_vars={"DB_PASSWORD": secret, "MODE": "prod"},
+    )
+
+    async def run() -> None:
+        async with db_session_factory() as session:
+            await record_deployment(
+                session, user_id=seeded_user.id,
+                project_id=seeded_user.personal_project_id,
+                snapshot=DeploymentSnapshot(
+                    container_id="cid-enc", container_name="api",
+                    source_kind="image", source_ref="nginx:alpine", git_branch=None,
+                    image_tag="nginx:alpine", container_port=80,
+                    env_vars={}, command=None, dockerfile_snapshot=None, public_url=None,
+                    deploy_config=config.model_dump(mode="json"),
+                ),
+            )
+        async with db_session_factory() as session:
+            raw = (await session.execute(
+                select(DeploymentRecord.deploy_config)
+                .where(DeploymentRecord.container_id == "cid-enc")
+            )).scalar_one()
+            assert isinstance(raw, str) and raw.startswith("enc:")
+            assert secret not in raw
+            loaded = await load_deploy_config_snapshot(session, "cid-enc")
+            assert loaded is not None
+            assert loaded.env_vars["DB_PASSWORD"] == secret
+
+        # Rows written before the fix stored plaintext JSON; they must still load.
+        async with db_session_factory() as session:
+            row = (await session.execute(
+                select(DeploymentRecord)
+                .where(DeploymentRecord.container_id == "cid-enc")
+            )).scalar_one()
+            row.deploy_config = config.model_dump(mode="json")
+            await session.commit()
+        async with db_session_factory() as session:
+            loaded = await load_deploy_config_snapshot(session, "cid-enc")
+            assert loaded is not None
+            assert loaded.env_vars["DB_PASSWORD"] == secret
+
+    asyncio.run(run())
+
+
 def test_base_container_info_resolves_policy_name_to_docker_id(
     fake_orchestrator: FakeContainerOrchestrator,
 ) -> None:

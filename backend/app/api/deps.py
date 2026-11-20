@@ -12,7 +12,7 @@ from fastapi import Depends, Request
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.core.auth.api_tokens import API_TOKEN_PREFIX, get_user_by_api_token
+from app.core.auth.api_tokens import API_TOKEN_PREFIX, get_api_token_principal
 from app.core.auth.enums import UserRole
 from app.core.auth.service import get_user_by_id
 from app.core.auth.tokens import decode_access_token
@@ -156,18 +156,27 @@ async def get_db() -> AsyncIterator[AsyncSession]:
 
 _oauth2_scheme = OAuth2PasswordBearer(tokenUrl="api/auth/login", auto_error=False)
 
+_MUTATING_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
+
 
 async def get_current_user(
     token: Annotated[str | None, Depends(_oauth2_scheme)],
+    request: Request,
     session: Annotated[AsyncSession, Depends(get_db)],
 ) -> User:
     """Resolve the bearer token (JWT or PAT) to a :class:`User`."""
     if not token:
         raise NotAuthenticatedError()
+    user: User | None
     if token.startswith(API_TOKEN_PREFIX):
-        user = await get_user_by_api_token(session, token)
-        if user is None:
+        principal = await get_api_token_principal(session, token)
+        if principal is None:
             raise NotAuthenticatedError("Invalid or revoked API token.")
+        user, scope = principal
+        if scope == "read" and request.method.upper() in _MUTATING_METHODS:
+            raise PermissionDeniedError(
+                "This API token has read-only scope; write requests are not allowed."
+            )
     else:
         claims = decode_access_token(token)
         user = await get_user_by_id(session, claims.user_id)

@@ -73,6 +73,8 @@ services:
         required: false
     environment:
       VELA_DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-vela}:${POSTGRES_PASSWORD:-vela}@postgres:5432/${POSTGRES_DB:-Vela}
+      VELA_AUTH_SECRET: ${VELA_AUTH_SECRET:-}
+      VELA_TOKEN_ENCRYPTION_KEY: ${VELA_TOKEN_ENCRYPTION_KEY:-}
       VELA_TRAEFIK_DYNAMIC_FILE: /etc/traefik/dynamic/traefik-http.yml
       VELA_TRAEFIK_RELOAD_CONTAINER: vela-traefik
       VELA_DOCKER_NETWORK: vela-workloads

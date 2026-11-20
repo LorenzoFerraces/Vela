@@ -148,6 +148,10 @@ jobs:
   infra-smoke:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    # Dummy secrets so require_deployment_secrets() allows startup; VELA_E2E stays unset.
+    env:
+      VELA_AUTH_SECRET: ci-smoke-secret-not-for-production
+      VELA_TOKEN_ENCRYPTION_KEY: aOyEhMsO-WUBHiLPBAR4NcnmSPrdGMF9TEzmyvG2jXs=
     steps:
       - uses: actions/checkout@v4
       - name: Validate compose file

@@ -62,6 +62,22 @@ def test_ws_ticket_endpoint_requires_auth(
     assert api_client.post(url).status_code == 200
 
 
+def test_expired_unconsumed_ws_ticket_is_swept(monkeypatch: pytest.MonkeyPatch) -> None:
+    from types import SimpleNamespace
+
+    from app.core.auth import ws_tickets
+
+    ws_tickets.reset_for_tests()
+    clock = {"now": 1000.0}
+    monkeypatch.setattr(ws_tickets, "time", SimpleNamespace(monotonic=lambda: clock["now"]))
+    old = ws_tickets.issue_ws_ticket(uuid.uuid4(), "cid-1", "logs")
+    assert old in ws_tickets._tickets
+    clock["now"] += ws_tickets._TICKET_TTL_SECONDS + 1
+    ws_tickets.issue_ws_ticket(uuid.uuid4(), "cid-1", "logs")
+    assert old not in ws_tickets._tickets
+    assert len(ws_tickets._tickets) == 1
+
+
 def test_login_throttled(anonymous_client: TestClient) -> None:
     rate_limit.reset_for_tests()
     for _ in range(11):

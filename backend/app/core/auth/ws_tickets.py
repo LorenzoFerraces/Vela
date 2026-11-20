@@ -11,8 +11,13 @@ _tickets: dict[str, tuple[uuid.UUID, str, str, float]] = {}
 
 
 def issue_ws_ticket(user_id: uuid.UUID, container_id: str, purpose: str) -> str:
+    now = time.monotonic()
+    # Sweep stale tickets on issue so unused ones cannot accumulate indefinitely.
+    for key, (_, _, _, expires_at) in list(_tickets.items()):
+        if expires_at <= now:
+            del _tickets[key]
     ticket = secrets.token_urlsafe(32)
-    _tickets[ticket] = (user_id, container_id, purpose, time.monotonic() + _TICKET_TTL_SECONDS)
+    _tickets[ticket] = (user_id, container_id, purpose, now + _TICKET_TTL_SECONDS)
     return ticket
 
 
