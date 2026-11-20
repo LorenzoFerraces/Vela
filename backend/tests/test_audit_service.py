@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import uuid
-from datetime import datetime, timezone, timedelta
+from datetime import UTC, date, datetime, timedelta
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -197,9 +197,9 @@ def test_list_date_range_filter(
     user_a: uuid.UUID,
 ) -> None:
     async def run() -> None:
-        now = datetime.now(timezone.utc)
-        yesterday = now - timedelta(days=1)
-        tomorrow = now + timedelta(days=1)
+        today = datetime.now(UTC).date()
+        yesterday = today - timedelta(days=1)
+        tomorrow = today + timedelta(days=1)
 
         await _emit(
             db_session_factory, user_a, "container.deploy", "container", "cid-1"
@@ -214,6 +214,38 @@ def test_list_date_range_filter(
             db_session_factory, from_date=yesterday, to_date=tomorrow
         )
         assert len(past_entries) == 1
+
+    asyncio.run(run())
+
+
+def test_list_to_date_includes_entire_selected_day(
+    db_session_factory: async_sessionmaker[AsyncSession],
+    user_a: uuid.UUID,
+) -> None:
+    """to_date is a calendar day, so entries late that day must still be returned."""
+    async def run() -> None:
+        async with db_session_factory() as session:
+            session.add(AuditLog(
+                user_id=user_a,
+                action="container.start",
+                target_type="container",
+                target_id="cid-morning",
+                created_at=datetime(2026, 11, 20, 0, 30, tzinfo=UTC),
+            ))
+            session.add(AuditLog(
+                user_id=user_a,
+                action="container.stop",
+                target_type="container",
+                target_id="cid-evening",
+                created_at=datetime(2026, 11, 20, 23, 30, tzinfo=UTC),
+            ))
+            await session.commit()
+
+        entries = await _query(db_session_factory, to_date=date(2026, 11, 20))
+        assert {entry.target_id for entry in entries} == {
+            "cid-morning",
+            "cid-evening",
+        }
 
     asyncio.run(run())
 
