@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-from app import bootstrap_env  # noqa: F401 — loads backend/.env before other app imports.
+from app import bootstrap_env  # loads backend/.env before other app imports.
 
 import asyncio
 import logging
+import os
 from contextlib import asynccontextmanager, suppress
 
 from fastapi import FastAPI
@@ -130,6 +131,9 @@ def create_app() -> FastAPI:
     Returns:
         FastAPI: A configured FastAPI application instance.
     """
+    if os.environ.get("VELA_E2E", "").strip() != "1":
+        bootstrap_env.require_deployment_secrets()
+
     application = FastAPI(
         title="Vela API",
         description="Container deployment platform — orchestrate, build, and manage containers.",
@@ -146,8 +150,8 @@ def create_app() -> FastAPI:
             "http://127.0.0.1:5173",
             "http://localhost:5174",
             "http://127.0.0.1:5174",
-            "http://velaunq.ddns.net:5173",
-            "https://velaunq.ddns.net:5173",
+            "http://app.example.com:5173",
+            "https://app.example.com:5173",
         ],
         allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$",
         allow_credentials=True,
