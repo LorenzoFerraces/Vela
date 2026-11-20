@@ -58,11 +58,12 @@ def test_remove_creates_audit_entry(api_client: TestClient) -> None:
     assert any(entry["action"] == "container.remove" for entry in logs)
 
 
-def test_exec_creates_audit_entry(
-    api_client: TestClient, auth_token: str
-) -> None:
+def test_exec_creates_audit_entry(api_client: TestClient) -> None:
+    ticket_response = api_client.post("/api/containers/cid-1/ws-ticket?purpose=exec")
+    assert ticket_response.status_code == 200
+    ticket = ticket_response.json()["ticket"]
     with api_client.websocket_connect(
-        f"/api/containers/cid-1/exec/ws?access_token={auth_token}"
+        f"/api/containers/cid-1/exec/ws?ticket={ticket}"
     ) as websocket:
         websocket.receive_bytes()
     logs = _get_audit_logs(api_client)

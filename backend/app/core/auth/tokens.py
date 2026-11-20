@@ -15,6 +15,8 @@ from app.core.exceptions import NotAuthenticatedError
 _ACCESS_TOKEN_TYPE = "access"
 _DEFAULT_TTL_MINUTES = 60
 _ALGORITHM = "HS256"
+_ISSUER = "vela"
+_AUDIENCE = "vela-api"
 
 
 @dataclass(frozen=True)
@@ -22,6 +24,8 @@ class AccessTokenClaims:
     user_id: uuid.UUID
     issued_at: datetime
     expires_at: datetime
+    issuer: str
+    audience: str
 
 
 def _secret() -> str:
@@ -57,14 +61,22 @@ def create_access_token(user_id: uuid.UUID) -> str:
         "iat": int(issued_at.timestamp()),
         "exp": int(expires_at.timestamp()),
         "type": _ACCESS_TOKEN_TYPE,
+        "iss": _ISSUER,
+        "aud": _AUDIENCE,
     }
     return jwt.encode(payload, _secret(), algorithm=_ALGORITHM)
 
 
 def decode_access_token(token: str) -> AccessTokenClaims:
-    """Validate the JWT signature, expiry, and type; return parsed claims."""
+    """Validate the JWT signature, expiry, type, issuer and audience; return parsed claims."""
     try:
-        payload = jwt.decode(token, _secret(), algorithms=[_ALGORITHM])
+        payload = jwt.decode(
+            token,
+            _secret(),
+            algorithms=[_ALGORITHM],
+            issuer=_ISSUER,
+            audience=_AUDIENCE,
+        )
     except InvalidTokenError as exc:
         raise NotAuthenticatedError("Invalid or expired token.") from exc
 
@@ -88,4 +100,6 @@ def decode_access_token(token: str) -> AccessTokenClaims:
         user_id=user_id,
         issued_at=datetime.fromtimestamp(issued_at_raw, tz=timezone.utc),
         expires_at=datetime.fromtimestamp(expires_at_raw, tz=timezone.utc),
+        issuer=_ISSUER,
+        audience=_AUDIENCE,
     )

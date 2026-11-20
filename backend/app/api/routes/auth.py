@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Request, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -19,6 +19,7 @@ from app.api.schemas import (
 )
 from app.api.user_view import user_public_from_snapshot
 from app.core.auth.enums import UserRole
+from app.core.auth.rate_limit import check_rate_limit, client_identity
 from app.core.auth.service import authenticate
 from app.core.auth.tokens import create_access_token
 from app.core.exceptions import (
@@ -65,22 +66,26 @@ async def register(body: RegisterRequest) -> TokenResponse:
 
 @router.post("/login", response_model=TokenResponse)
 async def login(
+    request: Request,
     body: LoginRequest,
     session: Annotated[AsyncSession, Depends(get_db)],
     object_storage: Annotated[ObjectStorage, Depends(get_object_storage)],
 ) -> TokenResponse:
     """Verify credentials and return an access token."""
+    check_rate_limit(client_identity(request))
     user = await authenticate(session, email=body.email, password=body.password)
     return _token_response(user, object_storage)
 
 
 @router.post("/clerk/exchange", response_model=TokenResponse)
 async def clerk_exchange(
+    request: Request,
     body: ClerkExchangeRequest,
     session: Annotated[AsyncSession, Depends(get_db)],
     object_storage: Annotated[ObjectStorage, Depends(get_object_storage)],
 ) -> TokenResponse:
     """Exchange a Clerk frontend JWT for a Vela access token."""
+    check_rate_limit(client_identity(request))
     enabled, _, _ = clerk_available()
     if not enabled:
         raise IntegrationConfigurationError(

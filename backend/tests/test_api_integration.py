@@ -19,7 +19,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.websockets import WebSocketDisconnect
 
 from app.api.app import create_app
-from app.core.auth.tokens import create_access_token
 from app.core.containers.docker_orchestrator import (
     VELA_OWNER_LABEL,
     VELA_ROUTE_HOST_LABEL,
@@ -33,7 +32,7 @@ from app.core.containers.volume_uploads import (
     VOLUME_UPLOAD_USER_QUOTA_BYTES,
 )
 from app.core.traffic.traffic_router import NoopTrafficRouter
-from app.db.models import Dockerfile, User
+from app.db.models import Dockerfile
 from tests.conftest import make_container_info
 from tests.test_deploy_jobs import wait_for_deploy
 
@@ -779,35 +778,31 @@ def test_list_containers_includes_access_url(
     assert data[0]["access_url"] == "https://svc.example.com/"
 
 
-def test_logs_stream_authenticated(
-    api_client: TestClient, auth_token: str
-) -> None:
+def test_logs_stream_authenticated(api_client: TestClient) -> None:
+    ticket_response = api_client.post("/api/containers/cid-1/ws-ticket?purpose=logs")
+    assert ticket_response.status_code == 200
+    ticket = ticket_response.json()["ticket"]
     with api_client.websocket_connect(
-        f"/api/containers/cid-1/logs/stream?access_token={auth_token}&follow=false"
+        f"/api/containers/cid-1/logs/stream?ticket={ticket}&follow=false"
     ) as websocket:
         data = websocket.receive_bytes()
     assert data.startswith(b"log line")
 
 
-def test_logs_stream_requires_token(anonymous_client: TestClient) -> None:
-    with anonymous_client.websocket_connect(
-        "/api/containers/cid-1/logs/stream"
-    ) as websocket:
-        with pytest.raises(WebSocketDisconnect):
-            websocket.receive_bytes()
+def test_logs_stream_requires_ticket(anonymous_client: TestClient) -> None:
+    with (
+        pytest.raises(WebSocketDisconnect),
+        anonymous_client.websocket_connect("/api/containers/cid-1/logs/stream"),
+    ):
+        pass
 
 
-def test_logs_stream_wrong_owner(
+def test_ws_ticket_wrong_owner_denied(
     api_client: TestClient,
     other_user_client: TestClient,
-    seeded_other_user: User,
 ) -> None:
-    token = create_access_token(seeded_other_user.id)
-    with other_user_client.websocket_connect(
-        f"/api/containers/cid-1/logs/stream?access_token={token}"
-    ) as websocket:
-        with pytest.raises(WebSocketDisconnect):
-            websocket.receive_bytes()
+    response = other_user_client.post("/api/containers/cid-1/ws-ticket?purpose=logs")
+    assert response.status_code == 404
     stats = api_client.get("/api/containers/cid-1/stats").json()
     assert stats["container_id"] == "cid-1"
     assert api_client.get("/api/containers/cid-1/health").json()["status"] == "healthy"

@@ -107,22 +107,6 @@ def _allowed_origins() -> frozenset[str]:
     return frozenset(origin.strip() for origin in raw.split(",") if origin.strip())
 
 
-_azp_warning_logged = False
-
-
-def _warn_if_azp_unenforced() -> None:
-    """Warn once when Clerk is configured but azp enforcement is disabled."""
-    global _azp_warning_logged
-    if _azp_warning_logged:
-        return
-    _azp_warning_logged = True
-    has_clerk = bool(os.environ.get("VELA_CLERK_PUBLISHABLE_KEY", "").strip())
-    if has_clerk and not _allowed_origins():
-        logger.warning(
-            "VELA_ALLOWED_ORIGINS is empty; Clerk token azp claims are not enforced."
-        )
-
-
 def _secret_key() -> str:
     return os.environ.get("VELA_CLERK_SECRET_KEY", "").strip()
 
@@ -182,10 +166,10 @@ async def verify_clerk_token(token: str) -> ClerkClaims:
     also lacks an ``email`` claim, the account's email is resolved via Clerk's
     Users API using ``VELA_CLERK_SECRET_KEY``.
 
-    Raises ``ClerkTokenError`` on invalid signature, expiry, issuer, audience,
-    azp, or missing required claims.
+    Raises ``IntegrationConfigurationError`` when allowed origins are not
+    configured, and ``ClerkTokenError`` on invalid signature, expiry, issuer,
+    audience, azp, or missing required claims.
     """
-    _warn_if_azp_unenforced()
     publishable_key = _publishable_key()
     jwks = await _get_jwks()
 
@@ -247,8 +231,12 @@ async def verify_clerk_token(token: str) -> ClerkClaims:
         email = await _fetch_clerk_email(external_id)
 
     allowed_origins = _allowed_origins()
+    if not allowed_origins:
+        raise IntegrationConfigurationError(
+            "VELA_ALLOWED_ORIGINS must be set when Clerk is enabled."
+        )
     azp = payload.get("azp")
-    if allowed_origins and azp is not None and azp not in allowed_origins:
+    if not isinstance(azp, str) or azp not in allowed_origins:
         raise ClerkTokenError("Clerk token azp is not an allowed origin.")
 
     return ClerkClaims(email=email.strip().lower(), external_id=external_id)

@@ -35,6 +35,11 @@ def _clear_cache():
     reset_jwks_cache_for_tests()
 
 
+@pytest.fixture(autouse=True)
+def _allowed_origins(monkeypatch: Any) -> None:
+    monkeypatch.setenv("VELA_ALLOWED_ORIGINS", "http://localhost:5173")
+
+
 def test_clerk_frontend_api_host_decodes_embedded_domain() -> None:
     assert clerk_frontend_api_host(TEST_CLERK_PUBLISHABLE_KEY) == "sample123.clerk.accounts.dev"
 
@@ -84,6 +89,7 @@ def _sign_clerk_token(
             "exp": now + 600,
             "nbf": now,
             "iat": now,
+            "azp": "http://localhost:5173",
         },
         private_key,
         algorithm="RS256",
@@ -101,6 +107,7 @@ def _full_claims(*, email: str = "u@x.com", sub: str = "user_1") -> dict[str, ob
         "exp": now + 600,
         "nbf": now,
         "iat": now,
+        "azp": "http://localhost:5173",
     }
 
 
@@ -356,23 +363,40 @@ async def test_verify_clerk_token_accepts_slightly_future_iat_within_leeway(
 
 
 @pytest.mark.asyncio
-async def test_verify_clerk_token_azp_skipped_when_allowlist_empty(
+async def test_verify_clerk_token_fails_closed_when_allowlist_empty(
     monkeypatch: Any,
 ) -> None:
     monkeypatch.setenv("VELA_CLERK_PUBLISHABLE_KEY", TEST_CLERK_PUBLISHABLE_KEY)
     monkeypatch.delenv("VELA_ALLOWED_ORIGINS", raising=False)
     kid, private_key = _make_rsa_kid()
+    token = pyjwt.encode(_full_claims(), private_key, algorithm="RS256", headers={"kid": kid})
+
+    async def fake_fetch() -> dict[str, object]:
+        return _jwks_for(kid, private_key)
+
+    with (
+        patch.object(clerk_mod, "_fetch_jwks", new=fake_fetch),
+        pytest.raises(IntegrationConfigurationError, match="VELA_ALLOWED_ORIGINS"),
+    ):
+        await verify_clerk_token(token)
+
+
+@pytest.mark.asyncio
+async def test_verify_clerk_token_missing_azp_raises(monkeypatch: Any) -> None:
+    monkeypatch.setenv("VELA_CLERK_PUBLISHABLE_KEY", TEST_CLERK_PUBLISHABLE_KEY)
+    kid, private_key = _make_rsa_kid()
     claims = _full_claims()
-    claims["azp"] = "http://localhost:8081"
+    del claims["azp"]
     token = pyjwt.encode(claims, private_key, algorithm="RS256", headers={"kid": kid})
 
     async def fake_fetch() -> dict[str, object]:
         return _jwks_for(kid, private_key)
 
-    with patch.object(clerk_mod, "_fetch_jwks", new=fake_fetch):
-        verified = await verify_clerk_token(token)
-
-    assert verified == ClerkClaims(email="u@x.com", external_id="user_1")
+    with (
+        patch.object(clerk_mod, "_fetch_jwks", new=fake_fetch),
+        pytest.raises(ClerkTokenError, match="azp"),
+    ):
+        await verify_clerk_token(token)
 
 
 @pytest.mark.asyncio

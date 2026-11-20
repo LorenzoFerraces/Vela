@@ -15,6 +15,7 @@ from fastapi import (
     BackgroundTasks,
     Depends,
     File,
+    HTTPException,
     Query,
     Response,
     UploadFile,
@@ -53,9 +54,8 @@ from app.api.schemas import (
 )
 from app.core.models import ScalingPolicyInfo
 from app.core import user_library
-from app.core.auth.api_tokens import API_TOKEN_PREFIX, get_user_by_api_token
 from app.core.auth.service import get_user_by_id
-from app.core.auth.tokens import decode_access_token
+from app.core.auth.ws_tickets import consume_ws_ticket, issue_ws_ticket
 from app.core.build.default_image_builder import DefaultImageBuilder
 from app.core.build.registry_image_suggestions import (
     fetch_docker_hub_suggestions,
@@ -105,7 +105,6 @@ from app.core.exceptions import (
     ContainerNotFoundError,
     ImageNotFoundError,
     InvalidVolumeUploadPathError,
-    NotAuthenticatedError,
     ProjectAccessDeniedError,
     ProviderConnectionError,
     RegistryAccessDeniedError,
@@ -157,23 +156,6 @@ _EXEC_START_FAILURE_MESSAGE = (
     "a shell (sh) is installed."
 )
 _MAX_TERMINAL_DIMENSION = 500
-
-
-async def _get_websocket_user(session: AsyncSession, token: str | None) -> User:
-    if not token:
-        raise NotAuthenticatedError()
-    if token.startswith(API_TOKEN_PREFIX):
-        user = await get_user_by_api_token(session, token)
-        if user is None:
-            raise NotAuthenticatedError("Invalid or revoked API token.")
-    else:
-        claims = decode_access_token(token)
-        user = await get_user_by_id(session, claims.user_id)
-        if user is None:
-            raise NotAuthenticatedError("User no longer exists.")
-    if not user.is_active:
-        raise NotAuthenticatedError()
-    return user
 
 
 def _exec_max_session_seconds() -> int:
@@ -1353,6 +1335,24 @@ async def container_logs(
     return {"logs": text}
 
 
+@router.post("/{container_id}/ws-ticket")
+async def issue_container_ws_ticket(
+    container_id: str,
+    purpose: str,
+    current_user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[AsyncSession, Depends(get_db)],
+    orchestrator: Annotated[ContainerOrchestrator, Depends(get_orchestrator)],
+) -> dict[str, str]:
+    """Issue a short-lived single-use ticket for a logs/exec WebSocket."""
+    if purpose not in ("logs", "exec"):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Invalid WebSocket purpose.")
+    await require_container_access(
+        session, orchestrator, current_user, container_id,
+        action="read" if purpose == "logs" else "write",
+    )
+    return {"ticket": issue_ws_ticket(current_user.id, container_id, purpose)}
+
+
 @router.websocket("/{container_id}/logs/stream")
 async def container_logs_stream(
     websocket: WebSocket,
@@ -1360,9 +1360,25 @@ async def container_logs_stream(
     orchestrator: Annotated[ContainerOrchestrator, Depends(get_orchestrator)],
     session: Annotated[AsyncSession, Depends(get_db)],
 ) -> None:
-    """Stream container logs over WebSocket (binary frames). Authenticate with ``access_token`` query param."""
+    """Stream container logs over WebSocket (binary frames). Authenticate with a short-lived ``ticket``."""
+    ticket = websocket.query_params.get("ticket", "")
+    user_id = consume_ws_ticket(ticket, container_id, "logs")
+    if user_id is None:
+        await websocket.close(code=1008, reason="Unauthorized")
+        return
+    user = await get_user_by_id(session, user_id)
+    if user is None or not user.is_active:
+        await websocket.close(code=1008, reason="Unauthorized")
+        return
+    try:
+        await require_container_access(
+            session, orchestrator, user, container_id, action="read"
+        )
+    except (ContainerNotFoundError, ProjectAccessDeniedError):
+        await websocket.close(code=1008, reason="Unauthorized")
+        return
     await websocket.accept()
-    token = websocket.query_params.get("access_token")
+
     tail_raw = websocket.query_params.get("tail", "200")
     try:
         tail_parsed = int(tail_raw)
@@ -1372,19 +1388,6 @@ async def container_logs_stream(
     follow_logs = (
         websocket.query_params.get("follow", "true").strip().lower() != "false"
     )
-
-    try:
-        user = await _get_websocket_user(session, token)
-    except NotAuthenticatedError:
-        await websocket.close(code=1008)
-        return
-    try:
-        await require_container_access(
-            session, orchestrator, user, container_id, action="read"
-        )
-    except (ContainerNotFoundError, ProjectAccessDeniedError):
-        await websocket.close(code=1008)
-        return
 
     try:
         async for chunk in orchestrator.stream_logs(
@@ -1409,20 +1412,16 @@ async def container_exec_ws(
     orchestrator: Annotated[ContainerOrchestrator, Depends(get_orchestrator)],
     session: Annotated[AsyncSession, Depends(get_db)],
 ) -> None:
-    """Bidirectional exec terminal over WebSocket. Authenticate with ``access_token`` query param."""
-    token = websocket.query_params.get("access_token")
-
-    try:
-        await websocket.accept()
-    except WebSocketDisconnect:
-        return
-
-    try:
-        user = await _get_websocket_user(session, token)
-    except NotAuthenticatedError:
+    """Bidirectional exec terminal over WebSocket. Authenticate with a short-lived ``ticket``."""
+    ticket = websocket.query_params.get("ticket", "")
+    user_id = consume_ws_ticket(ticket, container_id, "exec")
+    if user_id is None:
         await websocket.close(code=1008, reason="Unauthorized")
         return
-
+    user = await get_user_by_id(session, user_id)
+    if user is None or not user.is_active:
+        await websocket.close(code=1008, reason="Unauthorized")
+        return
     try:
         await require_container_access(
             session, orchestrator, user, container_id, action="write"
@@ -1430,6 +1429,7 @@ async def container_exec_ws(
     except (ContainerNotFoundError, ProjectAccessDeniedError):
         await websocket.close(code=1008, reason="Unauthorized")
         return
+    await websocket.accept()
 
     await emit_audit_log(
         session,

@@ -6,7 +6,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Response, status
+from fastapi import APIRouter, Depends, Request, Response, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -14,6 +14,7 @@ from app.api.deps import get_current_user, get_db
 from app.api.schemas import ApiTokenCreate, ApiTokenCreated, ApiTokenPublic
 from app.core.audit.service import emit_audit_log
 from app.core.auth.api_tokens import create_api_token
+from app.core.auth.rate_limit import check_rate_limit, client_identity
 from app.core.exceptions import ApiTokenNotFoundError
 from app.db.models import ApiToken, User
 
@@ -22,10 +23,12 @@ router = APIRouter()
 
 @router.post("/", response_model=ApiTokenCreated, status_code=status.HTTP_201_CREATED)
 async def create_token(
+    request: Request,
     body: ApiTokenCreate,
     user: Annotated[User, Depends(get_current_user)],
     session: Annotated[AsyncSession, Depends(get_db)],
 ) -> ApiTokenCreated:
+    check_rate_limit(client_identity(request))
     expires_at = (
         datetime.now(timezone.utc) + timedelta(days=body.expires_in_days)
         if body.expires_in_days is not None
