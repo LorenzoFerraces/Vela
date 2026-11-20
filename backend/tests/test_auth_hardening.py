@@ -20,6 +20,13 @@ def test_rate_limit_blocks_eleventh_attempt() -> None:
     assert getattr(exc.value, "status_code", None) == 429
 
 
+def test_rate_limit_bypass(monkeypatch: pytest.MonkeyPatch) -> None:
+    rate_limit.reset_for_tests()
+    monkeypatch.setenv("VELA_DISABLE_RATE_LIMIT", "1")
+    for _ in range(11):
+        rate_limit.check_rate_limit("1.2.3.4")
+
+
 def test_jwt_carries_and_verifies_issuer_audience() -> None:
     claims = decode_access_token(create_access_token(uuid.uuid4()))
     assert claims.issuer == "vela"

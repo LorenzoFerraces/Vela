@@ -52,6 +52,7 @@ const e2eApiEnv: Record<string, string> = {
   // Empty on purpose: keeps load_dotenv from filling in the local .env key,
   // so Clerk stays disabled and E2E never loads the real Clerk script.
   VELA_CLERK_PUBLISHABLE_KEY: '',
+  VELA_DISABLE_RATE_LIMIT: '1',
   VELA_ALLOWED_ORIGINS: 'http://127.0.0.1:5173',
   VELA_FAKE_ORCHESTRATOR: '1',
   VELA_DATABASE_URL: `sqlite+aiosqlite:///${e2eDatabasePath.replace(/\\/g, '/')}`,

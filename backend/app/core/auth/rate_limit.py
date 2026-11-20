@@ -28,6 +28,8 @@ def client_identity(request: Request) -> str:
 
 
 def check_rate_limit(key: str) -> None:
+    if os.environ.get("VELA_DISABLE_RATE_LIMIT", "").strip() == "1":
+        return
     now = time.monotonic()
     bucket = _buckets[key]
     while bucket and now - bucket[0] > _WINDOW_SECONDS:
