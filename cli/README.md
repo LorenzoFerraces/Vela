@@ -2,6 +2,8 @@
 
 Terminal client for Vela. Runs on Bun; ships as a compiled binary.
 
+Linux/macOS: use `dist/vela` (no `.exe`) and `export VAR=value` instead of `$env:VAR = "value"`.
+
 ## Install
 
 ```powershell

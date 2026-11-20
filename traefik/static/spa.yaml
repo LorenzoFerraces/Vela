@@ -23,9 +23,10 @@ http:
       tls:
         certResolver: letsencrypt
         # The rule has no Host matcher, so Traefik cannot infer which name to
-        # issue for. Must match VELA_GITHUB_OAUTH_REDIRECT_URI / VELA_FRONTEND_BASE_URL.
+        # issue for. Comes from VELA_DOMAIN (passed to the traefik service in
+        # docker-compose.yml); must match VELA_FRONTEND_BASE_URL / OAuth redirect.
         domains:
-          - main: velaunq.ddns.net
+          - main: '{{ env "VELA_DOMAIN" }}'
   services:
     vela-spa-svc:
       loadBalancer:

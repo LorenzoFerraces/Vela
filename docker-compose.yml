@@ -113,6 +113,8 @@ services:
     image: traefik:v3.2
     container_name: vela-traefik
     restart: unless-stopped
+    environment:
+      VELA_DOMAIN: ${VELA_DOMAIN:-velaunq.ddns.net}
     command:
       - --providers.file.directory=/etc/traefik/dynamic
       - --providers.file.watch=true
