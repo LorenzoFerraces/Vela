@@ -6,12 +6,22 @@ on:
       - "backend/**"
       - "frontend/**"
       - "cli/**"
+      - "docker-compose.yml"
+      - "docker-compose.dev.yml"
+      - "traefik/**"
+      - "frontend/nginx.conf"
+      - ".env.example"
       - ".github/workflows/ci.yml"
   pull_request:
     paths:
       - "backend/**"
       - "frontend/**"
       - "cli/**"
+      - "docker-compose.yml"
+      - "docker-compose.dev.yml"
+      - "traefik/**"
+      - "frontend/nginx.conf"
+      - ".env.example"
       - ".github/workflows/ci.yml"
 
 jobs:
@@ -46,7 +56,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: latest
+          bun-version: "1.4.4"
       - name: Install dependencies
         working-directory: cli
         run: bun install --frozen-lockfile
@@ -81,7 +91,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: "22"
+          node-version: "20" # keep in sync with frontend/Dockerfile:1 (node:20-alpine)
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
@@ -106,3 +116,52 @@ jobs:
           name: playwright-report
           path: frontend/playwright-report/
           retention-days: 7
+
+  lint-and-typecheck:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12", cache: pip, cache-dependency-path: backend/pyproject.toml }
+      - run: pip install -e "backend/[dev]"
+      - name: Backend lint
+        working-directory: backend
+        run: ruff check .
+      - name: Backend typecheck
+        working-directory: backend
+        run: mypy app/ tests/
+      - uses: actions/setup-node@v4
+        with: { node-version: "20", cache: npm, cache-dependency-path: frontend/package-lock.json } # keep in sync with frontend/Dockerfile:1
+      - run: npm ci
+        working-directory: frontend
+      - name: Frontend lint
+        working-directory: frontend
+        run: npm run lint
+      - name: Frontend typecheck
+        working-directory: frontend
+        run: npm run typecheck
+      - name: Frontend build
+        working-directory: frontend
+        run: npm run build
+
+  infra-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate compose file
+        run: docker compose -f docker-compose.yml config -q
+      - name: Build and start stack
+        run: docker compose up -d --build
+      - name: Wait for API health
+        run: |
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8081/api/health >/dev/null; then exit 0; fi
+            sleep 5
+          done
+          docker compose ps
+          exit 1
+      - name: Tear down
+        if: always()
+        run: docker compose down -v
