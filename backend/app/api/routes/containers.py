@@ -606,6 +606,30 @@ async def list_containers(
     )
 
 
+@router.get("/by-name/{name}", response_model=ContainerInfo)
+async def get_container_by_name(
+    name: str,
+    orchestrator: Annotated[ContainerOrchestrator, Depends(get_orchestrator)],
+    current_user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[AsyncSession, Depends(get_db)],
+) -> ContainerInfo:
+    """Resolve one container by exact name for the current user."""
+    project_ids = await list_accessible_project_ids(session, current_user.id)
+    containers = await _list_user_containers(
+        orchestrator,
+        session,
+        current_user,
+        container_status=None,
+        project_ids=project_ids,
+    )
+    match = next((info for info in containers if info.name == name), None)
+    if match is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Container not found.")
+    return await require_container_access(
+        session, orchestrator, current_user, match.id, action="read"
+    )
+
+
 @router.get("/image/availability", response_model=ImageAvailabilityResponse)
 async def image_availability(
     ref: Annotated[

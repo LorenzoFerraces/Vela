@@ -44,6 +44,11 @@ export async function runTui(): Promise<number> {
       initialContainers={initialContainers}
       onStart={act("start")}
       onStop={act("stop")}
+      onLogs={(container) => {
+        renderer.destroy()
+        console.log(`Run: vela logs ${container.name} -f`)
+        finish()
+      }}
       onExec={(container) => {
         renderer.destroy()
         console.log(`Run: vela exec ${container.name}`)

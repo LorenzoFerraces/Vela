@@ -44,6 +44,16 @@ from app.db.models import AlertHistory, EmailPreference, User, UserLlmProvider
 
 router = APIRouter()
 
+# Mounted at /api (not /api/settings) so the CLI can read it without auth.
+public_router = APIRouter()
+
+
+@public_router.get("/runtime-config")
+async def runtime_config() -> dict[str, int]:
+    from app.api.routes.containers import _exec_max_session_seconds
+
+    return {"exec_max_session_seconds": _exec_max_session_seconds()}
+
 
 def _provider_to_get(row: UserLlmProvider) -> LlmProviderGet:
     return LlmProviderGet(

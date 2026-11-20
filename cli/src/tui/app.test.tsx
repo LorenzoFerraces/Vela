@@ -33,3 +33,25 @@ test("renders the container list from initial data", async () => {
     setup.renderer.destroy()
   }
 })
+
+test("l and e delegate to the logs and exec handlers", async () => {
+  const calls: string[] = []
+  const setup = await testRender(
+    <App
+      initialContainers={[container]}
+      onLogs={() => calls.push("logs")}
+      onExec={() => calls.push("exec")}
+    />,
+    { width: 100, height: 24 },
+  )
+  try {
+    await setup.renderOnce()
+    setup.mockInput.pressKey("l")
+    await setup.flush()
+    setup.mockInput.pressKey("e")
+    await setup.flush()
+    expect(calls).toEqual(["logs", "exec"])
+  } finally {
+    setup.renderer.destroy()
+  }
+})

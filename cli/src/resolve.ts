@@ -32,6 +32,13 @@ export async function resolveContainerFromApi(
   config: ResolvedConfig & { token: string },
   query: string,
 ): Promise<ContainerInfo> {
+  const exact = await request<ContainerInfo | null>(
+    config,
+    "GET",
+    `/containers/by-name/${encodeURIComponent(query)}`,
+  ).catch(() => null)
+  if (exact) return exact
+
   const containers = await request<ContainerInfo[]>(config, "GET", "/containers/")
   const resolution = resolveContainer(containers, query)
   if (resolution.kind === "one") return resolution.container

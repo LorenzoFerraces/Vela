@@ -1,9 +1,9 @@
 import { parseArgs } from "node:util"
 
-import { requireToken } from "../client"
+import { request, requireToken } from "../client"
 import { resolveConfig } from "../config"
 import { resolveContainerFromApi } from "../resolve"
-import { websocketUrl } from "../ws"
+import { mintWsTicket, websocketUrl } from "../ws"
 
 interface RawStdin {
   setRawMode?: (mode: boolean) => void
@@ -31,20 +31,32 @@ export async function exec(argv: string[]): Promise<number> {
 
   const config = requireToken(resolveConfig({}))
   const container = await resolveContainerFromApi(config, query)
-
-  const url = websocketUrl(
-    config.server,
-    `/containers/${container.id}/exec/ws`,
-    config.token,
+  const ticket = await mintWsTicket(config, container.id, "exec")
+  const execMaxSeconds = await request<{ exec_max_session_seconds: number }>(
+    config,
+    "GET",
+    "/runtime-config",
   )
+    .then((settings) => settings.exec_max_session_seconds ?? 3600)
+    .catch(() => 3600)
+
+  const url = websocketUrl(config.server, `/containers/${container.id}/exec/ws`, ticket)
   const stdin = process.stdin as unknown as RawStdin
   const wasRaw = stdin.isRaw ?? false
 
   return await new Promise<number>((resolve, reject) => {
     const socket = new WebSocket(url)
     socket.binaryType = "arraybuffer"
+    const timeout = setTimeout(() => {
+      try {
+        socket.close()
+      } catch {
+        // already closed
+      }
+    }, execMaxSeconds * 1000)
 
     const restore = () => {
+      clearTimeout(timeout)
       stdin.off("data", onStdin)
       process.stdout.off("resize", onResize)
       stdin.setRawMode?.(wasRaw)

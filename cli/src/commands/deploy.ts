@@ -19,7 +19,7 @@ function isGitSource(source: string): boolean {
   )
 }
 
-function parseEnv(values: string[] | undefined): Record<string, string> {
+export function parseEnv(values: string[] | undefined): Record<string, string> {
   const env: Record<string, string> = {}
   for (const entry of values ?? []) {
     const separator = entry.indexOf("=")
@@ -31,13 +31,21 @@ function parseEnv(values: string[] | undefined): Record<string, string> {
   return env
 }
 
+interface WaitOptions {
+  maxAttempts?: number
+  poll?: (config: { server: string; token: string }) => Promise<DeployJob[]>
+}
+
 export async function waitForJob(
   config: { server: string; token: string },
   jobId: string,
+  options: WaitOptions = {},
 ): Promise<DeployJob> {
+  const maxAttempts = options.maxAttempts ?? 600
+  const poll = options.poll ?? ((cfg) => request<DeployJob[]>(cfg, "GET", "/deploys/active"))
   let lastPhase = ""
-  for (;;) {
-    const jobs = await request<DeployJob[]>(config, "GET", "/deploys/active")
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    const jobs = await poll(config)
     const job = jobs.find((candidate) => candidate.job_id === jobId)
     if (!job) {
       throw new VelaError(1, "Deploy job disappeared before completing.")
@@ -53,6 +61,7 @@ export async function waitForJob(
     }
     await Bun.sleep(1000)
   }
+  throw new VelaError(1, "Deploy job did not complete in time.")
 }
 
 export async function run(argv: string[]): Promise<number> {
@@ -67,6 +76,7 @@ export async function run(argv: string[]): Promise<number> {
       template: { type: "string" },
       project: { type: "string" },
       json: { type: "boolean" },
+      "no-wait": { type: "boolean" },
     },
     allowPositionals: true,
   })
@@ -95,7 +105,7 @@ export async function run(argv: string[]): Promise<number> {
   } else if (isGitSource(source)) {
     body.source_kind = "git"
     body.git_url = source
-    body.git_branch = values.branch ?? "main"
+    if (values.branch) body.git_branch = values.branch
   } else {
     body.source_kind = "image"
     body.image_ref = source
@@ -104,6 +114,10 @@ export async function run(argv: string[]): Promise<number> {
   const config = requireToken(resolveConfig({}))
   const accepted = await request<RunAccepted>(config, "POST", "/containers/run", body)
   console.log(`Queued deploy ${accepted.job_id}.`)
+  if (values["no-wait"]) {
+    console.log(accepted.job_id)
+    return 0
+  }
   const job = await waitForJob(config, accepted.job_id)
 
   if (values.json) {

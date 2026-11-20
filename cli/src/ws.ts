@@ -1,16 +1,31 @@
+import { request } from "./client"
+
 export function websocketUrl(
   server: string,
   path: string,
-  token: string,
+  ticket: string,
   params: Record<string, string> = {},
 ): string {
   const url = new URL(`${server}/api${path}`)
   url.protocol = url.protocol === "https:" ? "wss:" : "ws:"
-  url.searchParams.set("access_token", token)
+  url.searchParams.set("ticket", ticket)
   for (const [key, value] of Object.entries(params)) {
     url.searchParams.set(key, value)
   }
   return url.toString()
+}
+
+export async function mintWsTicket(
+  config: { server: string; token: string },
+  containerId: string,
+  purpose: "logs" | "exec",
+): Promise<string> {
+  const { ticket } = await request<{ ticket: string }>(
+    config,
+    "POST",
+    `/containers/${containerId}/ws-ticket?purpose=${purpose}`,
+  )
+  return ticket
 }
 
 export interface LogStreamOptions {
@@ -23,10 +38,11 @@ export async function streamLogs(
   containerId: string,
   options: LogStreamOptions,
 ): Promise<void> {
+  const ticket = await mintWsTicket(config, containerId, "logs")
   const url = websocketUrl(
     config.server,
     `/containers/${containerId}/logs/stream`,
-    config.token,
+    ticket,
     { tail: String(options.tail), follow: options.follow ? "true" : "false" },
   )
 

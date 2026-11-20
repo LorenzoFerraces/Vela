@@ -218,6 +218,11 @@ def create_app() -> FastAPI:
         tags=["settings"],
     )
     application.include_router(
+        settings.public_router,
+        prefix=API_PREFIX,
+        tags=["settings"],
+    )
+    application.include_router(
         deployments.router,
         prefix=f"{API_PREFIX}/deployments",
         tags=["deployments"],

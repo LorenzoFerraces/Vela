@@ -10,6 +10,7 @@ from app.api.routes import builder, images, traffic
 
 PUBLIC_PATHS = {
     "/api/health",
+    "/api/runtime-config",
     "/api/auth/config",
     "/api/auth/login",
     "/api/auth/register",

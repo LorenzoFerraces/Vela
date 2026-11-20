@@ -9,6 +9,7 @@ export interface AppProps {
   load?: () => Promise<ContainerInfo[]>
   onStart?: (container: ContainerInfo) => Promise<void>
   onStop?: (container: ContainerInfo) => Promise<void>
+  onLogs?: (container: ContainerInfo) => void
   onExec?: (container: ContainerInfo) => void
   onQuit?: () => void
 }
@@ -18,12 +19,12 @@ export function App({
   load,
   onStart,
   onStop,
+  onLogs,
   onExec,
   onQuit,
 }: AppProps) {
   const [containers, setContainers] = useState<ContainerInfo[]>(initialContainers)
   const [selected, setSelected] = useState(0)
-  const [logs, setLogs] = useState<string[]>([])
   const [status, setStatus] = useState("")
 
   useEffect(() => {
@@ -76,8 +77,8 @@ export function App({
         )
       return
     }
-    if (key.name === "l" && current) {
-      setLogs((lines) => [...lines, `-- following ${current.name} is handled by: vela logs ${current.name} -f`])
+    if (key.name === "l" && current && onLogs) {
+      onLogs(current)
       return
     }
     if (key.name === "e" && current && onExec) {
@@ -110,10 +111,6 @@ export function App({
           ) : (
             <text>no containers</text>
           )}
-          <text fg="#FFFF00">LOGS</text>
-          {logs.slice(-8).map((line, index) => (
-            <text key={`${index}-${line}`}>{line}</text>
-          ))}
         </box>
       </box>
       <text fg="#999999">

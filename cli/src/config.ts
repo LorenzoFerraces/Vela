@@ -53,11 +53,11 @@ export function clearStoredConfig(path: string = configPath()): void {
 }
 
 export function resolveConfig(
-  flags: { server?: string; token?: string },
+  flags: { token?: string },
   env: NodeJS.ProcessEnv = process.env,
   stored: StoredConfig | null = readStoredConfig(),
 ): ResolvedConfig {
-  const server = (flags.server ?? env.VELA_API_URL ?? stored?.server ?? DEFAULT_SERVER)
+  const server = (env.VELA_API_URL ?? stored?.server ?? DEFAULT_SERVER)
     .replace(/\/+$/, "")
   const fromOverride = flags.token ?? env.VELA_TOKEN
   return {
