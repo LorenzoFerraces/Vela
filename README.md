@@ -97,6 +97,7 @@ The repo-root `.env` is the official config (docker compose reads it; direct run
 | `VELA_GITHUB_OAUTH_REDIRECT_URI` | Public URL of `GET /api/auth/github/callback`, e.g. `http://localhost:8000/api/auth/github/callback` |
 | `VELA_GITHUB_OAUTH_SCOPES` | Comma-separated scopes requested from GitHub (default `repo,read:user`) |
 | `VELA_TOKEN_ENCRYPTION_KEY` | Fernet key used to encrypt third-party access tokens at rest. Generate with `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"` |
+| `VELA_GIT_ALLOW_PRIVATE_ENDPOINTS` | Set `1` to allow private/LAN Git remotes (mirrors `VELA_LLM_ALLOW_PRIVATE_ENDPOINTS`). Off by default. |
 | `VELA_GEMINI_API_KEY` | Google Gemini API key for GitHub repo analysis (pre-fill on Containers). Optional; without it, analysis uses deterministic project detection |
 | `VELA_GEMINI_MODEL` | Optional Gemini model id (default `gemini-3.1-flash-lite`) |
 | `VELA_VERTEX_API_KEY` / `VELA_VERTEX_PROJECT_ID` | Optional Vertex AI key + project ID; when both are set, Vertex is used instead of direct Gemini |
