@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import get_current_user, get_db, get_orchestrator
 from app.core.containers.orchestrator import ContainerOrchestrator
 from app.core.models import ScalingPolicyConfig, ScalingPolicyInfo
-from app.core.projects.access import list_accessible_project_ids
+from app.core.projects.access import list_accessible_project_ids, require_container_access
 from app.core.scaling.policy_repository import (
     get_policy,
     list_policies_for_container_names,
@@ -38,6 +38,30 @@ async def _require_accessible_container_name(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"No container found with name '{container_name}'.",
         )
+
+
+async def require_container_write_access(
+    session: AsyncSession,
+    orchestrator: ContainerOrchestrator,
+    current_user: User,
+    container_name: str,
+) -> None:
+    """Reject callers who can only view the container."""
+    info = await orchestrator.get_by_name(container_name) if hasattr(
+        orchestrator, "get_by_name"
+    ) else next(
+        (
+            container
+            for container in await orchestrator.list(user_id=current_user.id)
+            if container.name == container_name
+        ),
+        None,
+    )
+    if info is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Container not found.")
+    await require_container_access(
+        session, orchestrator, current_user, info.id, action="write"
+    )
 
 
 @router.get("/policies", response_model=list[ScalingPolicyInfo])
@@ -92,6 +116,9 @@ async def update_scaling_policy(
 ) -> ScalingPolicyInfo:
     """Create or update the auto-scaling policy for a container."""
     await _require_accessible_container_name(
+        session, orchestrator, current_user, container_name
+    )
+    await require_container_write_access(
         session, orchestrator, current_user, container_name
     )
     return await upsert_policy(session, container_name, body)

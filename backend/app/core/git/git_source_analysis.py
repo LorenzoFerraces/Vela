@@ -800,7 +800,7 @@ async def analyze_git_source(
 
     cache_version = (
         f"{GIT_SOURCE_PROMPT_VERSION}:{config.provider}:{config.model}"
-        f":{endpoint_fingerprint(config)}"
+        f":{endpoint_fingerprint(config)}:{user_id}"
     )
     # LLM path: cheap commit resolution (no clone) so a full-result cache hit skips the clone.
     commit = await git_head_ref(url=git_url, branch=git_branch, access_token=access_token) or ""

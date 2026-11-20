@@ -1353,6 +1353,25 @@ async def issue_container_ws_ticket(
     return {"ticket": issue_ws_ticket(current_user.id, container_id, purpose)}
 
 
+async def _stream_logs_to_websocket(
+    websocket: WebSocket,
+    orchestrator: ContainerOrchestrator,
+    container_id: str,
+    tail: int,
+    follow: bool,
+) -> None:
+    try:
+        async for chunk in orchestrator.stream_logs(
+            container_id, tail=tail, follow=follow
+        ):
+            await websocket.send_bytes(chunk)
+    except WebSocketDisconnect:
+        pass
+    except Exception:
+        with suppress(Exception):
+            await websocket.close(code=1011)
+
+
 @router.websocket("/{container_id}/logs/stream")
 async def container_logs_stream(
     websocket: WebSocket,
@@ -1390,19 +1409,16 @@ async def container_logs_stream(
     )
 
     try:
-        async for chunk in orchestrator.stream_logs(
-            container_id,
-            tail=tail_parsed,
-            follow=follow_logs,
-        ):
-            await websocket.send_bytes(chunk)
-    except WebSocketDisconnect:
-        pass
-    except Exception:
-        try:
-            await websocket.close(code=1011)
-        except Exception:
-            pass
+        await asyncio.wait_for(
+            _stream_logs_to_websocket(
+                websocket, orchestrator, container_id, tail_parsed, follow_logs
+            ),
+            timeout=_exec_max_session_seconds(),
+        )
+    except TimeoutError:
+        with suppress(Exception):
+            await websocket.send_text("[session expired]")
+            await websocket.close(code=1000, reason="Session timeout")
 
 
 @router.websocket("/{container_id}/exec/ws")

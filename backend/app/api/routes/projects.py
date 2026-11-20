@@ -23,6 +23,7 @@ from app.api.schemas import (
     ProjectStorageQuotaPublic,
     ProjectStorageQuotaUpdate,
 )
+from app.core.audit.service import emit_audit_log
 from app.core.containers.orchestrator import ContainerOrchestrator
 from app.core.exceptions import ProjectAccessDeniedError, TeamStorageQuotaError
 from app.core.projects import (
@@ -301,6 +302,14 @@ async def patch_project_member(
     current_user: Annotated[User, Depends(require_instructor)],
     session: Annotated[AsyncSession, Depends(get_db)],
 ) -> ProjectMemberPublic:
+    await emit_audit_log(
+        session,
+        user_id=current_user.id,
+        action="project.member_role_changed",
+        target_type="project",
+        target_id=str(project_id),
+        details={"changed_user_id": str(user_id)},
+    )
     row = await update_member_role(
         session,
         project_id=project_id,
@@ -326,6 +335,14 @@ async def delete_project_member(
     current_user: Annotated[User, Depends(require_instructor)],
     session: Annotated[AsyncSession, Depends(get_db)],
 ) -> Response:
+    await emit_audit_log(
+        session,
+        user_id=current_user.id,
+        action="project.member_removed",
+        target_type="project",
+        target_id=str(project_id),
+        details={"removed_user_id": str(user_id)},
+    )
     await remove_member(
         session,
         project_id=project_id,
@@ -379,6 +396,14 @@ async def create_project_invitation(
     current_user: Annotated[User, Depends(require_instructor)],
     session: Annotated[AsyncSession, Depends(get_db)],
 ) -> ProjectInvitationPublic:
+    await emit_audit_log(
+        session,
+        user_id=current_user.id,
+        action="project.invitation_created",
+        target_type="project",
+        target_id=str(project_id),
+        details={"invitee_email": body.email},
+    )
     row = await create_invitation(
         session,
         project_id=project_id,
@@ -405,6 +430,14 @@ async def delete_project_invitation(
     current_user: Annotated[User, Depends(require_instructor)],
     session: Annotated[AsyncSession, Depends(get_db)],
 ) -> Response:
+    await emit_audit_log(
+        session,
+        user_id=current_user.id,
+        action="project.invitation_cancelled",
+        target_type="project",
+        target_id=str(project_id),
+        details={"invitation_id": str(invitation_id)},
+    )
     await cancel_invitation(
         session,
         project_id=project_id,

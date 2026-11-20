@@ -131,6 +131,8 @@ API: **http://127.0.0.1:8000** — health: `GET /api/health` (no auth).
 
 Bootstrap: set `VELA_ADMIN_EMAIL` / `VELA_ADMIN_PASSWORD`. Public registration is disabled.
 
+Instructors may manage members and invitations across projects; every such mutation is recorded in the audit log.
+
 ### Authentication
 
 - `POST /api/auth/register` — disabled; returns 403 `Registration disabled`.

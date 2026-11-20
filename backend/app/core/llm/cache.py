@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import os
 import sqlite3
 import threading
 import time
+import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
@@ -21,6 +23,17 @@ _CREATE_TABLE = (
     "kind TEXT, version TEXT, commit_sha TEXT, payload TEXT, ts REAL, "
     "PRIMARY KEY (kind, version, commit_sha))"
 )
+
+
+def cache_identity(user_id: uuid.UUID | None, config: object, repo_ref: str) -> str:
+    """Stable discriminator so users, providers and repos never share a cached analysis."""
+    provider = getattr(config, "provider", "unknown")
+    model = getattr(config, "model", "unknown")
+    base = getattr(config, "base_url", None) or getattr(config, "url", "")
+    fingerprint = hashlib.sha256(
+        f"{provider}:{model}:{base}".encode()
+    ).hexdigest()[:12]
+    return f"{user_id or 'server'}:{fingerprint}:{repo_ref}"
 
 
 def _cache_root() -> Path:
