@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 import shutil
 import uuid
 from pathlib import Path
+
+from fastapi import UploadFile
 
 from app.core.exceptions import (
     InvalidVolumeUploadPathError,
@@ -16,6 +19,39 @@ from app.core.exceptions import (
 
 VOLUME_UPLOAD_MAX_BYTES = 100 * 1024 * 1024
 VOLUME_UPLOAD_USER_QUOTA_BYTES = 150 * 1024 * 1024
+
+_UPLOAD_CHUNK_BYTES = 1024 * 1024
+_upload_locks: dict[uuid.UUID, asyncio.Lock] = {}
+
+
+def upload_lock_for_user(user_id: uuid.UUID) -> asyncio.Lock:
+    """Per-user lock so concurrent uploads cannot race past the quota check.
+
+    # ponytail: process-local only; multiple API workers need a shared quota counter.
+    """
+    lock = _upload_locks.get(user_id)
+    if lock is None:
+        lock = asyncio.Lock()
+        _upload_locks[user_id] = lock
+    return lock
+
+
+async def read_upload_limited(upload: UploadFile, limit: int) -> bytes:
+    """Read an upload in chunks, rejecting it before the full body is buffered."""
+    chunks: list[bytes] = []
+    total = 0
+    while True:
+        chunk = await upload.read(_UPLOAD_CHUNK_BYTES)
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > limit:
+            limit_megabytes = limit // (1024 * 1024)
+            raise VolumeUploadTooLargeError(
+                f"Folder exceeds the {limit_megabytes} MB upload limit."
+            )
+        chunks.append(chunk)
+    return b"".join(chunks)
 
 
 def volume_upload_max_bytes() -> int:
@@ -164,9 +200,9 @@ def save_volume_upload(
 def resolve_volume_upload_path(user_id: uuid.UUID, upload_id: uuid.UUID) -> Path:
     root = upload_directory(user_id, upload_id).resolve()
     user_root = user_uploads_root(user_id).resolve()
-    if not str(root).startswith(str(user_root)):
-        msg = "Volume upload not found."
-        raise VolumeUploadNotFoundError(msg)
+    if not root.is_relative_to(user_root):
+        msg = "Volume upload path escapes the user's upload directory."
+        raise InvalidVolumeUploadPathError(msg)
     if not root.is_dir():
         msg = "Volume upload not found."
         raise VolumeUploadNotFoundError(msg)

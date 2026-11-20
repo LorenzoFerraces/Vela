@@ -71,8 +71,10 @@ from app.core.containers.docker_orchestrator import (
 )
 from app.core.containers.orchestrator import ContainerOrchestrator
 from app.core.containers.volume_uploads import (
+    read_upload_limited,
     resolve_volume_upload_path,
     save_volume_upload,
+    upload_lock_for_user,
     user_uploads_total_bytes,
     volume_upload_max_bytes,
     volume_upload_user_quota_bytes,
@@ -109,7 +111,6 @@ from app.core.exceptions import (
     RegistryAccessDeniedError,
     TeamStorageQuotaExceededError,
     VolumeUploadQuotaExceededError,
-    VolumeUploadTooLargeError,
 )
 from app.core.models import (
     ContainerInfo,
@@ -806,56 +807,45 @@ async def upload_volume_folder(
 
     per_folder_limit = volume_upload_max_bytes()
     user_quota = volume_upload_user_quota_bytes()
-    current_usage = user_uploads_total_bytes(current_user.id)
+    async with upload_lock_for_user(current_user.id):
+        current_usage = user_uploads_total_bytes(current_user.id)
+        payloads: list[tuple[str, bytes]] = []
+        total_bytes = 0
+        for upload in files:
+            relative_path = upload.filename or ""
+            content = await read_upload_limited(upload, per_folder_limit - total_bytes)
+            total_bytes += len(content)
+            if current_usage + total_bytes > user_quota:
+                limit_megabytes = user_quota // (1024 * 1024)
+                raise VolumeUploadQuotaExceededError(
+                    f"Upload would exceed your {limit_megabytes} MB volume storage quota. "
+                    "Use a smaller folder or remove unused uploads."
+                )
+            payloads.append((relative_path, content))
 
-    payloads: list[tuple[str, bytes]] = []
-    total_bytes = 0
-    for upload in files:
-        relative_path = upload.filename or ""
-        # Only read content if early size check passes\
-        if upload.size is not None and total_bytes + upload.size > per_folder_limit:
-            limit_megabytes = per_folder_limit // (1024 * 1024)
-            raise VolumeUploadTooLargeError(
-                f"Folder exceeds the {limit_megabytes} MB upload limit."
-            )
-        content = await upload.read()
-        total_bytes += len(content)
-        if total_bytes > per_folder_limit:
-            limit_megabytes = per_folder_limit // (1024 * 1024)
-            raise VolumeUploadTooLargeError(
-                f"Folder exceeds the {limit_megabytes} MB upload limit."
-            )
-        if current_usage + total_bytes > user_quota:
-            limit_megabytes = user_quota // (1024 * 1024)
-            raise VolumeUploadQuotaExceededError(
-                f"Upload would exceed your {limit_megabytes} MB volume storage quota. "
-                "Use a smaller folder or remove unused uploads."
-            )
-        payloads.append((relative_path, content))
-
-    personal_project_id = await get_personal_project_id(session, current_user)
-    personal_project = await session.get(Project, personal_project_id)
-    team_quota = (
-        effective_quota_bytes(personal_project)
-        if personal_project is not None
-        else None
-    )
-    if team_quota is not None:
-        disk_bytes, uploads_bytes = await team_storage_usage(
-            session, orchestrator, personal_project_id
+        personal_project_id = await get_personal_project_id(session, current_user)
+        personal_project = await session.get(Project, personal_project_id)
+        team_quota = (
+            effective_quota_bytes(personal_project)
+            if personal_project is not None
+            else None
         )
-        used_bytes = disk_bytes + uploads_bytes
-        if used_bytes + total_bytes > team_quota:
-            raise TeamStorageQuotaExceededError(
-                f"Upload would exceed the team's {format_gib(team_quota)} "
-                f"storage quota ({format_gib(used_bytes)} used). "
-                "Use a smaller folder or remove unused uploads."
+        if team_quota is not None:
+            disk_bytes, uploads_bytes = await team_storage_usage(
+                session, orchestrator, personal_project_id
             )
+            used_bytes = disk_bytes + uploads_bytes
+            if used_bytes + total_bytes > team_quota:
+                raise TeamStorageQuotaExceededError(
+                    f"Upload would exceed the team's {format_gib(team_quota)} "
+                    f"storage quota ({format_gib(used_bytes)} used). "
+                    "Use a smaller folder or remove unused uploads."
+                )
 
-    upload_id, folder_name, saved_bytes, file_count = save_volume_upload(
-        current_user.id,
-        payloads,
-    )
+        upload_id, folder_name, saved_bytes, file_count = save_volume_upload(
+            current_user.id,
+            payloads,
+        )
     return VolumeUploadResponse(
         upload_id=upload_id,
         folder_name=folder_name,
