@@ -4,7 +4,7 @@ export type Theme = 'dark' | 'light'
 
 const STORAGE_KEY = 'vela.theme'
 // ponytail: hex literals only here and in index.html — meta theme-color cannot consume a CSS variable.
-const THEME_COLORS: Record<Theme, string> = { dark: '#120e1e', light: '#f4f1f8' }
+const THEME_COLORS: Record<Theme, string> = { dark: '#120e1e', light: '#eae9ed' }
 
 function getInitialTheme(): Theme {
   const fallback = window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark'

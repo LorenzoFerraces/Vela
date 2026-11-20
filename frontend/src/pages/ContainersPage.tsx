@@ -72,9 +72,12 @@ export default function ContainersPage() {
     volumeRows,
   } = runForm
 
-  const { jobs: deployJobs, hasInFlightJob, refresh: refreshDeployJobs } = useActiveDeployJobs()
+  const { jobs: deployJobs, refresh: refreshDeployJobs } = useActiveDeployJobs()
   const containerJobs = deployJobs.filter(
     (job) => job.kind === 'container' && job.status === 'in_progress',
+  )
+  const hasInFlightContainerJob = containerJobs.some(
+    (job) => job.status === 'in_progress',
   )
 
   useEffect(() => {
@@ -92,11 +95,11 @@ export default function ContainersPage() {
   const workloadsRefreshRef = useRef<() => void>(() => {})
   const hadInFlightJobRef = useRef(false)
   useEffect(() => {
-    if (hadInFlightJobRef.current && !hasInFlightJob) {
+    if (hadInFlightJobRef.current && !hasInFlightContainerJob) {
       workloadsRefreshRef.current()
     }
-    hadInFlightJobRef.current = hasInFlightJob
-  }, [hasInFlightJob])
+    hadInFlightJobRef.current = hasInFlightContainerJob
+  }, [hasInFlightContainerJob])
 
   const reportListLoadError = useCallback(
     (detail: string) => {
