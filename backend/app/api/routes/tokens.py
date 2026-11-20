@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db
 from app.api.schemas import ApiTokenCreate, ApiTokenCreated, ApiTokenPublic
+from app.core.audit.service import emit_audit_log
 from app.core.auth.api_tokens import create_api_token
 from app.core.exceptions import ApiTokenNotFoundError
 from app.db.models import ApiToken, User
@@ -25,6 +26,15 @@ async def create_token(
     session: Annotated[AsyncSession, Depends(get_db)],
 ) -> ApiTokenCreated:
     record, minted = await create_api_token(session, user.id, body.name)
+    await emit_audit_log(
+        session,
+        user_id=user.id,
+        action="token.create",
+        target_type="token",
+        target_id=str(record.id),
+        details={"name": record.name},
+    )
+    await session.commit()
     return ApiTokenCreated(
         id=record.id,
         name=record.name,
@@ -70,5 +80,12 @@ async def revoke_token(
     if record is None:
         raise ApiTokenNotFoundError("API token not found.")
     await session.delete(record)
+    await emit_audit_log(
+        session,
+        user_id=user.id,
+        action="token.revoke",
+        target_type="token",
+        target_id=str(token_id),
+    )
     await session.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)

@@ -1057,13 +1057,17 @@ def test_run_private_github_clone_failure_hints_settings(
     assert "connect github in settings" in job["error"]["detail"].lower()
 
 
-def test_builder_build_calls_pipeline(make_authed_client, tmp_path, monkeypatch) -> None:
+def test_builder_build_calls_pipeline(
+    make_authed_client, provision_user, tmp_path, monkeypatch
+) -> None:
+    _, admin_token = provision_user("builder-admin@example.com", role="admin")
     project_dir = tmp_path / "app"
     project_dir.mkdir()
     (project_dir / "package.json").write_text('{"name":"x"}', encoding="utf-8")
     monkeypatch.setenv("VELA_ALLOWED_BUILD_ROOT", str(tmp_path.parent))
 
     with make_authed_client() as client:
+        client.headers["Authorization"] = f"Bearer {admin_token}"
         response = client.post(
             "/api/builder/build",
             json={
@@ -1077,13 +1081,15 @@ def test_builder_build_calls_pipeline(make_authed_client, tmp_path, monkeypatch)
 
 
 def test_builder_analyze_uses_validate_local(
-    make_authed_client, tmp_path, monkeypatch
+    make_authed_client, provision_user, tmp_path, monkeypatch
 ) -> None:
+    _, admin_token = provision_user("analyze-admin@example.com", role="admin")
     (tmp_path / "package.json").write_text('{"name":"x"}', encoding="utf-8")
 
     monkeypatch.setenv("VELA_ALLOWED_BUILD_ROOT", str(tmp_path.parent))
 
     with make_authed_client() as client:
+        client.headers["Authorization"] = f"Bearer {admin_token}"
         response = client.post(
             "/api/builder/analyze",
             json={"project_path": str(tmp_path)},
@@ -1193,15 +1199,17 @@ def test_list_images(make_authed_client) -> None:
     assert "b:1" in images
 
 
-def test_pull_image(make_authed_client) -> None:
+def test_pull_image(make_authed_client, provision_user) -> None:
     """
     Verifies that POST /api/images/pull pulls the specified image and registers it with the orchestrator.
     
     Asserts the endpoint responds with HTTP 200 and JSON {"detail": "ok"}, and that the orchestrator's image set includes "nginx:alpine".
     """
+    _, admin_token = provision_user("pull-admin@example.com", role="admin")
     orchestrator = FakeContainerOrchestrator()
 
     with make_authed_client(orchestrator=orchestrator) as client:
+        client.headers["Authorization"] = f"Bearer {admin_token}"
         response = client.post(
             "/api/images/pull",
             params={"image": "nginx", "tag": "alpine"},
@@ -1212,11 +1220,13 @@ def test_pull_image(make_authed_client) -> None:
     assert "nginx:alpine" in orchestrator._images
 
 
-def test_build_image_from_context(make_authed_client, tmp_path) -> None:
+def test_build_image_from_context(make_authed_client, provision_user, tmp_path) -> None:
+    _, admin_token = provision_user("build-admin@example.com", role="admin")
     (tmp_path / "Dockerfile").write_text("FROM scratch\n", encoding="utf-8")
     orchestrator = FakeContainerOrchestrator()
 
     with make_authed_client(orchestrator=orchestrator) as client:
+        client.headers["Authorization"] = f"Bearer {admin_token}"
         response = client.post(
             "/api/images/build",
             json={
@@ -1231,7 +1241,8 @@ def test_build_image_from_context(make_authed_client, tmp_path) -> None:
     assert "local/test:1" in orchestrator._images
 
 
-def test_traffic_routes_crud(make_authed_client) -> None:
+def test_traffic_routes_crud(make_authed_client, provision_user) -> None:
+    _, admin_token = provision_user("routes-admin@example.com", role="admin")
     router = NoopTrafficRouter()
 
     spec = {
@@ -1244,6 +1255,7 @@ def test_traffic_routes_crud(make_authed_client) -> None:
     }
 
     with make_authed_client(traffic_router=router) as client:
+        client.headers["Authorization"] = f"Bearer {admin_token}"
         created = client.post("/api/routes", json=spec)
         assert created.status_code == 200
         listed = client.get("/api/routes")
