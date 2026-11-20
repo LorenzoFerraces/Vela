@@ -59,7 +59,9 @@ def test_list_tokens_hides_secrets(db_app: Any, provision_user: Any) -> None:
     assert response.status_code == 200
     items = response.json()
     assert len(items) == 1
-    assert set(items[0]) == {"id", "name", "prefix", "created_at"}
+    assert set(items[0]) == {
+        "id", "name", "prefix", "scope", "created_at", "expires_at", "last_used_at",
+    }
 
 
 def test_revoke_removes_the_token(db_app: Any, provision_user: Any) -> None:

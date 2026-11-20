@@ -736,13 +736,18 @@ class TokenResponse(BaseModel):
 
 class ApiTokenCreate(BaseModel):
     name: str = Field(min_length=1, max_length=100)
+    scope: Literal["full", "read"] = "full"
+    expires_in_days: int | None = Field(default=None, ge=1, le=3650)
 
 
 class ApiTokenPublic(BaseModel):
     id: uuid.UUID
     name: str
     prefix: str
+    scope: str
     created_at: datetime
+    expires_at: datetime | None = None
+    last_used_at: datetime | None = None
 
 
 class ApiTokenCreated(ApiTokenPublic):

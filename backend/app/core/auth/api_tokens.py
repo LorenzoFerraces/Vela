@@ -6,8 +6,9 @@ import hashlib
 import secrets
 import uuid
 from dataclasses import dataclass
+from datetime import datetime, timezone
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import ApiToken, User
@@ -37,7 +38,12 @@ def mint_api_token() -> MintedApiToken:
 
 
 async def create_api_token(
-    session: AsyncSession, user_id: uuid.UUID, name: str
+    session: AsyncSession,
+    user_id: uuid.UUID,
+    name: str,
+    *,
+    expires_at: datetime | None = None,
+    scope: str = "full",
 ) -> tuple[ApiToken, MintedApiToken]:
     minted = mint_api_token()
     record = ApiToken(
@@ -45,6 +51,8 @@ async def create_api_token(
         name=name,
         token_prefix=minted.prefix,
         token_hash=minted.token_hash,
+        expires_at=expires_at,
+        scope=scope,
     )
     session.add(record)
     await session.commit()
@@ -55,9 +63,21 @@ async def create_api_token(
 async def get_user_by_api_token(
     session: AsyncSession, plaintext: str
 ) -> User | None:
+    now = datetime.now(timezone.utc)
     result = await session.execute(
-        select(User)
+        select(User, ApiToken.id)
         .join(ApiToken, ApiToken.user_id == User.id)
-        .where(ApiToken.token_hash == hash_api_token(plaintext))
+        .where(
+            ApiToken.token_hash == hash_api_token(plaintext),
+            (ApiToken.expires_at.is_(None)) | (ApiToken.expires_at > now),
+        )
     )
-    return result.scalar_one_or_none()
+    row = result.one_or_none()
+    if row is None:
+        return None
+    user, token_id = row
+    await session.execute(
+        update(ApiToken).where(ApiToken.id == token_id).values(last_used_at=now)
+    )
+    await session.commit()
+    return user

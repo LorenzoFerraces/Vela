@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import uuid
+from datetime import datetime, timedelta, timezone
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Response, status
@@ -25,7 +26,14 @@ async def create_token(
     user: Annotated[User, Depends(get_current_user)],
     session: Annotated[AsyncSession, Depends(get_db)],
 ) -> ApiTokenCreated:
-    record, minted = await create_api_token(session, user.id, body.name)
+    expires_at = (
+        datetime.now(timezone.utc) + timedelta(days=body.expires_in_days)
+        if body.expires_in_days is not None
+        else None
+    )
+    record, minted = await create_api_token(
+        session, user.id, body.name, expires_at=expires_at, scope=body.scope
+    )
     await emit_audit_log(
         session,
         user_id=user.id,
@@ -39,7 +47,10 @@ async def create_token(
         id=record.id,
         name=record.name,
         prefix=record.token_prefix,
+        scope=record.scope,
         created_at=record.created_at,
+        expires_at=record.expires_at,
+        last_used_at=record.last_used_at,
         token=minted.plaintext,
     )
 
@@ -59,7 +70,10 @@ async def list_tokens(
             id=record.id,
             name=record.name,
             prefix=record.token_prefix,
+            scope=record.scope,
             created_at=record.created_at,
+            expires_at=record.expires_at,
+            last_used_at=record.last_used_at,
         )
         for record in result.scalars()
     ]
