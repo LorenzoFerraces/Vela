@@ -39,6 +39,7 @@ export default function DashboardPage() {
       try {
         await startContainer(containerId)
         await refresh()
+        setHistoryRefreshSignal((signal) => signal + 1)
       } catch (error) {
         setBanner({ tone: 'err', text: formatApiError(error) })
       } finally {
@@ -55,6 +56,7 @@ export default function DashboardPage() {
       try {
         await stopContainer(containerId)
         await refresh()
+        setHistoryRefreshSignal((signal) => signal + 1)
         setUsageRefreshSignal((signal) => signal + 1)
       } catch (error) {
         setBanner({ tone: 'err', text: formatApiError(error) })
@@ -78,6 +80,7 @@ export default function DashboardPage() {
     try {
       await removeContainer(containerId, true)
       await refresh()
+      setHistoryRefreshSignal((signal) => signal + 1)
       setUsageRefreshSignal((signal) => signal + 1)
     } catch (error) {
       setBanner({ tone: 'err', text: formatApiError(error) })

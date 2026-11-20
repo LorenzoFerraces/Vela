@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, memo } from 'react'
+import { useCallback, useEffect, useRef, useState, memo } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import {
   createStack,
@@ -56,6 +56,23 @@ export default function StackBuilderPage() {
   const [saving, setSaving] = useState(false)
   const [serviceErrors, setServiceErrors] = useState<(ServiceFieldErrors | null)[]>([])
   const [removalPendingIndex, setRemovalPendingIndex] = useState<number | null>(null)
+  const highlightTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  useEffect(
+    () => () => {
+      if (highlightTimer.current !== null) clearTimeout(highlightTimer.current)
+    },
+    [],
+  )
+
+  function scheduleHighlight(index: number) {
+    if (highlightTimer.current !== null) clearTimeout(highlightTimer.current)
+    setHighlightIndex(index)
+    highlightTimer.current = setTimeout(() => {
+      setHighlightIndex(null)
+      highlightTimer.current = null
+    }, 2000)
+  }
+
   useEffect(() => {
     if (!editId) return
     let cancelled = false
@@ -181,8 +198,7 @@ export default function StackBuilderPage() {
     const newIndex = services.length
     setServices((prev) => [...prev, newService])
     setSelectedIndex(newIndex)
-    setHighlightIndex(newIndex)
-    setTimeout(() => setHighlightIndex(null), 2000)
+    scheduleHighlight(newIndex)
     setServiceErrors((prev) => [...prev, null])
   }
 
@@ -364,8 +380,7 @@ export default function StackBuilderPage() {
                       )
                       if (nextIndex === -1) return
                       setSelectedIndex(nextIndex)
-                      setHighlightIndex(nextIndex)
-                      window.setTimeout(() => setHighlightIndex(null), 2000)
+                      scheduleHighlight(nextIndex)
                     }}
                   />
                 )}

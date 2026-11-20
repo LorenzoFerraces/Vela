@@ -154,7 +154,10 @@ export function formatApiError(
       detail?: string
       build_log?: string
     }
-    const detail = parsed.detail ?? error.message
+    const detail =
+      typeof parsed.detail === 'string'
+        ? parsed.detail
+        : error.message
     if (parsed.build_log) {
       return `${detail}\n\n${parsed.build_log.slice(-2000)}`
     }

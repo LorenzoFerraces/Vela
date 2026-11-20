@@ -3,14 +3,23 @@ import { useLocation, useNavigate } from 'react-router-dom'
 import { ApiError, apiRequest, formatApiError } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 
-function safeNextPath(rawNext: string | null): string {
+// eslint-disable-next-line react-refresh/only-export-components
+export function safeNextPath(rawNext: string | null): string {
   if (!rawNext) return '/containers'
   try {
     const decoded = decodeURIComponent(rawNext)
-    return decoded.startsWith('/') ? decoded : '/containers'
+    return decoded.startsWith('/') && !decoded.startsWith('//')
+      ? decoded
+      : '/containers'
   } catch {
     return '/containers'
   }
+}
+
+export const CLERK_JS_VERSION = '5.97.0'
+// eslint-disable-next-line react-refresh/only-export-components
+export function clerkBrowserScriptUrl(frontendApi: string): string {
+  return `https://${frontendApi}/npm/@clerk/clerk-js@${CLERK_JS_VERSION}/dist/clerk.browser.js`
 }
 
 interface ClerkSession {
@@ -83,6 +92,7 @@ export default function LoginPage() {
   useEffect(() => {
     if (!clerkConfig) return
 
+    let injectedScript: HTMLScriptElement | null = null
     const loadClerk = () => {
       if (!clerkLoadPromise.current) {
         const loadPromise = new Promise<void>((resolve, reject) => {
@@ -90,9 +100,10 @@ export default function LoginPage() {
           script.async = true
           script.crossOrigin = 'anonymous'
           script.setAttribute('data-clerk-publishable-key', clerkConfig.publishableKey)
-          script.src = `https://${clerkConfig.frontendApi}/npm/@clerk/clerk-js@latest/dist/clerk.browser.js`
+          script.src = clerkBrowserScriptUrl(clerkConfig.frontendApi)
           script.onload = () => resolve()
           script.onerror = () => reject(new Error('Failed to load Clerk'))
+          injectedScript = script
           document.head.appendChild(script)
         })
         clerkLoadPromise.current = loadPromise
@@ -132,7 +143,11 @@ export default function LoginPage() {
     }).catch(() => {
       if (!cancelled) setErrorText('Clerk could not be loaded. Check your connection and reload the page.')
     })
-    return () => { cancelled = true }
+    return () => {
+      cancelled = true
+      injectedScript?.remove()
+      clerkLoadPromise.current = null
+    }
   }, [clerkConfig, clerkLogin, navigate, nextPath])
 
   async function onSubmit(event: React.FormEvent) {
