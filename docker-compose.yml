@@ -80,11 +80,11 @@ services:
       VELA_VOLUME_UPLOADS_HOST_DIR: ${VELA_VOLUME_UPLOADS_HOST_DIR:-}
     volumes:
       - ${DOCKER_SOCKET_PATH:-/var/run/docker.sock}:/var/run/docker.sock
-      # Named volume: a fresh Linux host no longer creates a root-owned bind.
-      # Workloads created through the host daemon need a host-visible mirror;
-      # set VELA_VOLUME_UPLOADS_HOST_DIR when folder uploads must be mounted
-      # into workload containers (see .env.example).
-      - volume_uploads:${VELA_VOLUME_UPLOADS_DIR:-/data/volume-uploads}
+      # Named volume by default: a fresh Linux host no longer creates a
+      # root-owned bind. When VELA_VOLUME_UPLOADS_HOST_DIR is set, use that
+      # pre-created host dir instead so workloads mount the same source the
+      # backend advertises (see .env.example).
+      - ${VELA_VOLUME_UPLOADS_HOST_DIR:-volume_uploads}:${VELA_VOLUME_UPLOADS_DIR:-/data/volume-uploads}
       - traefik_dynamic:/etc/traefik/dynamic
     depends_on:
       postgres:
