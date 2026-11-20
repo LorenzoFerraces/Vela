@@ -1876,6 +1876,21 @@ async def runtime_config() -> dict[str, int]:
 ```
 Call `clearTimeout(timeout)` in `restore()`. Use that setting for the client-side cap in `ws.ts` log streaming too.
 
+**WS-ticket migration (required — Task 7 removed `access_token` query auth).** In `cli/src/ws.ts`, change `websocketUrl(server, path, token, params)` to `websocketUrl(server, path, ticket, params)` and replace `url.searchParams.set("access_token", token)` with `url.searchParams.set("ticket", ticket)`. Add an exported helper using the existing `request` client:
+```ts
+export async function mintWsTicket(
+  config: { server: string; token: string },
+  containerId: string,
+  purpose: "logs" | "exec",
+): Promise<string> {
+  const { ticket } = await request<{ ticket: string }>(
+    config, 'POST', `/containers/${containerId}/ws-ticket?purpose=${purpose}`
+  )
+  return ticket
+}
+```
+In `streamLogs`, call `mintWsTicket(config, containerId, "logs")` before building the URL and pass that value to `websocketUrl`. In `cli/src/commands/exec.ts`, do the same with purpose `"exec"`. The ticket is 60-second, single-use, and bound to container + purpose (contract in `.superpowers/sdd/2026-11-20-defect-remediation/task-7-report.md` §"Cross-task WS-ticket interface"). Add a focused CLI test (with an injected fetch) asserting the ticket is minted and appears as `ticket=` in the WS URL and that `access_token` is absent. Without this, `vela logs -f` and `vela exec` are broken after Task 7.
+
 `cli/src/resolve.ts`: in `resolveContainerFromApi`, do an exact-name lookup before the paginated list:
 ```ts
   const exact = await request<ContainerInfo | null>(config, 'GET', `/containers/by-name/${encodeURIComponent(query)}`).catch(() => null)
