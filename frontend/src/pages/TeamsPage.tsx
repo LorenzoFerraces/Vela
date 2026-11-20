@@ -85,6 +85,7 @@ export default function TeamsPage() {
             Team name
             <input
               type="text"
+              name="team_name"
               className="teams-page__input"
               value={newTeamName}
               disabled={busy}

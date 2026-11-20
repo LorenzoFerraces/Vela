@@ -9,6 +9,7 @@ import {
   type LlmProviderKind,
 } from '../../api/client'
 import ConfirmDialog from '../../components/ConfirmDialog'
+import { Skeleton } from '../../components/Skeleton'
 
 const PROVIDER_LABELS: Record<LlmProviderKind, string> = {
   openai_compatible: 'OpenAI-compatible',
@@ -198,7 +199,7 @@ export default function LlmProviderCard({ onChanged }: LlmProviderCardProps) {
       </div>
       <div className="settings-card__body">
         {loading ? (
-          <p className="settings-card__muted">Loading…</p>
+          <Skeleton className="skeleton--hint-line" />
         ) : (
           <>
             {hasSavedRow ? (

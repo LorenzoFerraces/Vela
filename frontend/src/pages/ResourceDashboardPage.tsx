@@ -86,6 +86,7 @@ export default function ResourceDashboardPage() {
             key={range}
             type="button"
             className={`btn btn--sm ${timeRange === range ? 'btn--primary' : 'btn--ghost'}`}
+            aria-pressed={timeRange === range}
             onClick={() => setTimeRange(range)}
           >
             {range}

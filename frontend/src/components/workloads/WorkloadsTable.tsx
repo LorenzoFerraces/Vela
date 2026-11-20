@@ -67,7 +67,6 @@ function WorkloadStatsCell({
       <select
         id={`workloads-stats-select-${containerRow.id}`}
         className="containers-form__input workloads-table__stats-select"
-        aria-label={`Stats instance for ${containerRow.name}`}
         value={statsContainerId}
         onChange={(event) => onSelectStatsContainer(event.target.value)}
       >

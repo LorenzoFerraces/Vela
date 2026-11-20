@@ -14,6 +14,7 @@ import {
 } from '../api/client'
 import { useActiveDeployJobs } from '../hooks/useActiveDeployJobs'
 import type { DeployJob, DeployJobError } from '../api/client'
+import ConfirmDialog from '../components/ConfirmDialog'
 import BuildConfigModal from './containers/BuildConfigModal'
 import NewStackModal from './stacks/NewStackModal'
 import './stacks/stacks.css'
@@ -75,19 +76,16 @@ function failedServiceFromJob(job: DeployJob): string | null {
 function StackCard({
   stack,
   busy,
-  pendingDelete,
   deployJob,
   onDeploy,
   onDelete,
 }: {
   stack: Stack
   busy: boolean
-  pendingDelete: string | null
   deployJob: DeployJob | undefined
   onDeploy: (id: string) => void
   onDelete: (id: string) => void
 }) {
-  const isPending = pendingDelete === stack.id
   const deploying = deployJob !== undefined && deployJob.status === 'in_progress'
   return (
     <article className="stacks-card">
@@ -145,7 +143,7 @@ function StackCard({
           onClick={() => onDelete(stack.id)}
           disabled={deploying || busy}
         >
-          {isPending ? 'Confirm?' : 'Remove'}
+          Remove
         </button>
       </div>
     </article>
@@ -174,7 +172,7 @@ export default function StacksPage() {
   const [listLoading, setListLoading] = useState(true)
   const [busy, setBusy] = useState(false)
   const [banner, setBanner] = useState<Banner>(null)
-  const [pendingDelete, setPendingDelete] = useState<string | null>(null)
+  const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null)
   const [newStackOpen, setNewStackOpen] = useState(false)
   const [buildConfigOpen, setBuildConfigOpen] = useState(false)
   const [buildConfigInitial, setBuildConfigInitial] = useState<BuildOverride | null>(
@@ -185,7 +183,6 @@ export default function StacksPage() {
   )
   const [pendingServiceName, setPendingServiceName] = useState<string | null>(null)
   const [pendingJobIds, setPendingJobIds] = useState<Record<string, string>>({})
-  const deleteTimer = useRef<ReturnType<typeof setTimeout>>(undefined)
 
   const { jobs: deployJobs, refresh: refreshDeployJobs } = useActiveDeployJobs()
   const stackJobs = deployJobs.filter((job) => job.kind === 'stack')
@@ -210,12 +207,6 @@ export default function StacksPage() {
   useEffect(() => {
     loadStacks()
   }, [loadStacks])
-
-  useEffect(() => {
-    return () => {
-      if (deleteTimer.current) clearTimeout(deleteTimer.current)
-    }
-  }, [])
 
   // ponytail: 1s poll — the hook only fetches on mount and at a 2.5s cadence
   // while it already knows about in-flight jobs, so a deploy submitted outside
@@ -348,26 +339,22 @@ export default function StacksPage() {
   }
 
   const handleDelete = useCallback(async (id: string) => {
-    if (pendingDelete === id) {
-      setPendingDelete(null)
-      if (deleteTimer.current) clearTimeout(deleteTimer.current)
-      setBusy(true)
-      setBanner(null)
-      try {
-        await deleteStack(id)
-        setStacks((prev) => prev.filter((s) => s.id !== id))
-        setBanner({ tone: 'ok', text: 'Stack deleted.' })
-      } catch (err) {
-        setBanner({ tone: 'err', text: formatApiError(err) })
-      } finally {
-        setBusy(false)
-      }
-    } else {
-      setPendingDelete(id)
-      if (deleteTimer.current) clearTimeout(deleteTimer.current)
-      deleteTimer.current = setTimeout(() => setPendingDelete(null), 5000)
+    setBusy(true)
+    setBanner(null)
+    try {
+      await deleteStack(id)
+      setStacks((prev) => prev.filter((s) => s.id !== id))
+      setBanner({ tone: 'ok', text: 'Stack deleted.' })
+    } catch (err) {
+      setBanner({ tone: 'err', text: formatApiError(err) })
+    } finally {
+      setBusy(false)
     }
-  }, [pendingDelete])
+  }, [])
+
+  const deleteTarget = deleteTargetId
+    ? stacks.find((stack) => stack.id === deleteTargetId)
+    : undefined
 
   return (
     <section className="stacks-page">
@@ -393,7 +380,7 @@ export default function StacksPage() {
               ? 'containers-banner containers-banner--ok'
               : 'containers-banner containers-banner--err'
           }
-          role={banner.tone === 'err' ? 'alert' : undefined}
+          role={banner.tone === 'err' ? 'alert' : 'status'}
         >
           <p className="containers-banner__text">{banner.text}</p>
         </div>
@@ -425,7 +412,6 @@ export default function StacksPage() {
               key={stack.id}
               stack={stack}
               busy={busy}
-              pendingDelete={pendingDelete}
               deployJob={activeJobFor(stack.id)}
               onDeploy={handleDeploy}
               onDelete={handleDelete}
@@ -464,6 +450,24 @@ export default function StacksPage() {
         onConfirm={(override) => {
           void onBuildConfigConfirm(override)
         }}
+      />
+
+      <ConfirmDialog
+        open={deleteTargetId !== null}
+        title="Remove stack?"
+        message={
+          deleteTarget
+            ? `“${deleteTarget.name}” and all its services will be permanently removed.`
+            : 'This stack and all its services will be permanently removed.'
+        }
+        confirmLabel={busy ? 'Removing…' : 'Remove'}
+        busy={busy}
+        onConfirm={() => {
+          const id = deleteTargetId
+          setDeleteTargetId(null)
+          if (id) void handleDelete(id)
+        }}
+        onClose={() => setDeleteTargetId(null)}
       />
     </section>
   )

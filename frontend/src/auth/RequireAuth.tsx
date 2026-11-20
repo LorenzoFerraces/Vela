@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react'
 import { Navigate, useLocation } from 'react-router-dom'
+import { Skeleton } from '../components/Skeleton'
 import { useAuth } from './AuthContext'
 
 interface RequireAuthProps {
@@ -13,7 +14,7 @@ export default function RequireAuth({ children }: RequireAuthProps) {
   if (status === 'loading') {
     return (
       <div className="auth-loading" role="status" aria-live="polite">
-        Loading…
+        <Skeleton className="skeleton--hint-line" />
       </div>
     )
   }

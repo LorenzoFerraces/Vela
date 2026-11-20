@@ -187,9 +187,10 @@ export default function LoginPage() {
           </label>
           <input
             id="login-email"
+            name="email"
             className="auth-form__input"
             type="email"
-            autoComplete="email"
+            autoComplete="username"
             spellCheck={false}
             required
             value={email}
@@ -201,6 +202,7 @@ export default function LoginPage() {
           </label>
           <input
             id="login-password"
+            name="password"
             className="auth-form__input"
             type="password"
             autoComplete="current-password"
