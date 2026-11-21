@@ -22,8 +22,6 @@ import { useWorkloadGroups } from './containers/useWorkloadGroups'
 import { useContainerRunForm } from './containers/useContainerRunForm'
 import '../deploy-progress.css'
 
-const DEPLOY_JOB_DISCOVERY_POLL_MS = 1000
-
 export default function ContainersPage() {
   const [rowBusy, setRowBusy] = useState<string | null>(null)
   const [pendingRemoveId, setPendingRemoveId] = useState<string | null>(null)
@@ -78,21 +76,9 @@ export default function ContainersPage() {
   const containerJobs = deployJobs.filter(
     (job) => job.kind === 'container' && job.status === 'in_progress',
   )
-  const hasInFlightJob = containerJobs.length > 0
-
-  // ponytail: 1s poll — the hook only fetches on mount and at a 2.5s cadence
-  // while it already knows about in-flight jobs, so a deploy submitted via the
-  // API or another tab would never appear here, and a just-submitted form job
-  // would sit on the 2.5s cadence before resolving. Skipped when background
-  // jobs are in flight and the form isn't pending (the hook covers that).
-  useEffect(() => {
-    const interval = window.setInterval(() => {
-      if (document.visibilityState !== 'visible') return
-      if (hasInFlightJob && pendingJobId === null) return
-      void refreshDeployJobs()
-    }, DEPLOY_JOB_DISCOVERY_POLL_MS)
-    return () => window.clearInterval(interval)
-  }, [hasInFlightJob, pendingJobId, refreshDeployJobs])
+  const hasInFlightContainerJob = containerJobs.some(
+    (job) => job.status === 'in_progress',
+  )
 
   useEffect(() => {
     if (!pendingJobId) return
@@ -109,11 +95,11 @@ export default function ContainersPage() {
   const workloadsRefreshRef = useRef<() => void>(() => {})
   const hadInFlightJobRef = useRef(false)
   useEffect(() => {
-    if (hadInFlightJobRef.current && !hasInFlightJob) {
+    if (hadInFlightJobRef.current && !hasInFlightContainerJob) {
       workloadsRefreshRef.current()
     }
-    hadInFlightJobRef.current = hasInFlightJob
-  }, [hasInFlightJob])
+    hadInFlightJobRef.current = hasInFlightContainerJob
+  }, [hasInFlightContainerJob])
 
   const reportListLoadError = useCallback(
     (detail: string) => {
@@ -123,7 +109,10 @@ export default function ContainersPage() {
   )
 
   const { groups, listLoading, refresh } = useWorkloadGroups(reportListLoadError)
-  refreshRef.current = refresh
+
+  useEffect(() => {
+    refreshRef.current = refresh
+  }, [refresh])
 
   useEffect(() => {
     workloadsRefreshRef.current = () => {

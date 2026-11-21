@@ -9,9 +9,9 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
-from alembic import op
 import sqlalchemy as sa
 
+from alembic import op
 
 revision: str = "0021_user_role"
 down_revision: str | Sequence[str] | None = "0020_user_llm_provider"

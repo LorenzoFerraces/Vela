@@ -9,7 +9,8 @@ import pytest
 from app.core.build.default_image_builder import DefaultImageBuilder
 from app.core.exceptions import LlmNotConfiguredError, LlmProviderError
 from app.core.git import git_source_analysis
-from app.core.llm import cache as cache_module, user_config
+from app.core.llm import cache as cache_module
+from app.core.llm import user_config
 from app.core.llm.provider import LlmConfig, resolve_llm_config
 from app.core.stacks import repo_analysis
 from app.db.models import User

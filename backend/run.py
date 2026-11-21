@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-import app.bootstrap_env  # noqa: F401 — .env before uvicorn imports the app module.
-
 import uvicorn
+
+import app.bootstrap_env  # noqa: F401 — .env before uvicorn imports the app module.
 
 if __name__ == "__main__":
     import os

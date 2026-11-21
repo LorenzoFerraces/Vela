@@ -16,7 +16,6 @@ from app.core.enums import (
     SupportedLanguage,
 )
 
-
 # ---------------------------------------------------------------------------
 # Orchestrator models
 # ---------------------------------------------------------------------------
@@ -177,9 +176,11 @@ class DeployConfig(BaseModel):
             raise ValueError(msg)
         return value
 
-    @field_validator("cpu_limit")
+    @field_validator("cpu_limit", mode="before")
     @classmethod
-    def cpu_limit_must_be_finite(cls, value: float | None) -> float | None:
+    def cpu_limit_must_be_finite(
+        cls, value: float | str | None
+    ) -> float | str | None:
         """Reject a cpu_limit that is not a finite number."""
         return validate_finite_number(value)
 

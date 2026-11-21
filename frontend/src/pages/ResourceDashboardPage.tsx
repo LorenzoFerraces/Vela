@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useParams } from 'react-router-dom'
+import { useParams, useSearchParams } from 'react-router-dom'
 import {
   formatApiError,
   getMetricPoints,
@@ -20,9 +20,13 @@ const TIME_RANGE_HOURS: Record<TimeRange, number> = {
   '7d': 168,
 }
 
+const TIME_RANGES: TimeRange[] = ['1h', '6h', '24h', '7d']
+
 export default function ResourceDashboardPage() {
   const { containerId } = useParams<{ containerId: string }>()
-  const [timeRange, setTimeRange] = useState<TimeRange>('24h')
+  const [searchParams, setSearchParams] = useSearchParams()
+  const requestedRange = searchParams.get('range')
+  const timeRange: TimeRange = TIME_RANGES.find((value) => value === requestedRange) ?? '24h'
   const [metrics, setMetrics] = useState<MetricPoint[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -70,8 +74,6 @@ export default function ResourceDashboardPage() {
     }))
   }, [metrics])
 
-  const timeRangeButtons: TimeRange[] = ['1h', '6h', '24h', '7d']
-
   return (
     <section className="dashboard-page">
       <h1 className="dashboard-page__title">
@@ -81,12 +83,17 @@ export default function ResourceDashboardPage() {
 
       <div className="metrics-toolbar">
         <span className="metrics-toolbar__label">Time range:</span>
-        {timeRangeButtons.map((range) => (
+        {TIME_RANGES.map((range) => (
           <button
             key={range}
             type="button"
             className={`btn btn--sm ${timeRange === range ? 'btn--primary' : 'btn--ghost'}`}
-            onClick={() => setTimeRange(range)}
+            aria-pressed={timeRange === range}
+            onClick={() => {
+              const next = new URLSearchParams(searchParams)
+              next.set('range', range)
+              setSearchParams(next, { replace: true })
+            }}
           >
             {range}
           </button>

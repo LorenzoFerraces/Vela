@@ -66,7 +66,7 @@ class _OkClient:
 
             def raise_for_status(self) -> None:
                 """No-op: this stub always reports success."""
-                return None
+                return
 
             def json(self) -> dict:
                 """Return the candidate payload with embedded JSON text."""

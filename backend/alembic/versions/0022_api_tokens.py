@@ -8,6 +8,7 @@ Create Date: 2026-11-08
 from __future__ import annotations
 
 import sqlalchemy as sa
+
 from alembic import op
 
 revision: str = "0022_api_tokens"
@@ -17,7 +18,6 @@ depends_on: str | None = None
 
 
 def upgrade() -> None:
-    """Create the api_tokens table with user, prefix, and hash indexes."""
     op.create_table(
         "api_tokens",
         sa.Column("id", sa.Uuid(), nullable=False),
@@ -30,14 +30,15 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint("id"),
     )
     op.create_index("ix_api_tokens_user_id", "api_tokens", ["user_id"])
-    op.create_index("ix_api_tokens_token_prefix", "api_tokens", ["token_prefix"])
+    op.create_index(
+        "ix_api_tokens_token_prefix", "api_tokens", ["token_prefix"], unique=True
+    )
     op.create_index(
         "ix_api_tokens_token_hash", "api_tokens", ["token_hash"], unique=True
     )
 
 
 def downgrade() -> None:
-    """Drop the api_tokens indexes and table."""
     op.drop_index("ix_api_tokens_token_hash", table_name="api_tokens")
     op.drop_index("ix_api_tokens_token_prefix", table_name="api_tokens")
     op.drop_index("ix_api_tokens_user_id", table_name="api_tokens")

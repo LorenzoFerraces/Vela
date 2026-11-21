@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -16,7 +16,7 @@ from app.core.exceptions import (
     ProviderConnectionError,
     RouteNotFoundError,
 )
-from app.core.models import DeployConfig, default_listen_port_health_check
+from app.core.models import ContainerInfo, DeployConfig
 from app.core.scaling.policy_repository import (
     ScalingPolicyRuntime,
     list_enabled_policies,
@@ -60,7 +60,7 @@ def _is_in_cooldown(runtime: ScalingPolicyRuntime) -> bool:
     policy = runtime.policy
     if policy.last_scaled_at is None:
         return False
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     elapsed = (now - policy.last_scaled_at).total_seconds()
     return elapsed < policy.cooldown_seconds
 
@@ -125,6 +125,26 @@ async def _upsert_route_with_replicas(
     await traffic_router.upsert_route(updated_spec)
 
 
+def build_replica_config(base: DeployConfig, index: int) -> DeployConfig:
+    """Derive a replica config from the stored deploy config (not lossy inspection data)."""
+    return base.model_copy(update={
+        "name": f"{base.name}-r{index}",
+        "ports": [],
+        "route_host": None,
+        "public_route": False,
+    })
+
+
+async def _base_container_info(
+    orchestrator: ContainerOrchestrator, base_name: str
+) -> ContainerInfo | None:
+    """Resolve a policy's container name to the live container and its Docker id."""
+    return next(
+        (info for info in await orchestrator.list() if info.name == base_name),
+        None,
+    )
+
+
 async def _scale_up(
     orchestrator: ContainerOrchestrator,
     traffic_router: TrafficRouter,
@@ -132,24 +152,10 @@ async def _scale_up(
     base_port: int,
     base_spec: RouteSpec,
     current_replica_count: int,
+    base_config: DeployConfig,
 ) -> None:
     """Add one replica and register it with Traefik."""
     next_index = current_replica_count + 1
-    try:
-        base_info = await orchestrator.get(base_name)
-    except (ContainerNotFoundError, ProviderConnectionError):
-        logger.warning(
-            "Scale-up skipped: could not inspect base container %s", base_name
-        )
-        return
-    base_config = DeployConfig(
-        image=base_info.image,
-        name=base_name,
-        container_listen_port=base_port,
-        labels=dict(base_info.labels),
-        volumes=list(base_info.volumes),
-        health_check=default_listen_port_health_check(base_port),
-    )
     try:
         replica_info = await orchestrator.deploy_replica(base_config, next_index)
     except (OrchestratorError, ProviderConnectionError) as exc:
@@ -215,11 +221,10 @@ async def tick(
     for runtime in policies:
         try:
             await _evaluate_policy(session, orchestrator, traffic_router, runtime)
-        except Exception as exc:
+        except Exception:
             logger.exception(
-                "Unhandled error evaluating scaling policy for %s: %s",
+                "Unhandled error evaluating scaling policy for %s",
                 runtime.policy.container_name,
-                exc,
             )
 
 
@@ -229,9 +234,20 @@ async def _evaluate_policy(
     traffic_router: TrafficRouter,
     runtime: ScalingPolicyRuntime,
 ) -> None:
+    from app.core.deploy.deployment_history import load_deploy_config_snapshot
+
     policy = runtime.policy
     base_name = policy.container_name
-    now = datetime.now(timezone.utc)
+    base_info = await _base_container_info(orchestrator, base_name)
+    if base_info is None:
+        logger.warning("Scale-up skipped: base container %s not found", base_name)
+        return
+    base_config = await load_deploy_config_snapshot(session, base_info.id)
+    if base_config is None:
+        logger.warning("Scale-up skipped: no stored deploy config for %s", base_name)
+        return
+
+    now = datetime.now(UTC)
     in_cooldown = _is_in_cooldown(runtime)
 
     metric_value = await _measure_metric(orchestrator, base_name, policy.metric)
@@ -304,6 +320,7 @@ async def _evaluate_policy(
             base_port,
             base_spec,
             current_replica_count,
+            base_config,
         )
         await record_scale_event(session, base_name)
         return
@@ -345,5 +362,5 @@ async def run_scaling_loop(
                 await tick(session, orchestrator, traffic_router)
         except asyncio.CancelledError:
             raise
-        except Exception as exc:
-            logger.exception("Scaling loop iteration failed: %s", exc)
+        except Exception:
+            logger.exception("Scaling loop iteration failed")

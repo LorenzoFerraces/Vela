@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
-from app.core.enums import ContainerStatus, HealthStatus
 from app.core.containers.docker_orchestrator import (
     _inspect_to_container_info,
     _parse_created,
     _ports_from_list,
 )
+from app.core.enums import ContainerStatus, HealthStatus
 
 
 def test_inspect_to_container_info_maps_list_payload() -> None:
@@ -35,7 +35,7 @@ def test_inspect_to_container_info_maps_list_payload() -> None:
     assert info.labels == {"vela.managed": "true", "vela.owner_id": "u1"}
     assert info.status is ContainerStatus.RUNNING
     assert info.health is HealthStatus.NONE
-    assert info.created_at == datetime.fromtimestamp(created_unix, tz=timezone.utc)
+    assert info.created_at == datetime.fromtimestamp(created_unix, tz=UTC)
     assert info.created_at.tzinfo is not None
     assert len(info.ports) == 1
     assert info.ports[0].host_port == 8080

@@ -2,47 +2,62 @@
 
 from __future__ import annotations
 
-from typing import Annotated
-
 from pathlib import Path
+from typing import Annotated
 
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_current_user, get_db, get_image_builder
+from app.api.deps import get_current_user, get_db, get_image_builder, require_admin
 from app.api.schemas import (
     AnalyzeGitSourceRequest,
     BuilderAnalyzeRequest,
     BuilderBuildRequest,
     GitSourceAnalysis,
 )
-from app.core.build.default_image_builder import DefaultImageBuilder, validate_local_build_context
+from app.core.audit.service import emit_audit_log
+from app.core.build.default_image_builder import (
+    DefaultImageBuilder,
+    validate_local_build_context,
+)
 from app.core.git.git_source_analysis import analyze_git_source
 from app.core.models import BuildResult, ProjectInfo
 from app.db.models import User
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(get_current_user)])
 
 
 @router.post("/build", response_model=BuildResult)
 async def build_from_source(
     body: BuilderBuildRequest,
     image_builder: Annotated[DefaultImageBuilder, Depends(get_image_builder)],
+    session: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(require_admin)],
 ) -> BuildResult:
-    """Full pipeline: clone or local path → ensure Dockerfile → ``docker build``."""
-    return await image_builder.build_from_source(
+    """Full pipeline: clone or local path → ensure Dockerfile → docker build (admin only)."""
+    result = await image_builder.build_from_source(
         body.source,
         tag=body.tag,
         override=body.build_override,
     )
+    await emit_audit_log(
+        session,
+        user_id=current_user.id,
+        action="builder.build",
+        target_type="build",
+        target_id=result.image_tag,
+    )
+    await session.commit()
+    return result
 
 
 @router.post("/analyze", response_model=ProjectInfo)
 async def analyze(
     body: BuilderAnalyzeRequest,
     image_builder: Annotated[DefaultImageBuilder, Depends(get_image_builder)],
+    current_user: Annotated[User, Depends(require_admin)],
 ) -> ProjectInfo:
-    """Inspect a local project directory (subject to ``VELA_ALLOWED_BUILD_ROOT`` when set)."""
+    """Inspect a local project directory (admin only)."""
     ctx = validate_local_build_context(Path(body.project_path))
     return await image_builder.analyze(str(ctx))
 

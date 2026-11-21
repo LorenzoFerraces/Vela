@@ -7,10 +7,9 @@ Create Date: 2026-09-01
 """
 from __future__ import annotations
 
-from typing import Sequence
+from collections.abc import Sequence
 
 from alembic import op
-
 
 revision: str = "0018_deployment_records_cid_idx"
 down_revision: str | Sequence[str] | None = "0017_merge_console_utils"

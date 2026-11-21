@@ -92,12 +92,12 @@ function dayLabel(date: Date, now: Date): string {
   const diffDays = Math.round((today.getTime() - day.getTime()) / 86_400_000)
   if (diffDays === 0) return 'Today'
   if (diffDays === 1) return 'Yesterday'
-  return date.toLocaleDateString([], {
+  return new Intl.DateTimeFormat('en-US', {
     weekday: 'short',
     year: 'numeric',
     month: 'short',
     day: 'numeric',
-  })
+  }).format(date)
 }
 
 function groupByDay(entries: AuditLogEntry[]): DayGroup[] {
@@ -156,14 +156,8 @@ export default function AuditLogPage() {
     const params: AuditLogQueryParams = { limit: LIMIT, offset }
     if (actionFilter) params.action = actionFilter
     if (targetTypeFilter) params.target_type = targetTypeFilter
-    const fromDate = fromRaw ? new Date(`${fromRaw}T00:00:00`) : null
-    if (fromDate && !Number.isNaN(fromDate.getTime())) {
-      params.from_date = fromDate.toISOString()
-    }
-    const toDate = toRaw ? new Date(`${toRaw}T23:59:59`) : null
-    if (toDate && !Number.isNaN(toDate.getTime())) {
-      params.to_date = toDate.toISOString()
-    }
+    if (fromRaw) params.from_date = fromRaw
+    if (toRaw) params.to_date = toRaw
     return params
   }, [actionFilter, targetTypeFilter, fromRaw, toRaw, offset])
 
@@ -304,9 +298,11 @@ export default function AuditLogPage() {
                         ) : null}
                       </span>
                       <span className="audit-log-page__time">
-                        {new Date(entry.created_at).toLocaleString([], {
+                        {new Intl.DateTimeFormat('en-US', {
+                          dateStyle: 'medium',
+                          timeStyle: 'medium',
                           hour12: false,
-                        })}
+                        }).format(new Date(entry.created_at))}
                       </span>
                       {entry.details ? (
                         <details className="audit-log-page__details">

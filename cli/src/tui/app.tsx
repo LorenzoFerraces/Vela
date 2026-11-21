@@ -9,6 +9,7 @@ export interface AppProps {
   load?: () => Promise<ContainerInfo[]>
   onStart?: (container: ContainerInfo) => Promise<void>
   onStop?: (container: ContainerInfo) => Promise<void>
+  onLogs?: (container: ContainerInfo) => void
   onExec?: (container: ContainerInfo) => void
   onRun?: (source: string) => Promise<void>
   onQuit?: () => void
@@ -57,6 +58,7 @@ export function App({
   load,
   onStart,
   onStop,
+  onLogs,
   onExec,
   onRun,
   onQuit,
@@ -144,6 +146,10 @@ export function App({
       return
     }
     if (key.name === "l" && current) {
+      if (onLogs) {
+        onLogs(current)
+        return
+      }
       setLogs((lines) => [...lines, `-- following ${current.name} is handled by: vela logs ${current.name} -f`])
       return
     }

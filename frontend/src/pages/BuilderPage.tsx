@@ -1,37 +1,26 @@
 import { useCallback, useState } from 'react'
-import { BuilderMessageBanner } from './builder/BuilderMessageBanner'
-import type { BuilderBanner } from './builder/types'
 import { DockerfileTemplatesSection } from '../components/DockerfileTemplatesSection'
-import { useDockerfileTemplates } from '../components/useDockerfileTemplates'
+import {
+  useDockerfileTemplates,
+  type DockerfileTemplateBanner,
+} from '../components/useDockerfileTemplates'
+import SourceWorkspacePage from './SourceWorkspacePage'
 
-/**
- * Page component that displays the Builder UI and manages its banner state.
- *
- * Renders controls and lists for managing Dockerfile templates, wires the
- * template hook's state and handlers into the DockerfileTemplatesSection, and
- * passes banner state to BuilderMessageBanner.
- *
- * @returns The JSX element for the Builder page.
- */
 export default function BuilderPage() {
-  const [banner, setBanner] = useState<BuilderBanner>(null)
+  const [banner, setBanner] = useState<DockerfileTemplateBanner>(null)
 
-  const reportBanner = useCallback((next: BuilderBanner) => {
+  const reportBanner = useCallback((next: DockerfileTemplateBanner) => {
     setBanner(next)
   }, [])
 
   const dockerfiles = useDockerfileTemplates(reportBanner)
 
   return (
-    <section className="builder-page">
-      <h1 className="containers-page__title">Builder</h1>
+    <SourceWorkspacePage title="Builder" message={banner} loading={dockerfiles.listLoading}>
       <p className="containers-page__lead">
         Manage Dockerfile templates for your account. Pick them when deploying a
         container from the Containers page.
       </p>
-
-      <BuilderMessageBanner banner={banner} />
-
       <DockerfileTemplatesSection
         rows={dockerfiles.rows}
         listLoading={dockerfiles.listLoading}
@@ -48,6 +37,6 @@ export default function BuilderPage() {
         onRemove={(templateId) => void dockerfiles.removeTemplate(templateId)}
         leadText="Create and edit Dockerfiles to use when deploying containers."
       />
-    </section>
+    </SourceWorkspacePage>
   )
 }

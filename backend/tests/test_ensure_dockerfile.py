@@ -16,7 +16,7 @@ def test_existing_dockerfile_not_overwritten(tmp_path: Path) -> None:
     (tmp_path / "Dockerfile").write_text("FROM scratch\n", encoding="utf-8")
     (tmp_path / "build.gradle").write_text("plugins { id 'java' }\n", encoding="utf-8")
 
-    strategy, info = ensure_dockerfile_for_build(tmp_path)
+    strategy, _info = ensure_dockerfile_for_build(tmp_path)
 
     assert strategy is BuildStrategy.DOCKERFILE_EXISTS
     assert (tmp_path / "Dockerfile").read_text(encoding="utf-8") == "FROM scratch\n"
@@ -107,7 +107,7 @@ def test_dockerfile_exists_at_effective_root_is_not_overwritten(tmp_path: Path) 
     (backend_dir / "go.mod").write_text("module example\n", encoding="utf-8")
     (backend_dir / "Dockerfile").write_text("FROM scratch\n", encoding="utf-8")
 
-    strategy, info = ensure_dockerfile_for_build(tmp_path)
+    strategy, _info = ensure_dockerfile_for_build(tmp_path)
 
     assert strategy is BuildStrategy.DOCKERFILE_EXISTS
     assert (backend_dir / "Dockerfile").read_text(encoding="utf-8") == "FROM scratch\n"

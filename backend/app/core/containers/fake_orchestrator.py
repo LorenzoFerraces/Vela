@@ -3,14 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+import builtins
 import logging
 import os
 import threading
 import time
 import uuid
 from collections.abc import AsyncIterator, Callable
-from typing import List
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from app.core.containers.docker_orchestrator import (
     VELA_MANAGED_LABEL,
@@ -23,6 +23,7 @@ from app.core.containers.docker_orchestrator import (
     _access_url_from_route_labels,
     deploy_source_fields_from_labels,
 )
+from app.core.containers.orchestrator import ContainerOrchestrator
 from app.core.enums import ContainerStatus, HealthStatus
 from app.core.exceptions import (
     ContainerNotFoundError,
@@ -31,7 +32,6 @@ from app.core.exceptions import (
     RegistryAccessDeniedError,
 )
 from app.core.models import ContainerInfo, ContainerStats, DeployConfig, HealthResult
-from app.core.containers.orchestrator import ContainerOrchestrator
 
 logger = logging.getLogger(__name__)
 
@@ -146,7 +146,7 @@ class FakeContainerOrchestrator(ContainerOrchestrator):
             name=name,
             image=config.image,
             status=ContainerStatus.RUNNING,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
             ports=[],
             volumes=list(config.volumes),
             labels=labels,
@@ -295,7 +295,7 @@ class FakeContainerOrchestrator(ContainerOrchestrator):
         if not timestamps:
             return "".join(f"{text}\n" for _, text in visible)
         return "".join(
-            f"{datetime.fromtimestamp(ts, tz=timezone.utc):%Y-%m-%dT%H:%M:%S.%fZ} {text}\n"
+            f"{datetime.fromtimestamp(ts, tz=UTC):%Y-%m-%dT%H:%M:%S.%fZ} {text}\n"
             for ts, text in visible
         )
 
@@ -381,9 +381,9 @@ class FakeContainerOrchestrator(ContainerOrchestrator):
                                     ),
                                     loop,
                                 ).result(timeout=10)
-                    except asyncio.TimeoutError:
+                    except TimeoutError:
                         continue
-                    except Exception:
+                    except Exception:  # noqa: BLE001
                         logger.warning("fake exec stdin error for %s", container_id)
                         break
             except Exception:
@@ -420,7 +420,6 @@ class FakeContainerOrchestrator(ContainerOrchestrator):
 
     def resize_exec(self, container_id: str, exec_id: str, cols: int, rows: int) -> None:
         """No-op: fake exec ignores terminal size."""
-        pass
 
     async def get_stats(self, container_id: str) -> ContainerStats:
         """
@@ -439,7 +438,7 @@ class FakeContainerOrchestrator(ContainerOrchestrator):
         self._require_container(container_id)
         return ContainerStats(
             container_id=container_id,
-            timestamp=datetime.now(timezone.utc),
+            timestamp=datetime.now(UTC),
             cpu_percent=1.0,
             memory_usage_bytes=1000,
             memory_limit_bytes=2000,
@@ -460,7 +459,7 @@ class FakeContainerOrchestrator(ContainerOrchestrator):
         self._require_container(container_id)
         return HealthResult(
             status=HealthStatus.HEALTHY,
-            timestamp=datetime.now(timezone.utc),
+            timestamp=datetime.now(UTC),
         )
 
     async def pull_image(self, image: str, *, tag: str = "latest") -> None:
@@ -495,7 +494,7 @@ class FakeContainerOrchestrator(ContainerOrchestrator):
         self._built_tags.append(tag)
         return f"sha256:fake-{tag.replace(':', '-')}"
 
-    async def list_images(self) -> List[str]:
+    async def list_images(self) -> builtins.list[str]:
         """
         Get a sorted list of available image references.
 
@@ -504,7 +503,7 @@ class FakeContainerOrchestrator(ContainerOrchestrator):
         """
         return sorted(self._images)
 
-    async def list_replicas(self, base_name: str) -> List[ContainerInfo]:
+    async def list_replicas(self, base_name: str) -> builtins.list[ContainerInfo]:
         """Return fake containers labeled as replicas of base_name."""
         return [
             info

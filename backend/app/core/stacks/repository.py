@@ -12,9 +12,11 @@ from sqlalchemy.orm import selectinload
 
 from app.core.exceptions import (
     DuplicateStackNameError,
+    ProjectAccessDeniedError,
     StackCompositionCycleError,
     StackNotFoundError,
 )
+from app.core.projects.enums import can_write
 from app.core.projects.repository import list_project_ids_for_user, require_membership
 from app.db.models import Stack, StackComposition, StackService
 
@@ -149,6 +151,19 @@ async def update_stack(
     return stack
 
 
+async def require_stack_write_access(
+    session: AsyncSession,
+    stack: Stack,
+    user_id: uuid.UUID,
+) -> None:
+    """Raise ProjectAccessDeniedError unless ``user_id`` may write to ``stack``'s project."""
+    membership = await require_membership(
+        session, project_id=stack.project_id, user_id=user_id
+    )
+    if not can_write(membership.role):
+        raise ProjectAccessDeniedError("You do not have permission to modify this stack.")
+
+
 async def delete_stack(
     session: AsyncSession,
     stack_id: uuid.UUID,
@@ -158,15 +173,7 @@ async def delete_stack(
     stack = await get_stack(session, stack_id, user_id)
     if stack is None:
         raise StackNotFoundError(str(stack_id))
-
-    from app.core.projects.enums import can_write
-
-    membership = await require_membership(session, project_id=stack.project_id, user_id=user_id)
-    if not can_write(membership.role):
-        from app.core.exceptions import ProjectAccessDeniedError
-
-        raise ProjectAccessDeniedError("You do not have permission to delete this stack.")
-
+    await require_stack_write_access(session, stack, user_id)
     await session.delete(stack)
 
 
@@ -213,7 +220,7 @@ def resolve_composition(
                             graph[other_key].add(key)
 
     in_degree = {key: 0 for key in graph}
-    for node, deps in graph.items():
+    for deps in graph.values():
         for dep in deps:
             in_degree[dep] = in_degree.get(dep, 0) + 1
 
@@ -268,12 +275,12 @@ async def detect_cycle(
 
         visited.add(current)
 
-        stmt = (
+        child_stmt = (
             select(StackComposition.child_stack_id)
             .where(StackComposition.parent_stack_id == current)
         )
-        result = await session.execute(stmt)
-        for row in result.mappings():
+        child_result = await session.execute(child_stmt)
+        for row in child_result.mappings():
             next_id = row["child_stack_id"]
             if next_id not in visited:
                 path[next_id] = current

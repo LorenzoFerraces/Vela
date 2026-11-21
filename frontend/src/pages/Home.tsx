@@ -19,7 +19,7 @@ export default function Home() {
       } catch (error) {
         if (!cancelled) {
           setApiStatus('error')
-          setApiDetail(formatApiError(error, 'es'))
+          setApiDetail(formatApiError(error))
         }
       }
     })()
@@ -30,10 +30,10 @@ export default function Home() {
 
   return (
     <section className="hero">
-      <p className="hero__eyebrow">Plataforma de despliegue</p>
-      <h1 className="hero__title">Hola, esto es Vela</h1>
+      <p className="hero__eyebrow">Deployment platform</p>
+      <h1 className="hero__title">Hello, this is Vela</h1>
       <p className="hero__subtitle">
-        Orquesta, construye y gestiona contenedores desde un solo lugar.
+        Orchestrate, build and manage containers from one place.
       </p>
       <div className="hero__status" role="status" aria-live="polite">
         {apiStatus === 'idle' && (

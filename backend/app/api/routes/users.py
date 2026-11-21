@@ -11,7 +11,13 @@ from app.api.deps import get_current_user, get_db, get_object_storage
 from app.api.schemas import UserProfileUpdate, UserPublic
 from app.api.user_view import user_public_from_snapshot
 from app.core.audit.service import emit_audit_log
-from app.core.profile.service import delete_avatar, update_profile, upload_avatar
+from app.core.containers.volume_uploads import read_upload_limited
+from app.core.profile.service import (
+    MAX_AVATAR_BYTES,
+    delete_avatar,
+    update_profile,
+    upload_avatar,
+)
 from app.core.storage.object_storage import ObjectStorage
 from app.db.models import User
 
@@ -51,10 +57,10 @@ async def post_avatar(
     session: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
     object_storage: Annotated[ObjectStorage, Depends(get_object_storage)],
-    file: UploadFile = File(...),
+    file: UploadFile = File(...),  # noqa: B008
 ) -> UserPublic:
     """Upload or replace the current user's avatar."""
-    body = await file.read()
+    body = await read_upload_limited(file, MAX_AVATAR_BYTES + 1)
     snapshot = await upload_avatar(
         session,
         current_user,

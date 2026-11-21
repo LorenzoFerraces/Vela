@@ -33,10 +33,10 @@ async def query_logs(
     current_user: Annotated[User, Depends(get_current_user)],
     orchestrator: Annotated[ContainerOrchestrator, Depends(get_orchestrator)],
     container_id: str = Query(...),
-    level: LogLevel | None = Query(None),
-    source: LogSource | None = Query(None),
-    start_time: datetime | None = Query(None),
-    end_time: datetime | None = Query(None),
+    level: LogLevel | None = Query(None),  # noqa: B008
+    source: LogSource | None = Query(None),  # noqa: B008
+    start_time: datetime | None = Query(None),  # noqa: B008
+    end_time: datetime | None = Query(None),  # noqa: B008
     q: str | None = Query(None, max_length=512, description="Full-text search"),
     limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0),
@@ -98,10 +98,10 @@ async def export_logs(
     current_user: Annotated[User, Depends(get_current_user)],
     orchestrator: Annotated[ContainerOrchestrator, Depends(get_orchestrator)],
     container_id: str = Query(...),
-    level: LogLevel | None = Query(None),
-    source: LogSource | None = Query(None),
-    start_time: datetime | None = Query(None),
-    end_time: datetime | None = Query(None),
+    level: LogLevel | None = Query(None),  # noqa: B008
+    source: LogSource | None = Query(None),  # noqa: B008
+    start_time: datetime | None = Query(None),  # noqa: B008
+    end_time: datetime | None = Query(None),  # noqa: B008
     q: str | None = Query(None, max_length=512, description="Full-text search"),
     limit: int = Query(5000, ge=1, le=50000),
 ) -> StreamingResponse:

@@ -28,6 +28,13 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
 
   migrate:
     build:
@@ -66,6 +73,8 @@ services:
         required: false
     environment:
       VELA_DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-vela}:${POSTGRES_PASSWORD:-vela}@postgres:5432/${POSTGRES_DB:-Vela}
+      VELA_AUTH_SECRET: ${VELA_AUTH_SECRET:-}
+      VELA_TOKEN_ENCRYPTION_KEY: ${VELA_TOKEN_ENCRYPTION_KEY:-}
       VELA_TRAEFIK_DYNAMIC_FILE: /etc/traefik/dynamic/traefik-http.yml
       VELA_TRAEFIK_RELOAD_CONTAINER: vela-traefik
       VELA_DOCKER_NETWORK: vela-workloads
@@ -78,11 +87,11 @@ services:
       VELA_VOLUME_UPLOADS_HOST_DIR: ${VELA_VOLUME_UPLOADS_HOST_DIR:-}
     volumes:
       - ${DOCKER_SOCKET_PATH:-/var/run/docker.sock}:/var/run/docker.sock
-      # Host bind (not a named volume): workloads are created through the
-      # host daemon, which resolves bind sources on the host. The host path
-      # must be visible to the daemon; on Docker Desktop set
-      # VELA_VOLUME_UPLOADS_HOST_DIR to a Windows path in .env.
-      - ${VELA_VOLUME_UPLOADS_HOST_DIR:-/data/volume-uploads}:${VELA_VOLUME_UPLOADS_DIR:-/data/volume-uploads}
+      # Named volume by default: a fresh Linux host no longer creates a
+      # root-owned bind. When VELA_VOLUME_UPLOADS_HOST_DIR is set, use that
+      # pre-created host dir instead so workloads mount the same source the
+      # backend advertises (see .env.example).
+      - ${VELA_VOLUME_UPLOADS_HOST_DIR:-volume_uploads}:${VELA_VOLUME_UPLOADS_DIR:-/data/volume-uploads}
       - traefik_dynamic:/etc/traefik/dynamic
     depends_on:
       postgres:
@@ -95,6 +104,13 @@ services:
       timeout: 5s
       retries: 12
       start_period: 30s
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1G
 
   web:
     build:
@@ -105,6 +121,32 @@ services:
     restart: unless-stopped
     ports:
       - "${VELA_WEB_PORT:-8081}:8080"
+    environment:
+      VELA_VOLUME_UPLOAD_MAX_BYTES: ${VELA_VOLUME_UPLOAD_MAX_BYTES:-104857600}
+    volumes:
+      - ./frontend/nginx.conf:/etc/nginx/nginx-source.conf:ro
+    tmpfs:
+      - /etc/nginx/conf.d:uid=101,gid=101,mode=0755
+      - /var/cache/nginx:uid=101,gid=101,mode=0755
+      - /tmp:uid=101,gid=101,mode=0755
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        max_mb=$$(( $${VELA_VOLUME_UPLOAD_MAX_BYTES:-104857600} / 1048576 + 5 ))
+        sed "s/client_max_body_size 105m;/client_max_body_size $${max_mb}m;/" \
+          /etc/nginx/nginx-source.conf > /etc/nginx/conf.d/default.conf
+        exec nginx -g 'daemon off;'
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
     depends_on:
       api:
         condition: service_healthy
@@ -114,7 +156,9 @@ services:
     container_name: vela-traefik
     restart: unless-stopped
     environment:
-      VELA_DOMAIN: ${VELA_DOMAIN:-velaunq.ddns.net}
+      VELA_DOMAIN: ${VELA_DOMAIN:-app.example.com}
+      VELA_PUBLIC_HOST: ${VELA_PUBLIC_HOST:-app.example.com}
+      VELA_TRAEFIK_ACME_RESOLVER: ${VELA_TRAEFIK_ACME_RESOLVER:-letsencrypt}
     command:
       - --providers.file.directory=/etc/traefik/dynamic
       - --providers.file.watch=true
@@ -127,16 +171,39 @@ services:
       - --certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json
       - --certificatesresolvers.letsencrypt.acme.httpchallenge=true
       - --certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=web
-      - --api.dashboard=true
-      - --api.insecure=true
+      # Staging resolver for testing cert issuance without rate limits.
+      - --certificatesresolvers.staging.acme.caserver=https://acme-staging-v02.api.letsencrypt.org/directory
+      - --certificatesresolvers.staging.acme.email=${VELA_TRAEFIK_ACME_EMAIL:-}
+      - --certificatesresolvers.staging.acme.storage=/letsencrypt/acme-staging.json
+      - --certificatesresolvers.staging.acme.httpchallenge=true
+      - --certificatesresolvers.staging.acme.httpchallenge.entrypoint=web
+      # Dashboard off by default. Both flags gated by the same opt-in var.
+      - --api.dashboard=${VELA_TRAEFIK_DASHBOARD:-false}
+      - --api.insecure=${VELA_TRAEFIK_DASHBOARD:-false}
     ports:
       - "80:80"
       - "443:443"
+      # Loopback-only dashboard port; the dashboard itself is disabled unless
+      # VELA_TRAEFIK_DASHBOARD=1. Never exposed on the public entrypoints.
       - "127.0.0.1:8080:8080"
     volumes:
       - traefik_dynamic:/etc/traefik/dynamic
       - ./traefik/static/spa.yaml:/etc/traefik/dynamic/spa.yaml:ro
       - traefik_certs:/letsencrypt
+    tmpfs:
+      - /tmp
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
     networks:
       - default
       - workloads
@@ -148,6 +215,7 @@ volumes:
   postgres_data:
   traefik_dynamic:
   traefik_certs:
+  volume_uploads:
 
 networks:
   workloads:

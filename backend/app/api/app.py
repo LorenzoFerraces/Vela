@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-from app import bootstrap_env  # noqa: F401 — loads backend/.env before other app imports.
-
 import asyncio
 import logging
+import os
 from contextlib import asynccontextmanager, suppress
 
 from fastapi import FastAPI
@@ -14,16 +13,16 @@ from starlette.datastructures import MutableHeaders
 from starlette.middleware.gzip import GZipMiddleware
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
+from app import bootstrap_env  # loads backend/.env before other app imports.
 from app.api.errors import register_exception_handlers
-from app.core.deploy.jobs import DeployJobRegistry
 from app.api.routes import (
     admin,
     audit,
     auth,
     builder,
     containers,
-    deploys,
     deployments,
+    deploys,
     dockerfile_templates,
     github,
     images,
@@ -37,6 +36,7 @@ from app.api.routes import (
     traffic,
     users,
 )
+from app.core.deploy.jobs import DeployJobRegistry
 
 API_PREFIX = "/api"
 logger = logging.getLogger(__name__)
@@ -47,9 +47,9 @@ async def _lifespan(_application: FastAPI):
     from app.api.deps import get_orchestrator, get_traffic_router
     from app.core.auth.bootstrap import ensure_admin_user
     from app.core.exceptions import ProviderConnectionError, TrafficRouterError
-    from app.core.logging.collector import LogCollector, COLLECTOR_ENABLED
-    from app.core.notifications.container_monitor import run_monitoring_loop
+    from app.core.logging.collector import COLLECTOR_ENABLED, LogCollector
     from app.core.monitoring.metrics_collector import run_metrics_collector
+    from app.core.notifications.container_monitor import run_monitoring_loop
     from app.core.scaling.scaling_engine import run_scaling_loop
     from app.db.engine import get_session_factory
     from app.e2e_support import ensure_e2e_database
@@ -174,6 +174,9 @@ def create_app() -> FastAPI:
     Returns:
         FastAPI: A configured FastAPI application instance.
     """
+    if os.environ.get("VELA_E2E", "").strip() != "1":
+        bootstrap_env.require_deployment_secrets()
+
     application = FastAPI(
         title="Vela API",
         description="Container deployment platform — orchestrate, build, and manage containers.",
@@ -190,8 +193,8 @@ def create_app() -> FastAPI:
             "http://127.0.0.1:5173",
             "http://localhost:5174",
             "http://127.0.0.1:5174",
-            "http://velaunq.ddns.net:5173",
-            "https://velaunq.ddns.net:5173",
+            "http://app.example.com:5173",
+            "https://app.example.com:5173",
         ],
         allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$",
         allow_credentials=True,
@@ -263,6 +266,11 @@ def create_app() -> FastAPI:
     application.include_router(
         settings.router,
         prefix=f"{API_PREFIX}/settings",
+        tags=["settings"],
+    )
+    application.include_router(
+        settings.public_router,
+        prefix=API_PREFIX,
         tags=["settings"],
     )
     application.include_router(

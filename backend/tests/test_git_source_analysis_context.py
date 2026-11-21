@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from app.api.schemas import GitSourceAnalysis
 from app.core.git.git_source_analysis import (
     _clean_command_list,
     _collect_context_excerpts,
@@ -21,7 +22,6 @@ from app.core.git.git_source_analysis import (
     _select_readme_text,
     _subdir_marker_files,
 )
-from app.api.schemas import GitSourceAnalysis
 
 
 def test_context_order_prefers_env_examples_and_dockerfile(tmp_path: Path) -> None:

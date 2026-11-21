@@ -20,36 +20,6 @@ export async function getImageAvailability(
   )
 }
 
-export type ImageSuggestionSource = 'local' | 'registry'
-
-export interface ImageSuggestion {
-  ref: string
-  pull_count: number | null
-  source: ImageSuggestionSource
-}
-
-/**
- * Fetches image suggestions that match the given query.
- *
- * @param query - The search text used to find image suggestions
- * @param options - Optional settings for the request
- * @param options.limit - Maximum number of suggestions to return
- * @returns The list of matching image suggestion objects
- */
-export async function getImageSuggestions(
-  query: string,
-  options: { limit?: number } = {}
-): Promise<ImageSuggestion[]> {
-  const params = new URLSearchParams({ q: query })
-  if (options.limit != null) {
-    params.set('limit', String(options.limit))
-  }
-  const data = await apiGet<{ suggestions: ImageSuggestion[] }>(
-    `/api/containers/image/suggestions?${params.toString()}`
-  )
-  return data.suggestions
-}
-
 // --- User library (Dockerfile templates) ---
 
 export interface DockerfileTemplate {

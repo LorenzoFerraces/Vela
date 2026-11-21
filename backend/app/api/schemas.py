@@ -22,9 +22,9 @@ from app.core.containers.volume_uploads import (
     VOLUME_UPLOAD_USER_QUOTA_BYTES,
 )
 from app.core.models import (
+    MIN_ENFORCEABLE_CPU_CORES,
     BuildOverride,
     ContainerInfo,
-    MIN_ENFORCEABLE_CPU_CORES,
     ProjectSource,
     ScalingPolicyConfig,
     ScalingPolicyInfo,
@@ -244,7 +244,9 @@ class RunFromSourceRequest(BaseModel):
 
     @field_validator("cpu_limit", mode="before")
     @classmethod
-    def cpu_limit_must_be_finite(cls, value: float | None) -> float | None:
+    def cpu_limit_must_be_finite(
+        cls, value: float | str | None
+    ) -> float | str | None:
         """Reject non-finite CPU limits (NaN and infinities) before coercion."""
         return validate_finite_number(value)
 
@@ -687,11 +689,6 @@ class DeployJobPublic(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-class RegisterRequest(BaseModel):
-    email: EmailStr
-    password: str = Field(..., min_length=8, max_length=128)
-
-
 class LoginRequest(BaseModel):
     email: EmailStr
     password: str = Field(..., min_length=1, max_length=128)
@@ -755,6 +752,8 @@ class TokenResponse(BaseModel):
 class ApiTokenCreate(BaseModel):
     """Request to mint a named API token."""
     name: str = Field(min_length=1, max_length=100)
+    scope: Literal["full", "read"] = "full"
+    expires_in_days: int | None = Field(default=None, ge=1, le=3650)
 
 
 class ApiTokenPublic(BaseModel):
@@ -762,7 +761,10 @@ class ApiTokenPublic(BaseModel):
     id: uuid.UUID
     name: str
     prefix: str
+    scope: str
     created_at: datetime
+    expires_at: datetime | None = None
+    last_used_at: datetime | None = None
 
 
 class ApiTokenCreated(ApiTokenPublic):

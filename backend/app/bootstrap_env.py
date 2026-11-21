@@ -36,3 +36,16 @@ def _configure_app_logging() -> None:
 
 
 _configure_app_logging()
+
+
+def require_deployment_secrets() -> None:
+    """Fail closed when required secrets are blank; no insecure defaults."""
+    missing = [
+        name for name in ("VELA_AUTH_SECRET", "VELA_TOKEN_ENCRYPTION_KEY")
+        if not os.environ.get(name, "").strip()
+    ]
+    if missing:
+        raise RuntimeError(
+            "Missing required secrets: " + ", ".join(missing) +
+            ". Set them in .env (see .env.example)."
+        )

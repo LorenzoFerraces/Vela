@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { Link } from 'react-router-dom'
 import {
   CaretDown,
   ClockCounterClockwise,
@@ -16,7 +16,6 @@ type UserMenuProps = {
 }
 
 export default function UserMenu({ user, onLogout }: UserMenuProps) {
-  const navigate = useNavigate()
   const [open, setOpen] = useState(false)
   const rootRef = useRef<HTMLDivElement>(null)
   const triggerRef = useRef<HTMLButtonElement>(null)
@@ -45,11 +44,6 @@ export default function UserMenu({ user, onLogout }: UserMenuProps) {
     }
   }, [open])
 
-  function navigateTo(path: string) {
-    setOpen(false)
-    navigate(path)
-  }
-
   function handleLogout() {
     setOpen(false)
     onLogout()
@@ -72,22 +66,22 @@ export default function UserMenu({ user, onLogout }: UserMenuProps) {
       </button>
       {open && (
         <div className="user-menu__menu" aria-label="Account">
-          <button
-            type="button"
+          <Link
+            to="/settings"
             className="user-menu__item"
-            onClick={() => navigateTo('/settings')}
+            onClick={() => setOpen(false)}
           >
             <GearSix size={16} aria-hidden="true" />
             Settings
-          </button>
-          <button
-            type="button"
+          </Link>
+          <Link
+            to="/audit"
             className="user-menu__item"
-            onClick={() => navigateTo('/audit')}
+            onClick={() => setOpen(false)}
           >
             <ClockCounterClockwise size={16} aria-hidden="true" />
             Audit Log
-          </button>
+          </Link>
           <div className="user-menu__divider" role="separator" />
           <button
             type="button"

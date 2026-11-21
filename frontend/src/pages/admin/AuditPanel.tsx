@@ -10,7 +10,12 @@ type AuditPanelProps = {
 }
 
 function displayDate(value: string): string {
-  return new Date(value).toLocaleString([], { hour12: false })
+  const formatter = new Intl.DateTimeFormat('en-US', {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+    hour12: false,
+  })
+  return formatter.format(new Date(value))
 }
 
 export default function AuditPanel({ active }: AuditPanelProps) {

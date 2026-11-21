@@ -129,7 +129,7 @@ export default function LogsPage() {
   const handleExport = async () => {
     if (!hasContainer) return
     try {
-      await exportLogs(buildParams(false, search))
+      await exportLogs(buildParams(false, debouncedSearch))
     } catch (err) {
       setError(formatApiError(err))
     }
@@ -291,9 +291,11 @@ export default function LogsPage() {
                 className="logs-page__line"
               >
                 <span className="logs-page__line-time">
-                  {new Date(entry.timestamp).toLocaleString([], {
+                  {new Intl.DateTimeFormat('en-US', {
+                    dateStyle: 'medium',
+                    timeStyle: 'medium',
                     hour12: false,
-                  })}
+                  }).format(new Date(entry.timestamp))}
                 </span>
                 <span
                   className={`logs-page__line-level logs-page__line-level--${entry.level}`}

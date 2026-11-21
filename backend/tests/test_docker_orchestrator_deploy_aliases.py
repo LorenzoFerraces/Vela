@@ -108,7 +108,7 @@ def test_deploy_connects_stack_network_with_aliases_after_start() -> None:
         network_aliases=["postgres"],
     )
 
-    orch._inspect_container_with_size = lambda _container_id: {
+    orch._inspect_container_with_size = lambda container_id: {  # type: ignore[method-assign]
         "Id": "stub-container-id",
         "Name": "/Commit-y-me-voy_postgres",
         "Config": {"Image": "postgres:16", "Labels": {}},

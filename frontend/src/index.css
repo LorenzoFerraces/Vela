@@ -216,6 +216,23 @@ input[type="checkbox"]:disabled {
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23575072' d='M3 4.5 6 7.5 9 4.5'/%3E%3C/svg%3E");
 }
 
+.skip-link {
+  position: absolute;
+  left: -9999px;
+  top: 0;
+  z-index: 200;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--accent);
+  background: var(--bg-elevated);
+  color: var(--text);
+  text-decoration: none;
+}
+
+.skip-link:focus {
+  left: 1rem;
+  top: 1rem;
+}
+
 .app-shell {
   min-height: 100vh;
   display: flex;
@@ -856,6 +873,7 @@ input[type="checkbox"]:disabled {
   font: inherit;
   font-size: 0.875rem;
   text-align: left;
+  text-decoration: none;
   cursor: pointer;
 }
 
@@ -1486,12 +1504,7 @@ input[type="checkbox"]:disabled {
   display: inline;
 }
 
-/* --- Builder page (Dockerfile templates) --- */
-
-.builder-page .images-section,
-.images-page .images-section {
-  margin-bottom: 2.5rem;
-}
+/* --- Dockerfile templates --- */
 
 .images-section__lead {
   margin: 0 0 1rem;

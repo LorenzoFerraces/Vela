@@ -1,6 +1,6 @@
 export function formatTable(headers: string[], rows: string[][]): string {
   const widths = headers.map((header, index) =>
-    Math.max(header.length, ...rows.map((row) => (row[index] ?? "").length)),
+    Math.min(48, Math.max(header.length, ...rows.map((row) => (row[index] ?? "").length))),
   )
   const line = (cells: string[]) =>
     cells

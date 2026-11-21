@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import uuid
-from collections.abc import Coroutine
-from typing import Annotated, Any, Callable
+from collections.abc import Callable, Coroutine
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession

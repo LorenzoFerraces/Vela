@@ -34,7 +34,10 @@ from app.core.llm.user_config import (
     get_user_llm_provider,
     set_user_llm_provider,
 )
-from app.core.notifications.alert_service import DEFAULT_ALERT_FREQUENCY, DEFAULT_ALERT_TYPES
+from app.core.notifications.alert_service import (
+    DEFAULT_ALERT_FREQUENCY,
+    DEFAULT_ALERT_TYPES,
+)
 from app.core.notifications.container_monitor import (
     MONITOR_ENABLED,
     get_monitor_interval_seconds,
@@ -43,6 +46,16 @@ from app.core.notifications.container_monitor import (
 from app.db.models import AlertHistory, EmailPreference, User, UserLlmProvider
 
 router = APIRouter()
+
+# Mounted at /api (not /api/settings) so the CLI can read it without auth.
+public_router = APIRouter()
+
+
+@public_router.get("/runtime-config")
+async def runtime_config() -> dict[str, int]:
+    from app.api.routes.containers import _exec_max_session_seconds
+
+    return {"exec_max_session_seconds": _exec_max_session_seconds()}
 
 
 def _provider_to_get(row: UserLlmProvider) -> LlmProviderGet:

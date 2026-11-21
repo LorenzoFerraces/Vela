@@ -58,7 +58,10 @@ export function MetricChart({
   const formatXAxis = (value: string) => {
     try {
       const d = new Date(value)
-      return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      return new Intl.DateTimeFormat('en-US', {
+        hour: '2-digit',
+        minute: '2-digit',
+      }).format(d)
     } catch {
       return String(value)
     }
@@ -112,7 +115,12 @@ export function MetricChart({
             border: `1px solid ${CHART_GRID_STROKE}`,
             color: CHART_TEXT,
           }}
-          labelFormatter={(label) => new Date(String(label)).toLocaleString()}
+          labelFormatter={(label) =>
+            new Intl.DateTimeFormat('en-US', {
+              dateStyle: 'medium',
+              timeStyle: 'medium',
+            }).format(new Date(String(label)))
+          }
           formatter={(value, name) => [formatTooltipValue(Number(value)), name]}
         />
         {series ? (

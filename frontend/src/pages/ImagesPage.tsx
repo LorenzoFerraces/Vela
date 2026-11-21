@@ -1,27 +1,25 @@
 import { useCallback, useState } from 'react'
-import { ImagesMessageBanner } from './images/ImagesMessageBanner'
-import type { ImagesBanner } from './images/types'
 import { DockerfileTemplatesSection } from '../components/DockerfileTemplatesSection'
-import { useDockerfileTemplates } from '../components/useDockerfileTemplates'
+import {
+  useDockerfileTemplates,
+  type DockerfileTemplateBanner,
+} from '../components/useDockerfileTemplates'
+import SourceWorkspacePage from './SourceWorkspacePage'
 
 export default function ImagesPage() {
-  const [banner, setBanner] = useState<ImagesBanner>(null)
+  const [banner, setBanner] = useState<DockerfileTemplateBanner>(null)
 
-  const reportBanner = useCallback((next: ImagesBanner) => {
+  const reportBanner = useCallback((next: DockerfileTemplateBanner) => {
     setBanner(next)
   }, [])
 
   const dockerfiles = useDockerfileTemplates(reportBanner)
 
   return (
-    <section className="images-page">
-      <h1 className="containers-page__title">Images</h1>
+    <SourceWorkspacePage title="Images" message={banner} loading={dockerfiles.listLoading}>
       <p className="containers-page__lead">
         Manage Dockerfile templates for your account.
       </p>
-
-      <ImagesMessageBanner banner={banner} />
-
       <DockerfileTemplatesSection
         rows={dockerfiles.rows}
         listLoading={dockerfiles.listLoading}
@@ -38,6 +36,6 @@ export default function ImagesPage() {
         onRemove={(templateId) => void dockerfiles.removeTemplate(templateId)}
         leadText="Name and edit Dockerfile snippets stored in your account."
       />
-    </section>
+    </SourceWorkspacePage>
   )
 }

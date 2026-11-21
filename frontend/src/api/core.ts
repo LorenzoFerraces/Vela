@@ -154,7 +154,10 @@ export function formatApiError(
       detail?: string
       build_log?: string
     }
-    const detail = parsed.detail ?? error.message
+    const detail =
+      typeof parsed.detail === 'string'
+        ? parsed.detail
+        : error.message
     if (parsed.build_log) {
       return `${detail}\n\n${parsed.build_log.slice(-2000)}`
     }
@@ -197,6 +200,8 @@ export interface ApiRequestOptions {
   cacheTtl?: number
   /** Skip the TTL cache read; the fresh response still populates the cache. */
   revalidate?: boolean
+  /** Opt out of in-flight request deduplication (needed for single-use tokens). */
+  dedupe?: boolean
 }
 
 function buildHeaders(initHeaders: HeadersInit | undefined, skipAuth: boolean): Headers {
@@ -224,7 +229,7 @@ export async function apiRequest<T>(
   
   // Request deduplication
   const cacheKey = `${requestSessionGeneration}:${url}-${JSON.stringify(init)}`
-  if (activeRequests.has(cacheKey)) {
+  if (options.dedupe !== false && activeRequests.has(cacheKey)) {
     return activeRequests.get(cacheKey) as Promise<T>
   }
 
@@ -263,11 +268,13 @@ export async function apiRequest<T>(
   })
 
   // Track active request for deduplication
-  activeRequests.set(cacheKey, requestPromise)
-  const release = () => {
-    activeRequests.delete(cacheKey)
+  if (options.dedupe !== false) {
+    activeRequests.set(cacheKey, requestPromise)
+    const release = () => {
+      activeRequests.delete(cacheKey)
+    }
+    requestPromise.then(release, release)
   }
-  requestPromise.then(release, release)
   
   return requestPromise
 }

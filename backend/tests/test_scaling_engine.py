@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 from pydantic import ValidationError
 
 from app.core.containers.fake_orchestrator import FakeContainerOrchestrator
 from app.core.enums import ContainerStatus
-from app.core.models import ContainerInfo, VolumeMount
+from app.core.models import ContainerInfo, DeployConfig, VolumeMount
 from app.core.scaling.models import ScalingPolicy
 from app.core.scaling.scaling_engine import _scale_up
 from app.core.traffic.traffic_models import BackendServer, RouteSpec
@@ -26,7 +26,7 @@ async def test_scale_up_copies_base_container_volumes() -> None:
         name=base_name,
         image="myapp:latest",
         status=ContainerStatus.RUNNING,
-        created_at=datetime(2026, 6, 1, tzinfo=timezone.utc),
+        created_at=datetime(2026, 6, 1, tzinfo=UTC),
         volumes=base_volumes,
         labels={"vela.managed": "true"},
     )
@@ -43,6 +43,9 @@ async def test_scale_up_copies_base_container_volumes() -> None:
     )
     await traffic_router.upsert_route(base_spec)
 
+    base_config = DeployConfig(
+        image="myapp:latest", name=base_name, volumes=base_volumes
+    )
     await _scale_up(
         orchestrator,
         traffic_router,
@@ -50,6 +53,7 @@ async def test_scale_up_copies_base_container_volumes() -> None:
         base_port=8080,
         base_spec=base_spec,
         current_replica_count=0,
+        base_config=base_config,
     )
 
     assert orchestrator.last_deploy_config is not None

@@ -11,13 +11,11 @@ from urllib.parse import urlsplit
 ALLOW_PRIVATE_ENV = "VELA_LLM_ALLOW_PRIVATE_ENDPOINTS"
 
 
-def allow_private_endpoints() -> bool:
-    """True when the env override allows private or plain-HTTP endpoints."""
-    return os.environ.get(ALLOW_PRIVATE_ENV, "").strip() == "1"
+def allow_private_endpoints(*, env: str = ALLOW_PRIVATE_ENV) -> bool:
+    return os.environ.get(env, "").strip() == "1"
 
 
 def _host_is_public(host: str) -> bool:
-    """Resolve the host and return False if any address is non-global."""
     try:
         infos = socket.getaddrinfo(host, None)
     except OSError:
@@ -34,13 +32,15 @@ def _host_is_public(host: str) -> bool:
     return True
 
 
-def validate_outbound_url(url: str, *, label: str = "Base URL") -> str:
+def validate_outbound_url(
+    url: str, *, label: str = "Base URL", allow_private_env: str = ALLOW_PRIVATE_ENV
+) -> str:
     """Reject non-HTTPS and non-public destinations.
 
     Raises ``ValueError`` for request-model validators; callers doing outbound
     transport catch it and surface a provider error instead.
     """
-    if allow_private_endpoints():
+    if allow_private_endpoints(env=allow_private_env):
         return url
     parts = urlsplit(url)
     if parts.scheme != "https":
@@ -48,8 +48,35 @@ def validate_outbound_url(url: str, *, label: str = "Base URL") -> str:
     host = parts.hostname
     if not host:
         raise ValueError(f"{label} must include a host.")
-    # ponytail: sync DNS in the request validator; fine at this call rate, move to a
-    # pre-connect check if a hot path needs it.
+    # ponytail: sync DNS in the request validator; fine at this call rate.
     if not _host_is_public(host):
         raise ValueError(f"{label} must resolve to a public address.")
     return url
+
+
+def validate_git_remote(url: str) -> str:
+    """Apply the outbound SSRF guard to Git clone URLs (SSH remotes use host checks)."""
+    stripped = url.strip()
+    lowered = stripped.lower()
+    if lowered.startswith("git@"):
+        hostport = stripped.split("@", 1)[1]
+        if hostport.startswith("["):
+            host = hostport[1:].split("]", 1)[0]
+        else:
+            host = hostport.split(":", 1)[0]
+    elif lowered.startswith(("ssh://", "git://")):
+        host = urlsplit(stripped).hostname or ""
+    elif lowered.startswith(("http://", "https://")):
+        if not allow_private_endpoints(env="VELA_GIT_ALLOW_PRIVATE_ENDPOINTS"):
+            return validate_outbound_url(
+                stripped, label="Git URL",
+                allow_private_env="VELA_GIT_ALLOW_PRIVATE_ENDPOINTS",
+            )
+        return stripped
+    else:
+        raise ValueError("Git URL must be an http(s), ssh, git:// or git@ remote.")
+    if not host:
+        raise ValueError("Git URL must include a host.")
+    if not allow_private_endpoints(env="VELA_GIT_ALLOW_PRIVATE_ENDPOINTS") and not _host_is_public(host):
+        raise ValueError("Git URL must resolve to a public address.")
+    return stripped

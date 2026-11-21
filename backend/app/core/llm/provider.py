@@ -4,8 +4,6 @@ import hashlib
 import os
 from dataclasses import dataclass
 
-DEFAULT_LLM_MODEL = "gemini-3.5-flash-lite"
-
 GEMINI_API_ROOT = "https://generativelanguage.googleapis.com/v1beta"
 
 

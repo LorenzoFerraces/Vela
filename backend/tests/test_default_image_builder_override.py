@@ -154,7 +154,9 @@ async def test_resolve_service_image_passes_build_override(
         },
     )
 
-    tag = await stack_deploy._resolve_service_image(session, user, builder, service)
+    tag = await stack_deploy._resolve_service_image(
+        session, user, builder, service  # type: ignore[arg-type]
+    )
 
     assert tag.startswith("vela/gitbuild:")
     override = captured["override"]

@@ -10,10 +10,7 @@ from app.api.routes import containers as containers_routes
 
 
 def _deactivate_user(db_session_factory, user_id) -> None:
-    """Flip the user's is_active flag to false in the database."""
-
     async def run() -> None:
-        """Load the user, deactivate it, and commit."""
         from app.db.models import User
 
         async with db_session_factory() as session:
@@ -25,24 +22,35 @@ def _deactivate_user(db_session_factory, user_id) -> None:
     asyncio.run(run())
 
 
-def test_exec_ws_connects_and_receives_prompt(
-    api_client: TestClient, auth_token: str
-) -> None:
-    """Connecting to the exec websocket yields the shell prompt."""
+def _ticket(
+    client: TestClient,
+    purpose: str,
+    container_id: str = "cid-1",
+    *,
+    headers: dict[str, str] | None = None,
+) -> str:
+    response = client.post(
+        f"/api/containers/{container_id}/ws-ticket?purpose={purpose}",
+        headers=headers,
+    )
+    assert response.status_code == 200, response.text
+    return response.json()["ticket"]
+
+
+def test_exec_ws_connects_and_receives_prompt(api_client: TestClient) -> None:
+    ticket = _ticket(api_client, "exec")
     with api_client.websocket_connect(
-        f"/api/containers/cid-1/exec/ws?access_token={auth_token}"
+        f"/api/containers/cid-1/exec/ws?ticket={ticket}"
     ) as websocket:
         data = websocket.receive_bytes()
     assert b"root@" in data
     assert b":~# " in data
 
 
-def test_exec_ws_sends_input_and_gets_echo(
-    api_client: TestClient, auth_token: str
-) -> None:
-    """Text sent to the exec websocket is echoed back."""
+def test_exec_ws_sends_input_and_gets_echo(api_client: TestClient) -> None:
+    ticket = _ticket(api_client, "exec")
     with api_client.websocket_connect(
-        f"/api/containers/cid-1/exec/ws?access_token={auth_token}"
+        f"/api/containers/cid-1/exec/ws?ticket={ticket}"
     ) as websocket:
         websocket.receive_bytes()
         websocket.send_text("hello\n")
@@ -51,12 +59,10 @@ def test_exec_ws_sends_input_and_gets_echo(
     assert b"hello" in data
 
 
-def test_exec_ws_sends_carriage_return_and_gets_echo(
-    api_client: TestClient, auth_token: str
-) -> None:
-    """A command ending in a carriage return is echoed back."""
+def test_exec_ws_sends_carriage_return_and_gets_echo(api_client: TestClient) -> None:
+    ticket = _ticket(api_client, "exec")
     with api_client.websocket_connect(
-        f"/api/containers/cid-1/exec/ws?access_token={auth_token}"
+        f"/api/containers/cid-1/exec/ws?ticket={ticket}"
     ) as websocket:
         websocket.receive_bytes()
         websocket.send_text("echo vela-e2e-ok\r")
@@ -65,104 +71,112 @@ def test_exec_ws_sends_carriage_return_and_gets_echo(
     assert b"echo vela-e2e-ok" in data
 
 
-def test_exec_ws_rejects_unauthenticated(
-    anonymous_client: TestClient
-) -> None:
-    """The exec websocket closes with 1008 without a token."""
-    with anonymous_client.websocket_connect(
-        "/api/containers/cid-1/exec/ws"
-    ) as websocket:
-        with pytest.raises(WebSocketDisconnect) as exc:
-            websocket.receive_text()
+def test_exec_ws_rejects_unauthenticated(anonymous_client: TestClient) -> None:
+    with (
+        pytest.raises(WebSocketDisconnect) as exc,
+        anonymous_client.websocket_connect("/api/containers/cid-1/exec/ws"),
+    ):
+        pass
     assert exc.value.code == 1008
 
 
-def test_exec_ws_rejects_invalid_token(
-    anonymous_client: TestClient,
+def test_exec_ws_rejects_invalid_ticket(anonymous_client: TestClient) -> None:
+    with (
+        pytest.raises(WebSocketDisconnect) as exc,
+        anonymous_client.websocket_connect(
+            "/api/containers/cid-1/exec/ws?ticket=not-a-ticket"
+        ),
+    ):
+        pass
+    assert exc.value.code == 1008
+
+
+@pytest.mark.parametrize("path", ["/api/containers/cid-1/exec/ws", "/api/containers/cid-1/logs/stream"])
+def test_ws_never_authenticates_via_query_token(
+    api_client: TestClient, anonymous_client: TestClient, path: str
 ) -> None:
-    """The header wins when both are present, so this uses the bare client."""
-    with anonymous_client.websocket_connect(
-        "/api/containers/cid-1/exec/ws?access_token=not-a-jwt"
-    ) as websocket:
-        with pytest.raises(WebSocketDisconnect) as exc:
-            websocket.receive_text()
+    """A bearer token in the URL query is not an auth path; only tickets are."""
+    pat = _create_pat(api_client)["token"]
+    with (
+        pytest.raises(WebSocketDisconnect) as exc,
+        anonymous_client.websocket_connect(f"{path}?access_token={pat}"),
+    ):
+        pass
     assert exc.value.code == 1008
 
 
 def test_exec_ws_rejects_deactivated_user(
     api_client: TestClient,
-    auth_token: str,
     seeded_user,
     db_session_factory,
 ) -> None:
-    """The exec websocket closes with 1008 for a deactivated user."""
+    ticket = _ticket(api_client, "exec")
     _deactivate_user(db_session_factory, seeded_user.id)
-    with api_client.websocket_connect(
-        f"/api/containers/cid-1/exec/ws?access_token={auth_token}"
-    ) as websocket:
-        with pytest.raises(WebSocketDisconnect) as exc:
-            websocket.receive_bytes()
+    with (
+        pytest.raises(WebSocketDisconnect) as exc,
+        api_client.websocket_connect(f"/api/containers/cid-1/exec/ws?ticket={ticket}"),
+    ):
+        pass
     assert exc.value.code == 1008
 
 
 def test_logs_stream_rejects_deactivated_user(
     api_client: TestClient,
-    auth_token: str,
     seeded_user,
     db_session_factory,
 ) -> None:
-    """The logs websocket closes with 1008 for a deactivated user."""
+    ticket = _ticket(api_client, "logs")
     _deactivate_user(db_session_factory, seeded_user.id)
-    with api_client.websocket_connect(
-        f"/api/containers/cid-1/logs/stream?access_token={auth_token}&follow=false"
-    ) as websocket:
-        with pytest.raises(WebSocketDisconnect) as exc:
-            websocket.receive_bytes()
+    with (
+        pytest.raises(WebSocketDisconnect) as exc,
+        api_client.websocket_connect(
+            f"/api/containers/cid-1/logs/stream?ticket={ticket}&follow=false"
+        ),
+    ):
+        pass
     assert exc.value.code == 1008
 
 
-def test_exec_ws_rejects_invalid_container(
-    api_client: TestClient, auth_token: str
-) -> None:
-    """The exec websocket closes with 1008 for an unknown container."""
-    with api_client.websocket_connect(
-        f"/api/containers/nonexistent/exec/ws?access_token={auth_token}"
-    ) as websocket:
-        with pytest.raises(WebSocketDisconnect) as exc:
-            websocket.receive_text()
+def test_exec_ws_rejects_ticket_for_other_container(api_client: TestClient) -> None:
+    ticket = _ticket(api_client, "exec")
+    with (
+        pytest.raises(WebSocketDisconnect) as exc,
+        api_client.websocket_connect(
+            f"/api/containers/nonexistent/exec/ws?ticket={ticket}"
+        ),
+    ):
+        pass
     assert exc.value.code == 1008
 
 
 def test_exec_ws_semaphore_timeout_rejects(
-    make_authed_client, auth_token: str, monkeypatch: pytest.MonkeyPatch
+    make_authed_client, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The socket closes with 1013 when exec slot acquisition times out."""
     monkeypatch.setattr(containers_routes, "_exec_semaphore", asyncio.Semaphore(0))
     monkeypatch.setattr(
         containers_routes, "_EXEC_SEMAPHORE_ACQUIRE_TIMEOUT", 0.1
     )
     with make_authed_client() as client:
-        with client.websocket_connect(
-            f"/api/containers/cid-1/exec/ws?access_token={auth_token}"
-        ) as websocket:
-            with pytest.raises(WebSocketDisconnect) as exc:
-                websocket.receive_text()
+        ticket = _ticket(client, "exec")
+        with (
+            client.websocket_connect(
+                f"/api/containers/cid-1/exec/ws?ticket={ticket}"
+            ) as websocket,
+            pytest.raises(WebSocketDisconnect) as exc,
+        ):
+            websocket.receive_text()
     assert exc.value.code == 1013
 
 
-def test_exec_ws_surfaces_start_failure(
-    make_authed_client, fake_orchestrator, auth_token: str
-) -> None:
-    """A failing exec start sends an error message and closes with 1011."""
-
+def test_exec_ws_surfaces_start_failure(make_authed_client, fake_orchestrator) -> None:
     async def broken_stream_exec(*args: object, **kwargs: object) -> object:
-        """Exec stub that always raises a runtime start failure."""
         raise RuntimeError("OCI runtime exec failed: sh not found")
 
     fake_orchestrator.stream_exec = broken_stream_exec
     with make_authed_client() as client:
+        ticket = _ticket(client, "exec")
         with client.websocket_connect(
-            f"/api/containers/cid-1/exec/ws?access_token={auth_token}"
+            f"/api/containers/cid-1/exec/ws?ticket={ticket}"
         ) as websocket:
             websocket.send_text(json.dumps({"cols": 80, "rows": 24}))
             message = websocket.receive_text()
@@ -173,13 +187,13 @@ def test_exec_ws_surfaces_start_failure(
 
 
 def test_exec_ws_session_max_lifetime(
-    make_authed_client, auth_token: str, monkeypatch: pytest.MonkeyPatch
+    make_authed_client, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The session is closed with an expiry notice after its max lifetime."""
     monkeypatch.setenv("VELA_EXEC_MAX_SESSION_SECONDS", "1")
     with make_authed_client() as client:
+        ticket = _ticket(client, "exec")
         with client.websocket_connect(
-            f"/api/containers/cid-1/exec/ws?access_token={auth_token}"
+            f"/api/containers/cid-1/exec/ws?ticket={ticket}"
         ) as websocket:
             websocket.send_text(json.dumps({"cols": 80, "rows": 24}))
             texts: list[str] = []
@@ -196,7 +210,6 @@ def test_exec_ws_session_max_lifetime(
 
 
 def test_exec_ws_strict_resize_validation() -> None:
-    """Resize JSON is accepted only when exactly shaped and in range."""
     from app.api.routes.containers import _parse_resize_message
 
     assert (
@@ -219,12 +232,10 @@ def test_exec_ws_strict_resize_validation() -> None:
     assert _parse_resize_message("not json") is None
 
 
-def test_exec_ws_invalid_resize_forwarded_to_stdin(
-    api_client: TestClient, auth_token: str
-) -> None:
-    """An invalid resize message is sent to the shell as plain input."""
+def test_exec_ws_invalid_resize_forwarded_to_stdin(api_client: TestClient) -> None:
+    ticket = _ticket(api_client, "exec")
     with api_client.websocket_connect(
-        f"/api/containers/cid-1/exec/ws?access_token={auth_token}"
+        f"/api/containers/cid-1/exec/ws?ticket={ticket}"
     ) as websocket:
         websocket.receive_bytes()
         websocket.send_text('{"resize": {"cols": 99999, "rows": 24}}')
@@ -237,12 +248,10 @@ def test_exec_ws_invalid_resize_forwarded_to_stdin(
     assert b"99999" in data
 
 
-def test_exec_ws_valid_resize_swallowed(
-    api_client: TestClient, auth_token: str
-) -> None:
-    """A valid resize message is applied and never reaches the shell."""
+def test_exec_ws_valid_resize_swallowed(api_client: TestClient) -> None:
+    ticket = _ticket(api_client, "exec")
     with api_client.websocket_connect(
-        f"/api/containers/cid-1/exec/ws?access_token={auth_token}"
+        f"/api/containers/cid-1/exec/ws?ticket={ticket}"
     ) as websocket:
         websocket.receive_bytes()
         websocket.send_text(json.dumps({"resize": {"cols": 100, "rows": 30}}))
@@ -257,27 +266,23 @@ def test_exec_ws_valid_resize_swallowed(
 
 
 def _recording_stream_exec(fake_orchestrator) -> tuple[dict, object]:
-    """Wrap the fake's stream_exec to record the kwargs it receives."""
     seen: dict[str, int] = {}
     original = fake_orchestrator.stream_exec
 
     async def recording(container_id: str, **kwargs: int) -> object:
-        """Merge kwargs into the record, then delegate to the original."""
         seen.update(kwargs)
         return await original(container_id, **kwargs)
 
     return seen, recording
 
 
-def test_exec_ws_binary_init_frame(
-    make_authed_client, fake_orchestrator, auth_token: str
-) -> None:
-    """A binary init frame sets the cols/rows passed to the exec stream."""
+def test_exec_ws_binary_init_frame(make_authed_client, fake_orchestrator) -> None:
     seen, recording = _recording_stream_exec(fake_orchestrator)
     fake_orchestrator.stream_exec = recording
     with make_authed_client() as client:
+        ticket = _ticket(client, "exec")
         with client.websocket_connect(
-            f"/api/containers/cid-1/exec/ws?access_token={auth_token}"
+            f"/api/containers/cid-1/exec/ws?ticket={ticket}"
         ) as websocket:
             websocket.send_bytes(b'{"cols": 100, "rows": 30}')
             websocket.send_text("probe\n")
@@ -291,14 +296,14 @@ def test_exec_ws_binary_init_frame(
 
 
 def test_exec_ws_init_out_of_range_falls_back_to_defaults(
-    make_authed_client, fake_orchestrator, auth_token: str
+    make_authed_client, fake_orchestrator
 ) -> None:
-    """Out-of-range init cols fall back to the default; valid rows are kept."""
     seen, recording = _recording_stream_exec(fake_orchestrator)
     fake_orchestrator.stream_exec = recording
     with make_authed_client() as client:
+        ticket = _ticket(client, "exec")
         with client.websocket_connect(
-            f"/api/containers/cid-1/exec/ws?access_token={auth_token}"
+            f"/api/containers/cid-1/exec/ws?ticket={ticket}"
         ) as websocket:
             websocket.send_text(json.dumps({"cols": 999999, "rows": 42}))
             websocket.receive_bytes()
@@ -306,14 +311,14 @@ def test_exec_ws_init_out_of_range_falls_back_to_defaults(
 
 
 def test_exec_ws_init_invalid_numbers_not_injected_to_shell(
-    make_authed_client, fake_orchestrator, auth_token: str
+    make_authed_client, fake_orchestrator
 ) -> None:
-    """Non-numeric init values fall back to defaults and never reach the shell."""
     seen, recording = _recording_stream_exec(fake_orchestrator)
     fake_orchestrator.stream_exec = recording
     with make_authed_client() as client:
+        ticket = _ticket(client, "exec")
         with client.websocket_connect(
-            f"/api/containers/cid-1/exec/ws?access_token={auth_token}"
+            f"/api/containers/cid-1/exec/ws?ticket={ticket}"
         ) as websocket:
             websocket.send_text(json.dumps({"cols": "garbage", "rows": 24}))
             websocket.send_text("probe\n")
@@ -328,94 +333,51 @@ def test_exec_ws_init_invalid_numbers_not_injected_to_shell(
 
 
 def _create_pat(api_client: TestClient) -> dict:
-    """Create a personal access token via the API and return its JSON."""
     response = api_client.post("/api/tokens/", json={"name": "ws-test"})
     assert response.status_code == 201
     return response.json()
 
 
-def test_exec_ws_rejects_pat_in_query(
-    api_client: TestClient, anonymous_client: TestClient
-) -> None:
-    """PATs must travel in the header so they never land in access logs."""
-    pat = _create_pat(api_client)["token"]
-    with anonymous_client.websocket_connect(
-        f"/api/containers/cid-1/exec/ws?access_token={pat}"
-    ) as websocket:
-        with pytest.raises(WebSocketDisconnect) as exc:
-            websocket.receive_text()
-    assert exc.value.code == 1008
+def _pat_headers(pat: str) -> dict[str, str]:
+    return {"Authorization": f"Bearer {pat}"}
 
 
-def test_exec_ws_accepts_pat_header(
+def test_exec_ws_accepts_pat(
     api_client: TestClient, anonymous_client: TestClient
 ) -> None:
-    """The exec websocket authenticates with a PAT in the Authorization header."""
     pat = _create_pat(api_client)["token"]
+    ticket = _ticket(anonymous_client, "exec", headers=_pat_headers(pat))
     with anonymous_client.websocket_connect(
-        "/api/containers/cid-1/exec/ws",
-        headers={"Authorization": f"Bearer {pat}"},
+        f"/api/containers/cid-1/exec/ws?ticket={ticket}"
     ) as websocket:
         data = websocket.receive_bytes()
     assert b"root@" in data
 
 
-def test_logs_stream_accepts_pat_header(
+def test_logs_stream_accepts_pat(
     api_client: TestClient, anonymous_client: TestClient
 ) -> None:
-    """The logs websocket authenticates with a PAT in the Authorization header."""
     pat = _create_pat(api_client)["token"]
+    ticket = _ticket(anonymous_client, "logs", headers=_pat_headers(pat))
     with anonymous_client.websocket_connect(
-        "/api/containers/cid-1/logs/stream?follow=false",
-        headers={"Authorization": f"Bearer {pat}"},
+        f"/api/containers/cid-1/logs/stream?ticket={ticket}&follow=false"
     ) as websocket:
         data = websocket.receive_bytes()
     assert data.startswith(b"log line")
 
 
-def test_logs_stream_rejects_pat_in_query(
-    api_client: TestClient, anonymous_client: TestClient
+@pytest.mark.parametrize("purpose", ["exec", "logs"])
+def test_ws_ticket_rejected_for_revoked_pat(
+    api_client: TestClient, anonymous_client: TestClient, purpose: str
 ) -> None:
-    """The logs websocket closes with 1008 for a PAT in the query string."""
-    pat = _create_pat(api_client)["token"]
-    with anonymous_client.websocket_connect(
-        f"/api/containers/cid-1/logs/stream?access_token={pat}&follow=false"
-    ) as websocket:
-        with pytest.raises(WebSocketDisconnect) as exc:
-            websocket.receive_bytes()
-    assert exc.value.code == 1008
-
-
-def test_exec_ws_rejects_revoked_pat(
-    api_client: TestClient, anonymous_client: TestClient
-) -> None:
-    """The exec websocket closes with 1008 for a revoked PAT."""
     created = _create_pat(api_client)
     pat = created["token"]
     assert api_client.delete(f"/api/tokens/{created['id']}").status_code == 204
-    with anonymous_client.websocket_connect(
-        "/api/containers/cid-1/exec/ws",
-        headers={"Authorization": f"Bearer {pat}"},
-    ) as websocket:
-        with pytest.raises(WebSocketDisconnect) as exc:
-            websocket.receive_text()
-    assert exc.value.code == 1008
-
-
-def test_logs_stream_rejects_revoked_pat(
-    api_client: TestClient, anonymous_client: TestClient
-) -> None:
-    """The logs websocket closes with 1008 for a revoked PAT."""
-    created = _create_pat(api_client)
-    pat = created["token"]
-    assert api_client.delete(f"/api/tokens/{created['id']}").status_code == 204
-    with anonymous_client.websocket_connect(
-        "/api/containers/cid-1/logs/stream?follow=false",
-        headers={"Authorization": f"Bearer {pat}"},
-    ) as websocket:
-        with pytest.raises(WebSocketDisconnect) as exc:
-            websocket.receive_bytes()
-    assert exc.value.code == 1008
+    response = anonymous_client.post(
+        f"/api/containers/cid-1/ws-ticket?purpose={purpose}",
+        headers=_pat_headers(pat),
+    )
+    assert response.status_code == 401
 
 
 def test_exec_ws_rejects_pat_for_deactivated_user(
@@ -424,15 +386,16 @@ def test_exec_ws_rejects_pat_for_deactivated_user(
     seeded_user,
     db_session_factory,
 ) -> None:
-    """The exec websocket closes with 1008 when the PAT owner is deactivated."""
     pat = _create_pat(api_client)["token"]
+    ticket = _ticket(anonymous_client, "exec", headers=_pat_headers(pat))
     _deactivate_user(db_session_factory, seeded_user.id)
-    with anonymous_client.websocket_connect(
-        "/api/containers/cid-1/exec/ws",
-        headers={"Authorization": f"Bearer {pat}"},
-    ) as websocket:
-        with pytest.raises(WebSocketDisconnect) as exc:
-            websocket.receive_text()
+    with (
+        pytest.raises(WebSocketDisconnect) as exc,
+        anonymous_client.websocket_connect(
+            f"/api/containers/cid-1/exec/ws?ticket={ticket}"
+        ),
+    ):
+        pass
     assert exc.value.code == 1008
 
 
@@ -442,13 +405,14 @@ def test_logs_stream_rejects_pat_for_deactivated_user(
     seeded_user,
     db_session_factory,
 ) -> None:
-    """The logs websocket closes with 1008 when the PAT owner is deactivated."""
     pat = _create_pat(api_client)["token"]
+    ticket = _ticket(anonymous_client, "logs", headers=_pat_headers(pat))
     _deactivate_user(db_session_factory, seeded_user.id)
-    with anonymous_client.websocket_connect(
-        "/api/containers/cid-1/logs/stream?follow=false",
-        headers={"Authorization": f"Bearer {pat}"},
-    ) as websocket:
-        with pytest.raises(WebSocketDisconnect) as exc:
-            websocket.receive_bytes()
+    with (
+        pytest.raises(WebSocketDisconnect) as exc,
+        anonymous_client.websocket_connect(
+            f"/api/containers/cid-1/logs/stream?ticket={ticket}&follow=false"
+        ),
+    ):
+        pass
     assert exc.value.code == 1008

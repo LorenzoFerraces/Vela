@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import AsyncGenerator, Iterator
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 import pytest
@@ -61,7 +61,6 @@ async def quota_db() -> AsyncGenerator[AsyncSession, None]:
 
 @pytest.mark.asyncio
 async def test_project_storage_quota_column(quota_db: AsyncSession) -> None:
-    """Project.storage_quota_bytes persists through the ORM."""
     organization = Organization(name="quota org")
     quota_db.add(organization)
     await quota_db.flush()
@@ -79,7 +78,6 @@ async def test_project_storage_quota_column(quota_db: AsyncSession) -> None:
 
 @pytest.mark.asyncio
 async def test_alert_history_container_id_nullable(quota_db: AsyncSession) -> None:
-    """AlertHistory rows can be stored without a container id (storage alerts)."""
     user = User(id=uuid.uuid4(), email="quota@example.com")
     quota_db.add(user)
     await quota_db.flush()
@@ -88,7 +86,7 @@ async def test_alert_history_container_id_nullable(quota_db: AsyncSession) -> No
         container_id=None,
         event_type="storage",
         alert_hash="0" * 64,
-        sent_at=datetime.now(timezone.utc),
+        sent_at=datetime.now(UTC),
         status="sent",
     )
     quota_db.add(history)
@@ -111,13 +109,11 @@ _INSPECT_BASE = {
 
 
 def test_inspect_mapping_reads_size_rw() -> None:
-    """SizeRw from docker inspect becomes disk_bytes on ContainerInfo."""
     info = _inspect_to_container_info({**_INSPECT_BASE, "SizeRw": 4096})
     assert info.disk_bytes == 4096
 
 
 def test_inspect_mapping_defaults_disk_bytes_to_zero() -> None:
-    """Missing SizeRw maps to disk_bytes 0."""
     info = _inspect_to_container_info(_INSPECT_BASE)
     assert info.disk_bytes == 0
 
@@ -141,7 +137,7 @@ def _make_info(
             "name": "vela-quota-test",
             "image": "nginx:alpine",
             "status": ContainerStatus.RUNNING,
-            "created_at": datetime(2026, 4, 1, tzinfo=timezone.utc),
+            "created_at": datetime(2026, 4, 1, tzinfo=UTC),
             "ports": [],
             "labels": labels,
             "health": HealthStatus.NONE,
@@ -152,14 +148,12 @@ def _make_info(
 
 @pytest.fixture(autouse=True)
 def _reset_over_quota_state() -> Iterator[None]:
-    """Clear the rising-edge quota state before and after each test."""
     storage_quota.reset_over_quota_state()
     yield
     storage_quota.reset_over_quota_state()
 
 
 def test_environment_quota_bytes(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Env quota parses as int; unset or invalid means None."""
     monkeypatch.delenv("VELA_TEAM_STORAGE_QUOTA_BYTES", raising=False)
     assert storage_quota.environment_quota_bytes() is None
     monkeypatch.setenv("VELA_TEAM_STORAGE_QUOTA_BYTES", "not-a-number")
@@ -169,7 +163,6 @@ def test_environment_quota_bytes(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_effective_quota_resolution_matrix(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Team quota wins unless unset (env) or above the env cap (env clamps)."""
     monkeypatch.delenv("VELA_TEAM_STORAGE_QUOTA_BYTES", raising=False)
     assert (
         storage_quota.effective_quota_bytes(Project(storage_quota_bytes=None))
@@ -186,7 +179,6 @@ def test_effective_quota_resolution_matrix(monkeypatch: pytest.MonkeyPatch) -> N
 
 
 def test_quota_source_mapping(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Quota source reports unlimited, team or platform per the resolution."""
     monkeypatch.delenv("VELA_TEAM_STORAGE_QUOTA_BYTES", raising=False)
     assert storage_quota.quota_source(Project(storage_quota_bytes=None)) == "unlimited"
     assert storage_quota.quota_source(Project(storage_quota_bytes=1)) == "team"
@@ -198,7 +190,6 @@ def test_quota_source_mapping(monkeypatch: pytest.MonkeyPatch) -> None:
 async def test_team_storage_usage_counts_project_containers_and_member_uploads(
     quota_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Usage sums project-labeled, other-owned and legacy disks plus uploads."""
     organization = Organization(name="usage org")
     quota_db.add(organization)
     await quota_db.flush()
@@ -249,7 +240,6 @@ async def test_team_storage_usage_counts_project_containers_and_member_uploads(
 async def test_enforce_team_storage_capacity(
     quota_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Enforce raises TeamStorageQuotaExceededError at capacity, not when unlimited."""
     organization = Organization(name="enforce org")
     quota_db.add(organization)
     await quota_db.flush()
@@ -288,7 +278,6 @@ def test_run_blocked_when_team_quota_exceeded(
     seeded_user: User,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Container run returns 400 with a storage-quota message when over quota."""
     monkeypatch.setenv("VELA_TEAM_STORAGE_QUOTA_BYTES", "1024")
     # cid-1 carries the seeded user's owner label and no project label, so it
     # counts for their personal project.
@@ -307,7 +296,6 @@ def test_run_allowed_under_team_quota(
     fake_orchestrator: FakeContainerOrchestrator,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Container run succeeds while usage stays under the quota."""
     monkeypatch.setenv("VELA_TEAM_STORAGE_QUOTA_BYTES", str(10 * _GB))
     fake_orchestrator.set_disk_bytes("cid-1", 2048)
     response = api_client.post(
@@ -325,7 +313,6 @@ def test_deploy_blocked_when_team_quota_exceeded(
     seeded_user: User,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Deploy returns 400 with a storage-quota message when over quota."""
     monkeypatch.setenv("VELA_TEAM_STORAGE_QUOTA_BYTES", "1024")
     fake_orchestrator.set_disk_bytes("cid-1", 2048)
     response = api_client.post(
@@ -344,7 +331,6 @@ def test_upload_blocked_when_team_storage_quota_exceeded(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A volume upload crossing the team storage quota is rejected with 400."""
     monkeypatch.setenv("VELA_VOLUME_UPLOADS_DIR", str(tmp_path / "uploads"))
     monkeypatch.setenv("VELA_VOLUME_UPLOAD_USER_QUOTA_BYTES", str(150 * 1024**2))
     monkeypatch.setenv("VELA_TEAM_STORAGE_QUOTA_BYTES", str(1024 * 1024))
@@ -369,14 +355,12 @@ def _register(
     email: str,
     role: str = "student",
 ) -> None:
-    """Register a user and put their bearer token on the client headers."""
     client.headers["Authorization"] = (
         f"Bearer {register_user_client(email, role=role)}"
     )
 
 
 def _personal_project_id(client: TestClient) -> str:
-    """Return the authed user's personal project id."""
     return next(
         project["id"]
         for project in client.get("/api/projects/").json()
@@ -391,7 +375,6 @@ def test_storage_quota_get_for_member(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Members get quota, disk, uploads, usage and source from the endpoint."""
     # Isolate the upload-scan directory so local dev uploads can't skew the total.
     monkeypatch.setenv("VELA_VOLUME_UPLOADS_DIR", str(tmp_path / "uploads"))
     monkeypatch.setenv("VELA_TEAM_STORAGE_QUOTA_BYTES", str(1024 * 1024))
@@ -413,7 +396,6 @@ def test_storage_quota_get_for_member(
 def test_storage_quota_requires_membership(
     db_app: Any, register_user_client: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Non-members get 403 reading another project's storage quota."""
     monkeypatch.setenv("VELA_TEAM_STORAGE_QUOTA_BYTES", str(_GB))
     with TestClient(db_app) as owner_client, TestClient(db_app) as stranger_client:
         _register(register_user_client, owner_client, "quota-owner@example.com")
@@ -429,7 +411,6 @@ def test_storage_quota_requires_membership(
 def test_patch_storage_quota_rejects_above_platform_limit(
     db_app: Any, register_user_client: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Patching a quota above the platform limit returns 400."""
     monkeypatch.setenv("VELA_TEAM_STORAGE_QUOTA_BYTES", str(10 * 1024 * 1024))
     with TestClient(db_app) as client:
         _register(register_user_client, client, "quota-patch@example.com")
@@ -445,7 +426,6 @@ def test_patch_storage_quota_rejects_above_platform_limit(
 def test_patch_storage_quota_owner_sets_and_clears(
     db_app: Any, register_user_client: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Owner can set a team quota and clear it back to the platform value."""
     monkeypatch.setenv("VELA_TEAM_STORAGE_QUOTA_BYTES", str(10 * _GB))
     with TestClient(db_app) as client:
         _register(register_user_client, client, "quota-set@example.com")
@@ -476,7 +456,6 @@ def test_patch_storage_quota_owner_sets_and_clears(
 def test_patch_storage_quota_forbidden_for_non_owner(
     db_app: Any, register_user_client: Any
 ) -> None:
-    """A non-owner member gets 403 when patching the team quota."""
     with TestClient(db_app) as owner_client, TestClient(db_app) as member_client:
         _register(
             register_user_client,
@@ -513,7 +492,6 @@ def test_patch_storage_quota_forbidden_for_non_owner(
 async def test_check_team_storage_quotas_alerts_rising_edge_once(
     quota_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Alert fires once on the rising edge and state clears when back under."""
     from app.core.notifications.alert_service import AlertService
     from app.core.notifications.email_provider import ConsoleProvider
 
@@ -552,7 +530,6 @@ async def test_check_team_storage_quotas_alerts_rising_edge_once(
         used_bytes: int,
         quota_bytes: int,
     ) -> bool:
-        """Record the dispatch instead of sending email."""
         dispatched.append((user_id, project_id))
         return True
 
@@ -586,10 +563,8 @@ async def test_check_team_storage_quotas_alerts_rising_edge_once(
 async def test_project_storage_alert_sent_and_deduplicated(
     quota_db: AsyncSession,
 ) -> None:
-    """First storage alert is sent and recorded; an identical one is deduplicated."""
-    from app.core.notifications.email_provider import ConsoleProvider
-
     from app.core.notifications.alert_service import AlertService
+    from app.core.notifications.email_provider import ConsoleProvider
 
     user = User(id=uuid.uuid4(), email="storage-alert@example.com")
     quota_db.add(user)
@@ -641,7 +616,6 @@ async def test_project_storage_alert_sent_and_deduplicated(
 async def test_project_storage_alert_requires_storage_alert_type(
     quota_db: AsyncSession,
 ) -> None:
-    """Alerts are skipped when the user has not opted into storage alerts."""
     from app.core.notifications.alert_service import AlertService
     from app.core.notifications.email_provider import ConsoleProvider
 
@@ -682,7 +656,6 @@ async def test_project_storage_alert_requires_storage_alert_type(
 async def test_project_storage_alert_respects_disabled_notifications(
     quota_db: AsyncSession,
 ) -> None:
-    """Alerts are skipped when the user disabled notifications entirely."""
     from app.core.notifications.alert_service import AlertService
     from app.core.notifications.email_provider import ConsoleProvider
 
@@ -724,7 +697,6 @@ def test_usage_endpoint_includes_storage_fields(
     fake_orchestrator: FakeContainerOrchestrator,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The usage endpoint exposes quota, used and over_quota per project."""
     monkeypatch.setenv("VELA_TEAM_STORAGE_QUOTA_BYTES", str(2 * _GB))
     fake_orchestrator.set_disk_bytes("cid-1", _GB)
     response = api_client.get("/api/metrics/usage")

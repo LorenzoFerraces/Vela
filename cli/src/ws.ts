@@ -1,15 +1,31 @@
+import { request } from "./client"
+
 export function websocketUrl(
   server: string,
   path: string,
-  token: string,
+  ticket: string,
   params: Record<string, string> = {},
-): { url: string; headers: Record<string, string> } {
+): string {
   const url = new URL(`${server}/api${path}`)
   url.protocol = url.protocol === "https:" ? "wss:" : "ws:"
+  url.searchParams.set("ticket", ticket)
   for (const [key, value] of Object.entries(params)) {
     url.searchParams.set(key, value)
   }
-  return { url: url.toString(), headers: { Authorization: `Bearer ${token}` } }
+  return url.toString()
+}
+
+export async function mintWsTicket(
+  config: { server: string; token: string },
+  containerId: string,
+  purpose: "logs" | "exec",
+): Promise<string> {
+  const { ticket } = await request<{ ticket: string }>(
+    config,
+    "POST",
+    `/containers/${containerId}/ws-ticket?purpose=${purpose}`,
+  )
+  return ticket
 }
 
 export interface LogStreamOptions {
@@ -22,15 +38,16 @@ export async function streamLogs(
   containerId: string,
   options: LogStreamOptions,
 ): Promise<void> {
-  const { url, headers } = websocketUrl(
+  const ticket = await mintWsTicket(config, containerId, "logs")
+  const url = websocketUrl(
     config.server,
     `/containers/${containerId}/logs/stream`,
-    config.token,
+    ticket,
     { tail: String(options.tail), follow: options.follow ? "true" : "false" },
   )
 
   await new Promise<void>((resolve, reject) => {
-    const socket = new WebSocket(url, { headers } as never)
+    const socket = new WebSocket(url)
     socket.binaryType = "arraybuffer"
     socket.onmessage = (event) => {
       if (typeof event.data === "string") {
@@ -39,9 +56,10 @@ export async function streamLogs(
         process.stdout.write(Buffer.from(event.data).toString("utf8"))
       }
     }
-    socket.onclose = (event) => {
-      if (event.code !== 1000 && event.code !== 1001 && event.code !== 1005) {
-        reject(new Error(`Log stream closed (code ${event.code}).`))
+    socket.onclose = (event?: { code?: number }) => {
+      const code = event?.code
+      if (code !== undefined && code !== 1000 && code !== 1001 && code !== 1005) {
+        reject(new Error(`Log stream closed (code ${code}).`))
         return
       }
       resolve()

@@ -13,7 +13,7 @@ import os
 import secrets
 import uuid
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import jwt
 from jwt import InvalidTokenError
@@ -44,7 +44,7 @@ def _secret() -> str:
 
 def encode_state(user_id: uuid.UUID, *, ttl_seconds: int = _DEFAULT_TTL_SECONDS) -> str:
     """Sign a short-lived state token tying the OAuth dance to ``user_id``."""
-    issued_at = datetime.now(timezone.utc)
+    issued_at = datetime.now(UTC)
     expires_at = issued_at + timedelta(seconds=ttl_seconds)
     payload = {
         "sub": str(user_id),
@@ -86,7 +86,7 @@ def decode_state(token: str) -> StateClaims:
 
     return StateClaims(
         user_id=user_id,
-        issued_at=datetime.fromtimestamp(issued_at_raw, tz=timezone.utc),
-        expires_at=datetime.fromtimestamp(expires_at_raw, tz=timezone.utc),
+        issued_at=datetime.fromtimestamp(issued_at_raw, tz=UTC),
+        expires_at=datetime.fromtimestamp(expires_at_raw, tz=UTC),
         nonce=nonce,
     )

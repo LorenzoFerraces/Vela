@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import uuid
-from datetime import datetime
+from datetime import date, timedelta
 from typing import NamedTuple
 
 import sqlalchemy as sa
@@ -26,8 +26,8 @@ def _build_conditions(
     user_id: uuid.UUID | None = None,
     action: str | None = None,
     target_type: str | None = None,
-    from_date: datetime | None = None,
-    to_date: datetime | None = None,
+    from_date: date | None = None,
+    to_date: date | None = None,
 ) -> list[sa.ColumnElement]:
     """Translate the optional audit filters into SQL conditions."""
     conditions: list[sa.ColumnElement] = []
@@ -40,7 +40,7 @@ def _build_conditions(
     if from_date is not None:
         conditions.append(AuditLog.created_at >= from_date)
     if to_date is not None:
-        conditions.append(AuditLog.created_at <= to_date)
+        conditions.append(AuditLog.created_at < to_date + timedelta(days=1))
     return conditions
 
 
@@ -82,8 +82,8 @@ async def list_audit_logs(
     user_id: uuid.UUID | None = None,
     action: str | None = None,
     target_type: str | None = None,
-    from_date: datetime | None = None,
-    to_date: datetime | None = None,
+    from_date: date | None = None,
+    to_date: date | None = None,
     limit: int = 100,
     offset: int = 0,
 ) -> AuditLogQueryResult:

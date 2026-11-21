@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-import uuid
-from datetime import datetime, timezone
-
 import enum
+import uuid
+from datetime import UTC, datetime
 
 import sqlalchemy as sa
 from sqlalchemy import (
@@ -28,7 +27,7 @@ from app.db.base import Base
 
 
 def _utcnow() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 class User(Base):
@@ -71,13 +70,13 @@ class User(Base):
         index=True,
     )
 
-    oauth_identities: Mapped[list["UserOAuthIdentity"]] = relationship(
+    oauth_identities: Mapped[list[UserOAuthIdentity]] = relationship(
         back_populates="user", cascade="all, delete-orphan"
     )
-    dockerfiles: Mapped[list["Dockerfile"]] = relationship(
+    dockerfiles: Mapped[list[Dockerfile]] = relationship(
         back_populates="owner", cascade="all, delete-orphan"
     )
-    api_tokens: Mapped[list["ApiToken"]] = relationship(
+    api_tokens: Mapped[list[ApiToken]] = relationship(
         back_populates="user", cascade="all, delete-orphan"
     )
 
@@ -196,7 +195,7 @@ class Organization(Base):
         DateTime(timezone=True), nullable=False, default=_utcnow
     )
 
-    projects: Mapped[list["Project"]] = relationship(back_populates="organization")
+    projects: Mapped[list[Project]] = relationship(back_populates="organization")
 
 
 class Project(Base):
@@ -226,10 +225,10 @@ class Project(Base):
     )
 
     organization: Mapped[Organization] = relationship(back_populates="projects")
-    memberships: Mapped[list["ProjectMembership"]] = relationship(
+    memberships: Mapped[list[ProjectMembership]] = relationship(
         back_populates="project", cascade="all, delete-orphan"
     )
-    invitations: Mapped[list["ProjectInvitation"]] = relationship(
+    invitations: Mapped[list[ProjectInvitation]] = relationship(
         back_populates="project", cascade="all, delete-orphan"
     )
 
@@ -338,6 +337,7 @@ class DeploymentRecord(Base):
     command: Mapped[list | None] = mapped_column(JSON, nullable=True)
     dockerfile_snapshot: Mapped[str | None] = mapped_column(Text, nullable=True)
     build_override: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    deploy_config: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     public_url: Mapped[str | None] = mapped_column(String(2048), nullable=True)
     stack_id: Mapped[uuid.UUID | None] = mapped_column(
         Uuid(as_uuid=True),
@@ -463,8 +463,6 @@ class AlertHistory(Base):
 
 
 class AuditLog(Base):
-    """Persisted record of a user action on a target resource."""
-
     __tablename__ = "audit_log"
 
     id: Mapped[uuid.UUID] = mapped_column(
@@ -490,15 +488,11 @@ class AuditLog(Base):
 
 
 class LogSource(str, enum.Enum):
-    """Stream a captured container log line came from."""
-
     STDOUT = "stdout"
     STDERR = "stderr"
 
 
 class LogLevel(str, enum.Enum):
-    """Severity level of a stored container log line."""
-
     INFO = "info"
     WARN = "warn"
     ERROR = "error"
@@ -506,8 +500,6 @@ class LogLevel(str, enum.Enum):
 
 
 class ContainerLog(Base):
-    """One stored container log line with inferred level and source stream."""
-
     __tablename__ = "container_logs"
 
     id: Mapped[uuid.UUID] = mapped_column(
@@ -575,14 +567,14 @@ class Stack(Base):
         DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow,
     )
 
-    project: Mapped["Project"] = relationship()
-    services: Mapped[list["StackService"]] = relationship(
+    project: Mapped[Project] = relationship()
+    services: Mapped[list[StackService]] = relationship(
         back_populates="stack", cascade="all, delete-orphan",
     )
-    compositions_parent: Mapped[list["StackComposition"]] = relationship(
+    compositions_parent: Mapped[list[StackComposition]] = relationship(
         foreign_keys="StackComposition.parent_stack_id", cascade="all, delete-orphan",
     )
-    compositions_child: Mapped[list["StackComposition"]] = relationship(
+    compositions_child: Mapped[list[StackComposition]] = relationship(
         foreign_keys="StackComposition.child_stack_id", cascade="all, delete-orphan",
     )
 
@@ -617,7 +609,7 @@ class StackService(Base):
         DateTime(timezone=True), nullable=False, default=_utcnow,
     )
 
-    stack: Mapped["Stack"] = relationship(back_populates="services")
+    stack: Mapped[Stack] = relationship(back_populates="services")
 
 
 class StackComposition(Base):
@@ -639,8 +631,6 @@ class StackComposition(Base):
 
 
 class ContainerMetric(Base):
-    """One CPU/memory/network stats sample for a container."""
-
     __tablename__ = "container_metrics"
     __table_args__ = (
         sa.Index("ix_container_metrics_container_timestamp", "container_id", "timestamp"),
@@ -680,10 +670,19 @@ class ApiToken(Base):
     )
     name: Mapped[str] = mapped_column(String(100), nullable=False)
     token_prefix: Mapped[str] = mapped_column(
-        String(16), nullable=False, index=True
+        String(16), nullable=False, unique=True, index=True
     )
     token_hash: Mapped[str] = mapped_column(
         String(64), nullable=False, unique=True, index=True
+    )
+    expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    last_used_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    scope: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="full", server_default="full"
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=_utcnow

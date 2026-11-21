@@ -9,7 +9,7 @@ import re
 import time
 from collections import deque
 from collections.abc import Callable
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from itertools import islice
 from typing import Any, Protocol
 
@@ -23,7 +23,6 @@ logger = logging.getLogger(__name__)
 
 
 def _int_setting(name: str, default: int) -> int:
-    """Read an int env setting, falling back to default if unset or invalid."""
     raw_value = os.getenv(name)
     if raw_value is None:
         return default
@@ -46,9 +45,7 @@ COLLECTOR_ENABLED = os.getenv("VELA_LOG_COLLECTOR_ENABLED", "1") != "0"
 class _LogOrchestrator(Protocol):
     """The orchestrator surface the collector uses; any implementation of it works."""
 
-    async def list(self) -> Any:
-        """List all containers the orchestrator knows about."""
-        ...
+    async def list(self) -> Any: ...
 
     async def logs(
         self,
@@ -57,9 +54,7 @@ class _LogOrchestrator(Protocol):
         tail: int | None = None,
         since: float | None = None,
         timestamps: bool = False,
-    ) -> str:
-        """Fetch a container's logs, optionally tailed or since a timestamp."""
-        ...
+    ) -> str: ...
 # ponytail: cap overlap scanning at 1024 lines per container per poll
 _OVERLAP_CAP = 1024
 # ponytail: bound parallel log fetches per poll so a large fleet can't hammer the provider API
@@ -67,7 +62,6 @@ _LOG_FETCH_CONCURRENCY = 8
 
 
 async def batch_insert_logs(session, logs: list[ContainerLog]) -> None:
-    """Persist a batch of log rows in one commit."""
     if not logs:
         return
     session.add_all(logs)
@@ -75,8 +69,7 @@ async def batch_insert_logs(session, logs: list[ContainerLog]) -> None:
 
 
 async def cleanup_old_logs(session, retention_days: int = RETENTION_DAYS) -> int:
-    """Delete log rows older than retention_days; return the deleted row count."""
-    cutoff = datetime.now(timezone.utc) - timedelta(days=retention_days)
+    cutoff = datetime.now(UTC) - timedelta(days=retention_days)
     result = await session.execute(
         sa.delete(ContainerLog).where(ContainerLog.created_at < cutoff)
     )
@@ -108,11 +101,10 @@ def _split_log_timestamp(line: str) -> tuple[datetime | None, str]:
         parsed = datetime.fromisoformat(text)
     except ValueError:
         return None, line
-    return parsed.astimezone(timezone.utc), line[match.end() :]
+    return parsed.astimezone(UTC), line[match.end() :]
 
 
 def _fresh_lines(window: list[str], seen: deque[str]) -> list[str]:
-    """Trim a re-emitted overlap prefix from window against the already-seen lines."""
     # ponytail: trim a re-emitted prefix whose content matches the tail of `seen` (line-granular,
     # capped at _OVERLAP_CAP). A window that is *entirely* a repeat is ambiguous — a heartbeat
     # continuation looks identical to a replay — and is kept whole; we lose nothing, a boundary
@@ -131,8 +123,6 @@ def _fresh_lines(window: list[str], seen: deque[str]) -> list[str]:
 
 
 class LogCollector:
-    """Tails running containers and batch-inserts new log lines on a timer."""
-
     def __init__(
         self,
         orchestrator: _LogOrchestrator,
@@ -143,7 +133,6 @@ class LogCollector:
         max_lines_per_poll: int | None = None,
         clock: Callable[[], float] | None = None,
     ) -> None:
-        """Bind the collector to an orchestrator, session factory and poll knobs."""
         self._orchestrator = orchestrator
         self._session_factory = session_factory or get_session_factory()
         self._enabled = enabled
@@ -161,7 +150,6 @@ class LogCollector:
         self._fetch_semaphore = asyncio.Semaphore(_LOG_FETCH_CONCURRENCY)
 
     async def start(self) -> None:
-        """Start the background poll loop unless the collector is disabled."""
         if not COLLECTOR_ENABLED or not self._enabled:
             logger.info("Log collector disabled")
             return
@@ -174,7 +162,6 @@ class LogCollector:
         )
 
     async def stop(self) -> None:
-        """Stop the background poll loop and await its task."""
         self._running = False
         if self._task is not None:
             self._task.cancel()
@@ -185,7 +172,6 @@ class LogCollector:
         logger.info("Log collector stopped")
 
     async def _run_loop(self) -> None:
-        """Poll on the interval; run retention cleanup every tenth cycle."""
         cycle = 0
         while self._running:
             try:
@@ -200,16 +186,14 @@ class LogCollector:
             await asyncio.sleep(self._poll_interval)
 
     async def poll_once(self) -> None:
-        """Collect logs from running containers and insert the new lines."""
         if not self._enabled:
             return
         containers = await self._orchestrator.list()
         running = [c for c in containers if c.status == "running"]
         all_logs: list[ContainerLog] = []
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         async def _bounded_collect(container: Any) -> None:
-            """Fetch one container's logs under the fetch concurrency limit."""
             async with self._fetch_semaphore:
                 try:
                     await self._collect_container(container, now, all_logs)
@@ -232,7 +216,6 @@ class LogCollector:
     async def _collect_container(
         self, container: Any, now: datetime, out: list[ContainerLog]
     ) -> None:
-        """Append unseen log lines of one container to out and advance its cursor."""
         container_id = container.id
         cursor = self._cursor.get(container_id)
         if cursor is None:
@@ -275,7 +258,6 @@ class LogCollector:
         )
 
     async def _cleanup(self) -> None:
-        """Delete expired log rows, logging any cleanup failure."""
         try:
             async with self._session_factory() as session:
                 deleted = await cleanup_old_logs(session)

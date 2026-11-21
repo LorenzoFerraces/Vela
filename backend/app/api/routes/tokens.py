@@ -3,15 +3,18 @@
 from __future__ import annotations
 
 import uuid
+from datetime import UTC, datetime, timedelta
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Response, status
+from fastapi import APIRouter, Depends, Request, Response, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db, get_jwt_authenticated_user
 from app.api.schemas import ApiTokenCreate, ApiTokenCreated, ApiTokenPublic
+from app.core.audit.service import emit_audit_log
 from app.core.auth.api_tokens import create_api_token
+from app.core.auth.rate_limit import check_rate_limit, client_identity
 from app.core.exceptions import ApiTokenNotFoundError
 from app.db.models import ApiToken, User
 
@@ -20,17 +23,38 @@ router = APIRouter()
 
 @router.post("/", response_model=ApiTokenCreated, status_code=status.HTTP_201_CREATED)
 async def create_token(
+    request: Request,
     body: ApiTokenCreate,
     user: Annotated[User, Depends(get_jwt_authenticated_user)],
     session: Annotated[AsyncSession, Depends(get_db)],
 ) -> ApiTokenCreated:
     """Create a token from an interactive JWT login; PATs cannot mint tokens."""
-    record, minted = await create_api_token(session, user.id, body.name)
+    check_rate_limit(client_identity(request))
+    expires_at = (
+        datetime.now(UTC) + timedelta(days=body.expires_in_days)
+        if body.expires_in_days is not None
+        else None
+    )
+    record, minted = await create_api_token(
+        session, user.id, body.name, expires_at=expires_at, scope=body.scope
+    )
+    await emit_audit_log(
+        session,
+        user_id=user.id,
+        action="token.create",
+        target_type="token",
+        target_id=str(record.id),
+        details={"name": record.name},
+    )
+    await session.commit()
     return ApiTokenCreated(
         id=record.id,
         name=record.name,
         prefix=record.token_prefix,
+        scope=record.scope,
         created_at=record.created_at,
+        expires_at=record.expires_at,
+        last_used_at=record.last_used_at,
         token=minted.plaintext,
     )
 
@@ -51,7 +75,10 @@ async def list_tokens(
             id=record.id,
             name=record.name,
             prefix=record.token_prefix,
+            scope=record.scope,
             created_at=record.created_at,
+            expires_at=record.expires_at,
+            last_used_at=record.last_used_at,
         )
         for record in result.scalars()
     ]
@@ -73,5 +100,12 @@ async def revoke_token(
     if record is None:
         raise ApiTokenNotFoundError("API token not found.")
     await session.delete(record)
+    await emit_audit_log(
+        session,
+        user_id=user.id,
+        action="token.revoke",
+        target_type="token",
+        target_id=str(token_id),
+    )
     await session.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)

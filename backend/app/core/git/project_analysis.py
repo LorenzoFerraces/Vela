@@ -5,7 +5,11 @@ from __future__ import annotations
 from pathlib import Path
 
 from app.core.enums import BuildStrategy, SupportedLanguage
-from app.core.exceptions import AnalysisError, DockerfileGenerationError, NeedsBuildOverrideError
+from app.core.exceptions import (
+    AnalysisError,
+    DockerfileGenerationError,
+    NeedsBuildOverrideError,
+)
 from app.core.git.dockerfile_templates import dockerfile_contents_for
 from app.core.git.language_detection import analyze_project
 from app.core.models import BuildOverride, ProjectInfo

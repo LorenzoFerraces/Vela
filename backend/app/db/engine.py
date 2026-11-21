@@ -6,6 +6,7 @@ import os
 import sys
 from functools import lru_cache
 
+from dotenv import load_dotenv
 from sqlalchemy.engine.url import make_url
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
@@ -13,8 +14,6 @@ from sqlalchemy.ext.asyncio import (
     async_sessionmaker,
     create_async_engine,
 )
-
-from dotenv import load_dotenv
 
 # Preserve Playwright / pytest env (e.g. ``VELA_E2E`` SQLite) — do not let ``.env`` clobber it.
 load_dotenv(override=os.environ.get("VELA_E2E", "").strip() != "1")
@@ -52,7 +51,7 @@ def _database_url_for_engine() -> str:
         return url
     try:
         parsed = make_url(url)
-    except Exception:
+    except Exception:  # noqa: BLE001
         return url
     if parsed.host != "localhost":
         return url
@@ -70,7 +69,7 @@ def sync_database_url_for_alembic() -> str:
     url = _database_url_for_engine()
     try:
         parsed = make_url(url)
-    except Exception:
+    except Exception:  # noqa: BLE001
         return url
     if parsed.drivername == "postgresql+asyncpg":
         return parsed.set(drivername="postgresql+psycopg").render_as_string(hide_password=False)

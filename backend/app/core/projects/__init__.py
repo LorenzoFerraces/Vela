@@ -1,7 +1,13 @@
 """Shared project workspace for team mode."""
 
 from app.core.projects.bootstrap import ensure_personal_workspace
-from app.core.projects.enums import InvitationStatus, ProjectRole, can_read, can_write, is_owner
+from app.core.projects.enums import (
+    InvitationStatus,
+    ProjectRole,
+    can_read,
+    can_write,
+    is_owner,
+)
 from app.core.projects.repository import (
     accept_invitation,
     cancel_invitation,
@@ -34,10 +40,10 @@ __all__ = [
     "create_invitation",
     "create_shared_project",
     "ensure_personal_workspace",
-    "leave_project",
     "get_membership",
     "get_personal_project_id",
     "is_owner",
+    "leave_project",
     "list_incoming_invitations_for_user",
     "list_members",
     "list_pending_invitations_for_project",

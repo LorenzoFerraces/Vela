@@ -2,11 +2,9 @@
 
 from __future__ import annotations
 
-import time
-from collections import defaultdict, deque
-from typing import Annotated, Deque
+from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, Request, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -15,12 +13,12 @@ from app.api.schemas import (
     AuthConfigResponse,
     ClerkExchangeRequest,
     LoginRequest,
-    RegisterRequest,
     TokenResponse,
     UserPublic,
 )
 from app.api.user_view import user_public_from_snapshot
 from app.core.auth.enums import UserRole
+from app.core.auth.rate_limit import check_rate_limit, client_identity
 from app.core.auth.service import authenticate
 from app.core.auth.tokens import create_access_token
 from app.core.exceptions import (
@@ -34,29 +32,8 @@ from app.core.profile.service import user_to_snapshot
 from app.core.projects.bootstrap import ensure_personal_workspace
 from app.core.storage.object_storage import ObjectStorage
 from app.db.models import User
-from app.e2e_support import e2e_mode_enabled
 
 router = APIRouter()
-
-# ponytail: in-process sliding-window limiter; per-process only, resets on restart.
-# Upgrade to a shared store (Redis) if multiple API replicas or persistence needed.
-_LOGIN_ATTEMPTS: dict[str, Deque[float]] = defaultdict(deque)
-_LOGIN_WINDOW_SECONDS = 300.0
-_LOGIN_MAX_ATTEMPTS = 10
-
-
-def _check_login_rate_limit(client_ip: str) -> None:
-    """Reject with 429 once a client IP exceeds the sliding-window login attempt budget."""
-    now = time.monotonic()
-    bucket = _LOGIN_ATTEMPTS[client_ip]
-    while bucket and now - bucket[0] > _LOGIN_WINDOW_SECONDS:
-        bucket.popleft()
-    if len(bucket) >= _LOGIN_MAX_ATTEMPTS:
-        raise HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail="Too many login attempts. Try again later.",
-        )
-    bucket.append(now)
 
 
 @router.get("/config", response_model=AuthConfigResponse)
@@ -82,35 +59,32 @@ def _token_response(user: User, object_storage: ObjectStorage) -> TokenResponse:
     response_model=TokenResponse,
     status_code=status.HTTP_201_CREATED,
 )
-async def register(body: RegisterRequest) -> TokenResponse:
-    """Reject password registration; accounts come from Clerk sign-in."""
+async def register() -> TokenResponse:
     raise RegistrationDisabledError()
 
 
 @router.post("/login", response_model=TokenResponse)
 async def login(
-    body: LoginRequest,
     request: Request,
+    body: LoginRequest,
     session: Annotated[AsyncSession, Depends(get_db)],
     object_storage: Annotated[ObjectStorage, Depends(get_object_storage)],
 ) -> TokenResponse:
     """Verify credentials and return an access token."""
-    client_ip = request.client.host if request.client else "unknown"
-    # E2E runs log in from one loopback peer per test; the window budget would
-    # otherwise lock the whole suite out. Skip the limiter in E2E mode.
-    if not e2e_mode_enabled():
-        _check_login_rate_limit(client_ip)
+    check_rate_limit(client_identity(request))
     user = await authenticate(session, email=body.email, password=body.password)
     return _token_response(user, object_storage)
 
 
 @router.post("/clerk/exchange", response_model=TokenResponse)
 async def clerk_exchange(
+    request: Request,
     body: ClerkExchangeRequest,
     session: Annotated[AsyncSession, Depends(get_db)],
     object_storage: Annotated[ObjectStorage, Depends(get_object_storage)],
 ) -> TokenResponse:
     """Exchange a Clerk frontend JWT for a Vela access token."""
+    check_rate_limit(client_identity(request))
     enabled, _, _ = clerk_available()
     if not enabled:
         raise IntegrationConfigurationError(

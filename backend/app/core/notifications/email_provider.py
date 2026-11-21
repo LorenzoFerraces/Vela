@@ -12,6 +12,7 @@ import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from datetime import datetime
+
 from brevo import AsyncBrevo
 from brevo.core.api_error import ApiError
 from brevo.transactional_emails.types.send_transac_email_request_attachment_item import (

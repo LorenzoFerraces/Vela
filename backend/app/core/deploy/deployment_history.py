@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import difflib
+import json
 import uuid
 from collections.abc import Collection
 from dataclasses import dataclass
@@ -10,8 +11,14 @@ from dataclasses import dataclass
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.schemas import DeploymentDiffResponse, DeploymentEnvDiff, DeploymentRecordPublic
+from app.api.schemas import (
+    DeploymentDiffResponse,
+    DeploymentEnvDiff,
+    DeploymentRecordPublic,
+)
 from app.core.deploy.deploy_source_display import resolve_deploy_source_label
+from app.core.models import DeployConfig
+from app.core.security.secrets import decrypt_secret, encrypt_secret
 from app.db.models import DeploymentRecord, User
 
 
@@ -29,6 +36,28 @@ class DeploymentSnapshot:
     dockerfile_snapshot: str | None
     public_url: str | None
     build_override: dict | None = None
+    deploy_config: dict | None = None
+
+
+_ENCRYPTED_PREFIX = "enc:"
+
+
+def _encode_deploy_config(config: dict) -> str:
+    """Encrypt the serialized config so user env secrets are not stored in plaintext."""
+    ciphertext = encrypt_secret(json.dumps(config))
+    return _ENCRYPTED_PREFIX + ciphertext.decode("ascii")
+
+
+def _decode_deploy_config(raw: object) -> dict | None:
+    """Decrypt a marked snapshot; accept legacy plaintext dicts unchanged."""
+    if raw is None:
+        return None
+    if isinstance(raw, str) and raw.startswith(_ENCRYPTED_PREFIX):
+        ciphertext = raw[len(_ENCRYPTED_PREFIX):].encode("ascii")
+        return json.loads(decrypt_secret(ciphertext))
+    if isinstance(raw, dict):
+        return raw
+    return None
 
 
 async def record_deployment(
@@ -52,12 +81,34 @@ async def record_deployment(
         command=list(snapshot.command) if snapshot.command else None,
         dockerfile_snapshot=snapshot.dockerfile_snapshot,
         build_override=snapshot.build_override,
+        deploy_config=(
+            _encode_deploy_config(snapshot.deploy_config)
+            if snapshot.deploy_config is not None
+            else None
+        ),
         public_url=snapshot.public_url,
     )
     session.add(row)
     await session.commit()
     await session.refresh(row)
     return row
+
+
+async def load_deploy_config_snapshot(
+    session: AsyncSession, container_id: str
+) -> DeployConfig | None:
+    """Return the full DeployConfig recorded for ``container_id``, or None."""
+    result = await session.execute(
+        select(DeploymentRecord.deploy_config)
+        .where(DeploymentRecord.container_id == container_id)
+        .order_by(DeploymentRecord.created_at.desc())
+        .limit(1)
+    )
+    raw = result.scalar_one_or_none()
+    decoded = _decode_deploy_config(raw)
+    if decoded is None:
+        return None
+    return DeployConfig.model_validate(decoded)
 
 
 async def _to_public(

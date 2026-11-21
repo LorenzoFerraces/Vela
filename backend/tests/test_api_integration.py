@@ -19,21 +19,24 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.websockets import WebSocketDisconnect
 
 from app.api.app import create_app
-from app.core.auth.tokens import create_access_token
 from app.core.containers.docker_orchestrator import (
     VELA_OWNER_LABEL,
     VELA_ROUTE_HOST_LABEL,
     VELA_ROUTE_PATH_PREFIX_LABEL,
     VELA_ROUTE_TLS_LABEL,
 )
-from app.core.exceptions import CloneError, ImageNotFoundError, RegistryAccessDeniedError
 from app.core.containers.fake_orchestrator import FakeContainerOrchestrator
 from app.core.containers.volume_uploads import (
     VOLUME_UPLOAD_MAX_BYTES,
     VOLUME_UPLOAD_USER_QUOTA_BYTES,
 )
+from app.core.exceptions import (
+    CloneError,
+    ImageNotFoundError,
+    RegistryAccessDeniedError,
+)
 from app.core.traffic.traffic_router import NoopTrafficRouter
-from app.db.models import Dockerfile, User
+from app.db.models import Dockerfile
 from tests.conftest import make_container_info
 from tests.test_deploy_jobs import wait_for_deploy
 
@@ -783,35 +786,31 @@ def test_list_containers_includes_access_url(
     assert data[0]["access_url"] == "https://svc.example.com/"
 
 
-def test_logs_stream_authenticated(
-    api_client: TestClient, auth_token: str
-) -> None:
+def test_logs_stream_authenticated(api_client: TestClient) -> None:
+    ticket_response = api_client.post("/api/containers/cid-1/ws-ticket?purpose=logs")
+    assert ticket_response.status_code == 200
+    ticket = ticket_response.json()["ticket"]
     with api_client.websocket_connect(
-        f"/api/containers/cid-1/logs/stream?access_token={auth_token}&follow=false"
+        f"/api/containers/cid-1/logs/stream?ticket={ticket}&follow=false"
     ) as websocket:
         data = websocket.receive_bytes()
     assert data.startswith(b"log line")
 
 
-def test_logs_stream_requires_token(anonymous_client: TestClient) -> None:
-    with anonymous_client.websocket_connect(
-        "/api/containers/cid-1/logs/stream"
-    ) as websocket:
-        with pytest.raises(WebSocketDisconnect):
-            websocket.receive_bytes()
+def test_logs_stream_requires_ticket(anonymous_client: TestClient) -> None:
+    with (
+        pytest.raises(WebSocketDisconnect),
+        anonymous_client.websocket_connect("/api/containers/cid-1/logs/stream"),
+    ):
+        pass
 
 
-def test_logs_stream_wrong_owner(
+def test_ws_ticket_wrong_owner_denied(
     api_client: TestClient,
     other_user_client: TestClient,
-    seeded_other_user: User,
 ) -> None:
-    token = create_access_token(seeded_other_user.id)
-    with other_user_client.websocket_connect(
-        f"/api/containers/cid-1/logs/stream?access_token={token}"
-    ) as websocket:
-        with pytest.raises(WebSocketDisconnect):
-            websocket.receive_bytes()
+    response = other_user_client.post("/api/containers/cid-1/ws-ticket?purpose=logs")
+    assert response.status_code == 404
     stats = api_client.get("/api/containers/cid-1/stats").json()
     assert stats["container_id"] == "cid-1"
     assert api_client.get("/api/containers/cid-1/health").json()["status"] == "healthy"
@@ -1063,13 +1062,17 @@ def test_run_private_github_clone_failure_hints_settings(
     assert "connect github in settings" in job["error"]["detail"].lower()
 
 
-def test_builder_build_calls_pipeline(make_authed_client, tmp_path, monkeypatch) -> None:
+def test_builder_build_calls_pipeline(
+    make_authed_client, provision_user, tmp_path, monkeypatch
+) -> None:
+    _, admin_token = provision_user("builder-admin@example.com", role="admin")
     project_dir = tmp_path / "app"
     project_dir.mkdir()
     (project_dir / "package.json").write_text('{"name":"x"}', encoding="utf-8")
     monkeypatch.setenv("VELA_ALLOWED_BUILD_ROOT", str(tmp_path.parent))
 
     with make_authed_client() as client:
+        client.headers["Authorization"] = f"Bearer {admin_token}"
         response = client.post(
             "/api/builder/build",
             json={
@@ -1083,13 +1086,15 @@ def test_builder_build_calls_pipeline(make_authed_client, tmp_path, monkeypatch)
 
 
 def test_builder_analyze_uses_validate_local(
-    make_authed_client, tmp_path, monkeypatch
+    make_authed_client, provision_user, tmp_path, monkeypatch
 ) -> None:
+    _, admin_token = provision_user("analyze-admin@example.com", role="admin")
     (tmp_path / "package.json").write_text('{"name":"x"}', encoding="utf-8")
 
     monkeypatch.setenv("VELA_ALLOWED_BUILD_ROOT", str(tmp_path.parent))
 
     with make_authed_client() as client:
+        client.headers["Authorization"] = f"Bearer {admin_token}"
         response = client.post(
             "/api/builder/analyze",
             json={"project_path": str(tmp_path)},
@@ -1199,15 +1204,17 @@ def test_list_images(make_authed_client) -> None:
     assert "b:1" in images
 
 
-def test_pull_image(make_authed_client) -> None:
+def test_pull_image(make_authed_client, provision_user) -> None:
     """
     Verifies that POST /api/images/pull pulls the specified image and registers it with the orchestrator.
     
     Asserts the endpoint responds with HTTP 200 and JSON {"detail": "ok"}, and that the orchestrator's image set includes "nginx:alpine".
     """
+    _, admin_token = provision_user("pull-admin@example.com", role="admin")
     orchestrator = FakeContainerOrchestrator()
 
     with make_authed_client(orchestrator=orchestrator) as client:
+        client.headers["Authorization"] = f"Bearer {admin_token}"
         response = client.post(
             "/api/images/pull",
             params={"image": "nginx", "tag": "alpine"},
@@ -1218,11 +1225,13 @@ def test_pull_image(make_authed_client) -> None:
     assert "nginx:alpine" in orchestrator._images
 
 
-def test_build_image_from_context(make_authed_client, tmp_path) -> None:
+def test_build_image_from_context(make_authed_client, provision_user, tmp_path) -> None:
+    _, admin_token = provision_user("build-admin@example.com", role="admin")
     (tmp_path / "Dockerfile").write_text("FROM scratch\n", encoding="utf-8")
     orchestrator = FakeContainerOrchestrator()
 
     with make_authed_client(orchestrator=orchestrator) as client:
+        client.headers["Authorization"] = f"Bearer {admin_token}"
         response = client.post(
             "/api/images/build",
             json={
@@ -1237,7 +1246,8 @@ def test_build_image_from_context(make_authed_client, tmp_path) -> None:
     assert "local/test:1" in orchestrator._images
 
 
-def test_traffic_routes_crud(make_authed_client) -> None:
+def test_traffic_routes_crud(make_authed_client, provision_user) -> None:
+    _, admin_token = provision_user("routes-admin@example.com", role="admin")
     router = NoopTrafficRouter()
 
     spec = {
@@ -1250,6 +1260,7 @@ def test_traffic_routes_crud(make_authed_client) -> None:
     }
 
     with make_authed_client(traffic_router=router) as client:
+        client.headers["Authorization"] = f"Bearer {admin_token}"
         created = client.post("/api/routes", json=spec)
         assert created.status_code == 200
         listed = client.get("/api/routes")

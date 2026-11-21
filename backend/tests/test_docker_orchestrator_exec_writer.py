@@ -32,7 +32,6 @@ class _FakeExecRuntime:
 
     def close(self) -> None:
         """Close without doing anything."""
-        pass
 
 
 async def test_stream_exec_write_callable_does_not_block_event_loop(

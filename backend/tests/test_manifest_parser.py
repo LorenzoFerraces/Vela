@@ -32,34 +32,29 @@ spec:
 
 
 def test_parse_manifest_compose() -> None:
-    """A compose file parses as compose with each service listed."""
-    services, warnings, kind = parse_manifest(COMPOSE_YAML)
+    services, _warnings, kind = parse_manifest(COMPOSE_YAML)
     assert kind == "compose"
     assert {s.service_name for s in services} == {"web", "redis"}
 
 
 def test_parse_manifest_k8s() -> None:
-    """A Kubernetes deployment parses with service name and port."""
-    services, warnings, kind = parse_manifest(K8S_YAML)
+    services, _warnings, kind = parse_manifest(K8S_YAML)
     assert kind == "k8s"
     assert services[0].service_name == "web"
     assert services[0].container_port == 8080
 
 
 def test_parse_manifest_garbage_raises() -> None:
-    """Unparseable YAML raises ManifestParseError."""
     with pytest.raises(ManifestParseError, match="Unrecognized manifest"):
         parse_manifest("hello: [world")
 
 
 def test_parse_manifest_unknown_mapping_raises() -> None:
-    """A mapping matching no known format raises ManifestParseError."""
     with pytest.raises(ManifestParseError, match="Unrecognized manifest"):
         parse_manifest("foo: bar\nbaz: 1\n")
 
 
 def test_parse_manifest_k8s_without_workloads_raises() -> None:
-    """Kubernetes YAML with no supported workload raises ManifestParseError."""
     yaml_content = "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: c\ndata: {}\n"
     with pytest.raises(ManifestParseError, match="No supported Kubernetes resources"):
         parse_manifest(yaml_content)

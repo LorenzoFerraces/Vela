@@ -32,10 +32,9 @@ from app.core.git.git_source_analysis import (
 )
 from app.core.git.project_analysis import analyze_project
 from app.core.llm import generate_json
-from app.core.llm.cache import delete_cached, load_cached, store_cached
+from app.core.llm.cache import cache_identity, delete_cached, load_cached, store_cached
 from app.core.llm.provider import (
     LlmConfig,
-    endpoint_fingerprint,
     resolve_llm_config,
 )
 from app.core.llm.user_config import resolve_llm_config_for_user
@@ -344,6 +343,7 @@ async def _generate_services(
     evidence: list[ServiceEvidence],
     commit: str = "",
     config: LlmConfig | None = None,
+    user_id: uuid.UUID | None = None,
 ) -> tuple[list[StackService], str | None, tuple[str, ...], list[str]]:
     """Generate services via a cache-backed LLM call and reconcile detected facts."""
     # ponytail: prompt-only redaction; the raw url is still used as the git source_ref
@@ -376,10 +376,7 @@ async def _generate_services(
         config = resolve_llm_config()
     if config is None:
         raise LlmNotConfiguredError("AI analysis is not configured on this server.")
-    cache_version = (
-        f"{STACKS_PROMPT_VERSION}:{config.provider}:{config.model}"
-        f":{endpoint_fingerprint(config)}"
-    )
+    cache_version = cache_identity(user_id, config, git_url)
     payload = await load_cached("stacks", commit, cache_version)
     if payload is None:
         payload = await generate_json(prompt=prompt, schema=_generation_schema(), config=config)
@@ -484,6 +481,7 @@ async def analyze_repo_stack(
             evidence=evidence,
             commit=commit,
             config=config,
+            user_id=user_id,
         )
         return RepoStackAnalysis(
             services=services,

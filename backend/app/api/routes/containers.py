@@ -7,14 +7,16 @@ import json
 import logging
 import os
 import uuid
+from collections.abc import Callable
 from contextlib import suppress
-from typing import Annotated, Callable
+from typing import Annotated
 
 from fastapi import (
     APIRouter,
     BackgroundTasks,
     Depends,
     File,
+    HTTPException,
     Query,
     Response,
     UploadFile,
@@ -33,7 +35,6 @@ from app.api.deps import (
     get_image_builder,
     get_orchestrator,
     get_traffic_router,
-    resolve_user,
 )
 from app.api.route_wiring import (
     backend_port_for_route,
@@ -52,16 +53,15 @@ from app.api.schemas import (
     VolumeMountRequest,
     VolumeUploadResponse,
 )
-from app.core.models import ScalingPolicyInfo
 from app.core import user_library
-from app.core.auth.api_tokens import API_TOKEN_PREFIX
+from app.core.audit.service import emit_audit_log
 from app.core.auth.service import get_user_by_id
+from app.core.auth.ws_tickets import consume_ws_ticket, issue_ws_ticket
 from app.core.build.default_image_builder import DefaultImageBuilder
 from app.core.build.registry_image_suggestions import (
     fetch_docker_hub_suggestions,
     merge_image_suggestions,
 )
-from app.core.audit.service import emit_audit_log
 from app.core.containers.docker_orchestrator import (
     VELA_OWNER_LABEL,
     VELA_PROJECT_LABEL,
@@ -71,22 +71,15 @@ from app.core.containers.docker_orchestrator import (
 )
 from app.core.containers.orchestrator import ContainerOrchestrator
 from app.core.containers.volume_uploads import (
+    read_upload_limited,
     resolve_volume_upload_path,
     save_volume_upload,
+    upload_lock_for_user,
     user_uploads_total_bytes,
     volume_upload_max_bytes,
     volume_upload_user_quota_bytes,
 )
 from app.core.deploy.deploy_source_display import source_ref_looks_like_uuid
-from app.core.deploy.github_auth import (
-    github_token_for_url,
-    is_github_https_url,
-    looks_like_auth_failure,
-)
-from app.core.deploy.jobs import (
-    DeployJobRegistry,
-    classify_deploy_error,
-)
 from app.core.deploy.deploy_source_suggestions import (
     DeploySourcesResponse,
     collect_deploy_source_suggestions,
@@ -96,37 +89,37 @@ from app.core.deploy.deployment_history import (
     latest_source_by_container_ids,
     record_deployment,
 )
-from app.core.scaling.policy_repository import upsert_policy
+from app.core.deploy.github_auth import (
+    github_token_for_url,
+    is_github_https_url,
+    looks_like_auth_failure,
+)
+from app.core.deploy.jobs import (
+    DeployJobRegistry,
+    classify_deploy_error,
+)
 from app.core.enums import ContainerStatus, RestartPolicy
 from app.core.exceptions import (
-    AccountDeactivatedError,
     CloneError,
     ContainerNotFoundError,
     ImageNotFoundError,
     InvalidVolumeUploadPathError,
-    NotAuthenticatedError,
     ProjectAccessDeniedError,
     ProviderConnectionError,
     RegistryAccessDeniedError,
     TeamStorageQuotaExceededError,
     VolumeUploadQuotaExceededError,
-    VolumeUploadTooLargeError,
 )
 from app.core.models import (
     ContainerInfo,
     ContainerStats,
     DeployConfig,
-    default_listen_port_health_check,
     HealthResult,
     PortMapping,
     ProjectSource,
+    ScalingPolicyInfo,
     VolumeMount,
-)
-from app.core.quotas import (
-    effective_quota_bytes,
-    enforce_team_storage_capacity,
-    format_gib,
-    team_storage_usage,
+    default_listen_port_health_check,
 )
 from app.core.projects.access import (
     list_accessible_project_ids,
@@ -134,6 +127,13 @@ from app.core.projects.access import (
 )
 from app.core.projects.enums import ProjectRole, can_write
 from app.core.projects.repository import get_personal_project_id, require_membership
+from app.core.quotas import (
+    effective_quota_bytes,
+    enforce_team_storage_capacity,
+    format_gib,
+    team_storage_usage,
+)
+from app.core.scaling.policy_repository import upsert_policy
 from app.core.traffic.public_route_host import (
     apply_public_route_to_deploy_config,
     build_public_url,
@@ -159,35 +159,7 @@ _EXEC_START_FAILURE_MESSAGE = (
 _MAX_TERMINAL_DIMENSION = 500
 
 
-def _websocket_token(websocket: WebSocket) -> str | None:
-    """Return the bearer token from the upgrade request, header first.
-
-    Non-browser clients send ``Authorization: Bearer <token>`` so secrets stay
-    out of URLs and access logs. Browser clients cannot set upgrade headers,
-    so they keep passing a JWT ``access_token`` in the query string; PATs are
-    rejected there because they would leak into access logs.
-    """
-    authorization = websocket.headers.get("authorization", "")
-    if authorization.startswith("Bearer "):
-        return authorization.removeprefix("Bearer ").strip() or None
-    token = websocket.query_params.get("access_token")
-    if token and token.startswith(API_TOKEN_PREFIX):
-        return None
-    return token
-
-
-async def _get_websocket_user(session: AsyncSession, token: str | None) -> User:
-    """Resolve a WebSocket bearer token (JWT or PAT) to a :class:`User`."""
-    if not token:
-        raise NotAuthenticatedError()
-    try:
-        return await resolve_user(session, token)
-    except AccountDeactivatedError as exc:
-        raise NotAuthenticatedError() from exc
-
-
 def _exec_max_session_seconds() -> int:
-    """Return the max exec session lifetime in seconds (default 3600)."""
     try:
         return max(1, int(os.getenv("VELA_EXEC_MAX_SESSION_SECONDS", "3600")))
     except ValueError:
@@ -395,6 +367,7 @@ async def _persist_run_deployment(
     image_tag: str,
     dockerfile_snapshot: str | None,
     public_url: str | None,
+    deploy_config: dict,
 ) -> None:
     sanitized_env_vars = _redacted_env_vars_for_history(body.env_vars)
     for attempt in range(3):
@@ -420,6 +393,7 @@ async def _persist_run_deployment(
                         if body.build_override
                         else None
                     ),
+                    deploy_config=deploy_config,
                 ),
             )
             return
@@ -633,6 +607,30 @@ async def list_containers(
     )
 
 
+@router.get("/by-name/{name}", response_model=ContainerInfo)
+async def get_container_by_name(
+    name: str,
+    orchestrator: Annotated[ContainerOrchestrator, Depends(get_orchestrator)],
+    current_user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[AsyncSession, Depends(get_db)],
+) -> ContainerInfo:
+    """Resolve one container by exact name for the current user."""
+    project_ids = await list_accessible_project_ids(session, current_user.id)
+    containers = await _list_user_containers(
+        orchestrator,
+        session,
+        current_user,
+        container_status=None,
+        project_ids=project_ids,
+    )
+    match = next((info for info in containers if info.name == name), None)
+    if match is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Container not found.")
+    return await require_container_access(
+        session, orchestrator, current_user, match.id, action="read"
+    )
+
+
 @router.get("/image/availability", response_model=ImageAvailabilityResponse)
 async def image_availability(
     ref: Annotated[
@@ -816,56 +814,45 @@ async def upload_volume_folder(
 
     per_folder_limit = volume_upload_max_bytes()
     user_quota = volume_upload_user_quota_bytes()
-    current_usage = user_uploads_total_bytes(current_user.id)
+    async with upload_lock_for_user(current_user.id):
+        current_usage = user_uploads_total_bytes(current_user.id)
+        payloads: list[tuple[str, bytes]] = []
+        total_bytes = 0
+        for upload in files:
+            relative_path = upload.filename or ""
+            content = await read_upload_limited(upload, per_folder_limit - total_bytes)
+            total_bytes += len(content)
+            if current_usage + total_bytes > user_quota:
+                limit_megabytes = user_quota // (1024 * 1024)
+                raise VolumeUploadQuotaExceededError(
+                    f"Upload would exceed your {limit_megabytes} MB volume storage quota. "
+                    "Use a smaller folder or remove unused uploads."
+                )
+            payloads.append((relative_path, content))
 
-    payloads: list[tuple[str, bytes]] = []
-    total_bytes = 0
-    for upload in files:
-        relative_path = upload.filename or ""
-        # Only read content if early size check passes\
-        if upload.size is not None and total_bytes + upload.size > per_folder_limit:
-            limit_megabytes = per_folder_limit // (1024 * 1024)
-            raise VolumeUploadTooLargeError(
-                f"Folder exceeds the {limit_megabytes} MB upload limit."
-            )
-        content = await upload.read()
-        total_bytes += len(content)
-        if total_bytes > per_folder_limit:
-            limit_megabytes = per_folder_limit // (1024 * 1024)
-            raise VolumeUploadTooLargeError(
-                f"Folder exceeds the {limit_megabytes} MB upload limit."
-            )
-        if current_usage + total_bytes > user_quota:
-            limit_megabytes = user_quota // (1024 * 1024)
-            raise VolumeUploadQuotaExceededError(
-                f"Upload would exceed your {limit_megabytes} MB volume storage quota. "
-                "Use a smaller folder or remove unused uploads."
-            )
-        payloads.append((relative_path, content))
-
-    personal_project_id = await get_personal_project_id(session, current_user)
-    personal_project = await session.get(Project, personal_project_id)
-    team_quota = (
-        effective_quota_bytes(personal_project)
-        if personal_project is not None
-        else None
-    )
-    if team_quota is not None:
-        disk_bytes, uploads_bytes = await team_storage_usage(
-            session, orchestrator, personal_project_id
+        personal_project_id = await get_personal_project_id(session, current_user)
+        personal_project = await session.get(Project, personal_project_id)
+        team_quota = (
+            effective_quota_bytes(personal_project)
+            if personal_project is not None
+            else None
         )
-        used_bytes = disk_bytes + uploads_bytes
-        if used_bytes + total_bytes > team_quota:
-            raise TeamStorageQuotaExceededError(
-                f"Upload would exceed the team's {format_gib(team_quota)} "
-                f"storage quota ({format_gib(used_bytes)} used). "
-                "Use a smaller folder or remove unused uploads."
+        if team_quota is not None:
+            disk_bytes, uploads_bytes = await team_storage_usage(
+                session, orchestrator, personal_project_id
             )
+            used_bytes = disk_bytes + uploads_bytes
+            if used_bytes + total_bytes > team_quota:
+                raise TeamStorageQuotaExceededError(
+                    f"Upload would exceed the team's {format_gib(team_quota)} "
+                    f"storage quota ({format_gib(used_bytes)} used). "
+                    "Use a smaller folder or remove unused uploads."
+                )
 
-    upload_id, folder_name, saved_bytes, file_count = save_volume_upload(
-        current_user.id,
-        payloads,
-    )
+        upload_id, folder_name, saved_bytes, file_count = save_volume_upload(
+            current_user.id,
+            payloads,
+        )
     return VolumeUploadResponse(
         upload_id=upload_id,
         folder_name=folder_name,
@@ -944,6 +931,7 @@ async def _run_container_deploy_worker(
                     image_tag=image_ref,
                     dockerfile_snapshot=None,
                     public_url=public_url,
+                    deploy_config=cfg.model_dump(mode="json"),
                 )
                 saved_policy, scaling_policy_warning = await _persist_scaling_policy(
                     session, info.name, body
@@ -1030,6 +1018,7 @@ async def _run_container_deploy_worker(
                         build_result.dockerfile_snapshot or template.contents
                     ),
                     public_url=public_url,
+                    deploy_config=cfg.model_dump(mode="json"),
                 )
                 saved_policy, scaling_policy_warning = await _persist_scaling_policy(
                     session, info.name, body
@@ -1124,6 +1113,7 @@ async def _run_container_deploy_worker(
                 image_tag=build_result.image_tag,
                 dockerfile_snapshot=build_result.dockerfile_snapshot,
                 public_url=public_url,
+                deploy_config=cfg.model_dump(mode="json"),
             )
             saved_policy, scaling_policy_warning = await _persist_scaling_policy(
                 session, info.name, body
@@ -1153,7 +1143,7 @@ async def _run_container_deploy_worker(
                 ).model_dump(mode="json"),
             )
             return
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001
         registry.complete_failure(job_id, classify_deploy_error(exc))
 
 
@@ -1370,6 +1360,43 @@ async def container_logs(
     return {"logs": text}
 
 
+@router.post("/{container_id}/ws-ticket")
+async def issue_container_ws_ticket(
+    container_id: str,
+    purpose: str,
+    current_user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[AsyncSession, Depends(get_db)],
+    orchestrator: Annotated[ContainerOrchestrator, Depends(get_orchestrator)],
+) -> dict[str, str]:
+    """Issue a short-lived single-use ticket for a logs/exec WebSocket."""
+    if purpose not in ("logs", "exec"):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Invalid WebSocket purpose.")
+    await require_container_access(
+        session, orchestrator, current_user, container_id,
+        action="read" if purpose == "logs" else "write",
+    )
+    return {"ticket": issue_ws_ticket(current_user.id, container_id, purpose)}
+
+
+async def _stream_logs_to_websocket(
+    websocket: WebSocket,
+    orchestrator: ContainerOrchestrator,
+    container_id: str,
+    tail: int,
+    follow: bool,
+) -> None:
+    try:
+        async for chunk in orchestrator.stream_logs(
+            container_id, tail=tail, follow=follow
+        ):
+            await websocket.send_bytes(chunk)
+    except WebSocketDisconnect:
+        pass
+    except Exception:  # noqa: BLE001
+        with suppress(Exception):
+            await websocket.close(code=1011)
+
+
 @router.websocket("/{container_id}/logs/stream")
 async def container_logs_stream(
     websocket: WebSocket,
@@ -1377,13 +1404,25 @@ async def container_logs_stream(
     orchestrator: Annotated[ContainerOrchestrator, Depends(get_orchestrator)],
     session: Annotated[AsyncSession, Depends(get_db)],
 ) -> None:
-    """Stream container logs over WebSocket (binary frames).
-
-    Authenticate with the ``Authorization: Bearer`` header, or with the
-    ``access_token`` query param for browser clients.
-    """
+    """Stream container logs over WebSocket (binary frames). Authenticate with a short-lived ``ticket``."""
+    ticket = websocket.query_params.get("ticket", "")
+    user_id = consume_ws_ticket(ticket, container_id, "logs")
+    if user_id is None:
+        await websocket.close(code=1008, reason="Unauthorized")
+        return
+    user = await get_user_by_id(session, user_id)
+    if user is None or not user.is_active:
+        await websocket.close(code=1008, reason="Unauthorized")
+        return
+    try:
+        await require_container_access(
+            session, orchestrator, user, container_id, action="read"
+        )
+    except (ContainerNotFoundError, ProjectAccessDeniedError):
+        await websocket.close(code=1008, reason="Unauthorized")
+        return
     await websocket.accept()
-    token = _websocket_token(websocket)
+
     tail_raw = websocket.query_params.get("tail", "200")
     try:
         tail_parsed = int(tail_raw)
@@ -1395,32 +1434,16 @@ async def container_logs_stream(
     )
 
     try:
-        user = await _get_websocket_user(session, token)
-    except NotAuthenticatedError:
-        await websocket.close(code=1008)
-        return
-    try:
-        await require_container_access(
-            session, orchestrator, user, container_id, action="read"
+        await asyncio.wait_for(
+            _stream_logs_to_websocket(
+                websocket, orchestrator, container_id, tail_parsed, follow_logs
+            ),
+            timeout=_exec_max_session_seconds(),
         )
-    except (ContainerNotFoundError, ProjectAccessDeniedError):
-        await websocket.close(code=1008)
-        return
-
-    try:
-        async for chunk in orchestrator.stream_logs(
-            container_id,
-            tail=tail_parsed,
-            follow=follow_logs,
-        ):
-            await websocket.send_bytes(chunk)
-    except WebSocketDisconnect:
-        pass
-    except Exception:
-        try:
-            await websocket.close(code=1011)
-        except Exception:
-            pass
+    except TimeoutError:
+        with suppress(Exception):
+            await websocket.send_text("[session expired]")
+            await websocket.close(code=1000, reason="Session timeout")
 
 
 @router.websocket("/{container_id}/exec/ws")
@@ -1430,24 +1453,16 @@ async def container_exec_ws(
     orchestrator: Annotated[ContainerOrchestrator, Depends(get_orchestrator)],
     session: Annotated[AsyncSession, Depends(get_db)],
 ) -> None:
-    """Bidirectional exec terminal over WebSocket.
-
-    Authenticate with the ``Authorization: Bearer`` header, or with the
-    ``access_token`` query param for browser clients.
-    """
-    token = _websocket_token(websocket)
-
-    try:
-        await websocket.accept()
-    except WebSocketDisconnect:
-        return
-
-    try:
-        user = await _get_websocket_user(session, token)
-    except NotAuthenticatedError:
+    """Bidirectional exec terminal over WebSocket. Authenticate with a short-lived ``ticket``."""
+    ticket = websocket.query_params.get("ticket", "")
+    user_id = consume_ws_ticket(ticket, container_id, "exec")
+    if user_id is None:
         await websocket.close(code=1008, reason="Unauthorized")
         return
-
+    user = await get_user_by_id(session, user_id)
+    if user is None or not user.is_active:
+        await websocket.close(code=1008, reason="Unauthorized")
+        return
     try:
         await require_container_access(
             session, orchestrator, user, container_id, action="write"
@@ -1455,6 +1470,7 @@ async def container_exec_ws(
     except (ContainerNotFoundError, ProjectAccessDeniedError):
         await websocket.close(code=1008, reason="Unauthorized")
         return
+    await websocket.accept()
 
     await emit_audit_log(
         session,
@@ -1484,7 +1500,7 @@ async def container_exec_ws(
             init_raw = await asyncio.wait_for(
                 _receive_terminal_text(websocket), timeout=5.0
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             init_raw = None
         if init_raw is not None:
             try:
@@ -1501,12 +1517,12 @@ async def container_exec_ws(
             stdout_iter, stdin_write, exec_close_fn, exec_id = await orchestrator.stream_exec(
                 container_id, cols=cols, rows=rows
             )
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001
             logger.warning("exec start failed for %s: %s", container_id, exc)
             try:
                 await websocket.send_text(_EXEC_START_FAILURE_MESSAGE)
                 await websocket.close(code=1011)
-            except Exception:
+            except Exception:  # noqa: BLE001, S110
                 pass
             return
 
@@ -1514,17 +1530,15 @@ async def container_exec_ws(
             await asyncio.to_thread(stdin_write, pending_init.encode("utf-8"))
 
         async def _forward_to_client() -> None:
-            """Stream exec stdout chunks to the websocket until it disconnects."""
             try:
                 async for chunk in stdout_iter:
                     await websocket.send_bytes(chunk)
             except WebSocketDisconnect:
                 pass
-            except Exception:
+            except Exception:  # noqa: BLE001
                 logger.warning("exec forward error for %s", container_id)
 
         async def _forward_to_container() -> None:
-            """Send websocket input and resize frames to the exec session."""
             try:
                 while True:
                     msg = await _receive_terminal_text(websocket)
@@ -1541,7 +1555,7 @@ async def container_exec_ws(
                     await asyncio.to_thread(stdin_write, msg.encode("utf-8"))
             except WebSocketDisconnect:
                 pass
-            except Exception:
+            except Exception:  # noqa: BLE001
                 logger.warning("exec input error for %s", container_id)
 
         task_client = asyncio.create_task(_forward_to_client())
@@ -1561,7 +1575,7 @@ async def container_exec_ws(
                     websocket.send_text("[session expired]"), timeout=5.0
                 )
                 await websocket.close(code=1000, reason="Session timeout")
-            except Exception:
+            except Exception:  # noqa: BLE001, S110
                 pass
         for t in pending:
             t.cancel()
@@ -1569,7 +1583,7 @@ async def container_exec_ws(
                 await t
     except WebSocketDisconnect:
         pass
-    except Exception:
+    except Exception:  # noqa: BLE001
         logger.error("exec session error for %s", container_id)
     finally:
         if exec_close_fn is not None:

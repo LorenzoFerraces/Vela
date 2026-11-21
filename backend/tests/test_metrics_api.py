@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from fastapi.testclient import TestClient
 
@@ -32,7 +32,7 @@ def _seed_metrics(
     async def _run() -> None:
         """Add and commit the seeded metric rows."""
         async with db_session_factory() as session:
-            now = datetime.now(timezone.utc)
+            now = datetime.now(UTC)
             for i in range(count):
                 session.add(
                     ContainerMetric(
@@ -72,7 +72,7 @@ def _seed_container(
             name=name,
             image="nginx:alpine",
             status=status,
-            created_at=datetime(2026, 4, 1, tzinfo=timezone.utc),
+            created_at=datetime(2026, 4, 1, tzinfo=UTC),
             ports=[],
             labels=labels,
             health=HealthStatus.NONE,

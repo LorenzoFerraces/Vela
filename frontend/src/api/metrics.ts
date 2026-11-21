@@ -10,20 +10,6 @@ export interface MetricPoint {
   network_tx_bytes: number
 }
 
-export interface MetricSummary {
-  bucket_start: string
-  cpu_avg: number
-  cpu_max: number
-  cpu_min: number
-  memory_usage_avg: number
-  memory_usage_max: number
-  memory_limit_avg: number
-  memory_percent_avg: number
-  memory_percent_max: number
-  network_rx_total: number
-  network_tx_total: number
-}
-
 export async function getMetricPoints(
   containerId: string,
   options: { hours?: number; limit?: number } = {}
@@ -32,17 +18,6 @@ export async function getMetricPoints(
   if (options.hours != null) params.set('hours', String(options.hours))
   if (options.limit != null) params.set('limit', String(options.limit))
   return apiGet<MetricPoint[]>(`/api/metrics?${params.toString()}`)
-}
-
-export async function getMetricSummary(
-  containerId: string,
-  hours: number = 24
-): Promise<MetricSummary[]> {
-  const params = new URLSearchParams({
-    container_id: containerId,
-    hours: String(hours),
-  })
-  return apiGet<MetricSummary[]>(`/api/metrics/summary?${params.toString()}`)
 }
 
 export interface ContainerUsageEntry {

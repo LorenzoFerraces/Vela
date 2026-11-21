@@ -47,14 +47,15 @@ from app.core.deploy.jobs import DeployJobRegistry, classify_deploy_error
 from app.core.exceptions import ProjectAccessDeniedError
 from app.core.projects.enums import can_write
 from app.core.projects.repository import get_personal_project_id, require_membership
+from app.core.stacks.deploy import deploy_stack
 from app.core.stacks.manifest_parser import parse_manifest
 from app.core.stacks.repo_analysis import analyze_repo_stack
-from app.core.stacks.deploy import deploy_stack
 from app.core.stacks.repository import (
     create_stack,
     delete_stack,
     get_stack,
     list_stacks,
+    require_stack_write_access,
     resolve_composition,
     update_stack,
 )
@@ -241,6 +242,7 @@ async def delete_user_stack(
     if stack is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Stack not found.")
 
+    await require_stack_write_access(session, stack, current_user.id)
     containers = await orchestrator.list()
     containers_by_name = {container.name: container for container in containers}
     for service in stack.services:
@@ -321,7 +323,7 @@ async def _run_stack_deploy_worker(
                     job_id, name, state
                 ),
             )
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001
         registry.complete_failure(job_id, classify_deploy_error(exc))
         return
 

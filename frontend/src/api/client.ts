@@ -31,6 +31,7 @@ export {
   fetchContainerLogs,
   getContainerStats,
   getDeploySourceSuggestions,
+  issueWsTicket,
   listContainers,
   openContainerExecWebSocket,
   openContainerLogWebSocket,
@@ -61,7 +62,6 @@ export {
   deleteDockerfileTemplate,
   createDockerfileTemplate,
   getImageAvailability,
-  getImageSuggestions,
   listDockerfileTemplates,
   updateDockerfileTemplate,
 } from './images'
@@ -133,7 +133,6 @@ export {
 
 export {
   getMetricPoints,
-  getMetricSummary,
   getUsageSummary,
 } from './metrics'
 
@@ -178,8 +177,6 @@ export type {
 export type {
   DockerfileTemplate,
   ImageAvailabilityResponse,
-  ImageSuggestion,
-  ImageSuggestionSource,
 } from './images'
 
 export type {
@@ -238,7 +235,6 @@ export type {
 export type {
   ContainerUsageEntry,
   MetricPoint,
-  MetricSummary,
   ProjectUsage,
   UsageSummary,
 } from './metrics'

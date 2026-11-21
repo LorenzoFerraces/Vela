@@ -6,8 +6,23 @@ http:
       headers:
         stsSeconds: 31536000
         stsIncludeSubdomains: true
+    vela-https-redirect:
+      redirectScheme:
+        scheme: https
+        permanent: true
   routers:
-    # Plain HTTP, unchanged from before TLS was added.
+    # Redirect the public host to HTTPS. Higher priority than the catch-all
+    # plain-HTTP router below. Host/certResolver come from env on the traefik
+    # container (Go templates — this is a dynamic file-provider config).
+    vela-redirect:
+      rule: 'Host(`{{ env "VELA_PUBLIC_HOST" }}`)'
+      service: vela-spa-svc
+      entryPoints:
+        - web
+      middlewares:
+        - vela-https-redirect
+      priority: 100
+    # Catch-all plain HTTP (local health checks, hosts other than the public one).
     vela-spa:
       rule: "PathPrefix(`/`)"
       service: vela-spa-svc
@@ -21,12 +36,12 @@ http:
       entryPoints:
         - websecure
       tls:
-        certResolver: letsencrypt
+        certResolver: '{{ env "VELA_TRAEFIK_ACME_RESOLVER" }}'
         # The rule has no Host matcher, so Traefik cannot infer which name to
-        # issue for. Comes from VELA_DOMAIN (passed to the traefik service in
-        # docker-compose.yml); must match VELA_FRONTEND_BASE_URL / OAuth redirect.
+        # issue for. Comes from VELA_PUBLIC_HOST (passed to the traefik service
+        # in docker-compose.yml); must match VELA_FRONTEND_BASE_URL / OAuth redirect.
         domains:
-          - main: '{{ env "VELA_DOMAIN" }}'
+          - main: '{{ env "VELA_PUBLIC_HOST" }}'
   services:
     vela-spa-svc:
       loadBalancer:

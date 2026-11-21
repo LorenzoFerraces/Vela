@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { useAuth } from '../auth/AuthContext'
 import { isAdmin } from '../auth/roles'
 import AuditPanel from './admin/AuditPanel'
@@ -9,8 +9,30 @@ type AdminTab = 'users' | 'audit'
 
 export default function AdminPage() {
   const { user } = useAuth()
-  const [activeTab, setActiveTab] = useState<AdminTab>('users')
+  const [searchParams, setSearchParams] = useSearchParams()
   const canViewAudit = isAdmin(user)
+  const activeTab: AdminTab = searchParams.get('tab') === 'audit' && canViewAudit ? 'audit' : 'users'
+  const tabs: AdminTab[] = canViewAudit ? ['users', 'audit'] : ['users']
+
+  function selectTab(tab: AdminTab) {
+    const next = new URLSearchParams(searchParams)
+    if (tab === 'users') {
+      next.delete('tab')
+    } else {
+      next.set('tab', 'audit')
+    }
+    setSearchParams(next, { replace: true })
+  }
+
+  function onTabKeyDown(event: React.KeyboardEvent<HTMLButtonElement>) {
+    if (event.key !== 'ArrowRight' && event.key !== 'ArrowLeft') return
+    event.preventDefault()
+    const index = tabs.indexOf(activeTab)
+    const delta = event.key === 'ArrowRight' ? 1 : -1
+    const next = tabs[(index + delta + tabs.length) % tabs.length]
+    selectTab(next)
+    document.getElementById(`admin-${next}-tab`)?.focus()
+  }
 
   return (
     <section className="admin-page">
@@ -22,22 +44,28 @@ export default function AdminPage() {
       <div className="admin-tabs" role="tablist" aria-label="Admin sections">
         <button
           type="button"
+          id="admin-users-tab"
           className={`admin-tabs__tab${activeTab === 'users' ? ' admin-tabs__tab--active' : ''}`}
           role="tab"
           aria-selected={activeTab === 'users'}
           aria-controls="admin-users-panel"
-          onClick={() => setActiveTab('users')}
+          tabIndex={activeTab === 'users' ? 0 : -1}
+          onClick={() => selectTab('users')}
+          onKeyDown={onTabKeyDown}
         >
           Users
         </button>
         {canViewAudit ? (
           <button
             type="button"
+            id="admin-audit-tab"
             className={`admin-tabs__tab${activeTab === 'audit' ? ' admin-tabs__tab--active' : ''}`}
             role="tab"
             aria-selected={activeTab === 'audit'}
             aria-controls="admin-audit-panel"
-            onClick={() => setActiveTab('audit')}
+            tabIndex={activeTab === 'audit' ? 0 : -1}
+            onClick={() => selectTab('audit')}
+            onKeyDown={onTabKeyDown}
           >
             Audit
           </button>
@@ -47,6 +75,7 @@ export default function AdminPage() {
       <div
         id="admin-users-panel"
         role="tabpanel"
+        aria-labelledby="admin-users-tab"
         hidden={activeTab !== 'users'}
       >
         {activeTab === 'users' ? <UsersPanel user={user} /> : null}
@@ -55,6 +84,7 @@ export default function AdminPage() {
         <div
           id="admin-audit-panel"
           role="tabpanel"
+          aria-labelledby="admin-audit-tab"
           hidden={activeTab !== 'audit'}
         >
           <AuditPanel active={activeTab === 'audit'} />

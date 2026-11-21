@@ -28,6 +28,7 @@ def test_ensure_admin_user_preserves_existing_account_state(
         """Deactivate the admin, then check ensure_admin_user preserves that state."""
         async with db_session_factory() as session:
             from sqlalchemy import select
+
             from app.db.models import User
 
             user = await session.scalar(select(User).where(User.email == "root@example.com"))

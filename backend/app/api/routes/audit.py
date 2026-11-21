@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query
@@ -22,8 +22,8 @@ async def get_audit_log(
     current_user: Annotated[User, Depends(get_current_user)],
     action: Annotated[str | None, Query(description="Filter by action")] = None,
     target_type: Annotated[str | None, Query(description="Filter by target type")] = None,
-    from_date: Annotated[datetime | None, Query(description="Filter from date (ISO 8601)")] = None,
-    to_date: Annotated[datetime | None, Query(description="Filter to date (ISO 8601)")] = None,
+    from_date: Annotated[date | None, Query(description="Filter from date (YYYY-MM-DD)")] = None,
+    to_date: Annotated[date | None, Query(description="Filter to date (YYYY-MM-DD)")] = None,
     limit: Annotated[int, Query(ge=1, le=200, description="Max entries to return")] = 50,
     offset: Annotated[int, Query(ge=0, description="Offset for pagination")] = 0,
 ) -> AuditLogListResponse:

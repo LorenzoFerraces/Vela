@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useState, memo } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { useCallback, useEffect, useRef, useState, memo } from 'react'
+import { useBlocker, useNavigate, useParams } from 'react-router-dom'
 import {
   createStack,
   formatApiError,
@@ -8,6 +8,7 @@ import {
   type StackServiceCreate,
 } from '../../api/client'
 import ConfirmDialog from '../../components/ConfirmDialog'
+import { Skeleton } from '../../components/Skeleton'
 import { ServiceEditForm, type ServiceFieldErrors } from './ServiceEditForm'
 import StackVisualizer from './StackVisualizer'
 import { newId } from '../../utils/uid'
@@ -15,6 +16,8 @@ import { newId } from '../../utils/uid'
 type Banner = { tone: 'ok' | 'err'; text: string } | null
 
 type StackServiceRow = StackServiceCreate & { uid: string }
+
+const EMPTY_SNAPSHOT = JSON.stringify({ stackName: '', services: [] })
 
 function graphServicesEqual(
   prev: StackServiceCreate[],
@@ -56,6 +59,54 @@ export default function StackBuilderPage() {
   const [saving, setSaving] = useState(false)
   const [serviceErrors, setServiceErrors] = useState<(ServiceFieldErrors | null)[]>([])
   const [removalPendingIndex, setRemovalPendingIndex] = useState<number | null>(null)
+  const [baseline, setBaseline] = useState(EMPTY_SNAPSHOT)
+  const [pendingNavigate, setPendingNavigate] = useState(false)
+  const highlightTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const currentSnapshot = JSON.stringify({ stackName, services })
+  const isDirty = currentSnapshot !== baseline
+
+  const blocker = useBlocker(({ currentLocation, nextLocation }) =>
+    isDirty && currentLocation.pathname !== nextLocation.pathname,
+  )
+
+  useEffect(() => {
+    if (blocker.state !== 'blocked') return
+    if (window.confirm('Discard unsaved stack changes?')) blocker.proceed()
+    else blocker.reset()
+  }, [blocker])
+
+  useEffect(() => {
+    function onBeforeUnload(event: BeforeUnloadEvent) {
+      if (!isDirty) return
+      event.preventDefault()
+    }
+    window.addEventListener('beforeunload', onBeforeUnload)
+    return () => window.removeEventListener('beforeunload', onBeforeUnload)
+  }, [isDirty])
+
+  useEffect(() => {
+    if (!pendingNavigate || isDirty) return
+    setPendingNavigate(false)
+    navigate('/stacks')
+  }, [pendingNavigate, isDirty, navigate])
+
+  useEffect(
+    () => () => {
+      if (highlightTimer.current !== null) clearTimeout(highlightTimer.current)
+    },
+    [],
+  )
+
+  function scheduleHighlight(index: number) {
+    if (highlightTimer.current !== null) clearTimeout(highlightTimer.current)
+    setHighlightIndex(index)
+    highlightTimer.current = setTimeout(() => {
+      setHighlightIndex(null)
+      highlightTimer.current = null
+    }, 2000)
+  }
+
   useEffect(() => {
     if (!editId) return
     let cancelled = false
@@ -63,24 +114,24 @@ export default function StackBuilderPage() {
       try {
         const stack = await getStack(editId)
         if (cancelled) return
+        const loadedServices = stack.services.map((s) => ({
+          service_name: s.service_name,
+          source_kind: s.source_kind,
+          source_ref: s.source_ref,
+          git_branch: s.git_branch,
+          container_port: s.container_port,
+          env_vars: s.env_vars,
+          command: s.command,
+          public_route: s.public_route,
+          depends_on: s.depends_on,
+          volumes: s.volumes,
+          scaling_policy: s.scaling_policy,
+          build_override: s.build_override ?? null,
+          uid: newId(),
+        }))
         setStackName(stack.name)
-        setServices(
-          stack.services.map((s) => ({
-            service_name: s.service_name,
-            source_kind: s.source_kind,
-            source_ref: s.source_ref,
-            git_branch: s.git_branch,
-            container_port: s.container_port,
-            env_vars: s.env_vars,
-            command: s.command,
-            public_route: s.public_route,
-            depends_on: s.depends_on,
-            volumes: s.volumes,
-            scaling_policy: s.scaling_policy,
-            build_override: s.build_override ?? null,
-            uid: newId(),
-          }))
-        )
+        setServices(loadedServices)
+        setBaseline(JSON.stringify({ stackName: stack.name, services: loadedServices }))
       } catch (err) {
         if (!cancelled) setBanner({ tone: 'err', text: formatApiError(err) })
       } finally {
@@ -181,8 +232,7 @@ export default function StackBuilderPage() {
     const newIndex = services.length
     setServices((prev) => [...prev, newService])
     setSelectedIndex(newIndex)
-    setHighlightIndex(newIndex)
-    setTimeout(() => setHighlightIndex(null), 2000)
+    scheduleHighlight(newIndex)
     setServiceErrors((prev) => [...prev, null])
   }
 
@@ -245,7 +295,8 @@ export default function StackBuilderPage() {
           services: servicePayload,
         })
       }
-      navigate('/stacks')
+      setBaseline(currentSnapshot)
+      setPendingNavigate(true)
     } catch (err) {
       setBanner({ tone: 'err', text: formatApiError(err) })
     } finally {
@@ -275,7 +326,14 @@ export default function StackBuilderPage() {
         Define services and their dependencies, then deploy as a group.
       </p>
 
-      <form className="containers-form" onSubmit={(e) => e.preventDefault()}>
+      <form
+        id="stack-builder-form"
+        className="containers-form"
+        onSubmit={(e) => {
+          e.preventDefault()
+          void handleSave()
+        }}
+      >
         <label
           className="containers-form__label"
           htmlFor="stack-name-input"
@@ -306,7 +364,7 @@ export default function StackBuilderPage() {
       ) : null}
 
       {listLoading ? (
-        <p className="containers-muted">Loading…</p>
+        <Skeleton className="skeleton--hint-line" />
       ) : (
         <div className="stacks-builder__split">
           <div className="stacks-builder__form-col">
@@ -364,8 +422,7 @@ export default function StackBuilderPage() {
                       )
                       if (nextIndex === -1) return
                       setSelectedIndex(nextIndex)
-                      setHighlightIndex(nextIndex)
-                      window.setTimeout(() => setHighlightIndex(null), 2000)
+                      scheduleHighlight(nextIndex)
                     }}
                   />
                 )}
@@ -381,9 +438,9 @@ export default function StackBuilderPage() {
                 + Add Service
               </button>
               <button
-                type="button"
+                type="submit"
+                form="stack-builder-form"
                 className="btn btn--primary"
-                onClick={handleSave}
                 disabled={saving}
               >
                 {saving ? 'Saving…' : 'Save Stack'}

@@ -93,66 +93,87 @@ export function ContainerLogPanel({
     setStreamStatus('connecting')
     setErrorText(null)
 
-    let websocket: WebSocket
-    try {
-      websocket = openContainerLogWebSocket(containerId, {
-        tail: 400,
-        follow: true,
-      })
-    } catch (error) {
-      queueMicrotask(() => {
-        setStreamStatus('err')
-        setErrorText(formatApiError(error))
-      })
-      return
-    }
-    websocket.binaryType = 'arraybuffer'
-    websocket.onopen = () => {
-      queueMicrotask(() => {
-        setStreamStatus('live')
-      })
-    }
-    websocket.onmessage = (event) => {
-      const payload = event.data
-      const chunk =
-        payload instanceof ArrayBuffer
-          ? new Uint8Array(payload)
-          : typeof payload === 'string'
-             ? textEncoder.encode(payload)
-            : new Uint8Array()
-      if (chunk.length === 0) {
+    let disposed = false
+    let websocket: WebSocket | null = null
+
+    void (async () => {
+      let socket: WebSocket
+      try {
+        socket = await openContainerLogWebSocket(containerId, {
+          tail: 400,
+          follow: true,
+        })
+      } catch (error) {
+        if (!disposed) {
+          queueMicrotask(() => {
+            if (!disposed) {
+              setStreamStatus('err')
+              setErrorText(formatApiError(error))
+            }
+          })
+        }
         return
       }
-      const piece = decoderRef.current.decode(chunk, { stream: true })
-      if (piece === '') {
+      if (disposed) {
+        socket.close()
         return
       }
-      pendingRef.current = appendWithLimit(pendingRef.current, piece)
-      scheduleFlush()
-    }
-    websocket.onerror = () => {
-      queueMicrotask(() => {
-        setErrorText('Log stream connection failed.')
-        setStreamStatus('err')
-      })
-    }
-    websocket.onclose = () => {
-      queueMicrotask(() => {
-        flushPending()
-        setStreamStatus((previous) => (previous === 'err' ? previous : 'ended'))
-      })
-    }
+      websocket = socket
+      socket.binaryType = 'arraybuffer'
+      socket.onopen = () => {
+        queueMicrotask(() => {
+          if (!disposed) setStreamStatus('live')
+        })
+      }
+      socket.onmessage = (event) => {
+        if (disposed) return
+        const payload = event.data
+        const chunk =
+          payload instanceof ArrayBuffer
+            ? new Uint8Array(payload)
+            : typeof payload === 'string'
+                ? textEncoder.encode(payload)
+               : new Uint8Array()
+        if (chunk.length === 0) {
+          return
+        }
+        const piece = decoderRef.current.decode(chunk, { stream: true })
+        if (piece === '') {
+          return
+        }
+        pendingRef.current = appendWithLimit(pendingRef.current, piece)
+        scheduleFlush()
+      }
+      socket.onerror = () => {
+        queueMicrotask(() => {
+          if (disposed) return
+          setErrorText('Log stream connection failed.')
+          setStreamStatus('err')
+        })
+      }
+      socket.onclose = () => {
+        queueMicrotask(() => {
+          if (disposed) return
+          flushPending()
+          setStreamStatus((previous) => (previous === 'err' ? previous : 'ended'))
+        })
+      }
+    })()
+
     return () => {
-      websocket.onopen = null
-      websocket.onmessage = null
-      websocket.onerror = null
-      websocket.onclose = null
+      disposed = true
+      if (websocket) {
+        websocket.onopen = null
+        websocket.onmessage = null
+        websocket.onerror = null
+        websocket.onclose = null
+        websocket.close()
+      }
       if (frameRef.current !== null) {
         cancelAnimationFrame(frameRef.current)
         frameRef.current = null
       }
       flushPending()
-      websocket.close()
     }
   }, [containerId, isActive, isRunning, flushPending, scheduleFlush])
 

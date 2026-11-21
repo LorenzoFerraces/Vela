@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from app.core.notifications.container_monitor import ContainerStateSnapshot
 from app.core.enums import ContainerStatus, HealthStatus
+from app.core.notifications.container_monitor import ContainerStateSnapshot
 
 
 def test_detect_change_running_to_dead_is_failure() -> None:

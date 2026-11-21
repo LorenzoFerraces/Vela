@@ -17,6 +17,7 @@ import LlmProviderCard from './settings/LlmProviderCard'
 import ProfileSection from './settings/ProfileSection'
 import { EmailNotificationSettingsCard } from '../components/EmailNotificationSettings'
 import ConfirmDialog from '../components/ConfirmDialog'
+import { Skeleton } from '../components/Skeleton'
 
 type StatusState =
   | { kind: 'loading' }
@@ -191,7 +192,7 @@ export default function SettingsPage() {
           </div>
         </div>
         {state.kind === 'loading' ? (
-          <p className="settings-card__muted">Loading GitHub status…</p>
+          <Skeleton className="skeleton--hint-line" />
         ) : state.kind === 'error' ? (
           <p className="settings-banner settings-banner--err" role="alert">
             {state.detail}
@@ -422,7 +423,7 @@ function ConnectedGithubCard({
           onClick={onDisconnect}
           disabled={busy}
         >
-          {busy ? 'Working…' : 'Disconnect'}
+          {busy ? 'Disconnecting…' : 'Disconnect'}
         </button>
       </div>
     </div>

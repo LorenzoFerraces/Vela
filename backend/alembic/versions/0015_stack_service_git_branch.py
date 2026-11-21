@@ -7,11 +7,11 @@ Create Date: 2026-08-11
 """
 from __future__ import annotations
 
-from typing import Sequence
+from collections.abc import Sequence
 
-from alembic import op
 import sqlalchemy as sa
 
+from alembic import op
 
 revision: str = "0015_stack_service_git_branch"
 down_revision: str | Sequence[str] | None = "ea51f2f64578"

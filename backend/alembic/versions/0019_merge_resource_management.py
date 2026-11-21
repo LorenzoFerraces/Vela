@@ -9,7 +9,6 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
-
 revision: str = "0019_merge_resource_management"
 down_revision: str | Sequence[str] | None = (
     "0018_project_storage_quota",
@@ -21,9 +20,7 @@ depends_on: str | Sequence[str] | None = None
 
 def upgrade() -> None:
     """Merge the resource-management heads; no schema change."""
-    pass
 
 
 def downgrade() -> None:
     """Merge point; nothing to undo."""
-    pass

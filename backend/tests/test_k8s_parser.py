@@ -80,8 +80,7 @@ metadata:
 
 
 def test_parse_k8s_workloads() -> None:
-    """Deployments and StatefulSets become image services with env and ports."""
-    services, warnings = parse_k8s(MULTI_DOC_YAML)
+    services, _warnings = parse_k8s(MULTI_DOC_YAML)
     by_name = {s.service_name: s for s in services}
 
     assert set(by_name) == {"web", "cache"}
@@ -101,7 +100,6 @@ def test_parse_k8s_workloads() -> None:
 
 
 def test_parse_k8s_merges_config_map_env_from_env_from() -> None:
-    """envFrom configMapRef merges that ConfigMap's data into the workload."""
     services, _ = parse_k8s(MULTI_DOC_YAML)
     web = next(s for s in services if s.service_name == "web")
     assert web.env_vars["LOG_LEVEL"] == "debug"
@@ -111,7 +109,6 @@ def test_parse_k8s_merges_config_map_env_from_env_from() -> None:
 
 
 def test_parse_k8s_warns_on_secret_and_orphan_service() -> None:
-    """Secret kinds and Services without workloads produce warnings."""
     _, warnings = parse_k8s(MULTI_DOC_YAML)
     assert any("Secret" in w and "web-secret" in w for w in warnings)
     orphan = "apiVersion: v1\nkind: Service\nmetadata:\n  name: lonely\n"
@@ -120,7 +117,6 @@ def test_parse_k8s_warns_on_secret_and_orphan_service() -> None:
 
 
 def test_parse_k8s_secret_ref_in_env_from_warns_and_skips() -> None:
-    """secretRef in envFrom is skipped with a warning, leaving env empty."""
     yaml_content = """
 apiVersion: apps/v1
 kind: Deployment
@@ -142,7 +138,6 @@ spec:
 
 
 def test_parse_k8s_volume_mounts_warn() -> None:
-    """volumeMounts are unsupported: the service stays and a warning is added."""
     yaml_content = """
 apiVersion: apps/v1
 kind: Deployment
@@ -164,7 +159,6 @@ spec:
 
 
 def test_parse_k8s_sanitizes_and_deduplicates_names() -> None:
-    """Names are sanitized to lowercase and duplicates get a numeric suffix."""
     yaml_content = """
 apiVersion: apps/v1
 kind: Deployment
@@ -195,7 +189,6 @@ spec:
 
 
 def test_parse_k8s_no_workloads_returns_empty() -> None:
-    """A manifest with no workloads returns no services and no warnings."""
     yaml_content = """
 apiVersion: v1
 kind: ConfigMap
@@ -210,14 +203,12 @@ data:
 
 
 def test_parse_k8s_invalid_yaml_returns_warning() -> None:
-    """Invalid YAML returns no services and an Invalid YAML warning."""
     services, warnings = parse_k8s("not: [valid: yaml")
     assert services == []
     assert any("Invalid YAML" in w for w in warnings)
 
 
 def test_parse_k8s_missing_image_defaults_to_nginx_with_warning() -> None:
-    """A container without an image becomes nginx:alpine with a warning."""
     yaml_content = """
 apiVersion: apps/v1
 kind: Deployment

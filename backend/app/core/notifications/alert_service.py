@@ -9,7 +9,7 @@ import hashlib
 import logging
 import uuid
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Literal
 
 from sqlalchemy import and_, desc, select
@@ -76,7 +76,7 @@ class AlertService:
     ) -> bool:
         """Check if a successful alert was sent recently (dedup within time window)."""
         alert_hash = self._hash_event(user_id, container_id, event_type)
-        cutoff_time = datetime.now(timezone.utc) - timedelta(minutes=DEDUP_WINDOW_MINUTES)
+        cutoff_time = datetime.now(UTC) - timedelta(minutes=DEDUP_WINDOW_MINUTES)
 
         stmt = select(AlertHistory).where(
             and_(
@@ -134,7 +134,7 @@ class AlertService:
                 to=effective.email,
                 container_name=container_name,
                 event_type=event_type,
-                timestamp=datetime.now(timezone.utc),
+                timestamp=datetime.now(UTC),
                 details=details,
                 container_logs=container_logs,
             )
@@ -149,7 +149,7 @@ class AlertService:
                 container_id=container_id,
                 event_type=event_type,
                 alert_hash=alert_hash,
-                sent_at=datetime.now(timezone.utc),
+                sent_at=datetime.now(UTC),
                 email_sent_to=effective.email,
                 status="sent",
             )
@@ -196,7 +196,7 @@ class AlertService:
                 to=effective.email,
                 container_name=project_name,
                 event_type="storage",
-                timestamp=datetime.now(timezone.utc),
+                timestamp=datetime.now(UTC),
                 details=(
                     f"Team {project_name} is over its storage quota: "
                     f"{format_gib(used_bytes)} used of {format_gib(quota_bytes)}. "
@@ -213,7 +213,7 @@ class AlertService:
                     container_id=None,
                     event_type="storage",
                     alert_hash=self._hash_event(user_id, event_key, "storage"),
-                    sent_at=datetime.now(timezone.utc),
+                    sent_at=datetime.now(UTC),
                     email_sent_to=effective.email,
                     status="sent",
                 )

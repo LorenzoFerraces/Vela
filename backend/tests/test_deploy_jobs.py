@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import time
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, cast
 
@@ -35,13 +35,11 @@ USER_ID = uuid.uuid4()
 
 
 def _registry() -> DeployJobRegistry:
-    """Return a fresh in-memory deploy job registry."""
     return DeployJobRegistry()
 
 
-def _job(registry: DeployJobRegistry, **overrides: object):
-    """Create a job with standard container defaults plus overrides."""
-    params: dict[str, object] = {
+def _job(registry: DeployJobRegistry, **overrides: Any):
+    params: dict[str, Any] = {
         "kind": "container",
         "project_id": PROJECT_ID,
         "user_id": USER_ID,
@@ -53,7 +51,6 @@ def _job(registry: DeployJobRegistry, **overrides: object):
 
 
 def test_create_defaults_and_active_scope() -> None:
-    """New jobs start in_progress/queued and only list for their project."""
     registry = _registry()
     job = _job(registry)
     assert job.status == "in_progress"
@@ -64,7 +61,6 @@ def test_create_defaults_and_active_scope() -> None:
 
 
 def test_stack_job_service_states_in_order() -> None:
-    """Stack service states update per service and persist through failure."""
     registry = _registry()
     job = _job(registry, kind="stack", services=["web", "api"])
     assert [(s.name, s.state) for s in job.services] == [
@@ -88,11 +84,10 @@ def test_stack_job_service_states_in_order() -> None:
 
 
 def test_terminal_jobs_swept_after_ttl() -> None:
-    """Terminal jobs are dropped from the registry after the TTL expires."""
     registry = _registry()
     job = _job(registry)
     registry.complete_failure(job.job_id, {"code": "deploy_failed", "detail": "boom"})
-    job.finished_at = datetime.now(timezone.utc) - timedelta(
+    job.finished_at = datetime.now(UTC) - timedelta(
         seconds=TERMINAL_JOB_TTL + 1
     )
     assert registry.active(project_ids={PROJECT_ID}) == []
@@ -100,7 +95,6 @@ def test_terminal_jobs_swept_after_ttl() -> None:
 
 
 def test_terminal_transition_is_idempotent() -> None:
-    """The first terminal transition wins; later ones do not overwrite it."""
     registry = _registry()
     job = _job(registry)
     registry.complete_failure(job.job_id, {"code": "deploy_failed", "detail": "first"})
@@ -113,7 +107,6 @@ def test_terminal_transition_is_idempotent() -> None:
 
 
 def test_classify_deploy_error_known_types() -> None:
-    """Each known deploy exception maps to its error payload shape."""
     override = classify_deploy_error(NeedsBuildOverrideError("detection failed"))
     assert override == {"code": "needs_build_override", "detail": "detection failed"}
 
@@ -138,15 +131,12 @@ def test_classify_deploy_error_known_types() -> None:
 
 
 def test_spawn_runs_coroutine_and_cancel_all_stops_workers() -> None:
-    """spawn runs the job coroutine and cancel_all stops in-flight workers."""
     async def main() -> None:
-        """Run the spawn-then-cancel flow inside an event loop."""
         registry = _registry()
         job = _job(registry)
         started = asyncio.Event()
 
         async def worker() -> None:
-            """Signal that it started, then sleep until cancelled."""
             started.set()
             await asyncio.sleep(5)
 
@@ -160,7 +150,6 @@ def test_spawn_runs_coroutine_and_cancel_all_stops_workers() -> None:
 def _create_job(
     api_client: TestClient, seeded_user: User, **overrides: Any
 ):
-    """Create a deploy job on the app registry for the seeded user."""
     fastapi_app = cast(FastAPI, api_client.app)
     project_id = seeded_user.personal_project_id
     assert project_id is not None
@@ -176,14 +165,12 @@ def _create_job(
 
 
 def test_active_deploys_requires_auth(anonymous_client: TestClient) -> None:
-    """Unauthenticated callers get 401 from /api/deploys/active."""
     assert anonymous_client.get("/api/deploys/active").status_code == 401
 
 
 def test_active_deploys_lists_in_progress_job(
     api_client: TestClient, seeded_user: User
 ) -> None:
-    """The active list serializes a running job's full shape."""
     job = _create_job(api_client, seeded_user)
     listed = api_client.get("/api/deploys/active")
     assert listed.status_code == 200
@@ -203,7 +190,6 @@ def test_active_deploys_lists_in_progress_job(
 def test_active_deploys_keeps_terminal_job_visible(
     api_client: TestClient, seeded_user: User
 ) -> None:
-    """Just-failed jobs stay listed with their status and error."""
     job = _create_job(api_client, seeded_user)
     cast(FastAPI, api_client.app).state.deploy_jobs.complete_failure(
         job.job_id, {"code": "deploy_failed", "detail": "boom"}
@@ -219,7 +205,6 @@ def test_active_deploys_scoped_to_caller_projects(
     other_user_client: TestClient,
     seeded_user: User,
 ) -> None:
-    """Other users do not see this caller's deploy jobs."""
     job = _create_job(api_client, seeded_user)
     mine = {
         entry["job_id"] for entry in api_client.get("/api/deploys/active").json()
@@ -233,7 +218,6 @@ def test_active_deploys_scoped_to_caller_projects(
 
 
 def test_active_deploys_unknown_project_404(api_client: TestClient) -> None:
-    """Active list filtered to an unknown project returns 404."""
     response = api_client.get(f"/api/deploys/active?project_id={uuid.uuid4()}")
     assert response.status_code == 404
 
@@ -241,7 +225,6 @@ def test_active_deploys_unknown_project_404(api_client: TestClient) -> None:
 def test_active_deploys_echoes_stack_services(
     api_client: TestClient, seeded_user: User
 ) -> None:
-    """Stack jobs echo their services with per-service state."""
     job = _create_job(
         api_client, seeded_user, kind="stack", name="my-stack", services=["web", "api"]
     )
@@ -255,7 +238,6 @@ def test_active_deploys_echoes_stack_services(
 
 
 def _create_template(api_client: TestClient) -> str:
-    """Create a Dockerfile template through the API and return its id."""
     response = api_client.post(
         "/api/dockerfiles/",
         json={"name": f"tpl-{uuid.uuid4().hex[:8]}", "contents": "FROM nginx:alpine\n"},
@@ -265,7 +247,6 @@ def _create_template(api_client: TestClient) -> str:
 
 
 def _submit_run(api_client: TestClient, json_body: dict[str, Any]):
-    """POST /api/containers/run with the given body."""
     return api_client.post("/api/containers/run", json=json_body)
 
 
@@ -298,7 +279,6 @@ def test_run_returns_202_and_job_completes_with_run_response_shape(
     fake_orchestrator: FakeContainerOrchestrator,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Run returns 202 and the job completes with a run-shaped result."""
     monkeypatch.setenv("VELA_PUBLIC_ROUTE_DOMAIN", "apps.example.com")
     accepted = _submit_run(
         api_client,
@@ -329,7 +309,6 @@ def test_run_returns_202_and_job_completes_with_run_response_shape(
 def test_run_job_persists_deployment_record(
     api_client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A finished run job persists a deployment record with redacted env."""
     monkeypatch.setenv("VELA_PUBLIC_ROUTE_DOMAIN", "apps.example.com")
     accepted = _submit_run(
         api_client,
@@ -348,9 +327,7 @@ def test_run_job_error_contract_build_failure(
     fake_orchestrator: FakeContainerOrchestrator,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Build failures surface as a build_failed job error with logs."""
     async def failing_build(self, dockerfile_contents: str, *, tag: str):
-        """Fake builder that always raises ImageBuildError."""
         _ = self, dockerfile_contents, tag
         raise ImageBuildError("boom during build", build_log="step 1\nfailed")
 
@@ -375,11 +352,9 @@ def test_run_job_error_contract_build_failure(
 def test_run_job_error_contract_needs_build_override(
     api_client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """An empty clone surfaces a needs_build_override job error."""
     async def empty_clone(
         *, url: str, branch: str, dest: Path, access_token: str | None = None
     ) -> None:
-        """Fake git clone that leaves the destination directory empty."""
         _ = url, branch, access_token
         dest.mkdir(parents=True, exist_ok=True)
 
@@ -399,7 +374,6 @@ def test_run_job_error_contract_needs_build_override(
 def test_run_sync_400_stays_sync_for_missing_public_route_domain(
     api_client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A missing route domain fails synchronously with 400."""
     monkeypatch.delenv("VELA_PUBLIC_ROUTE_DOMAIN", raising=False)
     response = _submit_run(
         api_client, {"source": "nginx:alpine", "public_route": True}
@@ -409,7 +383,6 @@ def test_run_sync_400_stays_sync_for_missing_public_route_domain(
 
 
 def test_run_sync_422_stays_sync_for_bad_payload(api_client: TestClient) -> None:
-    """An invalid run payload fails synchronously with 422."""
     assert (
         _submit_run(
             api_client,
@@ -424,7 +397,6 @@ def test_run_sync_422_stays_sync_for_bad_payload(api_client: TestClient) -> None
 
 
 def _create_stack(api_client: TestClient, name: str, services: list[dict[str, Any]]) -> str:
-    """Create a stack through the API and return its id."""
     created = api_client.post(
         "/api/stacks/", json={"name": name, "services": services}
     )
@@ -433,7 +405,6 @@ def _create_stack(api_client: TestClient, name: str, services: list[dict[str, An
 
 
 def _image_service(name: str, ref: str, **extra: Any) -> dict[str, Any]:
-    """Build an image-source stack service dict with overrides."""
     service = {
         "service_name": name,
         "source_kind": "image",
@@ -449,7 +420,6 @@ def _image_service(name: str, ref: str, **extra: Any) -> dict[str, Any]:
 def test_stack_deploy_returns_202_and_completes(
     api_client: TestClient, fake_orchestrator: FakeContainerOrchestrator
 ) -> None:
-    """Stack deploy returns 202 and succeeds with containers and network."""
     stack_id = _create_stack(
         api_client, "jobs-stack", [_image_service("web", "nginx:alpine")]
     )
@@ -480,7 +450,6 @@ def test_stack_deploy_persist_survives_teardown_rollback(
     db_session_factory: async_sessionmaker[AsyncSession],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Persisted records survive a competing rollback racing the commit."""
     # Force the shared-connection hazard deterministically: the first
     # commit that stages DeploymentRecords gets a competing ROLLBACK on
     # the shared in-memory connection between its flush and COMMIT — the
@@ -489,7 +458,6 @@ def test_stack_deploy_persist_survives_teardown_rollback(
     original_commit = AsyncSession.commit
 
     async def racy_commit(self: AsyncSession) -> None:
-        """Interleave a competing ROLLBACK when staging deployment records."""
         nonlocal raced
         if not raced and any(
             isinstance(obj, DeploymentRecord) for obj in self.sync_session.new
@@ -527,7 +495,6 @@ def test_stack_deploy_persist_commit_failure_never_fails_job(
     api_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A failed persist commit is retried without failing the job."""
     # The commit staging DeploymentRecords can fail mid-flush (e.g. an
     # IntegrityError from a concurrent writer on the shared test
     # connection). The persist retry must absorb it, retry, and never
@@ -543,7 +510,6 @@ def test_stack_deploy_persist_commit_failure_never_fails_job(
     original_flush = Session.flush
 
     def failing_flush(self: Session, *args: Any, **kwargs: Any) -> None:
-        """Raise one IntegrityError when deployment records are first flushed."""
         nonlocal raised
         if not raised and any(
             isinstance(obj, DeploymentRecord) for obj in self.new
@@ -586,7 +552,6 @@ def test_stack_deploy_scaling_policy_persist_lands_one_record_per_container(
     api_client: TestClient,
     db_session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
-    """Intermediate policy commits do not duplicate deployment records."""
     # upsert_policy commits the worker's shared session while the
     # service's DeploymentRecord is already staged, so the row lands via
     # that intermediate commit. The terminal persist must treat rows
@@ -615,7 +580,6 @@ def test_stack_deploy_scaling_policy_persist_lands_one_record_per_container(
     ]
 
     async def count_rows() -> dict[str, int]:
-        """Count persisted DeploymentRecord rows per container id."""
         async with db_session_factory() as session:
             rows = await session.execute(
                 select(DeploymentRecord.container_id).where(
@@ -636,7 +600,6 @@ def test_stack_deploy_scaling_policy_persist_lands_one_record_per_container(
 def test_stack_deploy_partial_failure_reports_failed_service(
     api_client: TestClient, fake_orchestrator: FakeContainerOrchestrator
 ) -> None:
-    """A failed service marks the job failed and removes the stack network."""
     fake_orchestrator.fail_deploy_for_image("python:3.12-slim")
     stack_id = _create_stack(
         api_client,
@@ -666,11 +629,9 @@ def test_stack_deploy_partial_failure_reports_failed_service(
 def test_stack_deploy_needs_build_override_job_error(
     api_client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A git service needing build override fails the stack job with its code."""
     async def empty_clone(
         *, url: str, branch: str, dest: Path, access_token: str | None = None
     ) -> None:
-        """Fake git clone that leaves the destination directory empty."""
         _ = url, branch, access_token
         dest.mkdir(parents=True, exist_ok=True)
 
@@ -704,7 +665,6 @@ def test_stack_deploy_needs_build_override_job_error(
 def test_stack_deploy_viewer_still_404_sync(
     api_client: TestClient, seeded_user: User
 ) -> None:
-    """Deploying someone else's stack returns a synchronous 404."""
     # ownership check happens before the job exists (covered fully in
     # test_stack_permissions.py); here only the sync 404 path matters.
     assert api_client.post(f"/api/stacks/{uuid.uuid4()}/deploy").status_code == 404

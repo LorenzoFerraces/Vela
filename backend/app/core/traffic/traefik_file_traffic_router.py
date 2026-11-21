@@ -46,8 +46,9 @@ def _host_rule(host: str) -> str:
 
 
 def _path_rule(path_prefix: str) -> str:
-    escaped = path_prefix.replace("\\", "\\\\").replace("'", "\\'")
-    return f"PathPrefix(`{escaped}`)"
+    if "`" in path_prefix or "\\" in path_prefix:
+        raise RouteConfigurationError("path_prefix contains invalid characters")
+    return f"PathPrefix(`{path_prefix}`)"
 
 
 def _build_rule(spec: RouteSpec) -> str:

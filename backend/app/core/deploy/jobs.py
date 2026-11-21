@@ -12,9 +12,10 @@ from __future__ import annotations
 
 import asyncio
 import uuid
+from collections.abc import Coroutine
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
-from typing import Any, Coroutine, Literal
+from datetime import UTC, datetime, timedelta
+from typing import Any, Literal
 
 from app.core.exceptions import (
     ImageBuildError,
@@ -61,7 +62,6 @@ class DeployServiceProgress:
 
 @dataclass
 class DeployJob:
-    """Status snapshot for one async deploy job."""
     kind: DeployJobKind
     project_id: uuid.UUID
     user_id: uuid.UUID
@@ -75,7 +75,7 @@ class DeployJob:
     error: dict[str, Any] | None = None
     result: dict[str, Any] | None = None
     created_at: datetime = field(
-        default_factory=lambda: datetime.now(timezone.utc)
+        default_factory=lambda: datetime.now(UTC)
     )
     finished_at: datetime | None = None
 
@@ -84,7 +84,6 @@ class DeployJobRegistry:
     """Deploy job store and detached-worker task holder (event-loop only)."""
 
     def __init__(self) -> None:
-        """Start with no jobs and no worker tasks."""
         self._jobs: dict[str, DeployJob] = {}
         self._tasks: dict[str, asyncio.Task[None]] = {}
 
@@ -98,7 +97,6 @@ class DeployJobRegistry:
         source_label: str = "",
         services: list[str] | None = None,
     ) -> DeployJob:
-        """Register a new in-progress job and return it."""
         job = DeployJob(
             kind=kind,
             project_id=project_id,
@@ -114,13 +112,11 @@ class DeployJobRegistry:
         return job
 
     def get(self, job_id: str) -> DeployJob | None:
-        """Return the job for this id, or None."""
         return self._jobs.get(job_id)
 
     def set_phase(
         self, job_id: str, phase: str, phase_detail: str | None = None
     ) -> None:
-        """Update a job's phase and optional detail."""
         job = self._jobs.get(job_id)
         if job is None:
             return
@@ -128,7 +124,6 @@ class DeployJobRegistry:
         job.phase_detail = phase_detail
 
     def set_services(self, job_id: str, names: list[str]) -> None:
-        """Replace a job's service progress list."""
         job = self._jobs.get(job_id)
         if job is None:
             return
@@ -137,7 +132,6 @@ class DeployJobRegistry:
     def set_service_state(
         self, job_id: str, service_name: str, state: str
     ) -> None:
-        """Set the state of one service in a job."""
         job = self._jobs.get(job_id)
         if job is None:
             return
@@ -147,22 +141,20 @@ class DeployJobRegistry:
                 return
 
     def complete_success(self, job_id: str, result: dict[str, Any]) -> None:
-        """Mark an in-progress job succeeded with its result."""
         job = self._jobs.get(job_id)
         if job is None or job.status != "in_progress":
             return
         job.status = "succeeded"
         job.result = result
-        job.finished_at = datetime.now(timezone.utc)
+        job.finished_at = datetime.now(UTC)
 
     def complete_failure(self, job_id: str, error: dict[str, Any]) -> None:
-        """Mark an in-progress job failed with its error."""
         job = self._jobs.get(job_id)
         if job is None or job.status != "in_progress":
             return
         job.status = "failed"
         job.error = error
-        job.finished_at = datetime.now(timezone.utc)
+        job.finished_at = datetime.now(UTC)
 
     def active(self, *, project_ids: set[uuid.UUID]) -> list[DeployJob]:
         """Visible jobs for the given projects, sweeping expired terminals."""
@@ -186,8 +178,7 @@ class DeployJobRegistry:
         self._tasks.clear()
 
     def _sweep(self) -> None:
-        """Drop terminal jobs older than the TTL."""
-        cutoff = datetime.now(timezone.utc) - timedelta(
+        cutoff = datetime.now(UTC) - timedelta(
             seconds=TERMINAL_JOB_TTL
         )
         expired = [

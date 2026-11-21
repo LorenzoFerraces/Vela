@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from typing import Any
 
 import pytest
 
@@ -12,7 +13,7 @@ from app.core.git.dockerfile_templates import dockerfile_contents_for
 from app.core.models import BuildOverride, ProjectInfo
 
 
-def _info(language: SupportedLanguage, **overrides: object) -> ProjectInfo:
+def _info(language: SupportedLanguage, **overrides: Any) -> ProjectInfo:
     return ProjectInfo(language=language, **overrides)
 
 

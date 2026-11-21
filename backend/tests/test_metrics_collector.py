@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from sqlalchemy import select
@@ -18,8 +18,8 @@ from app.core.enums import ContainerStatus, HealthStatus
 from app.core.models import ContainerInfo
 from app.core.monitoring.metrics_collector import (
     _positive_int_setting,
-    collect_and_store_once,
     cleanup_expired_metrics,
+    collect_and_store_once,
 )
 from app.db.models import ContainerMetric
 
@@ -44,7 +44,7 @@ def seeded_orchestrator(test_user_id: uuid.UUID) -> FakeContainerOrchestrator:
             name="metrics-test",
             image="nginx:alpine",
             status=ContainerStatus.RUNNING,
-            created_at=datetime(2026, 4, 1, tzinfo=timezone.utc),
+            created_at=datetime(2026, 4, 1, tzinfo=UTC),
             ports=[],
             labels=labels,
             health=HealthStatus.NONE,
@@ -85,7 +85,7 @@ async def test_collect_and_store_once_skips_non_vela_containers(
             name="external",
             image="nginx:alpine",
             status=ContainerStatus.RUNNING,
-            created_at=datetime(2026, 4, 1, tzinfo=timezone.utc),
+            created_at=datetime(2026, 4, 1, tzinfo=UTC),
             ports=[],
             labels={},
             health=HealthStatus.NONE,
@@ -105,7 +105,7 @@ async def test_cleanup_expired_metrics_removes_old_rows(
 ) -> None:
     """Cleanup drops rows past retention and keeps recent ones."""
     async with db_session_factory() as session:
-        old_ts = datetime.now(timezone.utc) - timedelta(days=60)
+        old_ts = datetime.now(UTC) - timedelta(days=60)
         session.add(
             ContainerMetric(
                 container_id="cid-old",
@@ -121,7 +121,7 @@ async def test_cleanup_expired_metrics_removes_old_rows(
         session.add(
             ContainerMetric(
                 container_id="cid-recent",
-                timestamp=datetime.now(timezone.utc),
+                timestamp=datetime.now(UTC),
                 cpu_percent=20.0,
                 memory_usage_bytes=2048,
                 memory_limit_bytes=4096,

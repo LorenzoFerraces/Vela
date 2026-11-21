@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import base64
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -23,7 +23,7 @@ def test_format_alert_email() -> None:
         to="user@example.com",
         container_name="my-app",
         event_type="stop",
-        timestamp=datetime(2026, 6, 1, 12, 0, 0, tzinfo=timezone.utc),
+        timestamp=datetime(2026, 6, 1, 12, 0, 0, tzinfo=UTC),
         details="Container status: stopped",
     )
     subject, body = format_alert_email(alert)
@@ -38,7 +38,7 @@ async def test_brevo_provider_send_success() -> None:
         to="user@example.com",
         container_name="my-app",
         event_type="failure",
-        timestamp=datetime.now(timezone.utc),
+        timestamp=datetime.now(UTC),
     )
     mock_client = MagicMock()
     mock_client.transactional_emails.send_transac_email = AsyncMock(
@@ -72,7 +72,7 @@ async def test_brevo_provider_send_with_log_attachment() -> None:
         to="user@example.com",
         container_name="my-app",
         event_type="failure",
-        timestamp=datetime.now(timezone.utc),
+        timestamp=datetime.now(UTC),
         container_logs="error: process exited\n",
     )
     mock_client = MagicMock()
@@ -113,7 +113,7 @@ async def test_brevo_provider_send_api_error() -> None:
         to="user@example.com",
         container_name="my-app",
         event_type="stop",
-        timestamp=datetime.now(timezone.utc),
+        timestamp=datetime.now(UTC),
     )
 
     result = await provider.send_alert(alert)
