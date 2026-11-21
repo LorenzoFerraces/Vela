@@ -59,6 +59,7 @@ async def runtime_config() -> dict[str, int]:
 
 
 def _provider_to_get(row: UserLlmProvider) -> LlmProviderGet:
+    """Render a stored provider row for the API, exposing key presence only."""
     return LlmProviderGet(
         provider=cast(LlmProviderKind, row.provider),
         base_url=row.base_url,
@@ -68,6 +69,7 @@ def _provider_to_get(row: UserLlmProvider) -> LlmProviderGet:
 
 
 def _llm_test_failure_message(exc: LlmCallError) -> str:
+    """Return short user-facing text for the cause of an LlmCallError."""
     cause = exc.__cause__
     if isinstance(cause, httpx.HTTPStatusError):
         if cause.response.status_code in (401, 403):
@@ -124,6 +126,7 @@ async def get_llm_provider(
     current_user: Annotated[User, Depends(get_current_user)],
     session: Annotated[AsyncSession, Depends(get_db)],
 ) -> LlmProviderGet | None:
+    """Return the current user's stored LLM provider settings, or null."""
     row = await get_user_llm_provider(session, current_user.id)
     return _provider_to_get(row) if row is not None else None
 
@@ -134,6 +137,7 @@ async def put_llm_provider(
     current_user: Annotated[User, Depends(get_current_user)],
     session: Annotated[AsyncSession, Depends(get_db)],
 ) -> LlmProviderGet:
+    """Store the user's LLM provider settings and return the redacted view."""
     row = await set_user_llm_provider(
         session,
         current_user.id,
@@ -150,6 +154,7 @@ async def delete_llm_provider(
     current_user: Annotated[User, Depends(get_current_user)],
     session: Annotated[AsyncSession, Depends(get_db)],
 ) -> None:
+    """Delete the current user's stored LLM provider settings."""
     await delete_user_llm_provider(session, current_user.id)
 
 
@@ -158,6 +163,7 @@ async def test_llm_provider_route(
     body: LlmProviderTestRequest,
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> LlmProviderTestResponse:
+    """Verify candidate provider credentials, returning models or a 400 message."""
     config = config_from_parts(
         provider=body.provider,
         base_url=body.base_url,

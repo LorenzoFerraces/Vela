@@ -20,6 +20,7 @@ GEMINI_BODY = {
 
 
 def _gemini_config() -> LlmConfig:
+    """Build a user-origin Gemini config for provider tests."""
     return LlmConfig(
         provider="gemini",
         url="https://generativelanguage.googleapis.com/v1beta/models/m:generateContent",
@@ -31,6 +32,7 @@ def _gemini_config() -> LlmConfig:
 
 
 def _openai_config() -> LlmConfig:
+    """Build a user-origin OpenAI-compatible config for provider tests."""
     return LlmConfig(
         provider="openai_compatible",
         url="https://api.openai.com/v1/chat/completions",
@@ -43,6 +45,7 @@ def _openai_config() -> LlmConfig:
 
 
 def _anthropic_config() -> LlmConfig:
+    """Build a user-origin Anthropic config for provider tests."""
     return LlmConfig(
         provider="anthropic",
         url="https://api.anthropic.com/v1/messages",
@@ -54,30 +57,39 @@ def _anthropic_config() -> LlmConfig:
 
 
 class _FakeResponse:
+    """Stand-in for an httpx response with a preset payload and status code."""
+
     def __init__(self, payload: object | None, status_code: int = 200):
+        """Store the payload to serve and the status code to report."""
         self._payload = payload
         self.status_code = status_code
         self.text = json.dumps(payload) if payload is not None else ""
 
     def raise_for_status(self) -> None:
+        """Raise httpx.HTTPStatusError when the stored status is an error."""
         if self.status_code >= 400:
             request = httpx.Request("POST", "https://provider.test")
             response = httpx.Response(self.status_code, request=request)
             raise httpx.HTTPStatusError("error", request=request, response=response)
 
     def json(self) -> object:
+        """Return the stored payload, raising ValueError when there is none."""
         if self._payload is None:
             raise ValueError("no json")
         return self._payload
 
 
 class _FakeClient:
+    """Async HTTP client stand-in that records requests and replays one response."""
+
     def __init__(self, response: _FakeResponse | Exception):
+        """Store the response to return, or the exception every call raises."""
         self.response = response
         self.posts: list[dict] = []
         self.gets: list[dict] = []
 
     async def post(self, url, headers=None, params=None, json=None):
+        """Record the request and return the canned response or raise the error."""
         self.posts.append(
             {"url": url, "headers": headers, "params": params, "json": json}
         )
@@ -86,6 +98,7 @@ class _FakeClient:
         return self.response
 
     async def get(self, url, headers=None, params=None):
+        """Record the request and return the canned response or raise the error."""
         self.gets.append({"url": url, "headers": headers, "params": params})
         if isinstance(self.response, Exception):
             raise self.response
@@ -93,12 +106,14 @@ class _FakeClient:
 
 
 def _use(monkeypatch: pytest.MonkeyPatch, client: _FakeClient) -> None:
+    """Patch the provider base module to hand out the fake client."""
     monkeypatch.setattr(base, "get_client", lambda: client)
 
 
 def test_gemini_wire_format_matches_current_client(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Gemini posts contents plus responseMimeType/schema and parses the text part."""
     client = _FakeClient(_FakeResponse(GEMINI_BODY))
     _use(monkeypatch, client)
     import asyncio
@@ -119,6 +134,7 @@ def test_gemini_wire_format_matches_current_client(
 
 
 def test_openai_wire_format(monkeypatch: pytest.MonkeyPatch) -> None:
+    """OpenAI-compatible posts chat completions with the json_object response format."""
     body = {"choices": [{"message": {"content": '{"ok": 2}'}}]}
     client = _FakeClient(_FakeResponse(body))
     _use(monkeypatch, client)
@@ -138,6 +154,7 @@ def test_openai_wire_format(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_anthropic_wire_format_and_fences(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Anthropic posts max_tokens and messages and parses a fenced json block."""
     body = {
         "content": [
             {"type": "text", "text": '```json\n{"ok": 3}\n```'},
@@ -160,6 +177,7 @@ def test_anthropic_wire_format_and_fences(
 def test_http_error_raises_llm_call_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """An HTTP status error from the transport surfaces as LlmCallError."""
     error = httpx.HTTPStatusError(
         "boom",
         request=httpx.Request("POST", "https://x"),
@@ -176,6 +194,7 @@ def test_http_error_raises_llm_call_error(
 def test_malformed_body_raises_invalid_response(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """A Gemini body without candidates raises an invalid-response LlmCallError."""
     client = _FakeClient(_FakeResponse({"candidates": []}))
     _use(monkeypatch, client)
     import asyncio
@@ -187,6 +206,7 @@ def test_malformed_body_raises_invalid_response(
 def test_non_dict_json_raises_invalid_response(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Model text that parses to a non-dict raises an invalid-response error."""
     body = {"candidates": [{"content": {"parts": [{"text": "42"}]}}]}
     client = _FakeClient(_FakeResponse(body))
     _use(monkeypatch, client)
@@ -199,6 +219,7 @@ def test_non_dict_json_raises_invalid_response(
 def test_verify_parses_gemini_model_list(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Gemini verify strips the models/ prefix and passes the key as a param."""
     body = {"models": [{"name": "models/gemini-a"}, {"name": "gemini-b"}]}
     client = _FakeClient(_FakeResponse(body))
     _use(monkeypatch, client)
@@ -212,6 +233,7 @@ def test_verify_parses_gemini_model_list(
 def test_verify_parses_openai_model_list(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """OpenAI verify reads ids from GET {base_url}/models."""
     body = {"data": [{"id": "gpt-4o"}, {"id": "gpt-4o-mini"}]}
     client = _FakeClient(_FakeResponse(body))
     _use(monkeypatch, client)
@@ -225,6 +247,7 @@ def test_verify_parses_openai_model_list(
 def test_verify_connection_error_raises(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """A connection error during verify raises LlmCallError."""
     client = _FakeClient(httpx.ConnectError("down"))
     _use(monkeypatch, client)
     import asyncio
@@ -236,6 +259,7 @@ def test_verify_connection_error_raises(
 def test_anthropic_verify_posts_one_token(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Anthropic verify has no model list and posts a one-token ping."""
     client = _FakeClient(_FakeResponse({"content": [{"type": "text", "text": "x"}]}))
     _use(monkeypatch, client)
     import asyncio
@@ -247,6 +271,7 @@ def test_anthropic_verify_posts_one_token(
 def test_verify_empty_model_list_is_success(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """An empty model list counts as a successful verify."""
     client = _FakeClient(_FakeResponse({"models": []}))
     _use(monkeypatch, client)
     import asyncio
@@ -257,6 +282,7 @@ def test_verify_empty_model_list_is_success(
 def test_verify_non_dict_body_raises(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """A non-dict JSON body during verify raises LlmCallError."""
     client = _FakeClient(_FakeResponse(["not", "a", "dict"]))
     _use(monkeypatch, client)
     import asyncio
@@ -268,6 +294,7 @@ def test_verify_non_dict_body_raises(
 def test_verify_error_envelope_raises(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """An error envelope in the verify response raises LlmCallError."""
     client = _FakeClient(_FakeResponse({"error": {"code": 403}}))
     _use(monkeypatch, client)
     import asyncio
@@ -277,6 +304,7 @@ def test_verify_error_envelope_raises(
 
 
 def test_registry_dispatches() -> None:
+    """The registry maps each provider name to its implementation and rejects unknowns."""
     assert isinstance(get_provider(_gemini_config()), GeminiProvider)
     vertex = _gemini_config()
     assert isinstance(

@@ -223,6 +223,7 @@ def e2e_stack_repo_analysis_if_enabled(
     git_url: str,
     git_branch: str,
 ) -> RepoStackAnalysis | None:
+    """In E2E mode return a fixed two-service stack analysis instead of cloning."""
     if not e2e_mode_enabled():
         return None
     from app.core.stacks.repo_analysis import RepoStackAnalysis

@@ -28,7 +28,9 @@ from app.db.models import (
 def _seed_metrics(
     db_session_factory, container_id: str, count: int = 10
 ) -> None:
+    """Insert metric rows for a container in thirty-minute steps."""
     async def _run() -> None:
+        """Add and commit the seeded metric rows."""
         async with db_session_factory() as session:
             now = datetime.now(UTC)
             for i in range(count):
@@ -57,6 +59,7 @@ def _seed_container(
     project_id: uuid.UUID | None = None,
     status: ContainerStatus = ContainerStatus.RUNNING,
 ) -> None:
+    """Seed a managed container with owner and optional project labels."""
     labels = {
         VELA_MANAGED_LABEL: VELA_MANAGED_VALUE,
         VELA_OWNER_LABEL: str(test_user_id),
@@ -84,6 +87,7 @@ def _make_team_project(
     """Create organization + shared project + owner membership at the DB level."""
 
     async def _run() -> uuid.UUID:
+        """Create org, shared project and owner membership; return the project id."""
         async with db_session_factory() as session:
             org = Organization(name="Widgets Inc")
             session.add(org)
@@ -108,6 +112,7 @@ def test_get_metrics_returns_points(
     api_client: TestClient,
     db_session_factory,
 ) -> None:
+    """The metrics endpoint returns one point per stored row."""
     _seed_metrics(db_session_factory, "cid-1", count=5)
 
     resp = api_client.get("/api/metrics", params={"container_id": "cid-1"})
@@ -123,6 +128,7 @@ def test_get_metrics_respects_limit(
     api_client: TestClient,
     db_session_factory,
 ) -> None:
+    """The limit parameter caps the number of points returned."""
     _seed_metrics(db_session_factory, "cid-1", count=20)
 
     resp = api_client.get(
@@ -135,6 +141,7 @@ def test_get_metrics_respects_limit(
 def test_get_metrics_returns_empty_for_no_data(
     api_client: TestClient,
 ) -> None:
+    """A container without stored metrics gets an empty list."""
     resp = api_client.get(
         "/api/metrics", params={"container_id": "cid-1"}
     )
@@ -145,6 +152,7 @@ def test_get_metrics_returns_empty_for_no_data(
 def test_get_metrics_unauthorized(
     anonymous_client: TestClient,
 ) -> None:
+    """Anonymous requests to the metrics endpoint get 401."""
     resp = anonymous_client.get(
         "/api/metrics", params={"container_id": "cid-1"}
     )
@@ -155,6 +163,7 @@ def test_get_metrics_summary_returns_buckets(
     api_client: TestClient,
     db_session_factory,
 ) -> None:
+    """The summary endpoint returns buckets with cpu and memory aggregates."""
     _seed_metrics(db_session_factory, "cid-1", count=30)
 
     resp = api_client.get(
@@ -176,6 +185,7 @@ def test_get_usage_groups_by_project(
     fake_orchestrator: FakeContainerOrchestrator,
     test_user_id: uuid.UUID,
 ) -> None:
+    """Usage groups latest metrics by project and totals them."""
     project_id = _make_team_project(db_session_factory, test_user_id)
     _seed_container(
         fake_orchestrator, "cid-team", "team-web", test_user_id,
@@ -212,6 +222,7 @@ def test_get_usage_stopped_container_reports_no_usage(
     fake_orchestrator: FakeContainerOrchestrator,
     test_user_id: uuid.UUID,
 ) -> None:
+    """A stopped container reports no cpu or memory usage."""
     _seed_container(
         fake_orchestrator, "cid-stopped", "stopped-app", test_user_id,
         status=ContainerStatus.STOPPED,
@@ -238,5 +249,6 @@ def test_get_usage_stopped_container_reports_no_usage(
 def test_get_usage_unauthorized(
     anonymous_client: TestClient,
 ) -> None:
+    """Anonymous requests to the usage endpoint get 401."""
     resp = anonymous_client.get("/api/metrics/usage")
     assert resp.status_code == 401

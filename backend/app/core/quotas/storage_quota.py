@@ -31,6 +31,7 @@ _over_quota_project_ids: set[uuid.UUID] = set()
 
 
 def format_gib(total_bytes: int) -> str:
+    """Format a byte count as GiB with one decimal."""
     return f"{total_bytes / GIB:.1f} GiB"
 
 
@@ -66,16 +67,19 @@ def quota_source(project: Project) -> str:
 
 
 def reset_over_quota_state() -> None:
+    """Clear the per-process over-quota alert dedup state."""
     _over_quota_project_ids.clear()
 
 
 def currently_over_quota_projects() -> frozenset[uuid.UUID]:
+    """Return the project ids currently flagged as over quota."""
     return frozenset(_over_quota_project_ids)
 
 
 async def _member_user_ids(
     session: AsyncSession, project_id: uuid.UUID
 ) -> list[uuid.UUID]:
+    """Select the user ids of every member of a project."""
     statement = select(ProjectMembership.user_id).where(
         ProjectMembership.project_id == project_id
     )
@@ -87,6 +91,7 @@ async def _users_with_personal_project(
     project_id: uuid.UUID,
     candidate_user_ids: set[uuid.UUID],
 ) -> set[uuid.UUID]:
+    """Filter candidates to the users whose personal project is project_id."""
     if not candidate_user_ids:
         return set()
     statement = select(User.id).where(
@@ -171,6 +176,8 @@ async def enforce_team_storage_capacity(
 
 @dataclass(frozen=True)
 class TeamStorageQuotaSummary:
+    """Usage and quota snapshot for one team."""
+
     quota_bytes: int | None
     used_bytes: int
     container_disk_bytes: int

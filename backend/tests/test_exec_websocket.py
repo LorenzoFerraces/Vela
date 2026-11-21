@@ -91,6 +91,20 @@ def test_exec_ws_rejects_invalid_ticket(anonymous_client: TestClient) -> None:
     assert exc.value.code == 1008
 
 
+@pytest.mark.parametrize("path", ["/api/containers/cid-1/exec/ws", "/api/containers/cid-1/logs/stream"])
+def test_ws_never_authenticates_via_query_token(
+    api_client: TestClient, anonymous_client: TestClient, path: str
+) -> None:
+    """A bearer token in the URL query is not an auth path; only tickets are."""
+    pat = _create_pat(api_client)["token"]
+    with (
+        pytest.raises(WebSocketDisconnect) as exc,
+        anonymous_client.websocket_connect(f"{path}?access_token={pat}"),
+    ):
+        pass
+    assert exc.value.code == 1008
+
+
 def test_exec_ws_rejects_deactivated_user(
     api_client: TestClient,
     seeded_user,

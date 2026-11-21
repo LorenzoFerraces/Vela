@@ -24,11 +24,13 @@ from app.core.security.outbound_url import (
     ],
 )
 def test_rejects_non_https_and_private_destinations(url: str) -> None:
+    """Reject plain-HTTP and private-destination URLs with ValueError."""
     with pytest.raises(ValueError):
         validate_outbound_url(url)
 
 
 def test_accepts_public_https() -> None:
+    """Return a public HTTPS URL unchanged."""
     assert (
         validate_outbound_url("https://api.openai.com/v1")
         == "https://api.openai.com/v1"
@@ -36,6 +38,7 @@ def test_accepts_public_https() -> None:
 
 
 def test_allow_private_env_bypasses(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Allow private HTTP URLs when the allow-private env var is set."""
     monkeypatch.setenv(ALLOW_PRIVATE_ENV, "1")
     assert (
         validate_outbound_url("http://10.0.0.5:11434/v1")

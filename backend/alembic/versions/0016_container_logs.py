@@ -20,6 +20,7 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
+    """Create the container_logs table, its indexes, and a pg_trgm full-text index."""
     op.create_table(
         "container_logs",
         sa.Column("id", sa.Uuid(as_uuid=True), nullable=False),
@@ -58,6 +59,7 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    """Drop the container_logs indexes and table."""
     op.drop_index("ix_container_logs_container_timestamp", table_name="container_logs")
     op.drop_index("ix_container_logs_container_name", table_name="container_logs")
     op.drop_index("ix_container_logs_container_id", table_name="container_logs")

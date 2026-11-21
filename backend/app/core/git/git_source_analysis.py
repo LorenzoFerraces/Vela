@@ -163,12 +163,14 @@ def _find_readme(project_root: Path) -> Path | None:
 
 
 def _select_readme_text(text: str) -> str:
+    """Fit README text into MAX_FILE_BYTES, preferring key sections."""
     if len(text.encode("utf-8")) <= MAX_FILE_BYTES:
         return text
     return _extract_readme_sections(text) or text[:MAX_FILE_BYTES]
 
 
 def _extract_readme_sections(text: str, max_bytes: int = 8_000) -> str:
+    """Extract env-relevant README sections up to max_bytes."""
     lines = text.splitlines()
     section_indices: list[int] = []
     env_indices: set[int] = set()
@@ -206,9 +208,11 @@ def _extract_readme_sections(text: str, max_bytes: int = 8_000) -> str:
 
 
 def _repo_map(root: Path, max_entries: int = 150) -> str:
+    """Render a sorted, capped listing of repo file paths."""
     entries: list[str] = []
 
     def walk(directory: Path) -> None:
+        """Recurse into directories collecting visible file paths."""
         try:
             children = sorted(directory.iterdir(), key=lambda item: item.name)
         except OSError:
@@ -231,6 +235,7 @@ def _repo_map(root: Path, max_entries: int = 150) -> str:
 
 
 def _subdir_marker_files(root: Path) -> list[tuple[str, str]]:
+    """Read build marker files from subdirs when the root has none."""
     for name in _SUBDIR_MARKER_NAMES:
         if (root / name).is_file():
             return []
@@ -255,6 +260,7 @@ def _subdir_marker_files(root: Path) -> list[tuple[str, str]]:
 
 
 def _is_secret_like_key(key: str) -> bool:
+    """Check whether an env key name suggests a secret value."""
     upper = key.upper()
     return any(marker in upper for marker in _SECRET_KEY_MARKERS) or upper.endswith(
         _SECRET_KEY_SUFFIXES
@@ -262,6 +268,7 @@ def _is_secret_like_key(key: str) -> bool:
 
 
 def _unquote(value: str) -> str:
+    """Strip matching surrounding quotes from a config value."""
     stripped = value.strip()
     if len(stripped) >= 2 and stripped[0] == stripped[-1] and stripped[0] in {"'", '"'}:
         return stripped[1:-1].strip()
@@ -269,6 +276,7 @@ def _unquote(value: str) -> str:
 
 
 def _should_redact_value(key: str, value: str) -> bool:
+    """Decide whether a key/value pair looks like a secret."""
     if not value.strip():
         return False
     if _is_secret_like_key(key):
@@ -277,6 +285,7 @@ def _should_redact_value(key: str, value: str) -> bool:
 
 
 def _redact_line(line: str) -> str:
+    """Replace secret values in one env assignment or Dockerfile line."""
     assignment = _ENV_ASSIGNMENT_LINE.match(line)
     if assignment is not None:
         prefix, key, equals, value = assignment.groups()
@@ -298,6 +307,7 @@ def _redact_line(line: str) -> str:
 
 
 def _redact_secret_values(text: str) -> str:
+    """Redact secret values across every line of a text block."""
     redacted = "\n".join(_redact_line(line) for line in text.splitlines())
     if text.endswith("\n"):
         redacted += "\n"
@@ -319,6 +329,7 @@ def _append_excerpt(
 
 
 def _evidence_excerpt_lines(evidence: list[ServiceEvidence]) -> str:
+    """Join the matched evidence lines of all service evidences."""
     lines: list[str] = []
     for item in evidence:
         lines.extend(item.matched_lines)
@@ -326,6 +337,7 @@ def _evidence_excerpt_lines(evidence: list[ServiceEvidence]) -> str:
 
 
 def _evidence_fact_line(item: ServiceEvidence) -> str:
+    """Render one ServiceEvidence as a prompt fact line."""
     detail = ""
     if item.hostname:
         detail = f" host={item.hostname}"
@@ -341,6 +353,7 @@ def _collect_context_excerpts(
     info: ProjectInfo | None = None,
     evidence: list[ServiceEvidence] | None = None,
 ) -> str:
+    """Build the bounded repo context block for the analysis prompt."""
     parts: list[str] = []
     total = 0
 
@@ -457,6 +470,7 @@ def _extract_env_vars_from_context(context: str) -> dict[str, str]:
 
 
 def _dockerfile_facts(text: str) -> str | None:
+    """Summarize base image, exposed ports, and command from a Dockerfile."""
     base: str | None = None
     ports: list[str] = []
     command: str | None = None
@@ -496,6 +510,7 @@ def _detected_facts_block(
     info: ProjectInfo | None = None,
     evidence: list[ServiceEvidence] | None = None,
 ) -> str:
+    """Render deterministic scan facts as prompt bullet lines."""
     lines: list[str] = []
     info = info or analyze_project(root)
     if info.language is not SupportedLanguage.UNKNOWN:
@@ -530,10 +545,12 @@ def _detected_facts_block(
 
 
 def _valid_env_key(key: str) -> bool:
+    """Check an env key against the length and charset limits."""
     return len(key) <= MAX_ENV_KEY_LENGTH and _ENV_VAR_KEY.fullmatch(key) is not None
 
 
 def _validated_env_vars(env_vars: dict[str, str]) -> dict[str, str]:
+    """Drop env vars that violate the key or value limits."""
     return {
         key: value
         for key, value in env_vars.items()
@@ -563,6 +580,7 @@ def _env_vars_from_payload(parsed: dict[str, object]) -> dict[str, str]:
 
 
 def _clean_command_list(raw: object) -> list[str] | None:
+    """Keep a command list only when all tokens are usable strings."""
     if raw is None or not isinstance(raw, list):
         return None
     tokens = [
@@ -667,6 +685,7 @@ async def _call_gemini(
     commit: str = "",
     config: LlmConfig | None = None,
 ) -> GitSourceAnalysis:
+    """Ask the configured LLM for a structured repo analysis."""
     if config is None:
         config = resolve_llm_config()
     if config is None:
@@ -716,6 +735,7 @@ def _fallback_analysis(
     git_branch: str,
     info: ProjectInfo | None = None,
 ) -> GitSourceAnalysis:
+    """Build an analysis from local detection without calling the LLM."""
     info = info or analyze_project(project_root)
     port = 80
     if info.language in {"typescript", "javascript"}:
@@ -757,6 +777,7 @@ def _fallback_analysis(
 
 
 def _git_source_cache_key(git_url: str, commit: str, git_branch: str) -> str:
+    """Cache key from normalized URL, commit, branch; empty without commit."""
     if not commit:
         return ""
     normalized = _CREDENTIALS_IN_URL.sub(r"\1", git_url.strip()).rstrip("/")

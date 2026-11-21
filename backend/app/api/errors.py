@@ -80,8 +80,10 @@ def _project_error_payload(exc: ProjectError, error_code: str) -> dict[str, str]
 
 
 class _validation_error_response(JSONResponse):
+    """422 response that tolerates non-finite floats in pydantic's echoed input."""
     # ponytail: pydantic echoes non-finite inputs (inf/nan) into 422 details; starlette's renderer rejects them
     def render(self, content) -> bytes:
+        """Serialize with allow_nan so inf/nan values in error details do not raise."""
         return json.dumps(
             content,
             ensure_ascii=False,
@@ -105,6 +107,7 @@ def register_exception_handlers(app) -> None:
     async def request_validation_error_handler(
         _request: Request, exc: RequestValidationError
     ) -> JSONResponse:
+        """Return a 422 response with jsonable-encoded validation errors."""
         return _validation_error_response(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             content={"detail": jsonable_encoder(exc.errors())},
@@ -241,6 +244,7 @@ def register_exception_handlers(app) -> None:
     async def team_storage_quota_error_handler(
         _request: Request, exc: TeamStorageQuotaError
     ) -> JSONResponse:
+        """Return a 400 response with the team storage quota message."""
         return JSONResponse(
             status_code=status.HTTP_400_BAD_REQUEST,
             content={"detail": str(exc)},
@@ -325,6 +329,7 @@ def register_exception_handlers(app) -> None:
     async def account_deactivated_handler(
         _request: Request, exc: AccountDeactivatedError
     ) -> JSONResponse:
+        """Return a 403 response tagged with the account_deactivated code."""
         return JSONResponse(
             status_code=status.HTTP_403_FORBIDDEN,
             content={
@@ -337,6 +342,7 @@ def register_exception_handlers(app) -> None:
     async def registration_disabled_handler(
         _request: Request, exc: RegistrationDisabledError
     ) -> JSONResponse:
+        """Return a 403 response saying registration is disabled."""
         return JSONResponse(
             status_code=status.HTTP_403_FORBIDDEN,
             content={"detail": str(exc)},
@@ -346,6 +352,7 @@ def register_exception_handlers(app) -> None:
     async def permission_denied_handler(
         _request: Request, exc: PermissionDeniedError
     ) -> JSONResponse:
+        """Return a 403 response with the permission error message."""
         return JSONResponse(
             status_code=status.HTTP_403_FORBIDDEN,
             content={"detail": str(exc)},
@@ -422,6 +429,7 @@ def register_exception_handlers(app) -> None:
     async def llm_analysis_handler(
         _request: Request, exc: VelaError
     ) -> JSONResponse:
+        """Return a 503 response for LLM and git-source analysis failures."""
         return JSONResponse(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             content={"detail": str(exc)},
@@ -431,6 +439,7 @@ def register_exception_handlers(app) -> None:
     async def llm_provider_error_handler(
         _request: Request, exc: LlmProviderError
     ) -> JSONResponse:
+        """Return a 502 response with the provider error and fallback flag."""
         return JSONResponse(
             status_code=status.HTTP_502_BAD_GATEWAY,
             content={
@@ -443,6 +452,7 @@ def register_exception_handlers(app) -> None:
     async def llm_provider_config_error_handler(
         _request: Request, exc: LlmProviderConfigError
     ) -> JSONResponse:
+        """Return a 400 response for invalid LLM provider configuration."""
         return JSONResponse(
             status_code=status.HTTP_400_BAD_REQUEST,
             content={"detail": str(exc)},
@@ -505,6 +515,7 @@ def register_exception_handlers(app) -> None:
     async def manifest_parse_handler(
         _request: Request, exc: ManifestParseError
     ) -> JSONResponse:
+        """Return a 400 response with the manifest parse error detail."""
         return JSONResponse(
             status_code=status.HTTP_400_BAD_REQUEST, content={"detail": str(exc)}
         )

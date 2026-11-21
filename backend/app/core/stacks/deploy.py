@@ -36,6 +36,7 @@ logger = logging.getLogger(__name__)
 
 
 def _container_dns_name(stack: Stack, service: StackService) -> str:
+    """Compose the network DNS name for one stack service."""
     return f"{stack.name}_{service.service_name}"
 
 

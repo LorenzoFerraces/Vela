@@ -16,8 +16,8 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
-    pass
+    """Merge the migration heads; no schema change."""
 
 
 def downgrade() -> None:
-    pass
+    """Merge point; nothing to undo."""

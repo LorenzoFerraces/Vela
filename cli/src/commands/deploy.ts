@@ -105,7 +105,7 @@ export async function run(argv: string[]): Promise<number> {
   } else if (isGitSource(source)) {
     body.source_kind = "git"
     body.git_url = source
-    if (values.branch) body.git_branch = values.branch
+    body.git_branch = values.branch ?? "main"
   } else {
     body.source_kind = "image"
     body.image_ref = source
@@ -125,10 +125,22 @@ export async function run(argv: string[]): Promise<number> {
     return 0
   }
   console.log(`Deployed ${job.name}.`)
-  const result = job.result
-  if (typeof result === "object" && result !== null && "access_url" in result) {
-    const url = (result as Record<string, unknown>).access_url
-    if (typeof url === "string") console.log(url)
+  const result =
+    typeof job.result === "object" && job.result !== null
+      ? (job.result as Record<string, unknown>)
+      : null
+  const urlCandidates = [
+    result?.access_url,
+    result?.public_url,
+    result?.url,
+    (result?.container as Record<string, unknown> | undefined)?.access_url,
+    (result?.container as Record<string, unknown> | undefined)?.public_url,
+  ]
+  for (const candidate of urlCandidates) {
+    if (typeof candidate === "string" && candidate) {
+      console.log(candidate)
+      break
+    }
   }
   return 0
 }

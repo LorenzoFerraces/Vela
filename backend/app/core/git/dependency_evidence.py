@@ -93,6 +93,8 @@ _JDBC_DB_NAME = re.compile(r"/([^/?]+)(?:\?|$)")
 
 @dataclass(frozen=True)
 class ServiceEvidence:
+    """One detected external-service kind with its evidence."""
+
     kind: str
     image_ref: str
     port: int
@@ -105,6 +107,8 @@ class ServiceEvidence:
 
 @dataclass
 class _KindAccumulator:
+    """Mutable per-kind state gathered while scanning evidence files."""
+
     hostname: str | None = None
     port: int | None = None
     env_key: str | None = None
@@ -114,6 +118,7 @@ class _KindAccumulator:
 
 
 def _read(path: Path) -> str:
+    """Read a file's first bytes as UTF-8, or empty on failure."""
     try:
         raw = path.read_bytes()
     except OSError:
@@ -122,10 +127,12 @@ def _read(path: Path) -> str:
 
 
 def _redact_evidence_line(line: str) -> str:
+    """Hide URL credentials in an evidence line before storing it."""
     return re.sub(r"(://)[^@\s]*@", r"\1[REDACTED]@", line)
 
 
 def _normalize_property_key(dotted: str) -> str:
+    """Turn a dotted Spring property key into an upper-snake env name."""
     return re.sub(r"[.\-]", "_", dotted).upper()
 
 
@@ -145,6 +152,7 @@ def _resolve_spring_placeholder(value: str) -> tuple[str, list[tuple[str, str]]]
 
 
 def _spring_property_pairs(text: str, is_properties: bool) -> list[tuple[str, str]]:
+    """Parse Spring .properties or YAML text into dotted key/value pairs."""
     if is_properties:
         return [
             (key, value)
@@ -154,6 +162,7 @@ def _spring_property_pairs(text: str, is_properties: bool) -> list[tuple[str, st
 
 
 def _postgres_container_env_from_spring(text: str, is_properties: bool) -> dict[str, str]:
+    """Build POSTGRES_* container vars from Spring datasource properties."""
     jdbc_url: str | None = None
     username: str | None = None
     password: str | None = None
@@ -178,6 +187,7 @@ def _postgres_container_env_from_spring(text: str, is_properties: bool) -> dict[
 
 
 def _match_url(token: str) -> tuple[str, str | None, int | None] | None:
+    """Match a service URL token; return (kind, host, port) or None."""
     cleaned = token.strip().strip("\"'`,")
     for prefix, kind in _URL_SCHEMES:
         if cleaned.lower().startswith(prefix):
@@ -195,6 +205,7 @@ def _match_url(token: str) -> tuple[str, str | None, int | None] | None:
 
 
 def _flatten_yaml(text: str) -> list[tuple[str, str]]:
+    """Flatten indentation-based YAML into dotted key/value leaves."""
     stack: list[tuple[int, str]] = []
     leaves: list[tuple[str, str]] = []
     for raw_line in text.splitlines():
@@ -217,11 +228,13 @@ def _flatten_yaml(text: str) -> list[tuple[str, str]]:
 
 
 def _kinds_in_text(text: str, rules: tuple[tuple[str, str], ...]) -> set[str]:
+    """Return kinds whose needle appears in the lowercased text."""
     lowered = text.lower()
     return {kind for needle, kind in rules if needle in lowered}
 
 
 def _scan_pom(text: str) -> dict[str, list[str]]:
+    """Map pom.xml artifact kinds to dependency lines, skipping test scope."""
     by_kind: dict[str, list[str]] = {}
     for block in _POM_DEPENDENCY.findall(text):
         if _POM_TEST_SCOPE.search(block):
@@ -234,6 +247,7 @@ def _scan_pom(text: str) -> dict[str, list[str]]:
 
 
 def _scan_gradle(text: str) -> dict[str, list[str]]:
+    """Map Gradle dependency lines to known JVM artifact kinds."""
     by_kind: dict[str, list[str]] = {}
     in_test = False
     for line in text.splitlines():
@@ -251,6 +265,7 @@ def _scan_gradle(text: str) -> dict[str, list[str]]:
 
 
 def _scan_python(text: str) -> tuple[set[str], list[str]]:
+    """Find known service packages in requirements-style text."""
     kinds: set[str] = set()
     lines: list[str] = []
     for line in text.splitlines():
@@ -263,12 +278,14 @@ def _scan_python(text: str) -> tuple[set[str], list[str]]:
 
 
 def _normalize_python_spec(spec: str) -> str:
+    """Strip extras and version specifiers from a requirement spec."""
     name = spec.strip().strip("\"'")
     name = re.split(r"[<>=!~\[;@\s]", name, maxsplit=1)[0]
     return name.strip().lower().replace("_", "-")
 
 
 def _scan_pyproject(text: str) -> tuple[set[str], list[str]]:
+    """Find known service packages in PEP 621 or Poetry dependencies."""
     try:
         data = tomllib.loads(text)
     except tomllib.TOMLDecodeError:
@@ -307,6 +324,7 @@ def _scan_pyproject(text: str) -> tuple[set[str], list[str]]:
 
 
 def _scan_node(text: str) -> tuple[set[str], list[str]]:
+    """Find known service packages in package.json dependencies."""
     try:
         data = json.loads(text)
     except json.JSONDecodeError:
@@ -330,6 +348,7 @@ def _scan_spring(
     dict[str, list[str]],
     list[str],
 ]:
+    """Scan Spring config for service URLs; return hosts, lines, env defaults."""
     found: dict[str, tuple[str | None, int | None, str | None]] = {}
     lines: dict[str, list[str]] = {}
     app_env_lines: list[str] = []
@@ -353,6 +372,7 @@ def _scan_spring(
 
 
 def _scan_url_only(text: str) -> tuple[dict[str, tuple[str | None, int | None]], list[str]]:
+    """Find bare service URLs in text; return kinds with hosts and lines."""
     found: dict[str, tuple[str | None, int | None]] = {}
     lines: list[str] = []
     for line in text.splitlines():
@@ -367,6 +387,7 @@ def _scan_url_only(text: str) -> tuple[dict[str, tuple[str | None, int | None]],
 
 
 def _walk_files(root: Path, info: ProjectInfo | None) -> list[Path]:
+    """Collect candidate config files under the build subdir and root."""
     roots: list[Path] = []
     if info is not None and info.build_subdir:
         candidate = root / info.build_subdir
@@ -378,6 +399,7 @@ def _walk_files(root: Path, info: ProjectInfo | None) -> list[Path]:
     seen: set[Path] = set()
 
     def visit(directory: Path, depth: int) -> None:
+        """Recurse directories collecting candidate files up to the cap."""
         if depth > _WALK_DEPTH or len(found) >= MAX_EVIDENCE_FILES:
             return
         try:
@@ -403,6 +425,7 @@ def _walk_files(root: Path, info: ProjectInfo | None) -> list[Path]:
 
 
 def _is_candidate(name: str) -> bool:
+    """Check whether a filename is a config file worth scanning."""
     lowered = name.lower()
     return (
         lowered in {"pom.xml", "build.gradle", "build.gradle.kts", "requirements.txt",
@@ -418,6 +441,7 @@ def scan_dependency_evidence(root: Path, info: ProjectInfo | None = None) -> lis
 
     def record(kind: str, *, hostname: str | None, port: int | None, env_key: str | None,
                source: str, lines: list[str]) -> None:
+        """Merge one scan hit into the accumulator for its kind."""
         entry = kinds.setdefault(kind, _KindAccumulator())
         if hostname is not None and entry.hostname is None:
             entry.hostname = hostname
@@ -525,6 +549,7 @@ _IMAGE_FAMILY: dict[str, tuple[str, ...]] = {
 
 
 def classify_host(hostname: str | None) -> str:
+    """Classify a hostname as local, sibling, or external."""
     if hostname is None:
         return "local"
     host = hostname.strip().strip("[]").lower()
@@ -536,6 +561,7 @@ def classify_host(hostname: str | None) -> str:
 
 
 def _covering_service(services: list[StackService], kind: str) -> StackService | None:
+    """Find the existing service that already provides this kind."""
     aliases = _KIND_ALIASES.get(kind, frozenset())
     families = _IMAGE_FAMILY.get(kind, ())
     for service in services:
@@ -548,6 +574,7 @@ def _covering_service(services: list[StackService], kind: str) -> StackService |
 
 
 def _repo_built_services(services: list[StackService]) -> list[StackService]:
+    """Return services built from the repo rather than image references."""
     return [
         service
         for service in services
@@ -560,6 +587,7 @@ def _primary_app_service(
     *,
     kind: str,
 ) -> StackService | None:
+    """Pick the app service that should depend on a detected kind."""
     built_services = _repo_built_services(services)
     if not built_services:
         return None
@@ -580,6 +608,7 @@ def _primary_app_service(
 
 
 def _app_env_from_matched_lines(lines: tuple[str, ...]) -> dict[str, str]:
+    """Parse plain KEY=value env vars from evidence lines, skipping spring props."""
     env_vars: dict[str, str] = {}
     for line in lines:
         if "=" not in line or line.startswith("spring."):
@@ -592,6 +621,7 @@ def _app_env_from_matched_lines(lines: tuple[str, ...]) -> dict[str, str]:
 
 
 def _env_value_from_evidence(item: ServiceEvidence) -> str | None:
+    """Return the resolved value behind the evidence env key."""
     if item.env_key is None:
         return None
     prefix = f"{item.env_key}="
@@ -602,7 +632,9 @@ def _env_value_from_evidence(item: ServiceEvidence) -> str | None:
 
 
 def _rewrite_local_host(value: str, kind: str, replacement: str) -> str:
+    """Swap local hosts in matching-kind URLs for the service name."""
     def replace(match: re.Match[str]) -> str:
+        """Rewrite one URL token when its kind matches and host is local."""
         token = match.group(0)
         info = _match_url(token)
         if info is None or info[0] != kind:
@@ -625,6 +657,7 @@ def reconcile_detected_services(
     evidence: list[ServiceEvidence],
     warnings: list[str],
 ) -> tuple[list[StackService], list[str], tuple[str, ...]]:
+    """Add detected services and wire app env and depends_on to them."""
     result = list(services)
     new_warnings = list(warnings)
     detected_names: list[str] = []

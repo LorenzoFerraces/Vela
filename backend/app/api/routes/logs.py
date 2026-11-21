@@ -21,6 +21,7 @@ router = APIRouter(tags=["logs"])
 
 
 def _like_condition(q: str) -> sa.ColumnElement:
+    """Return a LIKE condition matching the message with wildcards escaped."""
     # ponytail: LIKE search, not pg_trgm — sufficient for log lookup, avoids Postgres-only dependency
     escaped = q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
     return ContainerLog.message.like(f"%{escaped}%", escape="\\")
@@ -40,6 +41,7 @@ async def query_logs(
     limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0),
 ) -> dict:
+    """Return paginated log entries for a container the user can read."""
     await require_container_access(
         session, orchestrator, current_user, container_id, action="read"
     )
@@ -103,6 +105,7 @@ async def export_logs(
     q: str | None = Query(None, max_length=512, description="Full-text search"),
     limit: int = Query(5000, ge=1, le=50000),
 ) -> StreamingResponse:
+    """Export matching container logs as a CSV download."""
     # ponytail: materializes up to `limit` rows in memory — accepted ceiling for CSV export
     await require_container_access(
         session, orchestrator, current_user, container_id, action="read"
@@ -144,6 +147,7 @@ async def export_logs(
     )
 
     def _sanitize(value: str) -> str:
+        """Prefix leading formula characters so spreadsheet apps don't execute cells."""
         if value and value[0] in ("=", "+", "-", "@"):
             return f"'{value}"
         return value

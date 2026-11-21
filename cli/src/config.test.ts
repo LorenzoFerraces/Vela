@@ -27,11 +27,14 @@ test("VELA_CONFIG overrides the default path", () => {
   expect(configPath({ VELA_CONFIG: path })).toBe(path)
 })
 
-test("precedence is env > file > default", () => {
+test("precedence is flags > env > file > default", () => {
   const stored = { server: "http://file", token: "file-token", tokenId: "file-id" }
   expect(
-    resolveConfig({ token: "flag-token" }, { VELA_API_URL: "http://env" }, stored),
-  ).toEqual({ server: "http://env", token: "flag-token", tokenId: undefined })
+    resolveConfig({ server: "http://flag", token: "flag-token" }, {}, stored),
+  ).toEqual({ server: "http://flag", token: "flag-token", tokenId: undefined })
+  expect(
+    resolveConfig({}, { VELA_API_URL: "http://env", VELA_TOKEN: "env-token" }, stored),
+  ).toEqual({ server: "http://env", token: "env-token", tokenId: undefined })
   expect(resolveConfig({}, {}, stored)).toEqual(stored)
   expect(resolveConfig({}, {}, null)).toEqual({
     server: DEFAULT_SERVER,
@@ -41,15 +44,9 @@ test("precedence is env > file > default", () => {
 })
 
 test("trailing slashes are trimmed from the server", () => {
-  expect(resolveConfig({}, { VELA_API_URL: "http://host:8000///" }, null).server).toBe(
+  expect(resolveConfig({ server: "http://host:8000///" }, {}, null).server).toBe(
     "http://host:8000",
   )
-})
-
-test("server is resolved from env/stored config, not a dead flag", () => {
-  expect(resolveConfig({}, { VELA_API_URL: "http://example.test/" })).toMatchObject({
-    server: "http://example.test",
-  })
 })
 
 test("stored config round-trips and is owner-readable only on POSIX", () => {

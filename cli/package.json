@@ -19,6 +19,8 @@
   },
   "dependencies": {
     "@opentui/core": "0.8.3",
+    "@opentui/core-linux-x64": "0.8.3",
+    "@opentui/core-linux-x64-musl": "0.8.3",
     "@opentui/react": "0.8.3",
     "react": "19.3.1"
   }

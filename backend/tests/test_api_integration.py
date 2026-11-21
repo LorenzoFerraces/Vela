@@ -232,6 +232,7 @@ def test_run_from_image_with_resource_limits(
     api_client: TestClient,
     fake_orchestrator: FakeContainerOrchestrator,
 ) -> None:
+    """Image runs pass cpu_limit and memory_limit through to the deploy config."""
     response = api_client.post(
         "/api/containers/run",
         json={
@@ -268,6 +269,7 @@ def test_run_resource_limits_pass_through_all_source_kinds(
     fake_orchestrator: FakeContainerOrchestrator,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Resource limits reach the deploy config for image, template and git runs."""
     monkeypatch.setenv("VELA_PUBLIC_ROUTE_DOMAIN", "apps.example.com")
     monkeypatch.setenv("VELA_PUBLIC_URL_SCHEME", "https")
     monkeypatch.setattr(
@@ -612,6 +614,7 @@ def test_request_recovers_after_mid_transaction_db_error(
     async def unguarded_create(
         session: AsyncSession, owner_id: uuid.UUID, *, name: str, contents: str
     ) -> None:
+        """Insert a Dockerfile without the duplicate-name guard, raising on flush."""
         session.add(Dockerfile(owner_id=owner_id, name=name, contents=contents))
         await session.flush()
 
@@ -705,6 +708,7 @@ def test_run_from_git_url_strips_embedded_credentials(
     assert deployed["source_label"] == "https://github.com/org/repo.git"
 
     async def stored_source_ref() -> str:
+        """Read the git deployment's persisted source_ref."""
         async with db_session_factory() as session:
             row = (
                 await session.execute(
@@ -840,6 +844,7 @@ def test_run_rejects_empty_source(api_client: TestClient) -> None:
 def test_run_rejects_non_finite_cpu_limit(
     api_client: TestClient, db_session_factory
 ) -> None:
+    """A JSON Infinity cpu_limit is rejected with 422 and stores no deployment."""
     import asyncio
 
     from sqlalchemy import select
@@ -856,6 +861,7 @@ def test_run_rejects_non_finite_cpu_limit(
     assert "Value must be a finite number" in response.text
 
     async def count_deployments() -> int:
+        """Count persisted deployment records."""
         async with db_session_factory() as session:
             rows = (
                 (await session.execute(select(DeploymentRecord))).scalars().all()
@@ -1556,6 +1562,7 @@ def test_stack_composition_cycle_prevention(api_client: TestClient) -> None:
 
 
 def test_stack_parse_manifest_k8s(api_client: TestClient) -> None:
+    """Parsing a k8s Deployment manifest returns its kind, service name and port."""
     k8s_yaml = """
 apiVersion: apps/v1
 kind: Deployment
@@ -1614,6 +1621,7 @@ services:
 
 
 def test_stack_parse_manifest_git_url(api_client: TestClient) -> None:
+    """A compose build context that is a Git URL parses as a git source on main."""
     compose_yaml = """
 services:
   app:
@@ -1629,6 +1637,7 @@ services:
 
 
 def test_stack_parse_manifest_unrecognized(api_client: TestClient) -> None:
+    """An unrecognized manifest returns 400 with a clear detail."""
     resp = api_client.post("/api/stacks/parse-manifest", json={"yaml_content": "foo: bar"})
     assert resp.status_code == 400
     assert "unrecognized manifest" in resp.json()["detail"].lower()
@@ -1724,6 +1733,7 @@ def test_stack_deploy_git_strips_credentials_from_display(
     async def _recording_clone(
         *, url: str, branch: str, dest: Path, access_token: str | None = None
     ) -> None:
+        """Clone stub that records the URL it receives, then delegates to the stub."""
         recorded_urls.append(url)
         await _stub_git_shallow_clone(
             url=url, branch=branch, dest=dest, access_token=access_token

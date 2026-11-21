@@ -19,6 +19,7 @@ ANTHROPIC_API_ROOT = "https://api.anthropic.com/v1"
 async def get_user_llm_provider(
     session: AsyncSession, user_id: uuid.UUID
 ) -> UserLlmProvider | None:
+    """Load the user's stored provider row, or None."""
     result = await session.execute(
         select(UserLlmProvider).where(UserLlmProvider.user_id == user_id)
     )
@@ -34,6 +35,7 @@ async def set_user_llm_provider(
     model: str,
     api_key: str | None,
 ) -> UserLlmProvider:
+    """Create or update the user's provider row, encrypting a new key."""
     row = await get_user_llm_provider(session, user_id)
     if api_key is None and row is None:
         raise LlmProviderConfigError("API key required.")
@@ -60,6 +62,7 @@ async def set_user_llm_provider(
 async def delete_user_llm_provider(
     session: AsyncSession, user_id: uuid.UUID
 ) -> bool:
+    """Delete the user's provider row; report whether one existed."""
     row = await get_user_llm_provider(session, user_id)
     if row is None:
         return False
@@ -75,6 +78,7 @@ def config_from_parts(
     model: str,
     api_key: str,
 ) -> LlmConfig:
+    """Build a user-origin LlmConfig from provider parts."""
     if provider == "gemini":
         return LlmConfig(
             provider="gemini",
@@ -113,6 +117,7 @@ def config_from_parts(
 
 
 def user_config_to_llm_config(row: UserLlmProvider) -> LlmConfig:
+    """Decrypt a stored row into an LlmConfig."""
     if row.api_key_encrypted is None:
         raise LlmProviderConfigError("Stored API key is missing.")
     return config_from_parts(
@@ -129,6 +134,7 @@ async def resolve_llm_config_for_user(
     *,
     force_server_default: bool = False,
 ) -> LlmConfig | None:
+    """Prefer the user's provider config, falling back to the server."""
     if session is not None and user_id is not None and not force_server_default:
         row = await get_user_llm_provider(session, user_id)
         if row is not None:

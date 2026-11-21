@@ -24,6 +24,7 @@ _NO_SERVER_LLM_VARS = (
 
 @pytest.fixture(autouse=True)
 def _clean_llm_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Set a test encryption key and clear all server LLM env vars."""
     monkeypatch.setenv("VELA_TOKEN_ENCRYPTION_KEY", Fernet.generate_key().decode())
     reset_token_cipher_for_tests()
     for name in _NO_SERVER_LLM_VARS:
@@ -31,6 +32,7 @@ def _clean_llm_env(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 async def _make_user(session: AsyncSession, email: str) -> User:
+    """Insert and return a User row with the given email."""
     user = User(email=email)
     session.add(user)
     await session.flush()
@@ -41,6 +43,7 @@ async def _make_user(session: AsyncSession, email: str) -> User:
 async def test_set_and_get_roundtrip(
     db_session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
+    """A stored provider decrypts to its key and builds a user-origin config."""
     async with db_session_factory() as session:
         user = await _make_user(session, "provider@example.com")
         await session.commit()
@@ -71,6 +74,7 @@ async def test_set_and_get_roundtrip(
 async def test_set_without_key_when_none_saved_raises(
     db_session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
+    """Setting without a key raises when no key has ever been stored."""
     async with db_session_factory() as session:
         user = await _make_user(session, "provider2@example.com")
         await session.commit()
@@ -89,6 +93,7 @@ async def test_set_without_key_when_none_saved_raises(
 async def test_set_without_key_keeps_existing_key(
     db_session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
+    """Setting without a key reuses the previously stored key."""
     async with db_session_factory() as session:
         user = await _make_user(session, "provider3@example.com")
         await session.commit()
@@ -117,6 +122,7 @@ async def test_set_without_key_keeps_existing_key(
 async def test_set_without_key_when_provider_changes_raises(
     db_session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
+    """Switching providers without a key raises, since the old key may not fit."""
     async with db_session_factory() as session:
         user = await _make_user(session, "provider-change@example.com")
         await session.commit()
@@ -143,6 +149,7 @@ async def test_set_without_key_when_provider_changes_raises(
 async def test_set_without_key_when_base_url_changes_raises(
     db_session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
+    """Changing the base URL without a key raises like a provider switch would."""
     async with db_session_factory() as session:
         user = await _make_user(session, "base-url-change@example.com")
         await session.commit()
@@ -166,6 +173,7 @@ async def test_set_without_key_when_base_url_changes_raises(
 
 
 def test_endpoint_fingerprint_isolates_same_model_different_endpoint() -> None:
+    """Fingerprints differ per base URL and never contain the API key."""
     one = user_config.config_from_parts(
         provider="openai_compatible",
         base_url="https://one.example/v1",
@@ -186,6 +194,7 @@ def test_endpoint_fingerprint_isolates_same_model_different_endpoint() -> None:
 async def test_delete_roundtrip(
     db_session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
+    """Delete removes the row and returns False once it is gone."""
     async with db_session_factory() as session:
         user = await _make_user(session, "provider4@example.com")
         await session.commit()
@@ -203,6 +212,7 @@ async def test_delete_roundtrip(
 
 
 def test_config_from_parts_openai_compatible() -> None:
+    """Parts build an OpenAI-compatible config with bearer auth from the base URL."""
     config = user_config.config_from_parts(
         provider="openai_compatible",
         base_url="https://openrouter.ai/api/v1",
@@ -216,6 +226,7 @@ def test_config_from_parts_openai_compatible() -> None:
 
 
 def test_config_from_parts_anthropic() -> None:
+    """Parts build an Anthropic config with the x-api-key and version headers."""
     config = user_config.config_from_parts(
         provider="anthropic",
         base_url=None,
@@ -234,6 +245,7 @@ async def test_resolve_prefers_user_row_over_env(
     db_session_factory: async_sessionmaker[AsyncSession],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Resolution uses the user's provider row even when env is configured."""
     monkeypatch.setenv("VELA_GEMINI_API_KEY", "env-key")
     async with db_session_factory() as session:
         user = await _make_user(session, "resolve@example.com")
@@ -257,6 +269,7 @@ async def test_resolve_force_server_default_skips_user_row(
     db_session_factory: async_sessionmaker[AsyncSession],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """force_server_default resolves the env config instead of the user row."""
     monkeypatch.setenv("VELA_GEMINI_API_KEY", "env-key")
     monkeypatch.setenv("VELA_GEMINI_MODEL", "server-default-model")
     async with db_session_factory() as session:
@@ -279,6 +292,7 @@ async def test_resolve_force_server_default_skips_user_row(
 
 
 def test_resolve_none_when_nothing_configured() -> None:
+    """Resolution returns None with no user row and no env config."""
     import asyncio
 
     assert asyncio.run(user_config.resolve_llm_config_for_user(None, None)) is None

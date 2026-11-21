@@ -108,6 +108,7 @@ def _allowed_origins() -> frozenset[str]:
 
 
 def _secret_key() -> str:
+    """Return the trimmed VELA_CLERK_SECRET_KEY environment value."""
     return os.environ.get("VELA_CLERK_SECRET_KEY", "").strip()
 
 

@@ -40,6 +40,7 @@ def resolve_compose_interpolation(
         return ""
 
     def replace_simple(match: re.Match[str]) -> str:
+        """Swap a bare $VAR for its host_env value, else an empty string."""
         return host_env[match.group(1)] if host_env and match.group(1) in host_env else ""
 
     resolved = _BRACE_DEFAULT_PATTERN.sub(replace_braced, value)
@@ -195,6 +196,7 @@ _ENV_ASSIGNMENT = re.compile(r"^(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)=(.*)$")
 
 
 def _env_file_paths(config: dict) -> list[str]:
+    """Collect env_file entries as paths, accepting string and list forms."""
     raw = config.get("env_file")
     if raw is None:
         return []
@@ -212,6 +214,7 @@ def _env_file_paths(config: dict) -> list[str]:
 
 
 def _load_dotenv_file(path: Path) -> dict[str, str]:
+    """Parse KEY=VALUE lines of a dotenv file; missing or unreadable files give {}."""
     if not path.is_file():
         return {}
     try:
@@ -233,6 +236,7 @@ def _load_dotenv_file(path: Path) -> dict[str, str]:
 
 
 def _load_env_files(config: dict, compose_dir: Path) -> dict[str, str]:
+    """Merge every env_file of a service config, resolved against compose_dir."""
     env_vars: dict[str, str] = {}
     for relative_path in _env_file_paths(config):
         env_vars.update(_load_dotenv_file((compose_dir / relative_path).resolve()))
@@ -272,6 +276,7 @@ def _extract_env(
     *,
     compose_dir: Path | None = None,
 ) -> dict[str, str]:
+    """Merge env_file variables with inline environment values (inline wins)."""
     file_env: dict[str, str] = {}
     if compose_dir is not None:
         file_env = _load_env_files(config, compose_dir)

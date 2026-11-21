@@ -10,11 +10,13 @@ from fastapi.testclient import TestClient
 
 @pytest.fixture
 def db_client(db_app: Any):
+    """Yield a TestClient with the app lifespan running."""
     with TestClient(db_app) as client:
         yield client
 
 
 def _auth(token: str) -> dict[str, str]:
+    """Return a Bearer auth header for the token."""
     return {"Authorization": f"Bearer {token}"}
 
 
@@ -26,6 +28,7 @@ def _invite_and_accept_member(
     instructor_token: str,
     member_email: str,
 ) -> Any:
+    """Provision a student, invite and accept into the owner's project; return ids."""
     member, member_token = provision_user(member_email, role="student")
     project_id = db_client.get(
         "/api/projects", headers=_auth(owner_token)
@@ -47,6 +50,7 @@ def _invite_and_accept_member(
 def test_student_cannot_create_invitation(
     db_client: Any, provision_user: Any
 ) -> None:
+    """Students cannot create invitations even for their own project."""
     _, token = provision_user("solo-student@example.com", role="student")
     provision_user("friend@example.com", role="student")
     project_id = db_client.get("/api/projects", headers=_auth(token)).json()[0]["id"]
@@ -63,6 +67,7 @@ def test_student_cannot_create_invitation(
 def test_instructor_can_invite_to_project_they_do_not_own(
     db_client: Any, provision_user: Any
 ) -> None:
+    """Instructors may invite into a project owned by someone else."""
     _, owner_token = provision_user("team-owner@example.com", role="student")
     _, instructor_token = provision_user(
         "team-instructor@example.com", role="instructor"
@@ -84,6 +89,7 @@ def test_instructor_can_invite_to_project_they_do_not_own(
 def test_instructor_can_list_and_cancel_invitation_for_project_they_do_not_own(
     db_client: Any, provision_user: Any
 ) -> None:
+    """Instructors can list and cancel invitations on a foreign project."""
     _, owner_token = provision_user("list-owner@example.com", role="student")
     _, instructor_token = provision_user(
         "list-instructor@example.com", role="instructor"
@@ -117,6 +123,7 @@ def test_instructor_can_list_and_cancel_invitation_for_project_they_do_not_own(
 def test_student_owner_cannot_patch_member_role(
     db_client: Any, provision_user: Any
 ) -> None:
+    """A student owner gets 403 when patching a member's role."""
     _, owner_token = provision_user("patch-owner@example.com", role="student")
     _, instructor_token = provision_user(
         "patch-instructor@example.com", role="instructor"
@@ -149,6 +156,7 @@ def test_student_owner_cannot_patch_member_role(
 def test_instructor_can_patch_member_role_for_project_they_do_not_own(
     db_client: Any, provision_user: Any
 ) -> None:
+    """Instructors can patch member roles on a project they do not own."""
     _, owner_token = provision_user("staff-patch-owner@example.com", role="student")
     _, instructor_token = provision_user(
         "staff-patch-instructor@example.com", role="instructor"
@@ -184,6 +192,7 @@ def test_instructor_can_patch_member_role_for_project_they_do_not_own(
 def test_student_owner_cannot_remove_member(
     db_client: Any, provision_user: Any
 ) -> None:
+    """A student owner gets 403 when removing a member."""
     _, owner_token = provision_user("remove-owner@example.com", role="student")
     _, instructor_token = provision_user(
         "remove-instructor@example.com", role="instructor"
@@ -207,6 +216,7 @@ def test_student_owner_cannot_remove_member(
 def test_instructor_can_remove_member_for_project_they_do_not_own(
     db_client: Any, provision_user: Any
 ) -> None:
+    """Instructors can remove members from a project they do not own."""
     _, owner_token = provision_user("staff-remove-owner@example.com", role="student")
     _, instructor_token = provision_user(
         "staff-remove-instructor@example.com", role="instructor"
@@ -234,6 +244,7 @@ def test_instructor_can_remove_member_for_project_they_do_not_own(
 def test_instructor_cannot_remove_sole_project_owner(
     db_client: Any, provision_user: Any
 ) -> None:
+    """Instructors get 403 when trying to remove a project's sole owner."""
     owner, owner_token = provision_user("sole-owner@example.com", role="student")
     _, instructor_token = provision_user(
         "sole-owner-instructor@example.com", role="instructor"
@@ -253,6 +264,7 @@ def test_instructor_cannot_remove_sole_project_owner(
 def test_instructor_cannot_remove_self_from_personal_project(
     db_client: Any, provision_user: Any
 ) -> None:
+    """Instructors cannot remove themselves from their personal project."""
     instructor, instructor_token = provision_user(
         "personal-owner@example.com", role="instructor"
     )

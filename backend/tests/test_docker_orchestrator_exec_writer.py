@@ -12,31 +12,37 @@ from app.core.containers.docker_orchestrator import DockerOrchestrator
 
 
 class _FakeExecRuntime:
+    """Exec IO stub with slow blocking read and write calls."""
     def __init__(self) -> None:
+        """Start with no recorded writes."""
         self._lock = threading.Lock()
         self.writes: list[bytes] = []
 
     def read(self, size: int) -> bytes:
+        """Sleep to mimic blocking socket reads and return nothing."""
         time.sleep(0.05)
         return b""
 
     def write(self, data: bytes) -> int:
+        """Sleep to mimic a blocking write, then record the data."""
         time.sleep(0.2)
         with self._lock:
             self.writes.append(data)
         return len(data)
 
     def close(self) -> None:
-        pass
+        """Close without doing anything."""
 
 
 async def test_stream_exec_write_callable_does_not_block_event_loop(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """The stdin write callable returns without waiting for the write."""
     runtime = _FakeExecRuntime()
     orch = DockerOrchestrator.__new__(DockerOrchestrator)
 
     def fake_session(container_id: str, cols: int, rows: int) -> tuple[str, object]:
+        """Return a fixed exec id with the fake runtime."""
         return "exec-1", runtime
 
     monkeypatch.setattr(orch, "_create_exec_session", fake_session)

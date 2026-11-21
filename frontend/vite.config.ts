@@ -5,7 +5,7 @@ import react from '@vitejs/plugin-react'
 export default defineConfig({
   plugins: [react()],
   server: {
-    allowedHosts: ['app.example.com'],
+    allowedHosts: [process.env.VELA_DOMAIN ?? 'app.example.com'],
     proxy: {
       // HTTP + WebSocket (container log stream) to FastAPI. Same-origin /api avoids
       // mixed-content blocking of ws: from an https:// dev page.

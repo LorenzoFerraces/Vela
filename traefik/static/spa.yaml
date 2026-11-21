@@ -1,4 +1,15 @@
 http:
+  middlewares:
+    # Referenced by the websecure entrypoint in docker-compose.yml: HSTS on all
+    # TLS-routed traffic (SPA + /api proxy), not just the routers defined here.
+    vela-hsts:
+      headers:
+        stsSeconds: 31536000
+        stsIncludeSubdomains: true
+    vela-https-redirect:
+      redirectScheme:
+        scheme: https
+        permanent: true
   routers:
     # Redirect the public host to HTTPS. Higher priority than the catch-all
     # plain-HTTP router below. Host/certResolver come from env on the traefik
@@ -27,14 +38,10 @@ http:
       tls:
         certResolver: '{{ env "VELA_TRAEFIK_ACME_RESOLVER" }}'
         # The rule has no Host matcher, so Traefik cannot infer which name to
-        # issue for. Must match VELA_GITHUB_OAUTH_REDIRECT_URI / VELA_FRONTEND_BASE_URL.
+        # issue for. Comes from VELA_PUBLIC_HOST (passed to the traefik service
+        # in docker-compose.yml); must match VELA_FRONTEND_BASE_URL / OAuth redirect.
         domains:
           - main: '{{ env "VELA_PUBLIC_HOST" }}'
-  middlewares:
-    vela-https-redirect:
-      redirectScheme:
-        scheme: https
-        permanent: true
   services:
     vela-spa-svc:
       loadBalancer:

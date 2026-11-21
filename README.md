@@ -19,6 +19,8 @@ FastAPI backend, Vite/React frontend, optional Traefik as an edge proxy, and Pos
 - **PostgreSQL 16+** (or use the repo’s Docker Compose file for a local instance)
 - Git (if you build from Git URLs)
 
+> **Linux / macOS:** Examples use PowerShell. Use `source .venv/bin/activate` instead of `.\.venv\Scripts\Activate.ps1`, `export NAME=value` instead of `$env:NAME = "value"`, and `dist/vela` instead of `vela.exe`. Docker commands are unchanged.
+
 ## Layout
 
 | Path | Role |

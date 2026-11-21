@@ -166,6 +166,7 @@ class LlmProviderError(VelaError):
     """A user-configured LLM provider failed; the server default may still work."""
 
     def __init__(self, message: str, *, fallback_available: bool) -> None:
+        """Store whether the server default can still serve as fallback."""
         super().__init__(message)
         self.fallback_available = fallback_available
 
@@ -234,17 +235,23 @@ class NotAuthenticatedError(AuthError):
 
 
 class AccountDeactivatedError(AuthError):
+    """Raised when a deactivated account tries to authenticate."""
     def __init__(self, message: str = "Account deactivated.") -> None:
+        """Initialize with an optional custom deactivated message."""
         super().__init__(message)
 
 
 class RegistrationDisabledError(AuthError):
+    """Raised when new signups are disabled."""
     def __init__(self) -> None:
+        """Initialize with the fixed registration-disabled message."""
         super().__init__("Registration disabled")
 
 
 class PermissionDeniedError(AuthError):
+    """Raised when the caller's role forbids the action."""
     def __init__(self, message: str = "You do not have permission to perform this action.") -> None:
+        """Initialize with an optional custom permission message."""
         super().__init__(message)
 
 

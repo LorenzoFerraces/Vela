@@ -20,6 +20,7 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
+    """Create the audit_log table with user/action/target columns and indexes."""
     op.create_table(
         "audit_log",
         sa.Column("id", sa.Uuid(as_uuid=True), nullable=False),
@@ -43,6 +44,7 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    """Drop the audit_log indexes and table."""
     op.drop_index("ix_audit_log_created_at", table_name="audit_log")
     op.drop_index("ix_audit_log_action", table_name="audit_log")
     op.drop_index("ix_audit_log_user_id", table_name="audit_log")

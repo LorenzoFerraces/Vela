@@ -285,6 +285,7 @@ class FakeContainerOrchestrator(ContainerOrchestrator):
         since: float | None,
         timestamps: bool = False,
     ) -> str:
+        """Render buffered fake log lines applying tail/since/timestamps."""
         lines = self._log_lines.setdefault(container_id, [])
         if not lines:
             lines.append((time.time(), "log line 1"))
@@ -340,6 +341,7 @@ class FakeContainerOrchestrator(ContainerOrchestrator):
         closed = threading.Event()
 
         def _shell_worker() -> None:
+            """Echo input lines with a fake prompt until exit or close."""
             try:
                 asyncio.run_coroutine_threadsafe(
                     stdout_queue.put(f"root@{container_id[:12]}:~# ".encode()),
@@ -392,15 +394,18 @@ class FakeContainerOrchestrator(ContainerOrchestrator):
         threading.Thread(target=_shell_worker, daemon=True, name="vela-fake-exec").start()
 
         def _write(data: bytes) -> None:
+            """Push stdin bytes into the fake shell queue."""
             if not closed.is_set():
                 asyncio.run_coroutine_threadsafe(stdin_queue.put(data), loop)
 
         def _close() -> None:
+            """Mark closed and send EOF to the worker."""
             if not closed.is_set():
                 closed.set()
                 asyncio.run_coroutine_threadsafe(stdin_queue.put(None), loop)
 
         async def _stdout_iterator() -> AsyncIterator[bytes]:
+            """Yield fake exec output until EOF."""
             try:
                 while True:
                     item = await stdout_queue.get()
@@ -414,7 +419,7 @@ class FakeContainerOrchestrator(ContainerOrchestrator):
         return _stdout_iterator(), _write, _close, exec_id
 
     def resize_exec(self, container_id: str, exec_id: str, cols: int, rows: int) -> None:
-        pass
+        """No-op: fake exec ignores terminal size."""
 
     async def get_stats(self, container_id: str) -> ContainerStats:
         """
@@ -499,6 +504,7 @@ class FakeContainerOrchestrator(ContainerOrchestrator):
         return sorted(self._images)
 
     async def list_replicas(self, base_name: str) -> builtins.list[ContainerInfo]:
+        """Return fake containers labeled as replicas of base_name."""
         return [
             info
             for info in self._containers.values()

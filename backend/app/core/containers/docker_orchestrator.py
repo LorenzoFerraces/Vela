@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import builtins
+import io
 import logging
 import os
 import re
@@ -17,6 +18,7 @@ import docker
 import docker.errors
 import requests.exceptions
 from docker.types import Healthcheck, Mount
+from docker.utils.socket import read as socket_read
 
 from app.core.containers.orchestrator import ContainerOrchestrator
 from app.core.enums import ContainerStatus, HealthStatus, RestartPolicy
@@ -62,14 +64,17 @@ class _BuildLogTail:
     __slots__ = ("_parts", "_size")
 
     def __init__(self) -> None:
+        """Start with an empty retained log tail."""
         self._parts: list[str] = []
         self._size: int = 0
 
     @property
     def size(self) -> int:
+        """Total retained bytes."""
         return self._size
 
     def append(self, text: str) -> None:
+        """Append log text, evicting leading chunks beyond the size cap."""
         if len(text) > _MAX_BUILD_LOG_BYTES:
             text = text[-_MAX_BUILD_LOG_BYTES:]
         self._parts.append(text)
@@ -78,6 +83,7 @@ class _BuildLogTail:
             self._size -= len(self._parts.pop(0))
 
     def text(self) -> str:
+        """Join the retained chunks into one string."""
         return "".join(self._parts)
 
 
@@ -246,6 +252,7 @@ def _ports_from_inspect(data: dict[str, Any]) -> list[PortMapping]:
 
 
 def _ports_from_list(data: dict[str, Any]) -> list[PortMapping]:
+    """Parse published port mappings from a container list entry."""
     result: list[PortMapping] = []
     for entry in data.get("Ports") or []:
         if not isinstance(entry, dict):
@@ -431,6 +438,7 @@ class DockerOrchestrator(ContainerOrchestrator):
         return await asyncio.to_thread(fn)
 
     def _inspect_container_with_size(self, container_id: str) -> dict:
+        """Inspect via the raw API so the response includes SizeRw."""
         # docker-py's high-level inspect omits SizeRw; the raw endpoint supports ?size=1.
         api = self._client.api
         url = api._url("/containers/{0}/json", container_id)
@@ -564,9 +572,7 @@ class DockerOrchestrator(ContainerOrchestrator):
         ports = self._port_bindings_from_config(config)
         restart = _docker_restart_policy(config.restart_policy)
         nano_cpus = (
-            int(config.cpu_limit * _NS_PER_SEC)
-            if config.cpu_limit is not None
-            else None
+            int(config.cpu_limit * _NS_PER_SEC) if config.cpu_limit is not None else None
         )
         hc = (
             _healthcheck_for_config(config.health_check)
@@ -818,6 +824,7 @@ class DockerOrchestrator(ContainerOrchestrator):
         since: float | None = None,
         timestamps: bool = False,
     ) -> str:
+        """Return log text for a managed container."""
         def sync() -> str:
             try:
                 c = self._client.containers.get(container_id)
@@ -916,6 +923,7 @@ class DockerOrchestrator(ContainerOrchestrator):
     def _create_exec_session(
         self, container_id: str, *, cols: int, rows: int
     ) -> tuple[str, Any]:
+        """Start a tty shell exec session on a managed container."""
         container = self._client.containers.get(container_id)
         self._assert_managed_labels(container.labels or {}, container_id)
         exec_id = self._client.api.exec_create(
@@ -939,6 +947,7 @@ class DockerOrchestrator(ContainerOrchestrator):
         cols: int = 80,
         rows: int = 24,
     ) -> tuple[AsyncIterator[bytes], Callable[[bytes], None], Callable[[], None], str]:
+        """Stream an interactive exec session: output iterator, writer, closer."""
         exec_id, exec_runtime = await asyncio.to_thread(
             self._create_exec_session, container_id, cols=cols, rows=rows
         )
@@ -952,9 +961,14 @@ class DockerOrchestrator(ContainerOrchestrator):
         )
 
         def _reader() -> None:
+            """Copy socket output into the async queue until EOF or close."""
             try:
                 while not closed.is_set():
-                    chunk = exec_runtime.read(4096)
+                    chunk = socket_read(exec_runtime, 4096)
+                    # docker's read returns None on a recoverable errno
+                    # (EINTR/EDEADLK/EWOULDBLOCK); retry instead of closing.
+                    if chunk is None:
+                        continue
                     if not chunk:
                         break
                     try:
@@ -981,12 +995,20 @@ class DockerOrchestrator(ContainerOrchestrator):
         threading.Thread(target=_reader, daemon=True, name="vela-exec-reader").start()
 
         def _write_blocking(data: bytes) -> None:
+            """Write exec stdin bytes through the socket wrapper or raw socket."""
             try:
-                exec_runtime.write(data)
+                # exec_start(socket=True) returns a read-only SocketIO on Unix
+                # sockets and an NpipeSocket on Windows, so write through the
+                # underlying socket when the wrapper rejects writes.
+                try:
+                    exec_runtime.write(data)
+                except (AttributeError, io.UnsupportedOperation):
+                    getattr(exec_runtime, "_sock", exec_runtime).sendall(data)
             except Exception as exc:  # noqa: BLE001
                 logger.warning("exec write error for %s: %s", container_id, exc)
 
         def _write(data: bytes) -> None:
+            """Submit a stdin write to the ordered writer thread."""
             if closed.is_set():
                 return
             try:
@@ -997,12 +1019,14 @@ class DockerOrchestrator(ContainerOrchestrator):
                 )
 
         def _close_blocking() -> None:
+            """Close the exec socket, logging failures."""
             try:
                 exec_runtime.close()
             except Exception as exc:  # noqa: BLE001
                 logger.warning("exec close error for %s: %s", container_id, exc)
 
         def _close() -> None:
+            """Mark the session closed and shut down the writer executor."""
             if closed.is_set():
                 return
             closed.set()
@@ -1010,6 +1034,7 @@ class DockerOrchestrator(ContainerOrchestrator):
             executor.shutdown(wait=False)
 
         async def _stdout_iterator() -> AsyncIterator[bytes]:
+            """Yield queued output chunks until the reader signals EOF."""
             try:
                 while True:
                     item = await queue.get()
@@ -1025,6 +1050,7 @@ class DockerOrchestrator(ContainerOrchestrator):
     def resize_exec(
         self, container_id: str, exec_id: str, cols: int, rows: int
     ) -> None:
+        """Resize the exec tty; errors are logged, not raised."""
         try:
             self._client.api.exec_resize(exec_id, height=rows, width=cols)
         except Exception as exc:  # noqa: BLE001
@@ -1223,7 +1249,9 @@ class DockerOrchestrator(ContainerOrchestrator):
             raise ProviderConnectionError(str(e)) from e
 
     async def list_images(self) -> builtins.list[str]:
+        """Return sorted unique tags of engine images."""
         def sync() -> list[str]:
+            """Collect image tags from the engine."""
             tags: list[str] = []
             for img in self._client.images.list():
                 tags.extend(img.tags or [])
@@ -1237,12 +1265,14 @@ class DockerOrchestrator(ContainerOrchestrator):
             raise ProviderConnectionError(str(e)) from e
 
     async def list_replicas(self, base_name: str) -> builtins.list[ContainerInfo]:
+        """List managed replica containers of base_name."""
         label_filter = [
             f"{VELA_MANAGED_LABEL}={VELA_MANAGED_VALUE}",
             f"{VELA_REPLICA_OF_LABEL}={base_name}",
         ]
 
         def sync() -> list[ContainerInfo]:
+            """Inspect all replica containers matching the label filter."""
             containers = self._client.containers.list(
                 all=True,
                 filters={"label": label_filter},
@@ -1290,6 +1320,7 @@ class DockerOrchestrator(ContainerOrchestrator):
         return await self.deploy(replica_config)
 
     def _lookup_proxy_container_sync(self) -> Any | None:
+        """Get the configured Traefik reload container, or None."""
         proxy_name = self._proxy_container
         if not proxy_name:
             return None
@@ -1310,6 +1341,7 @@ class DockerOrchestrator(ContainerOrchestrator):
             return None
 
     def _connect_proxy_to_network_sync(self, container: Any, network_name: str) -> None:
+        """Connect the proxy container to one network, tolerating API errors."""
         try:
             network = self._client.networks.get(network_name)
             network.connect(container)
@@ -1330,6 +1362,7 @@ class DockerOrchestrator(ContainerOrchestrator):
             )
 
     def _attach_proxy_to_network_sync(self, network_name: str) -> None:
+        """Attach the proxy to the new network and every vela-stack network."""
         container = self._lookup_proxy_container_sync()
         if container is None:
             return
@@ -1341,6 +1374,7 @@ class DockerOrchestrator(ContainerOrchestrator):
             self._connect_proxy_to_network_sync(container, name)
 
     def _detach_proxy_from_network_sync(self, network_name: str) -> None:
+        """Force-disconnect the proxy from one network."""
         proxy_name = self._proxy_container
         if not proxy_name:
             return
@@ -1359,7 +1393,9 @@ class DockerOrchestrator(ContainerOrchestrator):
             )
 
     async def create_network(self, name: str) -> None:
+        """Create the bridge network if missing and reattach the proxy."""
         def sync() -> None:
+            """Ensure the network exists and connect the proxy."""
             existing = [
                 n
                 for n in self._client.networks.list(filters={"name": name})
@@ -1372,7 +1408,9 @@ class DockerOrchestrator(ContainerOrchestrator):
         await self._to_thread(sync)
 
     async def remove_network(self, name: str) -> None:
+        """Detach the proxy and remove the network."""
         def sync() -> None:
+            """Detach the proxy and delete the network."""
             self._detach_proxy_from_network_sync(name)
             try:
                 network = self._client.networks.get(name)

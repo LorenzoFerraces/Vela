@@ -10,10 +10,12 @@ from app.db.models import ApiToken
 
 
 def _auth(token: str) -> dict[str, str]:
+    """Build an Authorization header for the given token."""
     return {"Authorization": f"Bearer {token}"}
 
 
 def test_create_token_returns_plaintext_once(db_app: Any, provision_user: Any) -> None:
+    """Token creation returns the plaintext vela_pat_ secret exactly once."""
     _, jwt = provision_user("token-owner@example.com")
     with TestClient(db_app) as client:
         response = client.post(
@@ -30,6 +32,7 @@ def test_create_token_returns_plaintext_once(db_app: Any, provision_user: Any) -
 def test_token_is_stored_hashed(
     db_app: Any, db_session_factory: Any, provision_user: Any
 ) -> None:
+    """The stored row keeps only a SHA-256 hash and prefix, never the secret."""
     import asyncio
 
     _, jwt = provision_user("hashed@example.com")
@@ -39,6 +42,7 @@ def test_token_is_stored_hashed(
         ).json()
 
     async def fetch() -> list[ApiToken]:
+        """Load all persisted ApiToken rows."""
         async with db_session_factory() as session:
             result = await session.execute(select(ApiToken))
             return list(result.scalars())
@@ -52,6 +56,7 @@ def test_token_is_stored_hashed(
 
 
 def test_list_tokens_hides_secrets(db_app: Any, provision_user: Any) -> None:
+    """Listing tokens exposes metadata only, including scope and lifecycle fields."""
     _, jwt = provision_user("list@example.com")
     with TestClient(db_app) as client:
         client.post("/api/tokens/", json={"name": "one"}, headers=_auth(jwt))
@@ -65,6 +70,7 @@ def test_list_tokens_hides_secrets(db_app: Any, provision_user: Any) -> None:
 
 
 def test_revoke_removes_the_token(db_app: Any, provision_user: Any) -> None:
+    """DELETE /api/tokens/{id} returns 204 and empties the list."""
     _, jwt = provision_user("revoke@example.com")
     with TestClient(db_app) as client:
         created = client.post(
@@ -79,6 +85,7 @@ def test_revoke_removes_the_token(db_app: Any, provision_user: Any) -> None:
 def test_cannot_revoke_another_users_token(
     db_app: Any, provision_user: Any
 ) -> None:
+    """Revoking another user's token id returns 404, not a deletion."""
     _, owner_jwt = provision_user("owner@example.com")
     _, other_jwt = provision_user("other@example.com")
     with TestClient(db_app) as client:
@@ -92,12 +99,30 @@ def test_cannot_revoke_another_users_token(
 
 
 def test_tokens_require_auth(db_app: Any) -> None:
+    """The tokens list requires authentication (401 anonymously)."""
     with TestClient(db_app) as client:
         response = client.get("/api/tokens/")
     assert response.status_code == 401
 
 
+def test_pat_cannot_create_another_token(db_app: Any, provision_user: Any) -> None:
+    """Authenticating with a PAT to mint another token is forbidden (403)."""
+    _, jwt = provision_user("pat-mint@example.com")
+    with TestClient(db_app) as client:
+        pat = client.post(
+            "/api/tokens/", json={"name": "cli:test"}, headers=_auth(jwt)
+        ).json()["token"]
+        response = client.post(
+            "/api/tokens/", json={"name": "second"}, headers=_auth(pat)
+        )
+    assert response.status_code == 403
+    assert response.json()["detail"] == (
+        "API tokens cannot create other tokens. Log in interactively."
+    )
+
+
 def test_pat_authenticates_like_a_jwt(db_app: Any, provision_user: Any) -> None:
+    """A PAT authenticates protected endpoints just like a JWT."""
     _, jwt = provision_user("pat-auth@example.com")
     with TestClient(db_app) as client:
         pat = client.post(
@@ -109,6 +134,7 @@ def test_pat_authenticates_like_a_jwt(db_app: Any, provision_user: Any) -> None:
 
 
 def test_revoked_pat_is_rejected(db_app: Any, provision_user: Any) -> None:
+    """A revoked PAT stops authenticating immediately (401)."""
     _, jwt = provision_user("revoked@example.com")
     with TestClient(db_app) as client:
         created = client.post(
@@ -122,6 +148,7 @@ def test_revoked_pat_is_rejected(db_app: Any, provision_user: Any) -> None:
 def test_deactivated_user_pat_is_rejected(
     db_app: Any, db_session_factory: Any, provision_user: Any
 ) -> None:
+    """A PAT for a deactivated account is refused with account_deactivated."""
     import asyncio
 
     from app.db.models import User
@@ -133,6 +160,7 @@ def test_deactivated_user_pat_is_rejected(
         ).json()["token"]
 
     async def deactivate() -> None:
+        """Flip the user's is_active flag straight in the database."""
         async with db_session_factory() as session:
             row = await session.get(User, user.id)
             assert row is not None

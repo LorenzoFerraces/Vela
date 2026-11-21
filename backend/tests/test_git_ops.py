@@ -86,3 +86,10 @@ def test_clone_error_url_and_message_mask_credentials(
     assert "supersecret" not in err.git_url
     assert "supersecret" not in str(err)
     assert "github.com" in err.git_url
+
+
+def test_validate_git_url_requires_scp_colon() -> None:
+    git_ops._validate_git_url("git@github.com:org/repo.git")
+    with pytest.raises(CloneError):
+        git_ops._validate_git_url("git@local-repo")
+

@@ -223,7 +223,10 @@ STUB_PAYLOAD = {
 
 
 class _EvalImageBuilder(DefaultImageBuilder):
+    """Image builder stub whose clone returns the prepared fixture repo."""
+
     def __init__(self, root: Path) -> None:
+        """Store the local fixture directory to serve as the clone result."""
         self._root = root
 
     async def clone_repository(
@@ -233,11 +236,13 @@ class _EvalImageBuilder(DefaultImageBuilder):
         branch: str = "main",
         access_token: str | None = None,
     ) -> str:
+        """Ignore the URL and return the stub root path."""
         _ = git_url, branch, access_token
         return str(self._root)
 
 
 def _write_fixture(tmp_path: Path, fixture: dict) -> Path:
+    """Write the fixture's files into a repo directory and return its root."""
     root = tmp_path / fixture["name"] / "repo"
     root.mkdir(parents=True)
     for filename, content in fixture["files"].items():
@@ -248,10 +253,12 @@ def _write_fixture(tmp_path: Path, fixture: dict) -> Path:
 
 
 def _llm_eval_enabled() -> bool:
+    """Return True when the live LLM eval tier is opted in."""
     return os.environ.get("VELA_LLM_EVAL", "").strip() == "1"
 
 
 def _score(fixture: dict, analysis: RepoStackAnalysis) -> tuple[list[str], dict[str, str]]:
+    """Compare an analysis against the golden; return hard misses and metrics."""
     hard_failures: list[str] = []
     services = {service.service_name.casefold(): service for service in analysis.services}
     env_union: dict[str, str] = {}
@@ -299,6 +306,7 @@ def _score(fixture: dict, analysis: RepoStackAnalysis) -> tuple[list[str], dict[
 
 
 def _record_history(fixture_name: str, metrics: dict[str, str], hard_failures: list[str]) -> None:
+    """Append one JSONL trend entry for the fixture run."""
     config = resolve_llm_config()
     entry = {
         "ts": datetime.now(UTC).isoformat(timespec="seconds"),
@@ -314,6 +322,7 @@ def _record_history(fixture_name: str, metrics: dict[str, str], hard_failures: l
 
 @pytest.mark.parametrize("fixture", FIXTURES, ids=lambda fixture: fixture["name"])
 def test_oracle_required_env_reachable(fixture: dict, tmp_path: Path) -> None:
+    """The deterministic extractor finds every golden's required env key."""
     root = _write_fixture(tmp_path, fixture)
     context = _collect_context_excerpts(root)
     extracted = _extract_env_vars_from_context(context)
@@ -324,6 +333,7 @@ def test_oracle_required_env_reachable(fixture: dict, tmp_path: Path) -> None:
 async def test_pipeline_stubbed_llm_merges_env_fallback(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """With a silent stub LLM, the fallback merge still supplies detected env."""
     fixture = FIXTURES[0]
     root = _write_fixture(tmp_path, fixture)
 
@@ -332,6 +342,7 @@ async def test_pipeline_stubbed_llm_merges_env_fallback(
     async def fake_generate_json(
         *, prompt: str, schema: dict, config: LlmConfig | None = None
     ) -> dict:
+        """Capture the prompt and return the stub two-service payload."""
         _ = schema, config
         captured["prompt"] = prompt
         return STUB_PAYLOAD
@@ -362,6 +373,7 @@ async def test_pipeline_stubbed_llm_merges_env_fallback(
 async def test_pipeline_stubbed_llm_appends_detected_services(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """Services detected from the manifest are appended even if the LLM omits them."""
     fixture = next(f for f in FIXTURES if f["name"] == "springboot-3db")
     root = _write_fixture(tmp_path, fixture)
 
@@ -384,6 +396,7 @@ async def test_pipeline_stubbed_llm_appends_detected_services(
     async def fake_generate_json(
         *, prompt: str, schema: dict, config: LlmConfig | None = None
     ) -> dict:
+        """Return the app-only stub payload."""
         _ = schema, config, prompt
         return app_only_payload
 
@@ -412,6 +425,7 @@ async def test_pipeline_stubbed_llm_appends_detected_services(
 async def test_pipeline_warns_on_external_managed_host(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """An external managed DB host produces a warning instead of a service."""
     root = tmp_path / "repo"
     root.mkdir()
     (root / "requirements.txt").write_text("psycopg2\n", encoding="utf-8")
@@ -439,6 +453,7 @@ async def test_pipeline_warns_on_external_managed_host(
     async def fake_generate_json(
         *, prompt: str, schema: dict, config: LlmConfig | None = None
     ) -> dict:
+        """Return the app-only stub payload."""
         _ = schema, config, prompt
         return app_only_payload
 
@@ -462,6 +477,7 @@ async def test_pipeline_warns_on_external_managed_host(
 async def test_llm_env_coverage(
     fixture: dict, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """Live tier: score real LLM output per fixture and fail on hard misses."""
     monkeypatch.delenv("VELA_E2E", raising=False)
     if resolve_llm_config() is None:
         pytest.skip("no LLM configured (VELA_GEMINI_API_KEY or VELA_VERTEX_API_KEY)")

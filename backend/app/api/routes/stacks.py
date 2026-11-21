@@ -136,6 +136,7 @@ async def parse_manifest_route(
     body: ManifestParseRequest,
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> ManifestParseResponse:
+    """Parse an uploaded manifest into stack services, rejecting empty or huge input."""
     _ = current_user
     if len(body.yaml_content.encode("utf-8")) > MAX_MANIFEST_YAML_BYTES:
         raise HTTPException(
@@ -162,6 +163,7 @@ async def analyze_repo_route(
     session: Annotated[AsyncSession, Depends(get_db)],
     image_builder: Annotated[DefaultImageBuilder, Depends(get_image_builder)],
 ) -> AnalyzeRepoResponse:
+    """Analyze a Git repository and return the stack services detected in it."""
     from app.core.deploy.github_auth import github_token_for_url
 
     access_token = await github_token_for_url(session, current_user, body.git_url)
@@ -413,6 +415,7 @@ def _orm_service_to_create(
     service: StackService,
     detected_names: Collection[str] = (),
 ) -> StackServiceCreate:
+    """Convert a persisted StackService row into a StackServiceCreate payload."""
     volumes = service.volumes or []
     scaling = service.scaling_policy
     source_kind = service.source_kind

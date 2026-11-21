@@ -2,6 +2,8 @@
 
 Conventions for tooling, dependencies, naming, and Python style. Follow this file when changing the repo.
 
+Linux/macOS: use `source .venv/bin/activate`, `export VAR=...`, and `python`/`dist/vela` instead of the PowerShell equivalents shown below.
+
 ## Repo management
 
 - **Keep the readme concise** when adding or updating the readme file.

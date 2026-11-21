@@ -29,8 +29,8 @@ function resolveApiServerCommand(): string {
     return process.env.PW_API_SERVER_COMMAND
   }
   const candidatePythonPaths = [
-    path.join(repoRoot, '.venv', 'Scripts', 'python.exe'),
     path.join(repoRoot, '.venv', 'bin', 'python'),
+    path.join(repoRoot, '.venv', 'Scripts', 'python.exe'),
   ]
   const venvPython = candidatePythonPaths.find((candidate) =>
     existsSync(candidate),

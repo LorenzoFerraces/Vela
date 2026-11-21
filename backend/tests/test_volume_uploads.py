@@ -71,6 +71,7 @@ def test_save_volume_upload_rejects_when_user_quota_exceeded(
 
 
 def test_resolve_remaps_to_host_root(tmp_path, monkeypatch) -> None:
+    """Resolve upload paths under the host directory when one is configured."""
     monkeypatch.setenv("VELA_VOLUME_UPLOADS_DIR", str(tmp_path))
     monkeypatch.setenv("VELA_VOLUME_UPLOADS_HOST_DIR", str(tmp_path / "host"))
     user_id = uuid.uuid4()

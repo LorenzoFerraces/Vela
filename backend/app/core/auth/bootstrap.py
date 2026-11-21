@@ -14,6 +14,7 @@ from app.db.models import User
 
 
 async def ensure_admin_user(session: AsyncSession) -> User | None:
+    """Return the env admin, creating it when missing; None if unconfigured."""
     email = os.environ.get("VELA_ADMIN_EMAIL", "").strip().lower()
     if not email:
         return None

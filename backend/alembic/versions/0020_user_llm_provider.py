@@ -20,6 +20,7 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
+    """Create the user_llm_providers table keyed by user_id."""
     op.create_table(
         "user_llm_providers",
         sa.Column("user_id", sa.Uuid(), nullable=False),
@@ -35,4 +36,5 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    """Drop the user_llm_providers table."""
     op.drop_table("user_llm_providers")

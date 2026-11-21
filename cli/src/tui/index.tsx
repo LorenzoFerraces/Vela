@@ -12,13 +12,27 @@ export async function runTui(): Promise<number> {
   }
   const config = requireToken(resolveConfig({}))
 
-  const renderer = await createCliRenderer({ exitOnCtrlC: true })
+  const renderer = await createCliRenderer({
+    exitOnCtrlC: true,
+    backgroundColor: "#0c0d12",
+  })
   const root = createRoot(renderer)
 
   const load = async () =>
     await request<ContainerInfo[]>(config, "GET", "/containers/")
   const act = (action: "start" | "stop") => async (container: ContainerInfo) => {
     await request(config, "POST", `/containers/${container.id}/${action}`)
+  }
+  const run = async (source: string) => {
+    const isGit =
+      source.startsWith("git@") ||
+      source.startsWith("http://") ||
+      source.startsWith("https://") ||
+      source.startsWith("ssh://")
+    const body = isGit
+      ? { source_kind: "git", git_url: source, git_branch: "main" }
+      : { source_kind: "image", image_ref: source }
+    await request(config, "POST", "/containers/run", body)
   }
 
   let finish: () => void = () => {}
@@ -49,6 +63,7 @@ export async function runTui(): Promise<number> {
         console.log(`Run: vela logs ${container.name} -f`)
         finish()
       }}
+      onRun={run}
       onExec={(container) => {
         renderer.destroy()
         console.log(`Run: vela exec ${container.name}`)

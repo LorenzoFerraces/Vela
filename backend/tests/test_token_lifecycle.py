@@ -38,7 +38,7 @@ def test_create_token_api_accepts_scope_and_expiry(api_client, seeded_user) -> N
 
 
 def test_read_scope_pat_is_read_only(api_client, seeded_user) -> None:
-    """A read PAT can GET but not POST/DELETE; JWT and full-scope PATs are unaffected."""
+    """A read PAT can GET but not POST/DELETE; no PAT may mint another token."""
     created = api_client.post("/api/tokens/", json={"name": "reader", "scope": "read"})
     assert created.status_code == 201
     read_pat = created.json()["token"]
@@ -64,11 +64,12 @@ def test_read_scope_pat_is_read_only(api_client, seeded_user) -> None:
     )
 
     assert api_client.get("/api/tokens/", headers=as_pat(full_pat)).status_code == 200
+    # Minting tokens is JWT-only, even for a full-scope PAT.
     assert (
         api_client.post(
-            "/api/tokens/", json={"name": "allowed"}, headers=as_pat(full_pat)
+            "/api/tokens/", json={"name": "blocked"}, headers=as_pat(full_pat)
         ).status_code
-        == 201
+        == 403
     )
     assert (
         api_client.delete(f"/api/tokens/{read_id}", headers=as_pat(full_pat)).status_code

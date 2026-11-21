@@ -159,21 +159,25 @@ _oauth2_scheme = OAuth2PasswordBearer(tokenUrl="api/auth/login", auto_error=Fals
 _MUTATING_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 
 
-async def get_current_user(
-    token: Annotated[str | None, Depends(_oauth2_scheme)],
-    request: Request,
-    session: Annotated[AsyncSession, Depends(get_db)],
+async def resolve_user(
+    session: AsyncSession, token: str, *, request: Request | None = None
 ) -> User:
-    """Resolve the bearer token (JWT or PAT) to a :class:`User`."""
-    if not token:
-        raise NotAuthenticatedError()
+    """Resolve a bearer token (JWT or PAT) to a :class:`User`.
+
+    When ``request`` is supplied, read-scoped PATs are rejected on mutating
+    methods so the restriction is enforced centrally for every route.
+    """
     user: User | None
     if token.startswith(API_TOKEN_PREFIX):
         principal = await get_api_token_principal(session, token)
         if principal is None:
             raise NotAuthenticatedError("Invalid or revoked API token.")
         user, scope = principal
-        if scope == "read" and request.method.upper() in _MUTATING_METHODS:
+        if (
+            request is not None
+            and scope == "read"
+            and request.method.upper() in _MUTATING_METHODS
+        ):
             raise PermissionDeniedError(
                 "This API token has read-only scope; write requests are not allowed."
             )
@@ -187,13 +191,40 @@ async def get_current_user(
     return user
 
 
+async def get_current_user(
+    token: Annotated[str | None, Depends(_oauth2_scheme)],
+    request: Request,
+    session: Annotated[AsyncSession, Depends(get_db)],
+) -> User:
+    """Resolve the bearer token (JWT or PAT) to a :class:`User`."""
+    if not token:
+        raise NotAuthenticatedError()
+    return await resolve_user(session, token, request=request)
+
+
+async def get_jwt_authenticated_user(
+    token: Annotated[str | None, Depends(_oauth2_scheme)],
+    session: Annotated[AsyncSession, Depends(get_db)],
+) -> User:
+    """Resolve a JWT bearer token to a :class:`User`, rejecting PATs."""
+    if not token:
+        raise NotAuthenticatedError()
+    if token.startswith(API_TOKEN_PREFIX):
+        raise PermissionDeniedError(
+            "API tokens cannot create other tokens. Log in interactively."
+        )
+    return await resolve_user(session, token)
+
+
 async def require_instructor(user: Annotated[User, Depends(get_current_user)]) -> User:
+    """Return the user if instructor or admin; raise PermissionDeniedError otherwise."""
     if user.role not in (UserRole.ADMIN, UserRole.INSTRUCTOR):
         raise PermissionDeniedError("Instructor or admin access required.")
     return user
 
 
 async def require_admin(user: Annotated[User, Depends(get_current_user)]) -> User:
+    """Return the user if admin; raise PermissionDeniedError otherwise."""
     if user.role != UserRole.ADMIN:
         raise PermissionDeniedError("Admin access required.")
     return user

@@ -14,6 +14,18 @@ from app.core.security.outbound_url import validate_git_remote
 from app.e2e_support import e2e_git_shallow_clone_if_enabled
 
 _CREDENTIALS_IN_URL = re.compile(r"(https?://)([^/@:\s]+:)?[^/@\s]+@", re.IGNORECASE)
+_ALLOWED_SCHEMES = ("https://", "http://", "ssh://", "git://", "git@")
+
+
+def _validate_git_url(url: str) -> None:
+    """Reject unsupported schemes and SCP-style URLs missing the host:path colon."""
+    lowered = url.strip().lower()
+    if not lowered.startswith(_ALLOWED_SCHEMES):
+        raise CloneError(url, "Unsupported git URL scheme.")
+    if lowered.startswith("git@") and ":" not in lowered:
+        raise CloneError(url, "Unsupported git URL scheme.")
+    if lowered.startswith(("file://", "file:")):
+        raise CloneError(url, "Unsupported git URL scheme.")
 
 
 def _guard_git_url(url: str) -> str:
@@ -45,6 +57,7 @@ async def git_shallow_clone(
     ):
         return
 
+    _validate_git_url(url)
     url = _guard_git_url(url)
 
     cmd = _build_clone_command(url=url, branch=branch, dest=dest, access_token=access_token)
@@ -107,6 +120,7 @@ def _sanitize_message(message: str) -> str:
 
 
 def head_commit(root: Path) -> str | None:
+    """Return the repo's HEAD commit SHA, or None when unavailable."""
     try:
         proc = subprocess.run(
             ["git", "-C", str(root), "rev-parse", "HEAD"],
@@ -124,6 +138,7 @@ def head_commit(root: Path) -> str | None:
 
 async def git_head_ref(*, url: str, branch: str, access_token: str | None = None) -> str | None:
     """Resolve the head commit sha of ``branch`` in ``url`` via ``git ls-remote`` (no clone)."""
+    _validate_git_url(url)
     url = _guard_git_url(url)
     # ponytail: ref pattern assumes a branch name (full refs pass through via the startswith check)
     ref = branch if branch.startswith("refs/") else f"refs/heads/{branch}"
