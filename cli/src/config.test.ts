@@ -10,12 +10,15 @@ import {
   readStoredConfig,
   resolveConfig,
   writeStoredConfig,
+  type StoredConfig,
 } from "./config"
 
 let directory = ""
+let configFile = ""
 
 beforeEach(() => {
   directory = mkdtempSync(join(tmpdir(), "vela-config-"))
+  configFile = join(directory, "config.json")
 })
 
 afterEach(() => {
@@ -28,18 +31,24 @@ test("VELA_CONFIG overrides the default path", () => {
 })
 
 test("precedence is flags > env > file > default", () => {
-  const stored = { server: "http://file", token: "file-token", tokenId: "file-id" }
+  const stored: StoredConfig = {
+    profiles: { default: { server: "http://file", token: "file-token", tokenId: "file-id" } },
+    active: "default",
+  }
   expect(
     resolveConfig({ server: "http://flag", token: "flag-token" }, {}, stored),
-  ).toEqual({ server: "http://flag", token: "flag-token", tokenId: undefined })
+  ).toEqual({ server: "http://flag", token: "flag-token", tokenId: undefined, profile: "default" })
   expect(
     resolveConfig({}, { VELA_API_URL: "http://env", VELA_TOKEN: "env-token" }, stored),
-  ).toEqual({ server: "http://env", token: "env-token", tokenId: undefined })
-  expect(resolveConfig({}, {}, stored)).toEqual(stored)
+  ).toEqual({ server: "http://env", token: "env-token", tokenId: undefined, profile: "default" })
+  expect(resolveConfig({}, {}, stored)).toEqual({
+    server: "http://file", token: "file-token", tokenId: "file-id", profile: "default",
+  })
   expect(resolveConfig({}, {}, null)).toEqual({
     server: DEFAULT_SERVER,
     token: undefined,
     tokenId: undefined,
+    profile: "default",
   })
 })
 
@@ -51,12 +60,12 @@ test("trailing slashes are trimmed from the server", () => {
 
 test("stored config round-trips and is owner-readable only on POSIX", () => {
   const path = join(directory, "nested", "config.json")
-  writeStoredConfig({ server: "http://host", token: "secret", tokenId: "id" }, path)
-  expect(readStoredConfig(path)).toEqual({
-    server: "http://host",
-    token: "secret",
-    tokenId: "id",
-  })
+  const config: StoredConfig = {
+    profiles: { default: { server: "http://host", token: "secret", tokenId: "id" } },
+    active: "default",
+  }
+  writeStoredConfig(config, path)
+  expect(readStoredConfig(path)).toEqual(config)
   if (process.platform !== "win32") {
     expect(statSync(path).mode & 0o777).toBe(0o600)
   }
@@ -71,8 +80,42 @@ test("a corrupt file reads as absent instead of throwing", () => {
 })
 
 test("clear removes the file", () => {
-  const path = join(directory, "config.json")
-  writeStoredConfig({ server: "http://host", token: "secret" }, path)
-  clearStoredConfig(path)
-  expect(readStoredConfig(path)).toBeNull()
+  writeStoredConfig(
+    { profiles: { default: { server: "http://host", token: "secret" } }, active: "default" },
+    configFile,
+  )
+  clearStoredConfig(configFile)
+  expect(readStoredConfig(configFile)).toBeNull()
+})
+
+test("migrates a legacy flat config into the default profile once", () => {
+  writeFileSync(configFile, JSON.stringify({ server: "http://old:8000", token: "pat_old", tokenId: "tid_1" }))
+  const stored = readStoredConfig(configFile)
+  expect(stored).toEqual({ profiles: { default: { server: "http://old:8000", token: "pat_old", tokenId: "tid_1" } }, active: "default" })
+  expect(JSON.parse(readFileSync(configFile, "utf8")).profiles.default.token).toBe("pat_old")
+})
+
+test("VELA_PROFILE selects a named profile and env overrides still win", () => {
+  writeStoredConfig({ profiles: {
+    default: { server: "http://default:8000", token: "pat_default" },
+    school: { server: "http://school:8000/", token: "pat_school", tokenId: "tid_school" },
+  }, active: "default" }, configFile)
+  const resolved = resolveConfig({}, { VELA_PROFILE: "school", VELA_API_URL: "http://override:9000" }, readStoredConfig(configFile)!)
+  expect(resolved).toEqual({ server: "http://override:9000", token: "pat_school", tokenId: "tid_school", profile: "school" })
+})
+
+test("flags.profile overrides the active profile and keeps its tokenId", () => {
+  writeStoredConfig({ profiles: {
+    default: { server: "http://default:8000", token: "pat_default" },
+    school: { server: "http://school:8000", token: "pat_school", tokenId: "tid_school" },
+  }, active: "default" }, configFile)
+  expect(resolveConfig({ profile: "school" }, {}, readStoredConfig(configFile)!))
+    .toEqual({ server: "http://school:8000", token: "pat_school", tokenId: "tid_school", profile: "school" })
+})
+
+test("unknown profile falls back to active and a corrupt file is still null", () => {
+  writeStoredConfig({ profiles: { default: { server: "http://d:8000", token: "t" } }, active: "default" }, configFile)
+  expect(resolveConfig({ profile: "missing" }, {}, readStoredConfig(configFile)!).profile).toBe("default")
+  writeFileSync(configFile, "{not json")
+  expect(readStoredConfig(configFile)).toBeNull()
 })

@@ -35,7 +35,8 @@ export async function login(argv: string[]): Promise<number> {
     allowPositionals: false,
   })
   const stored = readStoredConfig()
-  const server = (values.server ?? process.env.VELA_API_URL ?? stored?.server ?? DEFAULT_SERVER)
+  const activeProfile = stored?.profiles[stored.active]
+  const server = (values.server ?? process.env.VELA_API_URL ?? activeProfile?.server ?? DEFAULT_SERVER)
     .replace(/\/+$/, "")
 
   const email =
@@ -57,7 +58,12 @@ export async function login(argv: string[]): Promise<number> {
     { name: `cli:${hostname()}` },
   )
 
-  writeStoredConfig({ server, token: token.token, tokenId: token.id })
+  const active = stored?.active ?? "default"
+  const profiles = stored?.profiles ?? {}
+  writeStoredConfig({
+    profiles: { ...profiles, [active]: { server, token: token.token, tokenId: token.id } },
+    active,
+  })
   console.log(`Logged in to ${server} as ${email}.`)
   return 0
 }
