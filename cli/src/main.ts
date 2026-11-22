@@ -32,6 +32,8 @@ Global options (anywhere before --):
   --server <url>  API base URL (default http://127.0.0.1:8000)
   --token <pat>   Personal access token (default from ~/.vela/config.json)
   --profile <name> Named config profile to use
+  --json          Print command results as JSON
+  --quiet         Suppress command output
 `
 
 function isParseArgsError(error: unknown): boolean {
@@ -72,6 +74,15 @@ function applyGlobalConfig(argv: string[]): string[] {
     }
     if (arg.startsWith("--profile=")) {
       process.env.VELA_PROFILE = arg.slice("--profile=".length); continue
+    }
+    if (arg === "--json" || arg === "--quiet") {
+      process.env[arg === "--json" ? "VELA_OUTPUT_JSON" : "VELA_OUTPUT_QUIET"] = "1"; index += 1; continue
+    }
+    if (arg.startsWith("--json=")) {
+      process.env.VELA_OUTPUT_JSON = arg.slice("--json=".length); continue
+    }
+    if (arg.startsWith("--quiet=")) {
+      process.env.VELA_OUTPUT_QUIET = arg.slice("--quiet=".length); continue
     }
     rest.push(arg)
   }

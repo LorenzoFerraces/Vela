@@ -3,6 +3,7 @@ import { parseArgs } from "node:util"
 import { request, requireToken, VelaError } from "../client"
 import { resolveConfig } from "../config"
 import { formatTable } from "../format"
+import { emit } from "../output"
 
 interface ApiTokenPublic {
   id: string
@@ -19,7 +20,6 @@ export async function tokens(argv: string[]): Promise<number> {
   const { values, positionals } = parseArgs({
     args: argv,
     options: {
-      json: { type: "boolean" },
       name: { type: "string" },
     },
     allowPositionals: true,
@@ -29,12 +29,10 @@ export async function tokens(argv: string[]): Promise<number> {
 
   if (action === "list") {
     const items = await request<ApiTokenPublic[]>(config, "GET", "/tokens/")
-    if (values.json) {
-      console.log(JSON.stringify(items, null, 2))
-      return 0
-    }
-    const rows = items.map((item) => [item.name, item.prefix, item.created_at])
-    console.log(formatTable(["NAME", "PREFIX", "CREATED"], rows))
+    emit(items, () => {
+      const rows = items.map((item) => [item.name, item.prefix, item.created_at])
+      return formatTable(["NAME", "PREFIX", "CREATED"], rows)
+    })
     return 0
   }
 
