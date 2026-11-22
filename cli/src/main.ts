@@ -8,6 +8,7 @@ import { deploys, run } from "./commands/deploy"
 import { exec } from "./commands/exec"
 import { remove, restart, start, stop } from "./commands/lifecycle"
 import { logs } from "./commands/logs"
+import { inviteCommand, projectsCommand, stackCommand, teamsCommand } from "./commands/organisation"
 import { tokens } from "./commands/tokens"
 import { runTui } from "./tui"
 
@@ -26,6 +27,10 @@ Commands:
   start|stop|restart|rm <name>
   deploys         Deployment history
   tokens <list|create|revoke>
+  stack <list|deploy|rm>          Manage stacks (--project to filter list)
+  projects <list|create>          Manage projects
+  teams <list|create>             Manage teams
+  invite <list|create|cancel>     Manage project invitations (--project <id>)
   config <list|use|get|set|clear>  Manage named config profiles
   completion <bash|zsh|fish|powershell>  Print a shell completion script
   tui             Open the terminal UI (default with no command)
@@ -137,6 +142,14 @@ async function main(rawArgv: string[]): Promise<number> {
         return await remove(rest)
       case "tokens":
         return await tokens(rest)
+      case "stack":
+        return await stackCommand(rest)
+      case "projects":
+        return await projectsCommand(rest)
+      case "teams":
+        return await teamsCommand(rest)
+      case "invite":
+        return await inviteCommand(rest)
       case "config":
         return await configCommand(rest)
       case "completion":
