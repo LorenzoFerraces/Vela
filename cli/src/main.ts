@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
 import { exitCodeFor, isVelaError, VelaError } from "./client"
 import { login, logout, whoami } from "./commands/auth"
+import { configCommand } from "./commands/config"
 import { describe, ps } from "./commands/containers"
 import { deploys, run } from "./commands/deploy"
 import { exec } from "./commands/exec"
@@ -24,11 +25,13 @@ Commands:
   start|stop|restart|rm <name>
   deploys         Deployment history
   tokens <list|create|revoke>
+  config <list|use|get|set|clear>  Manage named config profiles
   tui             Open the terminal UI (default with no command)
 
 Global options (anywhere before --):
   --server <url>  API base URL (default http://127.0.0.1:8000)
   --token <pat>   Personal access token (default from ~/.vela/config.json)
+  --profile <name> Named config profile to use
 `
 
 function isParseArgsError(error: unknown): boolean {
@@ -63,6 +66,12 @@ function applyGlobalConfig(argv: string[]): string[] {
     if (arg.startsWith("--token=")) {
       process.env.VELA_TOKEN = arg.slice("--token=".length)
       continue
+    }
+    if (arg === "--profile" && index + 1 < head.length) {
+      process.env.VELA_PROFILE = head[index + 1]; index += 1; continue
+    }
+    if (arg.startsWith("--profile=")) {
+      process.env.VELA_PROFILE = arg.slice("--profile=".length); continue
     }
     rest.push(arg)
   }
@@ -115,6 +124,8 @@ async function main(rawArgv: string[]): Promise<number> {
         return await remove(rest)
       case "tokens":
         return await tokens(rest)
+      case "config":
+        return await configCommand(rest)
       case "deploys":
         return await deploys(rest)
       case "tui":
