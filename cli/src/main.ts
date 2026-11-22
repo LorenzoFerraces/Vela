@@ -2,6 +2,7 @@
 import { exitCodeFor, isVelaError, VelaError } from "./client"
 import { login, logout, whoami } from "./commands/auth"
 import { configCommand } from "./commands/config"
+import { completionCommand } from "./commands/completion"
 import { describe, ps } from "./commands/containers"
 import { deploys, run } from "./commands/deploy"
 import { exec } from "./commands/exec"
@@ -26,6 +27,7 @@ Commands:
   deploys         Deployment history
   tokens <list|create|revoke>
   config <list|use|get|set|clear>  Manage named config profiles
+  completion <bash|zsh|fish|powershell>  Print a shell completion script
   tui             Open the terminal UI (default with no command)
 
 Global options (anywhere before --):
@@ -137,6 +139,8 @@ async function main(rawArgv: string[]): Promise<number> {
         return await tokens(rest)
       case "config":
         return await configCommand(rest)
+      case "completion":
+        return await completionCommand(rest)
       case "deploys":
         return await deploys(rest)
       case "tui":

@@ -40,6 +40,7 @@ $env:VELA_TOKEN = "vela_pat_..."
 | `vela start\|stop\|restart\|rm <name>` | Lifecycle (`rm -y` to skip the prompt) |
 | `vela deploys [--json]` | Deployment history |
 | `vela tokens list\|create\|revoke` | Manage access tokens |
+| `vela completion <bash\|zsh\|fish\|powershell>` | Print a shell completion script |
 | `vela` | Terminal UI |
 
 Exit codes: `0` ok, `1` failure, `2` usage, `3` auth, `4` not found.
