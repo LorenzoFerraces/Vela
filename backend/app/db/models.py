@@ -689,3 +689,42 @@ class ApiToken(Base):
     )
 
     user: Mapped[User] = relationship(back_populates="api_tokens")
+
+
+class DeployJobRecord(Base):
+    __tablename__ = "deploy_jobs"
+
+    job_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    kind: Mapped[str] = mapped_column(String(16), nullable=False)
+    project_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), index=True, nullable=False)
+    user_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), nullable=False)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    source_label: Mapped[str] = mapped_column(String(512), nullable=False, default="")
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="in_progress")
+    phase: Mapped[str] = mapped_column(String(64), nullable=False, default="queued")
+    phase_detail: Mapped[str | None] = mapped_column(Text, nullable=True)
+    services: Mapped[list[dict[str, str]]] = mapped_column(JSON, nullable=False, default=list)
+    error: Mapped[dict[str, object] | None] = mapped_column(JSON, nullable=True)
+    result: Mapped[dict[str, object] | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+
+
+class TrafficRouteRecord(Base):
+    __tablename__ = "traffic_routes"
+
+    route_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    host: Mapped[str] = mapped_column(String(255), nullable=False)
+    path_prefix: Mapped[str] = mapped_column(String(512), nullable=False, default="/")
+    backend_servers: Mapped[list[dict[str, object]]] = mapped_column(JSON, nullable=False, default=list)
+    tls_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    entrypoints: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+
+
+class WsTicketRecord(Base):
+    __tablename__ = "ws_tickets"
+
+    ticket: Mapped[str] = mapped_column(String(128), primary_key=True)
+    container_id: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    purpose: Mapped[str] = mapped_column(String(16), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
