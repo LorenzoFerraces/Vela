@@ -53,7 +53,8 @@ export async function waitForJob(
     }
     if (job.phase !== lastPhase) {
       const detail = job.phase_detail ? ` ${job.phase_detail}` : ""
-      console.log(`[${job.phase}]${detail}`)
+      const progress = `[${job.phase}]${detail}`
+      emit(progress, () => progress)
       lastPhase = job.phase
     }
     if (job.status === "succeeded") return job
@@ -113,7 +114,8 @@ export async function run(argv: string[]): Promise<number> {
 
   const config = requireToken(resolveConfig({}))
   const accepted = await request<RunAccepted>(config, "POST", "/containers/run", body)
-  console.log(`Queued deploy ${accepted.job_id}.`)
+  const queued = `Queued deploy ${accepted.job_id}.`
+  emit(queued, () => queued)
   if (values["no-wait"]) {
     console.log(accepted.job_id)
     return 0

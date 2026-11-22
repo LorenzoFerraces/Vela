@@ -42,8 +42,8 @@ function isParseArgsError(error: unknown): boolean {
   return typeof code === "string" && code.startsWith("ERR_PARSE_ARGS")
 }
 
-// Global --server/--token are honored anywhere before `--` by publishing
-// env overrides that resolveConfig() already prefers over the stored file.
+// Global --server/--token/--profile/--json/--quiet are honored anywhere before
+// `--` by publishing env overrides that resolveConfig()/emit() already prefer.
 function applyGlobalConfig(argv: string[]): string[] {
   const separator = argv.indexOf("--")
   const head = separator >= 0 ? argv.slice(0, separator) : argv
@@ -76,7 +76,7 @@ function applyGlobalConfig(argv: string[]): string[] {
       process.env.VELA_PROFILE = arg.slice("--profile=".length); continue
     }
     if (arg === "--json" || arg === "--quiet") {
-      process.env[arg === "--json" ? "VELA_OUTPUT_JSON" : "VELA_OUTPUT_QUIET"] = "1"; index += 1; continue
+      process.env[arg === "--json" ? "VELA_OUTPUT_JSON" : "VELA_OUTPUT_QUIET"] = "1"; continue
     }
     if (arg.startsWith("--json=")) {
       process.env.VELA_OUTPUT_JSON = arg.slice("--json=".length); continue
