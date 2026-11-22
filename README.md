@@ -87,7 +87,7 @@ The repo-root `.env` is the official config (docker compose reads it; direct run
 | `VELA_ADMIN_EMAIL` | Bootstrap admin email; creates the admin on first startup if missing |
 | `VELA_ADMIN_PASSWORD` | Password for bootstrap admin (required on first create) |
 | `VELA_AUTH_ACCESS_TOKEN_TTL_MINUTES` | Optional; access token lifetime in minutes (default sensible if omitted) |
-| `VELA_TRAFFIC_ROUTER` | `noop` (default), `traefik_file`, or `kubernetes` |
+| `VELA_TRAFFIC_ROUTER` | `noop` (default) or `traefik_file` |
 | `VELA_TRAEFIK_DYNAMIC_FILE` | Absolute path to the dynamic YAML file Traefik loads (if using `traefik_file`) |
 | `VELA_TRAEFIK_RELOAD_CONTAINER` | Optional Docker **container name** (as in `docker ps`) for Traefik; after each route write, Vela sends **SIGHUP** so Traefik reloads the file when fsnotify misses changes (typical on Docker Desktop) |
 | `VELA_DOCKER_NETWORK` | Docker network name so Traefik can reach workload containers |

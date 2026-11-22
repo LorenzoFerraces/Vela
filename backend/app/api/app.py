@@ -14,6 +14,7 @@ from starlette.middleware.gzip import GZipMiddleware
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from app import bootstrap_env  # loads backend/.env before other app imports.
+from app.api.deps import validate_traffic_router_config
 from app.api.errors import register_exception_handlers
 from app.api.routes import (
     admin,
@@ -176,6 +177,8 @@ def create_app() -> FastAPI:
     """
     if os.environ.get("VELA_E2E", "").strip() != "1":
         bootstrap_env.require_deployment_secrets()
+
+    validate_traffic_router_config()
 
     application = FastAPI(
         title="Vela API",

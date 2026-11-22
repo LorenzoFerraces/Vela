@@ -30,7 +30,6 @@ from app.core.exceptions import (
 from app.core.storage.memory import InMemoryObjectStorage
 from app.core.storage.object_storage import ObjectStorage
 from app.core.storage.r2 import CloudflareR2ObjectStorage
-from app.core.traffic.kubernetes_traffic_router import KubernetesTrafficRouter
 from app.core.traffic.traefik_file_traffic_router import TraefikFileTrafficRouter
 from app.core.traffic.traffic_router import NoopTrafficRouter, TrafficRouter
 from app.db.engine import get_session_factory
@@ -79,18 +78,20 @@ def _traffic_router_from_env() -> TrafficRouter:
                 traefik_dynamic_file=Path(path_str),
                 reload_container=reload_container or None,
             )
-        case "kubernetes":
-            return KubernetesTrafficRouter()
         case _:
             raise TrafficRouterError(
-                f"Unknown VELA_TRAFFIC_ROUTER={mode!r}; "
-                "use noop, traefik_file, or kubernetes."
+                f"Unsupported VELA_TRAFFIC_ROUTER={mode!r}; use noop or traefik_file."
             )
+
+
+def validate_traffic_router_config() -> None:
+    """Fail at startup for an unsupported router instead of failing on first request."""
+    _traffic_router_from_env()
 
 
 @lru_cache(maxsize=1)
 def get_traffic_router() -> TrafficRouter:
-    """Shared edge routing adapter (noop, Traefik file, or Kubernetes scaffold)."""
+    """Shared edge routing adapter (noop or Traefik file)."""
     return _traffic_router_from_env()
 
 

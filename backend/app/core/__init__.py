@@ -44,7 +44,6 @@ from app.core.models import (
     ProjectSource,
 )
 from app.core.smoke import SMOKE_DEPLOY
-from app.core.traffic.kubernetes_traffic_router import KubernetesTrafficRouter
 from app.core.traffic.traefik_file_traffic_router import TraefikFileTrafficRouter
 from app.core.traffic.traffic_models import RouteInfo, RouteSpec
 from app.core.traffic.traffic_router import NoopTrafficRouter, TrafficRouter
@@ -74,7 +73,6 @@ __all__ = [
     "ImageBuildError",
     "ImageBuilder",
     "ImageNotFoundError",
-    "KubernetesTrafficRouter",
     "NeedsBuildOverrideError",
     "NoopTrafficRouter",
     "OrchestratorError",
