@@ -44,9 +44,8 @@ def test_kubernetes_is_rejected_with_supported_values(monkeypatch: pytest.Monkey
     monkeypatch.setenv("VELA_TRAFFIC_ROUTER", "kubernetes")
     with pytest.raises(TrafficRouterError) as excinfo:
         validate_traffic_router_config()
-    assert "noop" in str(excinfo.value)
-    assert "traefik_file" in str(excinfo.value)
-    assert "kubernetes" not in str(excinfo.value)
+    assert "use noop or traefik_file" in str(excinfo.value)
+    assert "Unsupported" in str(excinfo.value)
 
 
 @pytest.mark.parametrize("mode", ["noop", "traefik_file"])
@@ -149,7 +148,7 @@ async def test_deploy_job_record_round_trip(quota_db) -> None:
 @pytest.mark.asyncio
 async def test_traffic_route_and_ws_ticket_records(quota_db) -> None:
     quota_db.add(TrafficRouteRecord(
-        route_id="web-route", host="web.example", path_prefix="/", backend_servers=["http://web:80"],
+        route_id="web-route", host="web.example", path_prefix="/", backend_servers=[{"host": "web", "port": 80}],
         tls_enabled=False, entrypoints=["web"],
     ))
     quota_db.add(WsTicketRecord(ticket="ticket-1", container_id="c1", purpose="logs"))
@@ -158,7 +157,7 @@ async def test_traffic_route_and_ws_ticket_records(quota_db) -> None:
     assert len((await quota_db.execute(select(WsTicketRecord))).scalars().all()) == 1
 ```
 
-Reuse the `quota_db` fixture by importing it from `tests.test_compute_quota` or defining the same in-memory `StaticPool` fixture locally.
+Copy the `quota_db` fixture body (`create_async_engine` + `StaticPool` + `Base.metadata.create_all`, as written in Group A's `tests/test_compute_quota.py`) into `test_externalized_state_models.py` as a local fixture — do not import it from `tests.test_compute_quota`: Group B runs before Group A (spec order D→B→A→C), so that module does not exist yet when this task executes.
 
 - [ ] **Step 2: Run tests to verify they fail**
 
@@ -193,7 +192,7 @@ class TrafficRouteRecord(Base):
     route_id: Mapped[str] = mapped_column(String(128), primary_key=True)
     host: Mapped[str] = mapped_column(String(255), nullable=False)
     path_prefix: Mapped[str] = mapped_column(String(512), nullable=False, default="/")
-    backend_servers: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    backend_servers: Mapped[list[dict[str, object]]] = mapped_column(JSON, nullable=False, default=list)
     tls_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     entrypoints: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
 
@@ -297,7 +296,7 @@ git commit -m "feat(state): add deploy job, traffic route and ws ticket tables"
 ### Task 3: F04 — DB-backed deploy job registry and async call sites
 
 **Files:**
-- Modify: `backend/app/core/deploy/jobs.py`, `backend/app/api/app.py`, `backend/app/api/deps.py`, `backend/app/api/routes/deploys.py`, `backend/app/api/routes/containers.py`, `backend/app/api/routes/stacks.py`, `backend/app/core/stacks/deploy.py`, `backend/tests/conftest.py`, `backend/tests/test_deploy_jobs.py`
+- Modify: `backend/app/core/deploy/jobs.py`, `backend/app/api/app.py`, `backend/app/api/deps.py`, `backend/app/api/routes/deploys.py`, `backend/app/api/routes/containers.py`, `backend/app/api/routes/stacks.py`, `backend/app/core/stacks/deploy.py`, `backend/app/core/build/builder.py`, `backend/app/core/build/default_image_builder.py`, `backend/tests/conftest.py`, `backend/tests/test_deploy_jobs.py`
 - Test: `backend/tests/test_deploy_jobs.py` (rewritten fixtures), `frontend/e2e/deploy-progress.spec.ts` (unchanged, run as check)
 
 **Interfaces:**
@@ -400,12 +399,12 @@ Implement `_to_record`/`_from_record` explicitly, mapping `services` to/from `li
     _application.state.deploy_jobs = deploy_jobs
 ```
 
-`deps.get_deploy_jobs` stays unchanged. Update the module docstring in `jobs.py` to say jobs are persisted in Postgres with a 300 s terminal TTL sweep on `active()`.
+`deps.get_deploy_jobs` stays unchanged. Import `get_db_session_factory` from `app.api.deps` alongside the existing lifespan deps import (app.py:47). Update the module docstring in `jobs.py` to say jobs are persisted in Postgres with a 300 s terminal TTL sweep on `active()`.
 
 - [ ] **Step 3: Convert call sites to `await`**
 
 - `backend/app/api/routes/deploys.py`: `jobs = await registry.active(project_ids=accessible)`.
-- `backend/app/api/routes/containers.py`: add `await` to all 14 registry calls at lines 884, 918, 922, 951, 973, 1003, 1007, 1038, 1062, 1100, 1104, 1133, 1147 and `await registry.create(...)` at 1204 / `await registry.set_phase(...)` at 1211.
+- `backend/app/api/routes/containers.py`: add `await` to all 15 registry calls at lines 884, 918, 922, 951, 973, 1003, 1007, 1038, 1062, 1100, 1104, 1133, 1147 and `await registry.create(...)` at 1204 / `await registry.set_phase(...)` at 1211.
 - `backend/app/api/routes/stacks.py`: same for lines 293, 309, 321-324, 327, 341, 343, 388, 396.
 
 - [ ] **Step 4: Convert the sync stack callbacks** in `backend/app/core/stacks/deploy.py`:
@@ -416,6 +415,8 @@ Implement `_to_record`/`_from_record` explicitly, mapping `services` to/from `li
 ```
 
 At all six invocation sites (lines 85-86, 92-93, 108-109, 145-146, 161-162, 180-181) change to `await on_phase(...)` / `await on_service_state(...)` guarded by `if on_phase is not None`. In `stacks.py` the existing `lambda phase, _detail: registry.set_phase(job_id, phase)` still works because the lambda returns a coroutine that is now awaited; keep it.
+
+Also convert the image-builder callbacks, which Task 3's `await` conversion otherwise leaves as never-awaited coroutines: change `on_phase` to `Callable[[str], Awaitable[None]] | None` in the ABC (`backend/app/core/build/builder.py:25`) and in `DefaultImageBuilder.build_from_source` (`backend/app/core/build/default_image_builder.py:85`), and `await on_phase(...)` at its two invocation sites (default_image_builder.py:105-106 and 137-138) guarded by `if on_phase is not None`. The `on_phase=lambda phase: registry.set_phase(job_id, phase)` passed at containers.py:1062 then returns a coroutine that the builder awaits, matching the stack pattern.
 
 - [ ] **Step 5: Rewrite test fixtures** in `backend/tests/test_deploy_jobs.py`
 
@@ -440,7 +441,7 @@ Expected: PASS.
 - [ ] **Step 7: Commit**
 
 ```bash
-git add backend/app/core/deploy/jobs.py backend/app/api/app.py backend/app/api/routes/deploys.py backend/app/api/routes/containers.py backend/app/api/routes/stacks.py backend/app/core/stacks/deploy.py backend/tests/conftest.py backend/tests/test_deploy_jobs.py
+git add backend/app/core/deploy/jobs.py backend/app/api/app.py backend/app/api/routes/deploys.py backend/app/api/routes/containers.py backend/app/api/routes/stacks.py backend/app/core/stacks/deploy.py backend/app/core/build/builder.py backend/app/core/build/default_image_builder.py backend/tests/conftest.py backend/tests/test_deploy_jobs.py
 git commit -m "feat(state): persist deploy jobs in Postgres"
 ```
 
@@ -454,7 +455,7 @@ git commit -m "feat(state): persist deploy jobs in Postgres"
 - Test: `backend/tests/test_database_traffic_router.py`, `backend/tests/test_import_traffic_state.py`
 
 **Interfaces:**
-- Consumes: `TrafficRouteRecord`, `RouteSpec`, `RouteInfo`, helpers from `traefik_file_traffic_router.py`.
+- Consumes: `TrafficRouteRecord`, `RouteSpec`, `BackendServer`, `RouteInfo`, helpers from `traefik_file_traffic_router.py`.
 - Produces: `DatabaseTrafficRouter`, selected by `VELA_TRAFFIC_STATE_BACKEND=postgres`; `import_traffic_state(file_path, session_factory, dynamic_file)`.
 
 - [ ] **Step 1: Write failing tests** in `backend/tests/test_database_traffic_router.py`
@@ -480,7 +481,7 @@ def _spec(host: str) -> RouteSpec:
         route_id=uuid4().hex,
         host=host,
         path_prefix="/",
-        backend_servers=[BackendServer(url="http://web:80")],
+        backend_servers=[BackendServer(host="web", port=80)],
         tls_enabled=False,
         entrypoints=["web"],
     )
@@ -505,7 +506,7 @@ async def test_upsert_regenerates_traefik_document(router) -> None:
     assert "web.example" in content
 ```
 
-Use the exact `RouteSpec`/`BackendServer` field names from `backend/app/core/traffic/traffic_models.py` (the sample above follows the documented `host`, `path_prefix`, `backend_servers`, `tls_enabled`, `entrypoints` shape; adjust the `BackendServer` field to its real name if it is `url` vs `address`).
+The snippet uses the exact `RouteSpec`/`BackendServer` field names from `backend/app/core/traffic/traffic_models.py` (`BackendServer` is `host` + `port`, not a `url` string). The DB stores dumped dicts (`server.model_dump()`) and rebuilds models on read (`BackendServer.model_validate(item)`), as implemented in Step 3.
 
 - [ ] **Step 2: Run tests to verify they fail**
 
@@ -524,7 +525,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.exceptions import RouteNotFoundError, TrafficRouterError
-from app.core.traffic.traffic_models import RouteInfo, RouteSpec
+from app.core.traffic.traffic_models import BackendServer, RouteInfo, RouteSpec
 from app.core.traffic.traefik_file_traffic_router import (
     _atomic_write_bytes,
     _build_traefik_document,
@@ -546,7 +547,8 @@ class DatabaseTrafficRouter(TrafficRouter):
         rows = (await session.execute(select(TrafficRouteRecord))).scalars().all()
         return [RouteSpec(
             route_id=row.route_id, host=row.host, path_prefix=row.path_prefix,
-            backend_servers=row.backend_servers, tls_enabled=row.tls_enabled,
+            backend_servers=[BackendServer.model_validate(item) for item in row.backend_servers],
+            tls_enabled=row.tls_enabled,
             entrypoints=row.entrypoints,
         ) for row in rows]
 
@@ -567,12 +569,13 @@ class DatabaseTrafficRouter(TrafficRouter):
                 if record is None:
                     session.add(TrafficRouteRecord(
                         route_id=spec.route_id, host=spec.host, path_prefix=spec.path_prefix,
-                        backend_servers=spec.backend_servers, tls_enabled=spec.tls_enabled,
+                        backend_servers=[server.model_dump() for server in spec.backend_servers],
+                        tls_enabled=spec.tls_enabled,
                         entrypoints=spec.entrypoints,
                     ))
                 else:
                     record.host, record.path_prefix = spec.host, spec.path_prefix
-                    record.backend_servers, record.tls_enabled = spec.backend_servers, spec.tls_enabled
+                    record.backend_servers, record.tls_enabled = [server.model_dump() for server in spec.backend_servers], spec.tls_enabled
                     record.entrypoints = spec.entrypoints
                 await session.commit()
                 await self._write_document(await self._all_specs(session))
@@ -595,7 +598,8 @@ class DatabaseTrafficRouter(TrafficRouter):
                 raise RouteNotFoundError(f"Route {route_id} not found")
             spec = RouteSpec(
                 route_id=record.route_id, host=record.host, path_prefix=record.path_prefix,
-                backend_servers=record.backend_servers, tls_enabled=record.tls_enabled,
+                backend_servers=[BackendServer.model_validate(item) for item in record.backend_servers],
+                tls_enabled=record.tls_enabled,
                 entrypoints=record.entrypoints,
             )
             return RouteInfo.from_spec(spec)
@@ -635,7 +639,7 @@ from pathlib import Path
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.core.traffic.traffic_models import RouteSpec
+from app.core.traffic.traffic_models import BackendServer, RouteSpec
 from app.core.traffic.traefik_file_traffic_router import _build_traefik_document, _atomic_write_bytes
 from app.db.engine import get_session_factory
 from app.db.models import TrafficRouteRecord
@@ -652,14 +656,16 @@ async def import_traffic_state(
             if existing is None:
                 session.add(TrafficRouteRecord(
                     route_id=spec.route_id, host=spec.host, path_prefix=spec.path_prefix,
-                    backend_servers=spec.backend_servers, tls_enabled=spec.tls_enabled,
+                    backend_servers=[server.model_dump() for server in spec.backend_servers],
+                    tls_enabled=spec.tls_enabled,
                     entrypoints=spec.entrypoints,
                 ))
         await session.commit()
         rows = (await session.execute(select(TrafficRouteRecord))).scalars().all()
     document = _build_traefik_document([
         RouteSpec(route_id=row.route_id, host=row.host, path_prefix=row.path_prefix,
-                  backend_servers=row.backend_servers, tls_enabled=row.tls_enabled,
+                  backend_servers=[BackendServer.model_validate(item) for item in row.backend_servers],
+                  tls_enabled=row.tls_enabled,
                   entrypoints=row.entrypoints)
         for row in rows
     ])
@@ -702,38 +708,43 @@ git commit -m "feat(state): add Postgres traffic state store and importer"
 ### Task 5: F04 — DB-backed WebSocket tickets and compose R2 default
 
 **Files:**
-- Modify: `backend/app/core/containers/ws_tickets.py`, `docker-compose.yml`, `.env.example`
+- Modify: `backend/app/core/auth/ws_tickets.py`, `backend/app/api/routes/containers.py`, `backend/tests/conftest.py`, `backend/tests/test_auth_hardening.py`, `docker-compose.yml`, `.env.example`
 - Test: `backend/tests/test_ws_tickets.py`
 
 **Interfaces:**
 - Consumes: `WsTicketRecord`, `get_db_session_factory`.
-- Produces: `issue_ws_ticket` / `consume_ws_ticket` backed by Postgres; compose `api` service defaults `VELA_OBJECT_STORAGE=r2`.
+- Produces: async `issue_ws_ticket(session_factory, user_id, container_id, purpose) -> str` and async `consume_ws_ticket(session_factory, ticket, container_id, purpose) -> user_id | None` backed by Postgres, keeping the current `(user_id, container_id, purpose)` semantics; compose `api` service defaults `VELA_OBJECT_STORAGE=r2`.
 
 - [ ] **Step 1: Write a failing test** in `backend/tests/test_ws_tickets.py`
 
 ```python
-from app.core.containers.ws_tickets import consume_ws_ticket, issue_ws_ticket
-from app.db.models import WsTicketRecord
+import uuid
+
+import pytest
+
+from app.core.auth.ws_tickets import consume_ws_ticket, issue_ws_ticket
 
 
-def test_ticket_can_be_consumed_once(db_session_factory) -> None:
-    ticket = issue_ws_ticket(session_factory=db_session_factory, container_id="c1", purpose="logs")
-    assert consume_ws_ticket(session_factory=db_session_factory, ticket=ticket) == ("c1", "logs")
-    assert consume_ws_ticket(session_factory=db_session_factory, ticket=ticket) is None
+@pytest.mark.asyncio
+async def test_ticket_can_be_consumed_once(db_session_factory) -> None:
+    user_id = uuid.uuid4()
+    ticket = await issue_ws_ticket(db_session_factory, user_id, "c1", "logs")
+    assert await consume_ws_ticket(db_session_factory, ticket, "c1", "logs") == user_id
+    assert await consume_ws_ticket(db_session_factory, ticket, "c1", "logs") is None
 ```
 
-Match the exact existing signatures in `ws_tickets.py` and adjust the call shape in the test rather than changing the public API more than needed.
+The current API is sync and process-local (`issue_ws_ticket(user_id, container_id, purpose)`, `consume_ws_ticket(ticket, container_id, purpose) -> user_id | None`, module dict, 60 s TTL). This task keeps those names and the `(user_id, container_id, purpose)` semantics but prepends a `session_factory` argument and makes both functions async.
 
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `cd backend && python -m pytest tests/test_ws_tickets.py -q`
 Expected: FAIL — signature mismatch or process-local behaviour.
 
-- [ ] **Step 3: Move ticket state to Postgres** in `backend/app/core/containers/ws_tickets.py`
+- [ ] **Step 3: Move ticket state to Postgres** in `backend/app/core/auth/ws_tickets.py`
 
-Replace the process-local dict with inserts/deletes on `WsTicketRecord`, using `secrets.token_urlsafe(32)` for the ticket and a short TTL check against `created_at` on consume. Keep the public function names and the one-shot semantics. Delete expired rows on consume (the same lazy-sweep pattern as deploy jobs).
+Replace the process-local dict with inserts/deletes on `WsTicketRecord`, using `secrets.token_urlsafe(32)` for the ticket and a short TTL check against `created_at` on consume. Keep the public function names and the one-shot semantics. Delete expired rows on consume (the same lazy-sweep pattern as deploy jobs). Keep a `reset_for_tests(session_factory)` that deletes all `WsTicketRecord` rows, and update the autouse fixture in `backend/tests/conftest.py:86-91` to call it (e.g. via `asyncio.run`) so tests stay isolated. Convert the ws-ticket tests in `backend/tests/test_auth_hardening.py` (sync dict tests, lines 36-78) to the async session-factory shape, turning the expired-ticket sweep test into a `created_at` TTL check against `WsTicketRecord`.
 
-- [ ] **Step 4: Update the WebSocket routes** in `backend/app/api/routes/containers.py` if ticket issuance/consumption now needs a session factory — inject `get_db_session_factory` at the two WS ticket call sites and pass it through. No WebSocket protocol or URL changes.
+- [ ] **Step 4: Update the WebSocket routes** in `backend/app/api/routes/containers.py` — ticket issuance/consumption now needs a session factory: inject `get_db_session_factory` at the **three** WS ticket call sites (containers.py:1378 issue, :1409 and :1458 consume) and `await` each call. No WebSocket protocol or URL changes.
 
 - [ ] **Step 5: Set compose defaults**
 
@@ -748,7 +759,7 @@ In `docker-compose.yml` api `environment`, add:
       VELA_R2_PUBLIC_BASE_URL: ${VELA_R2_PUBLIC_BASE_URL:-}
 ```
 
-Keep `deps.py`'s `VELA_OBJECT_STORAGE` default as `memory` so pytest and direct runs are unchanged. Add a documented R2 block to `.env.example` with all five variables, noting `boto3` is already pinned and the public bucket must serve `VELA_R2_PUBLIC_BASE_URL/<key>`.
+Keep `deps.py`'s `VELA_OBJECT_STORAGE` default as `memory` so pytest and direct runs are unchanged. Reuse the existing R2 block at `.env.example:147-153` — do not duplicate it — and flip the `VELA_OBJECT_STORAGE` default at `.env.example:141` to `r2` so a copied `.env` does not silently override the compose R2 default; keep the note that `boto3` is already pinned and the public bucket must serve `VELA_R2_PUBLIC_BASE_URL/<key>`.
 
 - [ ] **Step 6: Verify**
 
@@ -758,7 +769,7 @@ Expected: PASS.
 - [ ] **Step 7: Commit**
 
 ```bash
-git add backend/app/core/containers/ws_tickets.py backend/app/api/routes/containers.py docker-compose.yml .env.example backend/tests/test_ws_tickets.py
+git add backend/app/core/auth/ws_tickets.py backend/app/api/routes/containers.py backend/tests/conftest.py backend/tests/test_auth_hardening.py docker-compose.yml .env.example backend/tests/test_ws_tickets.py
 git commit -m "feat(state): persist websocket tickets and default compose storage to R2"
 ```
 
@@ -822,9 +833,16 @@ Shutdown code must cancel only tasks that were actually created; keep an empty l
       VELA_BACKGROUND_LOOPS_ENABLED: "0"
       VELA_TRAFFIC_STATE_BACKEND: postgres
       VELA_OBJECT_STORAGE: r2
-    volumes: *api_volumes
-    networks: *api_networks
-    healthcheck: *api_healthcheck
+    volumes:
+      - ${DOCKER_SOCKET_PATH:-/var/run/docker.sock}:/var/run/docker.sock
+      - ${VELA_VOLUME_UPLOADS_HOST_DIR:-volume_uploads}:${VELA_VOLUME_UPLOADS_DIR:-/data/volume-uploads}
+      - traefik_dynamic:/etc/traefik/dynamic
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
     depends_on:
       migrate: { condition: service_completed_successfully }
     restart: unless-stopped
@@ -838,14 +856,16 @@ Shutdown code must cancel only tasks that were actually created; keep an empty l
     environment:
       VELA_BACKGROUND_LOOPS_ENABLED: "1"
       VELA_TRAFFIC_STATE_BACKEND: postgres
-    volumes: *api_volumes
-    networks: *api_networks
+    volumes:
+      - ${DOCKER_SOCKET_PATH:-/var/run/docker.sock}:/var/run/docker.sock
+      - ${VELA_VOLUME_UPLOADS_HOST_DIR:-volume_uploads}:${VELA_VOLUME_UPLOADS_DIR:-/data/volume-uploads}
+      - traefik_dynamic:/etc/traefik/dynamic
     depends_on:
       migrate: { condition: service_completed_successfully }
     restart: unless-stopped
 ```
 
-Copy the `volumes`, `networks` and `healthcheck` blocks verbatim from the existing `api` service (`docker-compose.yml:88-106`) into both new services; do not add `container_name` to either service. Add `VELA_BACKGROUND_LOOPS_ENABLED=1` and `VELA_API_REPLICAS=3` to `.env.example` with comments explaining the `ha` profile. Document the profile briefly in `README.md` next to the deploy section.
+The `volumes` and `healthcheck` blocks above are copied verbatim from the existing `api` service (`docker-compose.yml:88-106`) — inline them exactly as shown; do not use YAML anchors or aliases (`docker-compose.yml` defines none, so any `*alias` reference fails `docker compose config`). The `api` service has **no `networks:` block** — it rides the implicit default network — so leave `api-ha`/`scheduler` on the default network too and copy nothing for networks. Do not add `container_name` to either service. Add `VELA_BACKGROUND_LOOPS_ENABLED=1` and `VELA_API_REPLICAS=3` to `.env.example` with comments explaining the `ha` profile. Document the profile briefly in `README.md` next to the deploy section.
 
 - [ ] **Step 5: Verify the compose stack** per `AGENTS.md`
 
@@ -875,5 +895,5 @@ git commit -m "feat(infra): add opt-in multi-replica compose profile"
 ## Self-review (done at plan authoring)
 
 - **Spec coverage:** F17 → Task 1; F04 job state → Tasks 2–3; traffic state → Task 4; object storage → Task 5; stateless multi-replica → Tasks 5–6. Single-node compose is untouched by default; multi-replica is opt-in.
-- **Placeholder scan:** no TBD/TODO. Task 4 Step 1 notes one field-name check against `traffic_models.py`, and Task 5 Step 1 notes matching the existing `ws_tickets.py` signature; both are exact-location checks, not deferred work.
+- **Placeholder scan:** no TBD/TODO. The former field-name and signature caveats in Tasks 4 and 5 are resolved inline: the `BackendServer` round-trip (dump dicts on write, `model_validate` on read) and the ws-ticket call shape are specified exactly; all behaviour and data shapes are pinned.
 - **Type consistency:** `DeployJobRegistry` async signatures defined in Task 3 are used by all callers in the same task; `TrafficRouteRecord` and `WsTicketRecord` from Task 2 are used by Tasks 4–5; `validate_traffic_router_config` from Task 1 is called in `create_app()`.

@@ -93,6 +93,7 @@ Expected: FAIL — module not found.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import time
 from collections import defaultdict
@@ -100,7 +101,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from app.core.logging_config import logger
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -249,7 +250,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_db, get_orchestrator
-from app.core.containers.docker_orchestrator import ContainerOrchestrator
+from app.core.containers.orchestrator import ContainerOrchestrator
 from app.core.exceptions import NotAuthenticatedError
 from app.core.monitoring.edge_requests import get_edge_request_rates
 from app.db.models import DeploymentRecord
@@ -356,12 +357,12 @@ git commit -m "feat(metrics): add token-protected Prometheus scrape endpoint"
 **Files:**
 - Create: `backend/app/core/quotas/compute_quota.py`
 - Modify: `backend/app/core/quotas/__init__.py`, `backend/app/core/exceptions.py`, `backend/app/api/errors.py`, `backend/app/db/models.py`, `.env.example`
-- Create: `backend/alembic/versions/<generated>_add_team_compute_quotas.py`
+- Create: `backend/alembic/versions/0026_add_team_compute_quotas.py`
 - Test: `backend/tests/test_compute_quota.py`
 
 **Interfaces:**
 - Consumes: `Project`, `DeploymentRecord`, `load_deploy_config_snapshot`, `orchestrator.list()`, `list_accessible_project_ids`.
-- Produces: `ComputeQuotaSummary`, `environment_compute_ceilings() -> dict[str, int | None]`, `team_compute_usage(session, orchestrator, project_id) -> ComputeQuotaUsage`, `enforce_team_compute_capacity(session, orchestrator, project_id) -> None`, `check_team_compute_quotas(...) -> ComputeQuotaSummary`.
+- Produces: `ComputeQuotaSummary`, `environment_compute_ceilings() -> dict[str, int | None]`, `team_compute_usage(session, orchestrator, project_id) -> ComputeQuotaUsage`, `enforce_team_compute_capacity(session, orchestrator, project_id) -> None`, `team_compute_quota_summary(session, orchestrator, project) -> ComputeQuotaSummary`.
 
 - [ ] **Step 1: Add the exception types** to `backend/app/core/exceptions.py` next to the storage ones:
 
@@ -374,12 +375,17 @@ class TeamComputeQuotaError(ResourceLimitError):
     """A compute quota value is invalid or above the platform ceiling."""
 ```
 
-Add a 409 handler in `backend/app/api/errors.py`:
+Add a 409 handler inside `register_exception_handlers` in `backend/app/api/errors.py`, next to `team_storage_quota_error_handler` (errors.py:243-251):
 
 ```python
-@app.exception_handler(TeamComputeQuotaExceededError)
-async def _team_compute_quota_exceeded(_request: Request, exc: TeamComputeQuotaExceededError) -> JSONResponse:
-    return JSONResponse(status_code=409, content={"detail": str(exc), "code": "team_compute_quota_exceeded"})
+    @app.exception_handler(TeamComputeQuotaExceededError)
+    async def team_compute_quota_exceeded_handler(
+        _request: Request, exc: TeamComputeQuotaExceededError
+    ) -> JSONResponse:
+        return JSONResponse(
+            status_code=status.HTTP_409_CONFLICT,
+            content={"detail": str(exc), "code": "team_compute_quota_exceeded"},
+        )
 ```
 
 Add `TeamComputeQuotaExceededError` and `TeamComputeQuotaError` to that module's imports.
@@ -393,13 +399,25 @@ Add `TeamComputeQuotaExceededError` and `TeamComputeQuotaError` to that module's
     max_deploys_per_hour: Mapped[int | None] = mapped_column(Integer, nullable=True)
 ```
 
-- [ ] **Step 3: Generate and edit the alembic migration**
+- [ ] **Step 3: Create the pinned alembic migration** `backend/alembic/versions/0026_add_team_compute_quotas.py`
 
-Run: `cd backend && alembic revision -m "add team compute quotas"`
-
-Edit the generated file:
+Create the file explicitly with the pinned revision id — do not use `alembic revision -m ...`, which auto-generates a random id parented on whatever head exists at run time and would fork the chain (Group C's `0027_group_c_lifecycle` pins `down_revision = "0026_add_team_compute_quotas"`):
 
 ```python
+"""add team compute quotas
+
+Revision ID: 0026_add_team_compute_quotas
+Revises: 0025_externalized_state
+"""
+from alembic import op
+import sqlalchemy as sa
+
+revision = "0026_add_team_compute_quotas"
+down_revision = "0025_externalized_state"
+branch_labels = None
+depends_on = None
+
+
 def upgrade() -> None:
     op.add_column("projects", sa.Column("max_running_containers", sa.Integer(), nullable=True))
     op.add_column("projects", sa.Column("max_cpu_millicores", sa.Integer(), nullable=True))
@@ -555,7 +573,8 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deploy.deployment_history import load_deploy_config_snapshot
-from app.core.containers.docker_orchestrator import ContainerOrchestrator
+from app.core.containers.docker_orchestrator import VELA_PROJECT_LABEL
+from app.core.containers.orchestrator import ContainerOrchestrator
 from app.core.exceptions import TeamComputeQuotaExceededError
 from app.db.models import DeploymentRecord, Project
 
@@ -612,8 +631,13 @@ def _effective_limits(project: Project) -> dict[str, int | None]:
 async def team_compute_usage(
     session: AsyncSession, orchestrator: ContainerOrchestrator, project_id: uuid.UUID,
 ) -> ComputeQuotaUsage:
-    containers = await orchestrator.list(project_ids=[project_id])
-    running = [info for info in containers if info.status == "running"]
+    # Mirror usage_from_containers (storage_quota.py): orchestrator.list(project_ids=...)
+    # only filters when user_id is also set, so list once and filter by label in Python.
+    containers = await orchestrator.list()
+    running = [
+        info for info in containers
+        if info.labels.get(VELA_PROJECT_LABEL) == str(project_id) and info.status == "running"
+    ]
     cpu_millicores = 0
     memory_bytes = 0
     for info in running:
@@ -701,7 +725,7 @@ Expected: PASS; `alembic upgrade head` applies cleanly against a scratch DB.
 - [ ] **Step 10: Commit**
 
 ```bash
-git add backend/app/core/quotas/compute_quota.py backend/app/core/quotas/__init__.py backend/app/core/exceptions.py backend/app/api/errors.py backend/app/db/models.py backend/alembic/versions .env.example backend/tests/test_compute_quota.py
+git add backend/app/core/quotas/compute_quota.py backend/app/core/quotas/__init__.py backend/app/core/exceptions.py backend/app/api/errors.py backend/app/db/models.py backend/alembic/versions/0026_add_team_compute_quotas.py .env.example backend/tests/test_compute_quota.py
 git commit -m "feat(quotas): add per-team compute quota core and migration"
 ```
 
@@ -781,7 +805,7 @@ class ProjectComputeQuotaUpdate(BaseModel):
 ```python
 @router.get("/{project_id}/compute-quota", response_model=ProjectComputeQuotaPublic)
 async def get_project_compute_quota(project_id: uuid.UUID, orchestrator=Depends(get_orchestrator), current_user=Depends(get_current_user), session=Depends(get_db)):
-    await require_membership(session, project_id, current_user.id)
+    await require_membership(session, project_id=project_id, user_id=current_user.id)
     project = await require_project(session, project_id)
     summary = await team_compute_quota_summary(session, orchestrator, project)
     return ProjectComputeQuotaPublic(
@@ -799,7 +823,7 @@ async def get_project_compute_quota(project_id: uuid.UUID, orchestrator=Depends(
 
 @router.patch("/{project_id}/compute-quota", response_model=ProjectComputeQuotaPublic)
 async def update_project_compute_quota(project_id: uuid.UUID, body: ProjectComputeQuotaUpdate, orchestrator=Depends(get_orchestrator), current_user=Depends(get_current_user), session=Depends(get_db)):
-    membership = await require_membership(session, project_id, current_user.id)
+    membership = await require_membership(session, project_id=project_id, user_id=current_user.id)
     if membership.role != ProjectRole.OWNER:
         raise ProjectAccessDeniedError("Only the team owner can change compute quotas")
     project = await require_project(session, project_id)
@@ -830,11 +854,11 @@ Immediately after each existing `await enforce_team_storage_capacity(session, or
 Inside `_scale_up(...)`, before the `orchestrator.deploy_replica(...)` call, add:
 
 ```python
-    if stored_config.project_id is not None:
-        await enforce_team_compute_capacity(session, orchestrator, stored_config.project_id)
+    if base_config.project_id is not None:
+        await enforce_team_compute_capacity(session, orchestrator, base_config.project_id)
 ```
 
-`stored_config` is the already-loaded `DeployConfig` in `_evaluate_policy` — pass it into `_scale_up` (add a `deploy_config: DeployConfig` parameter and update the single call site in `_evaluate_policy`).
+`base_config` is the `DeployConfig` `_scale_up` already receives — do not add a second config parameter. Add a `session: AsyncSession` parameter to `_scale_up` and update **both** call sites: the positional call in `_evaluate_policy` (scaling_engine.py:315-324) and the existing keyword call in `tests/test_scaling_engine.py:49`.
 
 - [ ] **Step 7: Run tests**
 
@@ -853,7 +877,7 @@ git commit -m "feat(quotas): enforce compute quotas at deploy and scale"
 ### Task 5: F03 frontend — owner controls and usage-vs-quota panel
 
 **Files:**
-- Modify: `frontend/src/api/projects.ts`, `frontend/src/api/client.ts`, `frontend/src/pages/teams/TeamDetail.tsx`, `frontend/src/pages/TeamsPage.tsx`, `frontend/src/pages/containers/ResourceUsagePanel.tsx`, `frontend/src/pages/containers/resource-usage-panel.css`, `frontend/e2e/teams.spec.ts`
+- Modify: `frontend/src/api/projects.ts`, `frontend/src/api/client.ts`, `frontend/src/pages/teams/useTeamManagement.ts`, `frontend/src/pages/teams/TeamDetail.tsx`, `frontend/src/pages/TeamsPage.tsx`, `frontend/src/pages/containers/ResourceUsagePanel.tsx`, `frontend/src/pages/containers/resource-usage-panel.css`, `frontend/e2e/teams.spec.ts`
 
 **Interfaces:**
 - Consumes: `GET/PATCH /api/projects/{id}/compute-quota`.
@@ -888,7 +912,7 @@ export async function updateProjectComputeQuota(
 
 Re-export the type and both functions from `frontend/src/api/client.ts` alongside the storage-quota helpers.
 
-- [ ] **Step 2: Extend `frontend/src/pages/teams/TeamDetail.tsx`** with a Compute section mirroring the Storage section at lines 101-175: render `used/total` bars for containers, CPU (millicores) and memory (GiB) using the existing bar markup and `role="status"` semantics; when `isSelectedOwner`, render a compact form with three numeric inputs (containers, CPU millicores, memory GiB) and a Save button that calls `updateProjectComputeQuota` with null-on-empty, shows a success `role="status"` message, and a `role="alert"` error from `formatApiError`. Wire the new props through `frontend/src/pages/TeamsPage.tsx`.
+- [ ] **Step 2: Extend the state hook and `TeamDetail`** — first extend `frontend/src/pages/teams/useTeamManagement.ts` with `computeQuota` state, a `getProjectComputeQuota` fetch and an `updateProjectComputeQuota` save mirroring the existing storage flow (`getProjectStorageQuota` / `updateProjectStorageQuota`), and expose the new state and save function through `TeamsPage` to `TeamDetail`. Then extend `frontend/src/pages/teams/TeamDetail.tsx` with a Compute section mirroring the Storage section at lines 101-175: render `used/total` bars for containers, CPU (millicores) and memory (GiB) using the existing bar markup and `role="status"` semantics; when `isSelectedOwner`, render a compact form with three numeric inputs (containers, CPU millicores, memory GiB) and a Save button that calls `updateProjectComputeQuota` with null-on-empty, shows a success `role="status"` message, and a `role="alert"` error from `formatApiError`.
 
 - [ ] **Step 3: Extend `frontend/src/pages/containers/ResourceUsagePanel.tsx`** so each project card also shows a compute usage row (`containers`, `CPU`, `memory`) when a compute limit exists. Add any new selectors to `resource-usage-panel.css` using existing design tokens only — no raw hex.
 
@@ -907,7 +931,7 @@ Expected: PASS.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add frontend/src/api/projects.ts frontend/src/api/client.ts frontend/src/pages/teams/TeamDetail.tsx frontend/src/pages/TeamsPage.tsx frontend/src/pages/containers/ResourceUsagePanel.tsx frontend/src/pages/containers/resource-usage-panel.css frontend/e2e/teams.spec.ts
+git add frontend/src/api/projects.ts frontend/src/api/client.ts frontend/src/pages/teams/useTeamManagement.ts frontend/src/pages/teams/TeamDetail.tsx frontend/src/pages/TeamsPage.tsx frontend/src/pages/containers/ResourceUsagePanel.tsx frontend/src/pages/containers/resource-usage-panel.css frontend/e2e/teams.spec.ts
 git commit -m "feat(ui): add compute quota owner controls and usage panel"
 ```
 
@@ -926,8 +950,7 @@ git commit -m "feat(ui): add compute quota owner controls and usage panel"
 - [ ] **Step 1: Write failing tests** in `backend/tests/test_showback_api.py`
 
 ```python
-def test_showback_is_team_scoped_and_reports_resource_time(api_client, monkeypatch):
-    monkeypatch.setenv("VELA_METRICS_INTERVAL_SECONDS", "30")
+def test_showback_is_team_scoped_and_reports_resource_time(api_client):
     response = api_client.get("/api/metrics/showback")
     assert response.status_code == 200
     body = response.json()
@@ -978,28 +1001,45 @@ from fastapi.responses import StreamingResponse
 import csv
 import io
 
-def _resource_time(session, project_ids: list[uuid.UUID], days: int) -> tuple[float, float]:
+
+async def _resource_time(session, container_ids: list[str], days: int) -> tuple[float, float]:
     since = datetime.now(timezone.utc) - timedelta(days=days)
-    intervals = 0
     cpu_seconds = 0.0
     memory_gib_seconds = 0.0
-    rows = session.execute(
-        select(ContainerMetric).where(ContainerMetric.timestamp >= since)
-    ).scalars().all()
-    for row in rows:
-        cpu_seconds += (row.cpu_percent / 100) * METRICS_INTERVAL_SECONDS
-        memory_gib_seconds += (row.memory_usage_bytes / 1024**3) * METRICS_INTERVAL_SECONDS
+    if container_ids:
+        rows = (await session.execute(
+            select(ContainerMetric).where(
+                ContainerMetric.timestamp >= since,
+                ContainerMetric.container_id.in_(container_ids),
+            )
+        )).scalars().all()
+        for row in rows:
+            cpu_seconds += (row.cpu_percent / 100) * METRICS_INTERVAL_SECONDS
+            memory_gib_seconds += (row.memory_usage_bytes / 1024**3) * METRICS_INTERVAL_SECONDS
     return cpu_seconds, memory_gib_seconds / 3600
 
 
 @router.get("/showback", response_model=ShowbackSummary)
 async def get_showback(current_user=Depends(get_current_user), session=Depends(get_db), orchestrator=Depends(get_orchestrator)):
-    project_ids = await list_accessible_project_ids(session, current_user.id)
-    since = datetime.now(timezone.utc) - timedelta(days=30)
-    cpu_seconds, memory_gib_hours = _resource_time(session, project_ids, 30)
-    teams: list[TeamShowback] = []
+    if current_user.role == UserRole.ADMIN:
+        project_ids = set((await session.execute(select(Project.id))).scalars().all())
+        containers = await orchestrator.list()
+    else:
+        project_ids = await list_accessible_project_ids(session, current_user.id)
+        containers = await orchestrator.list(project_ids=project_ids, user_id=current_user.id)
+    ids_by_project: dict[uuid.UUID, list[str]] = {}
+    for info in containers:
+        raw_project_id = info.labels.get(VELA_PROJECT_LABEL)
+        try:
+            ids_by_project.setdefault(uuid.UUID(raw_project_id), []).append(info.id)
+        except (TypeError, ValueError):
+            continue
     projects = (await session.execute(select(Project).where(Project.id.in_(project_ids)))).scalars().all()
+    teams: list[TeamShowback] = []
     for project in projects:
+        cpu_seconds, memory_gib_hours = await _resource_time(
+            session, ids_by_project.get(project.id, []), 30,
+        )
         disk_bytes, uploads_bytes = await team_storage_usage(session, orchestrator, project.id)
         storage_gib = (disk_bytes + uploads_bytes) / 1024**3
         teams.append(TeamShowback(
@@ -1009,6 +1049,7 @@ async def get_showback(current_user=Depends(get_current_user), session=Depends(g
             # ponytail: current storage × 30 days; no storage time series exists yet.
             storage_gib_days=storage_gib * 30,
         ))
+    since = datetime.now(timezone.utc) - timedelta(days=30)
     return ShowbackSummary(month=since.strftime("%Y-%m"), teams=teams)
 
 
@@ -1023,7 +1064,7 @@ async def export_showback(month: str, current_user=Depends(get_current_user), se
     return StreamingResponse(iter([buffer.getvalue()]), media_type="text/csv", headers={"Content-Disposition": f'attachment; filename="vela-showback-{month}.csv"'})
 ```
 
-Use the module's existing `Annotated[...]` dependency style and add `orchestrator` / `session` parameters to the export handler explicitly rather than forwarding them positionally if the router requires it. Admin-sees-all: when `current_user.role == UserRole.ADMIN`, set `project_ids` to all project ids instead of `list_accessible_project_ids`.
+Use the module's existing `Annotated[...]` dependency style and add `orchestrator` / `session` parameters to the export handler explicitly rather than forwarding them positionally if the router requires it. Scoping mirrors `get_usage` (metrics.py:144-147): one `orchestrator.list(project_ids=..., user_id=current_user.id)` call, containers grouped by `VELA_PROJECT_LABEL`, then per-team `ContainerMetric.container_id.in_(ids)` — never an unscoped `ContainerMetric` query; admins widen to all projects with an unfiltered list.
 
 - [ ] **Step 5: Run tests**
 
@@ -1116,7 +1157,8 @@ git commit -m "feat(ui): add per-team showback dashboard"
 ### Task 8: F18 — real RPS scaling and signal status
 
 **Files:**
-- Modify: `backend/app/core/scaling/scaling_engine.py`, `backend/app/core/models.py`, `backend/app/api/routes/scaling.py`, `backend/app/core/traffic/traffic_router.py` (only if needed for type check), `frontend/src/api/scaling.ts`, `frontend/src/pages/containers/ContainersRunScalingFields.tsx`, `backend/tests/test_scaling_engine.py`, `backend/tests/test_scaling_api.py`
+- Modify: `backend/app/core/scaling/scaling_engine.py`, `backend/app/core/models.py`, `backend/app/api/routes/scaling.py`, `backend/app/core/traffic/traffic_router.py` (only if needed for type check), `frontend/src/api/scaling.ts`, `frontend/src/pages/containers/ContainersRunScalingFields.tsx`, `backend/tests/test_scaling_engine.py`
+- Create: `backend/tests/test_scaling_api.py` (new spec covering GET list/one, PUT, and `signal_unavailable` on responses)
 
 **Interfaces:**
 - Consumes: `get_edge_request_rates` from Task 1; `ScalingMetric.REQUESTS_PER_SECOND`; injected `TrafficRouter`.
@@ -1177,6 +1219,8 @@ def test_rps_fails_closed_when_signal_unavailable(monkeypatch) -> None:
     assert result is None
 ```
 
+Also create `backend/tests/test_scaling_api.py` — the file does not exist yet, so create rather than modify. Write a new spec covering GET list, GET one, PUT and the `signal_unavailable` field on the responses, using the `api_client` fixture and the seeding pattern from `backend/tests/test_replica_config.py`.
+
 - [ ] **Step 2: Run tests to verify they fail**
 
 Run: `cd backend && python -m pytest tests/test_scaling_engine.py -q`
@@ -1192,14 +1236,16 @@ async def _measure_metric(
     traffic_router: TrafficRouter,
 ) -> float | None:
     if metric is ScalingMetric.REQUESTS_PER_SECOND and not isinstance(traffic_router, NoopTrafficRouter):
-        signal = get_edge_request_rates()
+        signal = edge_requests.get_edge_request_rates()
         if not signal.available:
             return None
-        route = await traffic_router.get_route(container_name)
-        host = route.host if route is not None else None
-        if host is None or host not in signal.rates_by_host:
+        try:
+            route = await traffic_router.get_route(container_name)
+        except RouteNotFoundError:
             return None
-        return signal.rates_by_host[host]
+        if route.host not in signal.rates_by_host:
+            return None
+        return signal.rates_by_host[route.host]
     stats = await _stats_or_none(orchestrator, container_name)
     if stats is None:
         return None
@@ -1207,7 +1253,7 @@ async def _measure_metric(
     return float(stats.cpu_percent)
 ```
 
-Keep the existing try/except orchestrator error handling in a new `_stats_or_none` helper. Update the single call in `_evaluate_policy` to pass `traffic_router`.
+Keep the existing try/except orchestrator error handling in a new `_stats_or_none` helper. Update the single call in `_evaluate_policy` to pass `traffic_router`. Import the module (`from app.core.monitoring import edge_requests`) and call through it — `edge_requests.get_edge_request_rates()` — so the Step 1 monkeypatch of `edge_requests.get_edge_request_rates` is visible to the engine; `RouteNotFoundError` is already imported in the module, and `traffic_router.get_route` raises it for unrouted containers (never returns `None`), so catch it and return `None` instead of testing `route is not None`.
 
 - [ ] **Step 4: Add computed signal status** to `ScalingPolicyInfo` in `backend/app/core/models.py`:
 
@@ -1215,7 +1261,7 @@ Keep the existing try/except orchestrator error handling in a new `_stats_or_non
     signal_unavailable: bool = False
 ```
 
-In `backend/app/api/routes/scaling.py`, set it on every returned `ScalingPolicyInfo` after `_orm_to_info` / `_orm_to_runtime`:
+In `backend/app/api/routes/scaling.py`, set it on every returned `ScalingPolicyInfo` by wrapping the values returned by `list_policies_for_container_names`, `get_policy` and `upsert_policy` (those helpers live in `app/core/scaling/policy_repository.py`; the route module only imports them):
 
 ```python
 def _with_signal_status(info: ScalingPolicyInfo) -> ScalingPolicyInfo:
@@ -1242,7 +1288,7 @@ Expected: PASS.
 - [ ] **Step 7: Commit**
 
 ```bash
-git add backend/app/core/scaling/scaling_engine.py backend/app/core/models.py backend/app/api/routes/scaling.py backend/tests/test_scaling_engine.py frontend/src/api/scaling.ts frontend/src/pages/containers/ContainersRunScalingFields.tsx
+git add backend/app/core/scaling/scaling_engine.py backend/app/core/models.py backend/app/api/routes/scaling.py backend/tests/test_scaling_engine.py backend/tests/test_scaling_api.py frontend/src/api/scaling.ts frontend/src/pages/containers/ContainersRunScalingFields.tsx
 git commit -m "feat(scaling): drive RPS policies from the edge counter"
 ```
 

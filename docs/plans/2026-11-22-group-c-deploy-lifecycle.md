@@ -4,7 +4,7 @@
 
 **Goal:** Add write-only versioned secrets with `secret://` references, config update with a dry-run diff, GitHub App push-to-deploy webhooks, and TTL-bound PR preview environments.
 
-**Architecture:** One `0026_*` migration adds all new tables. `F14` resolves `secret://name@version` into a **runtime-only** `DeployConfig` copy right before `orchestrator.deploy`; the persisted encrypted snapshot and the history `env_vars` column keep the references, never plaintext. `F13` loads that snapshot, classifies fields into mutable vs identity/topology, rejects recreation-triggering changes, and calls the existing `_deploy_and_maybe_wire_route` + history/audit path so a normal history entry is written. `F15` adds a GitHub App credential service (PyJWT is already a dependency) and an unauthenticated webhook receiver mounted **outside `/api`**, with HMAC + 5-minute skew + unique-delivery-id dedup. `F10` reuses the webhook and the existing source-deploy worker with preview labels, a preview hostname prefix, clamped limits, TTL and a GC loop.
+**Architecture:** One `0027_*` migration adds all new tables. `F14` resolves `secret://name@version` into a **runtime-only** `DeployConfig` copy right before `orchestrator.deploy`; the persisted encrypted snapshot and the history `env_vars` column keep the references, never plaintext. `F13` loads that snapshot, classifies fields into mutable vs identity/topology, rejects recreation-triggering changes, and calls the existing `_deploy_and_maybe_wire_route` + history/audit path so a normal history entry is written. `F15` adds a GitHub App credential service (PyJWT is already a dependency) and an unauthenticated webhook receiver mounted **outside `/api`**, with HMAC signature verification over the raw body plus unique-delivery-id dedup (GitHub sends no timestamp header, so there is no skew window to enforce). `F10` reuses the webhook and the existing source-deploy worker with preview labels, a preview hostname prefix, clamped limits, TTL and a GC loop.
 
 **Tech Stack:** FastAPI, SQLAlchemy async, Alembic, Fernet (`encrypt_secret`/`decrypt_secret`), PyJWT (already pinned), stdlib `hmac`/`hashlib`, pytest, React/TypeScript, Playwright.
 
@@ -12,7 +12,7 @@
 
 - Worktree root: `C:\Users\lolo\.local\share\opencode\worktree\ab1b01\defect-remediation`. Paths are relative to it.
 - Implementation order within this plan: Task 1 → 2 → 3 → 4 → 5 → 6. F10 depends on F14 and F15.
-- Alembic: Group B claims `0025_externalized_state`; this plan uses **`0026_group_c_lifecycle`** with `down_revision = "0025_externalized_state"` (confirm the parent at merge time; never create a second head).
+- Alembic: Group B creates `0025_externalized_state` and Group A creates `0026_add_team_compute_quotas`; this plan uses **`0027_group_c_lifecycle`** with `down_revision = "0026_add_team_compute_quotas"` (never create a second head).
 - Secret plaintext must never reach `DeploymentRecord.env_vars`, `DeploymentRecordPublic`, `DeploymentDiffResponse`, an audit log, or any API response. The only place it may exist is the runtime `DeployConfig` passed to `orchestrator.deploy`.
 - Webhook receiver must be mounted outside `/api` so `test_route_auth_regression.py` keeps passing unchanged; if mounted under `/api`, its path must be added to `PUBLIC_PATHS` in that test.
 - Preview deploys must reject `secret://` references and production env keys before the worker starts, especially for fork PRs.
@@ -24,12 +24,12 @@
 
 **Files:**
 - Modify: `backend/app/db/models.py`, `backend/app/core/exceptions.py`, `backend/app/api/errors.py`
-- Create: `backend/alembic/versions/0026_group_c_lifecycle.py`, `backend/app/core/secret_store.py`
+- Create: `backend/alembic/versions/0027_group_c_lifecycle.py`, `backend/app/core/secret_store.py`
 - Test: `backend/tests/test_secret_store.py`
 
 **Interfaces:**
 - Consumes: `encrypt_secret`, `decrypt_secret`, `require_membership`, `ProjectRole`.
-- Produces: `create_secret(session, *, owner_user_id, project_id, name, value) -> SecretPublic`, `set_secret_value`, `get_secret_version`, `resolve_secret_reference(session, *, scope, name, version) -> str`, `SecretPublic`.
+- Produces: `create_secret(session, *, owner_user_id, project_id, name, value) -> Secret`, `set_secret_value`, `get_secret_version`, `resolve_secret_reference(session, *, scope, name, version) -> str`, `SecretPublic`.
 
 - [ ] **Step 1: Add exception classes** to `backend/app/core/exceptions.py`
 
@@ -55,20 +55,24 @@ class WebhookSignatureError(VelaError):
 
 
 class WebhookReplayError(VelaError):
-    """Webhook timestamp is outside the skew window or delivery id was seen before."""
+    """A webhook delivery id was seen before."""
 
 
 class PreviewSecretForbiddenError(VelaError):
     """A preview deploy attempted to use a production secret or env value."""
 ```
 
-Register `SecretNotFoundError`, `SecretVersionNotFoundError` and `PreviewSecretForbiddenError` as 404/400 handlers in `backend/app/api/errors.py` following the `TeamStorageQuotaError` handler at lines 243-251; register `WebhookSignatureError` and `WebhookReplayError` as 400 handlers.
+Register `SecretNotFoundError`, `SecretVersionNotFoundError` and `PreviewSecretForbiddenError` as 404/400 handlers in `backend/app/api/errors.py` following the `TeamStorageQuotaError` handler at lines 243-251; register `WebhookSignatureError` and `WebhookReplayError` as 400 handlers, and `GitHubAppNotConfiguredError` as a 503 handler (detail "GitHub App is not configured") so an unconfigured App is never a 500 — keep 400 only for the signature and replay errors.
 
 - [ ] **Step 2: Add all Group C models** to `backend/app/db/models.py`
 
 ```python
 class Secret(Base):
     __tablename__ = "secrets"
+    __table_args__ = (
+        UniqueConstraint("owner_user_id", "name"),
+        UniqueConstraint("project_id", "name"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
     owner_user_id: Mapped[uuid.UUID | None] = mapped_column(Uuid(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=True)
@@ -160,19 +164,19 @@ class PreviewDeploy(Base):
     closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 ```
 
-- [ ] **Step 3: Create `backend/alembic/versions/0026_group_c_lifecycle.py`**
+- [ ] **Step 3: Create `backend/alembic/versions/0027_group_c_lifecycle.py`**
 
 ```python
 """group c lifecycle
 
-Revision ID: 0026_group_c_lifecycle
-Revises: 0025_externalized_state
+Revision ID: 0027_group_c_lifecycle
+Revises: 0026_add_team_compute_quotas
 """
 from alembic import op
 import sqlalchemy as sa
 
-revision = "0026_group_c_lifecycle"
-down_revision = "0025_externalized_state"
+revision = "0027_group_c_lifecycle"
+down_revision = "0026_add_team_compute_quotas"
 branch_labels = None
 depends_on = None
 
@@ -189,6 +193,8 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(["owner_user_id"], ["users.id"], ondelete="CASCADE"),
         sa.ForeignKeyConstraint(["project_id"], ["projects.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
+        sa.UniqueConstraint("owner_user_id", "name"),
+        sa.UniqueConstraint("project_id", "name"),
     )
     op.create_table(
         "secret_versions",
@@ -404,7 +410,7 @@ def test_reference_pattern() -> None:
 Run: `cd backend && python -m pytest tests/test_secret_store.py -q && alembic upgrade head && ruff check .`
 
 ```bash
-git add backend/app/db/models.py backend/alembic/versions/0026_group_c_lifecycle.py backend/app/core/secret_store.py backend/app/core/exceptions.py backend/app/api/errors.py backend/tests/test_secret_store.py
+git add backend/app/db/models.py backend/alembic/versions/0027_group_c_lifecycle.py backend/app/core/secret_store.py backend/app/core/exceptions.py backend/app/api/errors.py backend/tests/test_secret_store.py
 git commit -m "feat(secrets): add write-only versioned secret store"
 ```
 
@@ -497,7 +503,7 @@ async def runtime_config_with_secrets(
 
 - [ ] **Step 4: Wire into the three deploy paths** in `backend/app/api/routes/containers.py`
 
-In each path (synchronous image deploy, dockerfile_template worker, git worker), create the runtime copy immediately before the `orchestrator.deploy(...)` call, and keep all `model_dump(mode="json")` history persistence calls operating on the **original** config:
+In each of the four deploy paths (containers.py:783 sync image deploy, :919 worker image branch, :1004 dockerfile_template, :1101 git), create the runtime copy immediately before the `orchestrator.deploy(...)` call, and keep all `model_dump(mode="json")` history persistence calls operating on the **original** config:
 
 ```python
     runtime_config = await runtime_config_with_secrets(
@@ -534,7 +540,7 @@ class SecretValueUpdate(BaseModel):
     value: str = Field(..., min_length=1)
 ```
 
-Routes: `GET /` (list secrets visible to user via `list_project_ids_for_user`), `POST /` (create with `require_membership` + `can_write` when project-scoped, else personal), `PATCH /{id}` (rotation = new version), `DELETE /{id}`. **No route returns a plaintext value** — `SecretPublic.has_value` is always `true` and `latest_version` is the only version metadata. Register the router in `backend/app/api/app.py` with `get_current_user` at router level.
+Routes: `GET /` (list secrets visible to user via `list_project_ids_for_user`), `POST /` (create with `require_membership` + `can_write` when project-scoped, else personal; reject a duplicate `(scope, name)` with a 400 before insert — the model's unique constraints from Task 1 are the backstop), `PATCH /{id}` (rotation = new version), `DELETE /{id}`. **No route returns a plaintext value** — `SecretPublic.has_value` is always `true` and `latest_version` is the only version metadata. Register the router in `backend/app/api/app.py` with `get_current_user` at router level.
 
 - [ ] **Step 6: Update `backend/tests/test_deploy_epic.py`** so the expected history env value for a `secret://` reference is the reference itself, while ordinary env values remain `<REDACTED>`; add one assertion that `fake_orchestrator.last_deploy_config.env_vars` contains the resolved plaintext (proving the runtime copy was used).
 
@@ -618,6 +624,8 @@ class DeploymentUpdateDryRunResponse(DeploymentDiffResponse):
     config: dict[str, ConfigFieldDiff]
 ```
 
+`DeploymentUpdateDryRunResponse` inherits the required `left_id`/`right_id` from `DeploymentDiffResponse` (schemas.py:646-650); the dry-run handler sets both to `row.id` — the inherited fields describe the same record, since a single-deployment dry-run has no second deployment. `DeploymentUpdateRequest` uses `HealthCheckConfig`; add it to the existing `from app.core.models import (...)` block in `schemas.py` (line 24) — it is not currently imported.
+
 - [ ] **Step 4: Add the field classifier and diff** to `backend/app/core/deploy/deployment_history.py`
 
 ```python
@@ -648,7 +656,7 @@ Import `ConfigFieldDiff` from `app.api.schemas` — if that creates a core→api
 
 - [ ] **Step 5: Add the routes** to `backend/app/api/routes/deployments.py`
 
-Both handlers load the deployment row (`get_deployment` scoping), load the snapshot via `load_deploy_config_snapshot(session, row.container_id)`, call `classify_update(body.model_dump(exclude_none=True))`, and raise `DeploymentConfigChangeRequiresRecreateError` naming the rejected fields. The dry-run builds the candidate with `candidate = snapshot.model_copy(update=mutable)` and returns `DeploymentUpdateDryRunResponse` with the existing `diff_deployments` fields plus `diff_config_fields(snapshot, candidate)`. The PATCH uses the same candidate through `runtime_config_with_secrets` → `_deploy_and_maybe_wire_route` → `_persist_run_deployment` → `emit_audit_log`, then returns the new `DeploymentRecordPublic`. Reject label edits to `VELA_OWNER_LABEL`/`VELA_PROJECT_LABEL` with a clear error — those keys are re-applied by `_apply_deploy_labels`.
+Both handlers load the deployment row (`get_deployment` scoping), load the snapshot via `load_deploy_config_snapshot(session, row.container_id)`, call `classify_update(body.model_dump(exclude_none=True))`, and raise `DeploymentConfigChangeRequiresRecreateError` naming the rejected fields. The dry-run builds the candidate with `candidate = snapshot.model_copy(update=mutable)` and returns `DeploymentUpdateDryRunResponse` with the existing `diff_deployments` fields plus `diff_config_fields(snapshot, candidate)`, specifying `left_id=row.id, right_id=row.id` (the inherited fields describe the same record). The PATCH uses the same candidate through `runtime_config_with_secrets` → `_deploy_and_maybe_wire_route` → `_persist_run_deployment` → `emit_audit_log`, then returns the new `DeploymentRecordPublic`. Reject label edits to `VELA_OWNER_LABEL`/`VELA_PROJECT_LABEL` with a clear error — those keys are re-applied by `_apply_deploy_labels`.
 
 - [ ] **Step 6: Frontend** — extend `frontend/src/api/builds.ts` with `DeploymentUpdateRequest`, `ConfigFieldDiff`, `DeploymentUpdateDryRunResponse`, `dryRunDeployment(id, body)` and `updateDeployment(id, body)`; re-export from `client.ts`. In `DeploymentHistorySection.tsx`, reuse the existing two-select compare panel to show the `config` diff (non-secret fields only, with a short label per field), and add a "Review & apply" flow: dry-run on click → review panel → confirm button calls update → refresh history. Use existing `role="alert"` / `role="status"` / skeleton patterns and `deployment-history__*` classes.
 
@@ -684,11 +692,10 @@ git commit -m "feat(deploy): add config dry-run and patch update"
 import hashlib
 import hmac
 import json
-from datetime import UTC, datetime
 import pytest
 
 
-def _headers(payload: dict, secret: str, delivery_id: str, timestamp: datetime) -> dict[str, str]:
+def _headers(payload: dict, secret: str, delivery_id: str) -> dict[str, str]:
     body = json.dumps(payload, separators=(",", ":")).encode()
     digest = hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
     return {
@@ -699,7 +706,21 @@ def _headers(payload: dict, secret: str, delivery_id: str, timestamp: datetime) 
     }
 
 
-def test_webhook_rejects_bad_signature(api_client) -> None:
+def test_webhook_rejects_bad_signature(api_client, db_session_factory) -> None:
+    import asyncio
+
+    from app.core.security.secrets import encrypt_secret
+    from app.db.models import GitHubAppInstall
+
+    async def seed() -> None:
+        async with db_session_factory() as session:
+            session.add(GitHubAppInstall(
+                app_id="123", private_key_encrypted=encrypt_secret("pem"),
+                webhook_secret_encrypted=encrypt_secret("hook-secret"),
+            ))
+            await session.commit()
+
+    asyncio.run(seed())
     response = api_client.post("/webhooks/github/00000000-0000-0000-0000-000000000001", content=b"{}", headers={"X-Hub-Signature-256": "sha256=bad", "X-GitHub-Delivery": "d1", "X-GitHub-Event": "push"})
     assert response.status_code == 400
 
@@ -727,13 +748,15 @@ def test_webhook_dedups_delivery_ids(api_client, db_session_factory) -> None:
     asyncio.run(seed())
     payload = {"repository": {"full_name": "org/repo"}, "ref": "refs/heads/main"}
     body = json.dumps(payload, separators=(",", ":")).encode()
-    headers = _headers(payload, "hook-secret", "d-up-1", datetime.now(UTC))
+    headers = _headers(payload, "hook-secret", "d-up-1")
     url = f"/webhooks/github/{project_id}"
     first = api_client.post(url, content=body, headers=headers)
     second = api_client.post(url, content=body, headers=headers)
     assert first.json()["status"] == "received"
     assert second.json()["status"] == "duplicate"
 ```
+
+The bad-signature test seeds a `GitHubAppInstall` first: without one the handler raises `GitHubAppNotConfiguredError`, which Task 1 registers as 503 — the 400 path must be reached through a configured App with a bad signature.
 
 - [ ] **Step 2: Run tests to verify they fail**
 
@@ -749,13 +772,12 @@ import hashlib
 import hmac
 import time
 import uuid
-from datetime import UTC, datetime, timedelta
 
 import jwt
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.exceptions import GitHubAppNotConfiguredError, WebhookReplayError, WebhookSignatureError
+from app.core.exceptions import GitHubAppNotConfiguredError, WebhookSignatureError
 from app.core.security.secrets import decrypt_secret
 from app.db.models import GitHubAppInstall, GitHubAppInstallationId
 import httpx
@@ -766,12 +788,6 @@ def verify_github_signature(payload: bytes, secret: str, signature: str | None) 
         return False
     expected = hmac.new(secret.encode(), payload, hashlib.sha256).hexdigest()
     return hmac.compare_digest(signature.removeprefix("sha256="), expected)
-
-
-def check_timestamp(timestamp: datetime | None, now: datetime | None = None) -> None:
-    moment = now or datetime.now(UTC)
-    if timestamp is None or abs((moment - timestamp).total_seconds()) > 300:
-        raise WebhookReplayError("Webhook timestamp is outside the 5-minute window")
 
 
 async def installation_token(session: AsyncSession, project_id: uuid.UUID) -> str:
@@ -808,9 +824,11 @@ router = APIRouter()
 
 @router.post("/webhooks/github/{project_id}")
 async def github_webhook(
-    project_id: uuid.UUID, request: Request, session: AsyncSession = Depends(get_db),
-    registry: DeployJobRegistry = Depends(get_deploy_jobs),
+    project_id: uuid.UUID,
+    request: Request,
     background_tasks: BackgroundTasks,
+    session: Annotated[AsyncSession, Depends(get_db)],
+    registry: Annotated[DeployJobRegistry, Depends(get_deploy_jobs)],
 ) -> dict[str, str]:
     payload = await request.body()
     delivery_id = request.headers.get("X-GitHub-Delivery", "")
@@ -843,21 +861,18 @@ async def github_webhook(
     if config.branch_filters and branch not in config.branch_filters:
         return {"status": "ignored"}
 
-    timestamp = datetime.fromisoformat(body.get("timestamp", "").replace("Z", "+00:00")) if body.get("timestamp") else None
-    check_timestamp(timestamp)
-
     delivery = GitHubWebhookDelivery(
         delivery_id=delivery_id, project_id=project_id,
         repo_full_name=body["repository"]["full_name"], event=event,
         action=body.get("action"), branch=branch,
-        sender_timestamp=timestamp, status="received",
+        status="received",
     )
     session.add(delivery)
     await session.commit()
     return {"status": "received"}
 ```
 
-Add PR metadata (`pr_number`, `is_fork`) for `pull_request` events and call the shared deploy enqueue helper from Task 6.
+The non-default `background_tasks` parameter must come before the defaulted `Depends` parameters (Python syntax: a parameter without a default cannot follow one with a default). Replay protection is the unique `delivery_id` constraint plus the pre-check above — GitHub sends no timestamp header, so no payload timestamp or skew window is applied. Add PR metadata (`pr_number`, `is_fork`) for `pull_request` events and call the shared deploy enqueue helper from Task 6.
 
 - [ ] **Step 5: Mount the router outside `/api`** in `backend/app/api/app.py`
 
@@ -889,7 +904,7 @@ Use it at `containers.py:1054` in place of the PAT-only call so App tokens are p
 Run: `cd backend && python -m pytest tests/test_github_app.py tests/test_webhooks.py tests/test_github_oauth.py tests/test_route_auth_regression.py -q && ruff check .`
 
 ```bash
-git add backend/app/core/github_app.py backend/app/api/routes/webhooks.py backend/app/api/app.py backend/app/api/schemas.py backend/app/api/errors.py backend/app/core/deploy/github_auth.py backend/app/db/models.py backend/alembic/versions/0026_group_c_lifecycle.py backend/tests/test_github_app.py backend/tests/test_webhooks.py
+git add backend/app/core/github_app.py backend/app/api/routes/webhooks.py backend/app/api/app.py backend/app/api/schemas.py backend/app/api/errors.py backend/app/core/deploy/github_auth.py backend/app/db/models.py backend/alembic/versions/0027_group_c_lifecycle.py backend/tests/test_github_app.py backend/tests/test_webhooks.py
 git commit -m "feat(webhooks): add GitHub App installation and signed webhook receiver"
 ```
 
@@ -1068,14 +1083,14 @@ async def collect_expired_previews(
     return len(rows)
 ```
 
-In `preview_deploy_config`, apply the preview hostname prefix by passing `label_prefix="pr-"` where `allocate_public_hostname` is called in the webhook path (public route allocation is handled by `apply_public_route_to_deploy_config`, so pass the prefix there).
+Add an optional `label_prefix: str | None = None` parameter to `apply_public_route_to_deploy_config` (public_route_host.py:85-95 — it currently takes no prefix parameter and reads `VELA_PUBLIC_ROUTE_HOST_PREFIX`), defaulting to the env prefix when `None`, and pass `label_prefix="pr-"` from the preview path in the webhook.
 
 - [ ] **Step 4: Wire the webhook to enqueue previews** in `backend/app/api/routes/webhooks.py`
 
 For `pull_request` events with `action in {"opened", "synchronize", "reopened"}` and `config.preview_enabled`:
 - reject fork PRs with any `secret://` env value before enqueueing (the shared `preview_deploy_config` already rejects all refs);
 - call `preview_deploy_config(...)` with the PR head SHA and a dedicated env set (no production env keys — use an allowlist configured on `GitHubWebhookConfig` or an empty set by default);
-- get `token = await github_token_for_project(session, project_id, user)`;
+- get `token = await installation_token(session, project_id)` — the webhook receiver has no authenticated user, so the PAT fallback (`github_token_for_url(session, user, ...)`) does not apply there;
 - create a `PreviewDeploy` row with `expires_at = now + ttl`, unique `(project_id, repo, pr_number)` (upsert on synchronize);
 - call `spawn_deploy_worker(registry, job_id, worker, ...)` using the existing `_run_container_deploy_worker` with a `RunFromSourceRequest` built from the preview config, and mark the row `deployed` on success.
 - For `action == "closed"`, set `closed_at`, remove the container and route, and mark the row `closed`.
@@ -1117,4 +1132,4 @@ git commit -m "feat(previews): add TTL-bound PR preview deploys"
 
 - **Spec coverage:** F14 → Tasks 1–2; F13 → Task 3; F15 → Tasks 4–5; F10 → Task 6. All locked decisions represented: write-only versioned secrets, runtime-only resolution, dry-run + in-place redeploy, GitHub App installation tokens, signed/deduped webhooks, repo opt-in, preview caps/TTL/no-secrets/health+monitor GC.
 - **Placeholder scan:** no TBD/TODO. Task 4 Step 2 has one explicit in-code note about the unique-key lookup shape (`delivery_id` is the unique column, not the PK) and Task 1 Step 2 lists all tables the single migration creates; neither defers work.
-- **Type consistency:** `resolve_secret_reference` from Task 1 is consumed by Task 2; `runtime_config_with_secrets` from Task 2 is reused by Tasks 3 and 6; `verify_github_signature` and `installation_token` from Task 4 are consumed by the webhook and preview paths; `PreviewDeploy` from Task 1 is used by Task 6. Migration `0026` targets Group B's `0025` head with a merge-time check, avoiding a second head.
+- **Type consistency:** `resolve_secret_reference` from Task 1 is consumed by Task 2; `runtime_config_with_secrets` from Task 2 is reused by Tasks 3 and 6; `verify_github_signature` and `installation_token` from Task 4 are consumed by the webhook and preview paths; `PreviewDeploy` from Task 1 is used by Task 6. Migration `0027_group_c_lifecycle` chains onto Group A's `0026_add_team_compute_quotas` (itself pinned to Group B's `0025_externalized_state`), keeping the chain single-headed with no merge-time check needed.

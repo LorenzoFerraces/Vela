@@ -57,7 +57,7 @@ test("VELA_PROFILE selects a named profile and env overrides still win", () => {
     school: { server: "http://school:8000/", token: "pat_school", tokenId: "tid_school" },
   }, active: "default" }, configFile)
   const resolved = resolveConfig({}, { VELA_PROFILE: "school", VELA_API_URL: "http://override:9000" }, readStoredConfig(configFile)!)
-  expect(resolved).toEqual({ server: "http://override:9000", token: "pat_school", tokenId: undefined, profile: "school" })
+  expect(resolved).toEqual({ server: "http://override:9000", token: "pat_school", tokenId: "tid_school", profile: "school" })
 })
 
 test("flags.profile overrides the active profile and keeps its tokenId", () => {
@@ -187,6 +187,15 @@ writeStoredConfig({
 ```
 
 Add `readStoredConfig` to the existing import from `../config`. `logout()` keeps `clearStoredConfig()`; update `cli/README.md` only in Task 8.
+
+Also fix the server fallback in `login()` (auth.ts:38), which still reads `stored?.server` from the legacy flat shape and no longer typechecks against the profile-shaped `StoredConfig`:
+
+```ts
+const stored = readStoredConfig()
+const activeProfile = stored?.profiles[stored.active]
+const server = (values.server ?? process.env.VELA_API_URL ?? activeProfile?.server ?? DEFAULT_SERVER)
+  .replace(/\/+$/, "")
+```
 
 - [ ] **Step 5: Run tests and typecheck**
 
@@ -372,7 +381,7 @@ git commit -m "feat(cli): add vela config command and --profile flag"
 
 **Files:**
 - Create: `cli/src/output.ts`
-- Modify: `cli/src/main.ts`, `cli/src/commands/deploy.ts`, `cli/src/commands/containers.ts`, `cli/src/commands/tokens.ts`
+- Modify: `cli/src/main.ts`, `cli/src/commands/deploy.ts`, `cli/src/commands/containers.ts`, `cli/src/commands/tokens.ts`, `cli/src/commands/auth.ts`
 - Test: `cli/src/output.test.ts`
 
 **Interfaces:**
@@ -430,7 +439,7 @@ In `cli/src/main.ts` `applyGlobalConfig`, add the two flags (both `--json`/`--qu
 
 - [ ] **Step 4: Refactor existing JSON-capable commands to use `emit`**
 
-In `deploy.ts`, `containers.ts` and `tokens.ts`, delete their local `json` flag handling and replace each `if (json) console.log(JSON.stringify(x, null, 2)); else ...` with `emit(x, () => humanString)`. Keep the existing human strings byte-for-byte (including `formatTable(...)` calls). `--json` is now consumed globally, so remove `json: { type: "boolean" }` from those commands' `parseArgs` options.
+In `deploy.ts`, `containers.ts` and `tokens.ts`, delete their local `json` flag handling and replace each `if (json) console.log(JSON.stringify(x, null, 2)); else ...` with `emit(x, () => humanString)`. Do the same for `whoami` in `cli/src/commands/auth.ts` (local `json` option, lines 86-95): convert it to `emit(me, render)` with the existing human string as the render callback — once `applyGlobalConfig` strips a global `--json`, whoami's own `parseArgs` never sees it and would silently print human text. Keep the existing human strings byte-for-byte (including `formatTable(...)` calls). `--json` is now consumed globally, so remove `json: { type: "boolean" }` from those commands' `parseArgs` options.
 
 - [ ] **Step 5: Run tests and typecheck**
 
@@ -440,7 +449,7 @@ Expected: PASS.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add cli/src/output.ts cli/src/output.test.ts cli/src/main.ts cli/src/commands/deploy.ts cli/src/commands/containers.ts cli/src/commands/tokens.ts
+git add cli/src/output.ts cli/src/output.test.ts cli/src/main.ts cli/src/commands/deploy.ts cli/src/commands/containers.ts cli/src/commands/tokens.ts cli/src/commands/auth.ts
 git commit -m "feat(cli): add uniform --json and --quiet output"
 ```
 
@@ -463,19 +472,6 @@ git commit -m "feat(cli): add uniform --json and --quiet output"
 import { expect, test } from "bun:test"
 import { completionCommand } from "./completion"
 
-test("each supported shell script contains every command", () => {
-  for (const shell of ["bash", "zsh", "fish", "powershell"]) {
-    const lines: string[] = []
-    const log = console.log; console.log = (value: string) => lines.push(value)
-    try { expect(completionCommand([shell])).resolves.toBe(0) } finally { console.log = log }
-    // assert after awaiting in the same test body
-  }
-})
-```
-
-Replace the loop body with an awaited version for determinism:
-
-```ts
 test("each supported shell script contains every command", async () => {
   for (const shell of ["bash", "zsh", "fish", "powershell"]) {
     const lines: string[] = []
@@ -612,7 +608,7 @@ import { emit } from "../output"
 import { formatTable } from "../format"
 
 interface ProjectPublic { id: string; name: string; role?: string }
-interface StackPublic { id: string; name: string; status: string }
+interface StackPublic { id: string; project_id: string; name: string }
 interface ProjectInvitationPublic { id: string; email: string; role: string }
 
 function parse(argv: string[], options: Parameters<typeof parseArgs>[0]["options"]) {
@@ -628,15 +624,14 @@ export async function stackCommand(argv: string[]): Promise<number> {
   if (action === "list") {
     const stacks = await request<StackPublic[]>(config, "GET", "/stacks/")
     const project = values.project
-    const rows = project ? stacks.filter((stack) => (stack as StackPublic & { project_id?: string }).project_id === project) : stacks
-    emit(rows, () => formatTable(["ID", "NAME", "STATUS"], rows.map((stack) => [stack.id, stack.name, stack.status])))
+    const rows = project ? stacks.filter((stack) => stack.project_id === project) : stacks
+    emit(rows, () => formatTable(["ID", "NAME"], rows.map((stack) => [stack.id, stack.name])))
     return 0
   }
   if (action === "deploy") {
     const stackId = positionals[0]
     if (!stackId) throw new VelaError(2, "Usage: vela stack deploy <stack-id>")
-    if (!values.project) throw new VelaError(2, "stack deploy requires --project <id>")
-    const accepted = await request<{ job_id: string }>(config, "POST", `/stacks/${stackId}/deploy`, { project_id: values.project })
+    const accepted = await request<{ job_id: string }>(config, "POST", `/stacks/${stackId}/deploy`)
     emit(accepted, () => `Deploy job: ${accepted.job_id}`)
     return 0
   }
@@ -744,8 +739,10 @@ beforeEach(() => {
   process.env.VELA_CONFIG = ""
   process.env.VELA_TOKEN = "pat_test"
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
-    calls.push({ method: init?.method ?? "GET", url: String(input) })
-    return new Response(JSON.stringify([]), { status: 200, headers: { "content-type": "application/json" } })
+    const url = String(input)
+    calls.push({ method: init?.method ?? "GET", url })
+    const body = url.includes("audit") ? JSON.stringify({ entries: [], total: 0 }) : JSON.stringify([])
+    return new Response(body, { status: 200, headers: { "content-type": "application/json" } })
   }) as typeof fetch
 })
 afterEach(() => {
@@ -824,8 +821,8 @@ export async function scaleCommand(argv: string[]): Promise<number> {
   const { positionals } = parseArgs({ args: argv.slice(1), allowPositionals: true })
   const config = requireToken(resolveConfig({}))
   if (action === "list") {
-    const policies = await request<{ container_name: string; metric: string; target: number }[]>(config, "GET", "/scaling/policies")
-    rows(policies, ["CONTAINER", "METRIC", "TARGET"], (item) => [item.container_name, item.metric, String(item.target)])
+    const policies = await request<{ container_name: string; metric: string; scale_up_threshold: number }[]>(config, "GET", "/scaling/policies")
+    rows(policies, ["CONTAINER", "METRIC", "SCALE UP AT"], (item) => [item.container_name, item.metric, String(item.scale_up_threshold)])
     return 0
   }
   if (action === "set") {
@@ -834,7 +831,7 @@ export async function scaleCommand(argv: string[]): Promise<number> {
       throw new VelaError(2, "Usage: vela scale set <container> <metric> <target>")
     }
     const policy = await request<{ container_name: string }>(config, "PUT", `/scaling/policies/${containerName}`, {
-      metric, target: Number(target),
+      metric, scale_up_threshold: Number(target), scale_down_threshold: Math.max(Number(target) / 2, 0),
     })
     emit(policy, () => `Updated ${policy.container_name}`)
     return 0
@@ -925,8 +922,10 @@ beforeEach(() => {
   process.env.VELA_CONFIG = ""
   process.env.VELA_TOKEN = "pat_test"
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
-    calls.push({ method: init?.method ?? "GET", url: String(input) })
-    return new Response(JSON.stringify([]), { status: 200, headers: { "content-type": "application/json" } })
+    const url = String(input)
+    calls.push({ method: init?.method ?? "GET", url })
+    const body = url.includes("deploy-sources") ? JSON.stringify({ suggestions: [] }) : JSON.stringify([])
+    return new Response(body, { status: 200, headers: { "content-type": "application/json" } })
   }) as typeof fetch
 })
 afterEach(() => {
@@ -997,8 +996,10 @@ export async function sourcesCommand(argv: string[]): Promise<number> {
   const action = argv[0] ?? "list"
   if (action !== "list") throw new VelaError(2, `Unknown sources action: ${action}`)
   const config = requireToken(resolveConfig({}))
-  const sources = await request<{ sources: string[] }>(config, "GET", "/containers/deploy-sources?q=")
-  emit(sources, () => sources.sources.join("\n"))
+  const response = await request<{ suggestions: Array<{ kind: string; name?: string; id?: string; image?: string; git_url?: string }> }>(config, "GET", "/containers/deploy-sources?q=")
+  const label = (suggestion: { kind: string; name?: string; id?: string; image?: string; git_url?: string }): string =>
+    `${suggestion.kind}: ${suggestion.name ?? suggestion.image ?? suggestion.git_url ?? suggestion.id ?? ""}`
+  emit(response, () => response.suggestions.map(label).join("\n"))
   return 0
 }
 

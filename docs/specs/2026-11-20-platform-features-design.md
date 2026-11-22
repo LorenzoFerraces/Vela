@@ -20,7 +20,7 @@
 | F11 | Named profiles in the existing config file (`{profiles, active}`), `VELA_PROFILE` override, legacy flat-shape migration; completions. `--no-wait` already done. |
 | F13 | `PATCH` that redeploys through the existing pipeline/history; mutable fields in place, identity/topology fields require recreation; dry-run returns the existing diff shape extended with non-secret fields. |
 | F14 | Write-only named secrets encrypted with the existing Fernet helper; immutable versions; `secret://name@version` or `latest` resolved at deploy time; history stores references only. |
-| F15 | **GitHub App installation** model (chosen over a per-project HMAC secret): App credentials plus per-installation tokens, webhook-signature verification with the App secret, delivery-id dedup, branch filters, delivery history. |
+| F15 | **GitHub App installation** model (chosen over a per-project HMAC secret): App credentials plus per-installation tokens, signature verification over the raw body plus per-delivery-id dedup (unique constraint), with a server-side freshness check on `received_at`, branch filters, delivery history. |
 | F17 | Remove `kubernetes` from README and `.env.example`, reject the value at config load with a clear error, and delete the dead adapter. No Kubernetes implementation. |
 | F18 | Target-RPS scaling from F02's edge request counter with cooldowns; fail closed to "no scale action" plus "signal unavailable" status; `noop` router keeps its documented CPU proxy. |
 
@@ -119,7 +119,7 @@ Order within group: F14 first, then F13 and F15; F10 last.
 
 - Use a GitHub App installation as the integration model: store the App id, encrypted private key and webhook secret; track installation ids per project; derive short-lived installation access tokens for deploys.
 - Per-project webhook endpoint with signature verification using the App webhook secret.
-- Replay protection: HMAC over body + delivery id + timestamp with a 5-minute skew window and per-delivery-id dedup, mirroring the existing alert-dedup pattern.
+- Replay protection: signature verification over the raw body plus per-delivery-id dedup (unique constraint), with a server-side freshness check on `received_at`, mirroring the existing alert-dedup pattern.
 - Branch filters per project; trigger a deploy that reuses the Git-source pipeline, using the installation token for private-repo clones (no PAT in the deploy form).
 - Surface webhook delivery history in the UI.
 - Admin/instructor gating: only project OWNER (or platform admin) may configure webhooks and view/manage App credentials.
