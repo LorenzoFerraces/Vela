@@ -89,18 +89,21 @@ export function TeamDetail({
           label: 'Containers',
           used: computeQuota.used_running_containers,
           limit: computeQuota.max_running_containers,
+          ceiling: computeQuota.platform_ceiling.running_containers,
           display: (value: number) => String(value),
         },
         {
           label: 'CPU',
           used: computeQuota.used_cpu_millicores,
           limit: computeQuota.max_cpu_millicores,
+          ceiling: computeQuota.platform_ceiling.cpu_millicores,
           display: (value: number) => `${value} mCPU`,
         },
         {
           label: 'Memory',
           used: computeQuota.used_memory_bytes,
           limit: computeQuota.max_memory_bytes,
+          ceiling: computeQuota.platform_ceiling.memory_bytes,
           display: formatGib,
         },
       ]
@@ -232,7 +235,9 @@ export function TeamDetail({
                     <p className="teams-page__muted" role="status">
                       {row.label}:{' '}
                       {row.limit === null
-                        ? `${row.display(row.used)} used · Unlimited`
+                        ? row.ceiling === null
+                          ? `${row.display(row.used)} used · Unlimited`
+                          : `${row.display(row.used)} used · ${row.display(row.ceiling)} (platform default)`
                         : `${row.display(row.used)} of ${row.display(row.limit)}`}
                     </p>
                     {row.limit !== null ? (
@@ -271,7 +276,7 @@ export function TeamDetail({
                       onChange={(event) =>
                         onComputeInputChange('containers', event.target.value)
                       }
-                      placeholder="Unlimited"
+                      placeholder="Platform default"
                     />
                   </label>
                   <label className="teams-page__field">
@@ -286,7 +291,7 @@ export function TeamDetail({
                       onChange={(event) =>
                         onComputeInputChange('cpu', event.target.value)
                       }
-                      placeholder="Unlimited"
+                      placeholder="Platform default"
                     />
                   </label>
                   <label className="teams-page__field">
@@ -301,7 +306,7 @@ export function TeamDetail({
                       onChange={(event) =>
                         onComputeInputChange('memory', event.target.value)
                       }
-                      placeholder="Unlimited"
+                      placeholder="Platform default"
                     />
                   </label>
                   <button

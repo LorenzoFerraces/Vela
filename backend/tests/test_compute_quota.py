@@ -15,6 +15,7 @@ from app.core.enums import ContainerStatus, HealthStatus
 from app.core.exceptions import TeamComputeQuotaExceededError
 from app.core.models import ContainerInfo, DeployConfig
 from app.core.quotas.compute_quota import (
+    _effective_limits,
     enforce_team_compute_capacity,
     environment_compute_ceilings,
     team_compute_usage,
@@ -93,6 +94,12 @@ def test_ceilings_parse_and_clamp(monkeypatch) -> None:
         "memory_bytes": None,
         "deploys_per_hour": None,
     }
+
+
+def test_effective_limits_falls_back_to_platform_ceiling(monkeypatch) -> None:
+    monkeypatch.setenv("VELA_TEAM_MAX_RUNNING_CONTAINERS", "20")
+    project = Project(name="ceiling team", organization_id=uuid.uuid4())
+    assert _effective_limits(project)["running_containers"] == 20
 
 
 @pytest.mark.asyncio
