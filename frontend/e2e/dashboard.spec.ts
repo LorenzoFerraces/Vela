@@ -116,4 +116,16 @@ test.describe('Dashboard page', () => {
         .first(),
     ).toBeVisible()
   })
+
+  test('showback page lists team resource-time columns', async ({
+    authenticatedPage,
+  }) => {
+    await authenticatedPage.goto('/showback')
+    await expect(
+      authenticatedPage.getByRole('heading', { name: '[ SHOWBACK ]', level: 1 }),
+    ).toBeVisible()
+    await expect(
+      authenticatedPage.getByRole('columnheader', { name: 'Team' }),
+    ).toBeVisible()
+  })
 })

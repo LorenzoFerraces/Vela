@@ -115,12 +115,15 @@ export function MetricChart({
             border: `1px solid ${CHART_GRID_STROKE}`,
             color: CHART_TEXT,
           }}
-          labelFormatter={(label) =>
-            new Intl.DateTimeFormat('en-US', {
-              dateStyle: 'medium',
-              timeStyle: 'medium',
-            }).format(new Date(String(label)))
-          }
+          labelFormatter={(label) => {
+            const date = new Date(String(label))
+            return Number.isNaN(date.getTime())
+              ? String(label)
+              : new Intl.DateTimeFormat('en-US', {
+                  dateStyle: 'medium',
+                  timeStyle: 'medium',
+                }).format(date)
+          }}
           formatter={(value, name) => [formatTooltipValue(Number(value)), name]}
         />
         {series ? (

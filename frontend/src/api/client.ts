@@ -139,6 +139,11 @@ export {
 } from './metrics'
 
 export {
+  exportShowbackCsv,
+  getShowback,
+} from './showback'
+
+export {
   analyzeRepo,
   createStack,
   deleteStack,
@@ -242,6 +247,11 @@ export type {
   ProjectUsage,
   UsageSummary,
 } from './metrics'
+
+export type {
+  ShowbackSummary,
+  TeamShowback,
+} from './showback'
 
 export type {
   AdminUserCreate,
