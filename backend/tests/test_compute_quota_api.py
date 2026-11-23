@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 from typing import Any
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from fastapi.testclient import TestClient
+
+from app.db.models import Project
 
 
 def _personal_project_id(client: TestClient) -> str:
@@ -74,3 +76,53 @@ def test_compute_quota_requires_authentication(
 ) -> None:
     response = anonymous_client.get(f"/api/projects/{uuid4()}/compute-quota")
     assert response.status_code == 401
+
+
+async def test_explicit_null_clears_stored_compute_limit(
+    api_client: TestClient, db_session_factory, monkeypatch: Any
+) -> None:
+    monkeypatch.setenv("VELA_TEAM_MAX_RUNNING_CONTAINERS", "20")
+    project_id = _personal_project_id(api_client)
+    assert api_client.patch(
+        f"/api/projects/{project_id}/compute-quota",
+        json={"max_running_containers": 3},
+    ).status_code == 200
+
+    response = api_client.patch(
+        f"/api/projects/{project_id}/compute-quota",
+        json={"max_running_containers": None},
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["max_running_containers"] is None
+
+    async with db_session_factory() as session:
+        project = await session.get(Project, UUID(project_id))
+        assert project is not None
+        assert project.max_running_containers is None
+
+
+async def test_absent_field_keeps_stored_compute_limit(
+    api_client: TestClient, db_session_factory, monkeypatch: Any
+) -> None:
+    monkeypatch.setenv("VELA_TEAM_MAX_RUNNING_CONTAINERS", "20")
+    monkeypatch.setenv("VELA_TEAM_MAX_CPU_MILLICORES", "20")
+    project_id = _personal_project_id(api_client)
+    assert api_client.patch(
+        f"/api/projects/{project_id}/compute-quota",
+        json={"max_running_containers": 3},
+    ).status_code == 200
+
+    response = api_client.patch(
+        f"/api/projects/{project_id}/compute-quota",
+        json={"max_cpu_millicores": 5},
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["max_running_containers"] == 3
+    assert body["max_cpu_millicores"] == 5
+
+    async with db_session_factory() as session:
+        project = await session.get(Project, UUID(project_id))
+        assert project is not None
+        assert project.max_running_containers == 3
+        assert project.max_cpu_millicores == 5

@@ -316,14 +316,13 @@ async def update_project_compute_quota(
         )
     project = await require_project(session, project_id)
     ceilings = environment_compute_ceilings()
-    for field, value in body.model_dump().items():
-        if value is None:
-            continue
-        ceiling = ceilings[field.replace("max_", "")]
-        if ceiling is not None and value > ceiling:
-            raise TeamComputeQuotaError(
-                f"{field} cannot exceed the platform ceiling of {ceiling}"
-            )
+    for field, value in body.model_dump(exclude_unset=True).items():
+        if value is not None:
+            ceiling = ceilings[field.replace("max_", "")]
+            if ceiling is not None and value > ceiling:
+                raise TeamComputeQuotaError(
+                    f"{field} cannot exceed the platform ceiling of {ceiling}"
+                )
         setattr(project, field, value)
     await session.commit()
     return await get_project_compute_quota(project_id, orchestrator, current_user, session)
