@@ -534,3 +534,146 @@ def test_push_quota_gates_block_deploy(
     assert all("quota" in (error or "").lower() for _, error in asyncio.run(delivery_errors()))
     assert all(status == "failed" for status, _ in asyncio.run(delivery_errors()))
 
+
+def test_linked_installation_resolves_token_for_pr_event(
+    api_client: TestClient, db_session_factory, seeded_user, provision_user, monkeypatch
+) -> None:
+    import asyncio
+    import httpx
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric import rsa
+
+    from app.core import github_app
+    from app.core.projects.repository import get_personal_project_id
+    from app.core.security.secrets import encrypt_secret
+    from app.db.models import (
+        GitHubAppInstall,
+        GitHubAppInstallationId,
+        GitHubWebhookConfig,
+    )
+
+    async def resolve_project_id() -> uuid.UUID:
+        async with db_session_factory() as session:
+            user = await session.get(User, seeded_user.id)
+            assert user is not None
+            return await get_personal_project_id(session, user)
+
+    project_id = asyncio.run(resolve_project_id())
+    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    pem = key.private_bytes(
+        serialization.Encoding.PEM,
+        serialization.PrivateFormat.PKCS8,
+        serialization.NoEncryption(),
+    ).decode("utf-8")
+
+    async def seed() -> None:
+        async with db_session_factory() as session:
+            session.add(
+                GitHubAppInstall(
+                    app_id="12345",
+                    private_key_encrypted=encrypt_secret(pem),
+                    webhook_secret_encrypted=encrypt_secret("hook-secret"),
+                )
+            )
+            session.add(
+                GitHubWebhookConfig(
+                    project_id=project_id,
+                    repo_full_name="org/repo",
+                    enabled=True,
+                    preview_enabled=True,
+                    preview_ttl_seconds=1800,
+                    created_by_user_id=seeded_user.id,
+                )
+            )
+            await session.commit()
+
+    asyncio.run(seed())
+
+    url = f"/api/projects/{project_id}/github-webhook/installation"
+    _, other_token = provision_user("other-install@example.com")
+    with TestClient(api_client.app) as other_client:
+        other_client.headers["Authorization"] = f"Bearer {other_token}"
+        assert other_client.put(url, json={"installation_id": "999"}).status_code in (403, 404)
+
+    link = api_client.put(
+        url, json={"installation_id": "987", "account_login": "org"}
+    )
+    assert link.status_code == 200
+    assert link.json() == {
+        "project_id": str(project_id),
+        "installation_id": "987",
+        "account_login": "org",
+    }
+
+    async def check_mapping() -> None:
+        async with db_session_factory() as session:
+            row = (await session.execute(
+                select(GitHubAppInstallationId).where(
+                    GitHubAppInstallationId.project_id == project_id
+                )
+            )).scalar_one()
+            assert row.installation_id == "987"
+
+    asyncio.run(check_mapping())
+
+    # Re-linking the same project updates the existing mapping.
+    updated = api_client.put(url, json={"installation_id": "988"})
+    assert updated.json()["installation_id"] == "988"
+
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(201, json={"token": "ghs_linked"})
+
+    original_client = httpx.AsyncClient
+
+    def patched_client(*args: object, **kwargs: object) -> httpx.AsyncClient:
+        kwargs["transport"] = httpx.MockTransport(handler)  # type: ignore[assignment]
+        return original_client(*args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(github_app.httpx, "AsyncClient", patched_client)
+
+    captured: list[object] = []
+
+    async def capture_spawn(registry, job_id, worker, *worker_args) -> None:
+        captured.append(worker_args)
+
+    monkeypatch.setattr("app.api.routes.webhooks.spawn_deploy_worker", capture_spawn)
+
+    payload = {
+        "action": "opened",
+        "repository": {
+            "full_name": "org/repo",
+            "clone_url": "https://github.com/org/repo.git",
+        },
+        "pull_request": {
+            "number": 7,
+            "head": {
+                "sha": "aaaabbbbcccc",
+                "ref": "feature",
+                "repo": {
+                    "fork": False,
+                    "clone_url": "https://github.com/org/repo.git",
+                },
+            },
+        },
+    }
+    body = json.dumps(payload, separators=(",", ":")).encode()
+    digest = hmac.new(b"hook-secret", body, hashlib.sha256).hexdigest()
+    headers = {
+        "X-Hub-Signature-256": f"sha256={digest}",
+        "X-GitHub-Delivery": "pr-linked-install",
+        "X-GitHub-Event": "pull_request",
+        "content-type": "application/json",
+    }
+    response = api_client.post(
+        f"/webhooks/github/{project_id}", content=body, headers=headers
+    )
+    assert response.json()["status"] == "received"
+    assert len(captured) == 1
+    args = captured[0]
+    assert isinstance(args, tuple)
+    assert args[10] == "ghs_linked"
+    assert requests[0].url.path == "/app/installations/988/access_tokens"
+

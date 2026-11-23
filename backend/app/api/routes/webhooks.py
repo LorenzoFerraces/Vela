@@ -29,6 +29,8 @@ from app.api.routes.deploys import spawn_deploy_worker
 from app.api.schemas import (
     GitHubAppConfigGet,
     GitHubAppConfigSet,
+    GitHubAppInstallationLinkGet,
+    GitHubAppInstallationLinkSet,
     GitHubWebhookConfigGet,
     GitHubWebhookConfigSet,
     GitHubWebhookDeliveryEntry,
@@ -56,6 +58,7 @@ from app.core.security.secrets import decrypt_secret, encrypt_secret
 from app.core.traffic.traffic_router import TrafficRouter
 from app.db.models import (
     GitHubAppInstall,
+    GitHubAppInstallationId,
     GitHubWebhookConfig,
     GitHubWebhookDelivery,
     PreviewDeploy,
@@ -630,6 +633,44 @@ async def put_project_webhook_config(
     row.created_by_user_id = current_user.id
     session.add(row)
     result = _project_config(project_id, row)
+    await session.commit()
+    return result
+
+
+@router.put(
+    "/api/projects/{project_id}/github-webhook/installation",
+    response_model=GitHubAppInstallationLinkGet,
+)
+async def put_project_github_installation(
+    project_id: uuid.UUID,
+    body: GitHubAppInstallationLinkSet,
+    current_user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[AsyncSession, Depends(get_db)],
+) -> GitHubAppInstallationLinkGet:
+    """Link the GitHub App installation that mints tokens for a project's webhooks."""
+    await _require_owner_or_admin(session, project_id, current_user)
+    install = (await session.execute(select(GitHubAppInstall))).scalar_one_or_none()
+    if install is None:
+        raise GitHubAppNotConfiguredError("GitHub App is not configured")
+    mapping = (
+        await session.execute(
+            select(GitHubAppInstallationId).where(
+                GitHubAppInstallationId.project_id == project_id
+            )
+        )
+    ).scalar_one_or_none()
+    if mapping is None:
+        mapping = GitHubAppInstallationId(
+            app_install_id=install.id, project_id=project_id
+        )
+    mapping.installation_id = body.installation_id.strip()
+    mapping.account_login = body.account_login
+    session.add(mapping)
+    result = GitHubAppInstallationLinkGet(
+        project_id=project_id,
+        installation_id=mapping.installation_id,
+        account_login=mapping.account_login,
+    )
     await session.commit()
     return result
 

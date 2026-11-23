@@ -1196,6 +1196,17 @@ class GitHubAppConfigGet(BaseModel):
     connected_at: datetime | None
 
 
+class GitHubAppInstallationLinkSet(BaseModel):
+    installation_id: str = Field(..., min_length=1, max_length=64)
+    account_login: str | None = Field(default=None, max_length=128)
+
+
+class GitHubAppInstallationLinkGet(BaseModel):
+    project_id: uuid.UUID
+    installation_id: str
+    account_login: str | None
+
+
 class GitHubWebhookConfigSet(BaseModel):
     repo_full_name: str = Field(..., min_length=1, max_length=256)
     enabled: bool = False
