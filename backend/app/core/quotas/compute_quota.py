@@ -12,6 +12,7 @@ from app.core.containers.docker_orchestrator import VELA_PROJECT_LABEL
 from app.core.containers.orchestrator import ContainerOrchestrator
 from app.core.deploy.deployment_history import load_deploy_config_snapshot
 from app.core.exceptions import TeamComputeQuotaExceededError
+from app.core.models import DeployConfig
 from app.db.models import DeploymentRecord, Project
 
 
@@ -99,15 +100,26 @@ async def team_compute_usage(
 
 async def enforce_team_compute_capacity(
     session: AsyncSession, orchestrator: ContainerOrchestrator, project_id: uuid.UUID,
+    *, pending: DeployConfig | None = None,
 ) -> None:
     project = await session.get(Project, project_id)
     if project is None:
         return
     limits = _effective_limits(project)
     usage = await team_compute_usage(session, orchestrator, project_id)
+    projected = {
+        "running_containers": usage.running_containers + (1 if pending else 0),
+        "cpu_millicores": usage.cpu_millicores + (
+            int((pending.cpu_limit or 0.0) * 1000) if pending else 0
+        ),
+        "memory_bytes": usage.memory_bytes + (
+            (pending.memory_limit or 0) * 1024**2 if pending else 0
+        ),
+        "deploys_per_hour": usage.deploys_per_hour,
+    }
     for key in ("running_containers", "cpu_millicores", "memory_bytes", "deploys_per_hour"):
         limit = limits[key]
-        used = getattr(usage, key)
+        used = projected[key]
         if limit is not None and used >= limit:
             raise TeamComputeQuotaExceededError(
                 f"Team compute quota exceeded for {key.replace('_', ' ')}: {used} used, limit {limit}"

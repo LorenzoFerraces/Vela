@@ -181,7 +181,7 @@ async def _scale_up(
     if base_config.project_id is not None:
         try:
             await enforce_team_compute_capacity(
-                session, orchestrator, base_config.project_id
+                session, orchestrator, base_config.project_id, pending=base_config
             )
         except TeamComputeQuotaExceededError as exc:
             logger.warning("Scale-up blocked by compute quota for %s: %s", base_name, exc)

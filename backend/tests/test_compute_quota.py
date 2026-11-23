@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 
 import pytest
 import pytest_asyncio
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
@@ -124,3 +125,37 @@ async def test_enforcement_raises_when_over_quota(quota_db: AsyncSession) -> Non
     with pytest.raises(TeamComputeQuotaExceededError) as excinfo:
         await enforce_team_compute_capacity(quota_db, orchestrator, project.id)
     assert "running containers" in str(excinfo.value)
+
+
+@pytest.mark.asyncio
+async def test_pending_allocation_counts_toward_quota(
+    quota_db: AsyncSession, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    for name in (
+        "VELA_TEAM_MAX_RUNNING_CONTAINERS",
+        "VELA_TEAM_MAX_CPU_MILLICORES",
+        "VELA_TEAM_MAX_MEMORY_BYTES",
+        "VELA_TEAM_MAX_DEPLOYS_PER_HOUR",
+    ):
+        monkeypatch.setenv(name, "")
+    project, container_id = await _seed(quota_db)
+    project.max_memory_bytes = 1000 * 1024**2
+    record = (await quota_db.execute(
+        select(DeploymentRecord).where(DeploymentRecord.container_id == container_id)
+    )).scalar_one()
+    record.deploy_config = DeployConfig(
+        image="nginx", cpu_limit=0.5, memory_limit=900,
+    ).model_dump(mode="json")
+    await quota_db.commit()
+    orchestrator = FakeContainerOrchestrator()
+    orchestrator.seed_container(_info(project.id, container_id))
+
+    # 900 MB of a 1000 MB limit still fits when no deploy is pending.
+    await enforce_team_compute_capacity(quota_db, orchestrator, project.id)
+
+    # A 512 MB deploy would land at 1412 MB, so it must be rejected.
+    with pytest.raises(TeamComputeQuotaExceededError, match="memory bytes"):
+        await enforce_team_compute_capacity(
+            quota_db, orchestrator, project.id,
+            pending=DeployConfig(image="nginx", memory_limit=512),
+        )

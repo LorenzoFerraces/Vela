@@ -45,6 +45,7 @@ from app.core.exceptions import (
     WebhookSignatureError,
 )
 from app.core.github_app import installation_token, verify_github_signature
+from app.core.models import DeployConfig
 from app.core.previews import preview_deploy_config, teardown_preview
 from app.core.projects.repository import require_owner
 from app.core.quotas import (
@@ -287,7 +288,9 @@ async def _enqueue_preview(
         return False
 
     try:
-        await enforce_team_compute_capacity(session, orchestrator, project_id)
+        await enforce_team_compute_capacity(
+            session, orchestrator, project_id, pending=preview_config
+        )
     except TeamComputeQuotaExceededError as exc:
         logger.warning(
             "Preview quota gate rejected PR %s #%s: %s", repo_full_name, pr_number, exc
@@ -407,7 +410,10 @@ async def _enqueue_push_deploy(
         return False
 
     try:
-        await enforce_team_compute_capacity(session, orchestrator, project_id)
+        await enforce_team_compute_capacity(
+            session, orchestrator, project_id,
+            pending=DeployConfig(image="pending"),
+        )
         await enforce_team_storage_capacity(session, orchestrator, project_id)
     except (TeamComputeQuotaExceededError, TeamStorageQuotaExceededError) as exc:
         logger.warning("Push quota gate rejected %s: %s", repo_full_name, exc)
