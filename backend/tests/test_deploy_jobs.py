@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.containers.fake_orchestrator import FakeContainerOrchestrator
 from app.core.deploy.jobs import (
+    OUTCOME_RETENTION_HOURS,
     TERMINAL_JOB_TTL,
     DeployJob,
     DeployJobRegistry,
@@ -120,7 +121,28 @@ async def test_stack_job_service_states_in_order(
     assert [item.job_id for item in active] == [job.job_id]
 
 
-async def test_terminal_jobs_swept_after_ttl(
+async def test_terminal_jobs_hidden_after_ttl_but_retained_for_metrics(
+    registry: DeployJobRegistry,
+    db_session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    job = await _job(registry)
+    await registry.complete_failure(
+        job.job_id, {"code": "deploy_failed", "detail": "boom"}
+    )
+    async with db_session_factory() as session:
+        record = await session.get(DeployJobRecord, job.job_id)
+        assert record is not None
+        # Older than the poller window but inside the outcome retention window.
+        record.finished_at = datetime.now(UTC) - timedelta(
+            seconds=TERMINAL_JOB_TTL + 1
+        )
+        await session.commit()
+    assert await registry.active(project_ids={PROJECT_ID}) == []
+    # get() still sees the row so the 24h success-rate metric can count it.
+    assert await registry.get(job.job_id) is not None
+
+
+async def test_terminal_jobs_swept_after_retention(
     registry: DeployJobRegistry,
     db_session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
@@ -132,7 +154,7 @@ async def test_terminal_jobs_swept_after_ttl(
         record = await session.get(DeployJobRecord, job.job_id)
         assert record is not None
         record.finished_at = datetime.now(UTC) - timedelta(
-            seconds=TERMINAL_JOB_TTL + 1
+            hours=OUTCOME_RETENTION_HOURS + 1
         )
         await session.commit()
     assert await registry.active(project_ids={PROJECT_ID}) == []

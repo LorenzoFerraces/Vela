@@ -1,10 +1,11 @@
 """Postgres-backed registry for async deploy jobs (202 + polled status).
 
 Jobs are persisted in the ``deploy_jobs`` table so they survive process
-restarts. Terminal jobs are swept after ``TERMINAL_JOB_TTL`` (300 s) on each
-``active()`` call, keeping the poller's terminal state visible. Detached worker
-task handles stay on the event loop (workers are coroutines; Docker SDK work
-already runs in the threadpool).
+restarts. Terminal rows are retained for ``OUTCOME_RETENTION_HOURS`` (24 h) so
+the deploy-success metric sees its full window, while ``active()`` hides
+terminals older than ``TERMINAL_JOB_TTL`` (300 s) to keep the poller's terminal
+state visible. Detached worker task handles stay on the event loop (workers are
+coroutines; Docker SDK work already runs in the threadpool).
 """
 
 from __future__ import annotations
@@ -16,7 +17,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any, Literal, cast
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.exceptions import (
@@ -31,6 +32,9 @@ DeployJobKind = Literal["container", "stack"]
 DeployJobStatus = Literal["in_progress", "succeeded", "failed"]
 
 TERMINAL_JOB_TTL = 300  # seconds a terminal job stays visible to pollers
+# Retain terminal rows longer than the poller window so the 24h deploy-success
+# metric in prometheus.py sees outcomes that have aged out of ``active()``.
+OUTCOME_RETENTION_HOURS = 24
 ABANDONED_JOB_CUTOFF = timedelta(minutes=30)
 ABANDONED_JOB_ERROR: dict[str, Any] = {
     "code": "deploy_failed",
@@ -190,19 +194,25 @@ class DeployJobRegistry:
         await self._update(job_id, change)
 
     async def active(self, *, project_ids: set[uuid.UUID]) -> list[DeployJob]:
-        """Visible jobs for the given projects, sweeping expired terminals."""
+        """Visible jobs for the given projects, sweeping long-expired terminals."""
+        now = datetime.now(UTC)
         async with self._session_factory() as session:
             await session.execute(
                 delete(DeployJobRecord).where(
                     DeployJobRecord.finished_at.is_not(None),
                     DeployJobRecord.finished_at
-                    < datetime.now(UTC) - timedelta(seconds=TERMINAL_JOB_TTL),
+                    < now - timedelta(hours=OUTCOME_RETENTION_HOURS),
                 )
             )
             rows = (
                 await session.execute(
                     select(DeployJobRecord).where(
-                        DeployJobRecord.project_id.in_(project_ids)
+                        DeployJobRecord.project_id.in_(project_ids),
+                        or_(
+                            DeployJobRecord.finished_at.is_(None),
+                            DeployJobRecord.finished_at
+                            >= now - timedelta(seconds=TERMINAL_JOB_TTL),
+                        ),
                     )
                 )
             ).scalars().all()

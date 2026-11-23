@@ -73,6 +73,39 @@ def test_metrics_deploy_success_rate_uses_terminal_jobs(
     assert abs(float(rate_line.split()[1]) - 2 / 3) < 1e-6
 
 
+def test_metrics_success_rate_counts_outcomes_older_than_poller_ttl(
+    api_client, monkeypatch, db_session_factory, deploy_jobs
+) -> None:
+    """A job aged past the 300s API window still counts toward the 24h rate."""
+    monkeypatch.setenv("VELA_METRICS_TOKEN", "scrape-secret")
+    project_id = uuid.uuid4()
+
+    async def seed_and_sweep() -> None:
+        async with db_session_factory() as session:
+            session.add(DeployJobRecord(
+                job_id="old-but-retained",
+                kind="deploy",
+                project_id=project_id,
+                user_id=uuid.uuid4(),
+                name="app-old",
+                status="succeeded",
+                finished_at=datetime.now(UTC) - timedelta(minutes=10),
+            ))
+            await session.commit()
+        # active() runs the sweep; it must not erase metric outcomes.
+        assert await deploy_jobs.active(project_ids={project_id}) == []
+
+    asyncio.run(seed_and_sweep())
+    body = TestClient(api_client.app).get(
+        "/metrics", headers={"Authorization": "Bearer scrape-secret"},
+    ).text
+    rate_line = next(
+        line for line in body.splitlines()
+        if line.startswith("vela_deploy_success_rate ")
+    )
+    assert float(rate_line.split()[1]) == 1.0
+
+
 def test_metrics_token_comparison_handles_non_ascii(monkeypatch) -> None:
     monkeypatch.setenv("VELA_METRICS_TOKEN", "sécrêt-🔑")
     require_metrics_token("Bearer sécrêt-🔑")
