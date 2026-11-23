@@ -756,6 +756,7 @@ class Secret(Base):
 
 class SecretVersion(Base):
     __tablename__ = "secret_versions"
+    __table_args__ = (UniqueConstraint("secret_id", "version"),)
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
     secret_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("secrets.id", ondelete="CASCADE"), nullable=False)
@@ -778,6 +779,7 @@ class GitHubAppInstall(Base):
 
 class GitHubAppInstallationId(Base):
     __tablename__ = "github_app_installation_ids"
+    __table_args__ = (UniqueConstraint("app_install_id", "project_id"),)
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
     app_install_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("github_app_installs.id", ondelete="CASCADE"), nullable=False)
@@ -820,6 +822,7 @@ class GitHubWebhookDelivery(Base):
 
 class PreviewDeploy(Base):
     __tablename__ = "preview_deploys"
+    __table_args__ = (UniqueConstraint("project_id", "repo_full_name", "pr_number"),)
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
     project_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
