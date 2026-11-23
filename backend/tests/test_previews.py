@@ -221,7 +221,7 @@ def test_webhook_deploys_pr_head_with_installation_token(
     run_body = args[3]
     assert run_body.source_kind == "git"
     assert run_body.git_url == "https://github.com/org/repo.git"
-    assert run_body.git_branch == "feature/payments"
+    assert run_body.git_branch == "deadbeefcafe"  # pinned to the event's head SHA
     assert run_body.container_name == "pr-21-deadbeef"
     assert run_body.env_vars["PREVIEW"] == "true"
     assert run_body.cpu_limit == 0.5
@@ -304,7 +304,7 @@ def test_synchronize_previews_teardown_then_redeploy(
     args = captured["args"]
     assert isinstance(args, tuple)
     assert args[3].git_url == "https://github.com/org/repo.git"
-    assert args[3].git_branch == "feature/new"
+    assert args[3].git_branch == "newsha456"  # pinned to the event's head SHA
     assert args[10] == "inst-token-xyz"
 
     async def get_row() -> PreviewDeploy:

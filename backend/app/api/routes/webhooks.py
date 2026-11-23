@@ -239,7 +239,6 @@ async def _enqueue_preview(
     """Upsert the preview row and deploy the PR head through the source worker."""
     head = pull_request.get("head") or {}
     head_sha = str(head.get("sha") or "")
-    head_ref = str(head.get("ref") or head_sha)
     clone_url = str((head.get("repo") or {}).get("clone_url") or "")
     if not clone_url or config.created_by_user_id is None:
         return True
@@ -306,7 +305,7 @@ async def _enqueue_preview(
     run_body = RunFromSourceRequest(
         source_kind="git",
         git_url=clone_url,
-        git_branch=head_ref,
+        git_branch=head_sha,
         container_name=preview_config.name,
         container_port=80,
         public_route=True,
