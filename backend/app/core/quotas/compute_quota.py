@@ -8,7 +8,10 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.containers.docker_orchestrator import VELA_PROJECT_LABEL
+from app.core.containers.docker_orchestrator import (
+    VELA_PROJECT_LABEL,
+    VELA_REPLICA_OF_LABEL,
+)
 from app.core.containers.orchestrator import ContainerOrchestrator
 from app.core.deploy.deployment_history import load_deploy_config_snapshot
 from app.core.exceptions import TeamComputeQuotaExceededError
@@ -82,8 +85,24 @@ async def team_compute_usage(
     ]
     cpu_millicores = 0
     memory_bytes = 0
+    containers_by_name = {info.name: info for info in containers}
+    base_snapshots: dict[str, DeployConfig | None] = {}
     for info in running:
         config = await load_deploy_config_snapshot(session, info.id)
+        if config is None:
+            # Replicas have no DeploymentRecord of their own; their limits come
+            # from the base config used to create them.
+            base_name = info.labels.get(VELA_REPLICA_OF_LABEL)
+            if not base_name:
+                continue
+            if base_name not in base_snapshots:
+                base_info = containers_by_name.get(base_name)
+                base_snapshots[base_name] = (
+                    await load_deploy_config_snapshot(session, base_info.id)
+                    if base_info is not None
+                    else None
+                )
+            config = base_snapshots[base_name]
         if config is None:
             continue
         cpu_millicores += int((config.cpu_limit or 0.0) * 1000)

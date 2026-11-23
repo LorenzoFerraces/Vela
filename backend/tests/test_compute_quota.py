@@ -10,7 +10,10 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
-from app.core.containers.docker_orchestrator import VELA_PROJECT_LABEL
+from app.core.containers.docker_orchestrator import (
+    VELA_PROJECT_LABEL,
+    VELA_REPLICA_OF_LABEL,
+)
 from app.core.containers.fake_orchestrator import FakeContainerOrchestrator
 from app.core.enums import ContainerStatus, HealthStatus
 from app.core.exceptions import TeamComputeQuotaExceededError
@@ -115,6 +118,29 @@ async def test_usage_converts_cores_and_mb(
     assert usage.running_containers == 1
     assert usage.cpu_millicores == 500
     assert usage.memory_bytes == 512 * 1024**2
+
+
+@pytest.mark.asyncio
+async def test_usage_counts_replicas_against_base_snapshot(
+    quota_db: AsyncSession,
+) -> None:
+    project, container_id = await _seed(quota_db)
+    orchestrator = FakeContainerOrchestrator()
+    orchestrator.seed_container(_info(project.id, container_id))
+    for index in (1, 2):
+        replica_name = f"web-r{index}"
+        orchestrator.seed_container(_info(project.id, replica_name).model_copy(update={
+            "name": replica_name,
+            "labels": {
+                VELA_PROJECT_LABEL: str(project.id),
+                VELA_REPLICA_OF_LABEL: "web",
+            },
+        }))
+
+    usage = await team_compute_usage(quota_db, orchestrator, project.id)
+    assert usage.running_containers == 3
+    assert usage.cpu_millicores == 1500
+    assert usage.memory_bytes == 3 * 512 * 1024**2
 
 
 @pytest.mark.asyncio
