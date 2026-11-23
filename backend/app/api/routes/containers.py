@@ -885,8 +885,14 @@ async def _run_container_deploy_worker(
     orchestrator: ContainerOrchestrator,
     traffic_router: TrafficRouter,
     image_builder: DefaultImageBuilder,
+    access_token: str | None = None,
+    route_label_prefix: str | None = None,
 ) -> None:
-    """Run the deploy pipeline detached; mirror phases into the job registry."""
+    """Run the deploy pipeline detached; mirror phases into the job registry.
+
+    ``access_token`` and ``route_label_prefix`` are set by webhook-triggered
+    previews, which have no authenticated user and need a dedicated route prefix.
+    """
     try:
         async with session_factory() as session:
             user = await get_user_by_id(session, user_id)
@@ -924,7 +930,7 @@ async def _run_container_deploy_worker(
                 cfg = _apply_deploy_labels(
                     cfg, owner_id=str(user.id), project_id=project_id
                 )
-                cfg = await apply_public_route_to_deploy_config(cfg, traffic_router)
+                cfg = await apply_public_route_to_deploy_config(cfg, traffic_router, label_prefix=route_label_prefix)
                 await registry.set_phase(job_id, "starting", image_ref)
                 runtime_config = await runtime_config_with_secrets(
                     session, cfg, owner_user_id=user.id, project_id=project_id,
@@ -1012,7 +1018,7 @@ async def _run_container_deploy_worker(
                 cfg = _apply_deploy_labels(
                     cfg, owner_id=str(user.id), project_id=project_id
                 )
-                cfg = await apply_public_route_to_deploy_config(cfg, traffic_router)
+                cfg = await apply_public_route_to_deploy_config(cfg, traffic_router, label_prefix=route_label_prefix)
                 await registry.set_phase(job_id, "starting", build_result.image_tag)
                 runtime_config = await runtime_config_with_secrets(
                     session, cfg, owner_user_id=user.id, project_id=project_id,
@@ -1067,23 +1073,21 @@ async def _run_container_deploy_worker(
 
             git_url = (body.git_url or "").strip()
             sanitized_git_url = sanitize_url_for_display(git_url)
-            access_token = (
-                await github_token_for_project(session, project_id, user)
-                if is_github_https_url(git_url)
-                else None
-            )
+            token = access_token
+            if token is None and is_github_https_url(git_url):
+                token = await github_token_for_project(session, project_id, user)
             tag = f"vela/gitbuild:{uuid.uuid4().hex[:12]}"
             try:
                 build_result = await image_builder.build_from_source(
                     ProjectSource(git_url=git_url, branch=body.git_branch),
                     tag=tag,
-                    access_token=access_token,
+                    access_token=token,
                     override=body.build_override,
                     on_phase=lambda phase: registry.set_phase(job_id, phase),
                 )
             except CloneError as exc:
                 if (
-                    access_token is None
+                    token is None
                     and is_github_https_url(git_url)
                     and looks_like_auth_failure(str(exc))
                 ):
@@ -1116,7 +1120,7 @@ async def _run_container_deploy_worker(
             cfg = _apply_deploy_labels(
                 cfg, owner_id=str(user.id), project_id=project_id
             )
-            cfg = await apply_public_route_to_deploy_config(cfg, traffic_router)
+            cfg = await apply_public_route_to_deploy_config(cfg, traffic_router, label_prefix=route_label_prefix)
             await registry.set_phase(job_id, "starting", build_result.image_tag)
             runtime_config = await runtime_config_with_secrets(
                 session, cfg, owner_user_id=user.id, project_id=project_id,

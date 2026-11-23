@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import os
 import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Annotated
@@ -18,14 +17,12 @@ from app.api.deps import (
     get_db,
     get_db_session_factory,
     get_deploy_jobs,
+    get_image_builder,
     get_orchestrator,
     get_traffic_router,
     require_admin,
 )
-from app.api.route_wiring import (
-    backend_port_for_route,
-    register_route_for_deployed_container,
-)
+from app.api.routes.containers import _run_container_deploy_worker
 from app.api.routes.deploys import spawn_deploy_worker
 from app.api.schemas import (
     GitHubAppConfigGet,
@@ -33,22 +30,17 @@ from app.api.schemas import (
     GitHubWebhookConfigGet,
     GitHubWebhookConfigSet,
     GitHubWebhookDeliveryEntry,
+    RunFromSourceRequest,
 )
 from app.core.auth.enums import UserRole
+from app.core.build.default_image_builder import DefaultImageBuilder
 from app.core.containers.orchestrator import ContainerOrchestrator
-from app.core.deploy.jobs import DeployJobRegistry, classify_deploy_error
-from app.core.deploy.secret_resolution import runtime_config_with_secrets
+from app.core.deploy.jobs import DeployJobRegistry
 from app.core.exceptions import GitHubAppNotConfiguredError, WebhookSignatureError
-from app.core.github_app import verify_github_signature
-from app.core.models import DeployConfig
+from app.core.github_app import installation_token, verify_github_signature
 from app.core.previews import preview_deploy_config, teardown_preview
 from app.core.projects.repository import require_owner
 from app.core.security.secrets import decrypt_secret, encrypt_secret
-from app.core.traffic.public_route_host import (
-    apply_public_route_to_deploy_config,
-    build_public_url,
-    read_public_route_settings,
-)
 from app.core.traffic.traffic_router import TrafficRouter
 from app.db.models import (
     GitHubAppInstall,
@@ -73,6 +65,7 @@ async def github_webhook(
     ],
     orchestrator: Annotated[ContainerOrchestrator, Depends(get_orchestrator)],
     traffic_router: Annotated[TrafficRouter, Depends(get_traffic_router)],
+    image_builder: Annotated[DefaultImageBuilder, Depends(get_image_builder)],
 ) -> dict[str, str]:
     """Verify the HMAC, record the delivery and accept configured push / PR events."""
     payload = await request.body()
@@ -143,8 +136,8 @@ async def github_webhook(
         if action in {"opened", "synchronize", "reopened"}:
             await _enqueue_preview(
                 session, background_tasks, registry, session_factory,
-                orchestrator, traffic_router, config, project_id, repo_full_name,
-                pr_number, pull_request,
+                orchestrator, traffic_router, image_builder, config, project_id,
+                repo_full_name, pr_number, pull_request,
             )
         elif action == "closed":
             await _teardown_preview_row(
@@ -161,22 +154,30 @@ async def _enqueue_preview(
     session_factory: async_sessionmaker[AsyncSession],
     orchestrator: ContainerOrchestrator,
     traffic_router: TrafficRouter,
+    image_builder: DefaultImageBuilder,
     config: GitHubWebhookConfig,
     project_id: uuid.UUID,
     repo_full_name: str,
     pr_number: int,
     pull_request: dict,
 ) -> None:
-    """Upsert the preview row and spawn its detached deploy worker."""
-    head_sha = str((pull_request.get("head") or {}).get("sha") or "")
+    """Upsert the preview row and deploy the PR head through the source worker."""
+    head = pull_request.get("head") or {}
+    head_sha = str(head.get("sha") or "")
+    head_ref = str(head.get("ref") or head_sha)
+    clone_url = str((head.get("repo") or {}).get("clone_url") or "")
+    if not clone_url or config.created_by_user_id is None:
+        return
+
     preview_config = preview_deploy_config(
         repo_full_name=repo_full_name,
         pr_number=pr_number,
         head_sha=head_sha,
-        image=os.environ.get("VELA_PREVIEW_IMAGE", "nginx:latest"),
+        image=clone_url,
         env_vars={},
         ttl_seconds=config.preview_ttl_seconds,
     )
+    token = await installation_token(session, project_id)
     now = datetime.now(UTC)
     expires_at = now + timedelta(seconds=config.preview_ttl_seconds)
     row = (
@@ -196,17 +197,33 @@ async def _enqueue_preview(
         )
         session.add(row)
     else:
+        await teardown_preview(session, row, orchestrator, traffic_router)
         row.head_sha = head_sha
         row.expires_at = expires_at
         row.status = "pending"
         row.closed_at = None
+        row.container_id = None
+        row.container_name = None
+        row.route_host = None
+        row.public_url = None
     await session.commit()
 
-    owner_user_id = config.created_by_user_id or row.id
+    run_body = RunFromSourceRequest(
+        source_kind="git",
+        git_url=clone_url,
+        git_branch=head_ref,
+        container_name=preview_config.name,
+        container_port=80,
+        public_route=True,
+        env_vars=preview_config.env_vars,
+        cpu_limit=preview_config.cpu_limit,
+        memory_limit=preview_config.memory_limit,
+        project_id=project_id,
+    )
     job = await registry.create(
         kind="container",
         project_id=project_id,
-        user_id=owner_user_id,
+        user_id=config.created_by_user_id,
         name=preview_config.name or f"pr-{pr_number}",
         source_label=repo_full_name,
     )
@@ -218,12 +235,16 @@ async def _enqueue_preview(
         registry,
         job.job_id,
         session_factory,
-        row.id,
-        preview_config,
-        owner_user_id,
+        run_body,
         project_id,
+        [],
+        config.created_by_user_id,
         orchestrator,
         traffic_router,
+        image_builder,
+        token,
+        "pr-",
+        row.id,
     )
 
 
@@ -231,54 +252,38 @@ async def _run_preview_worker(
     registry: DeployJobRegistry,
     job_id: str,
     session_factory: async_sessionmaker[AsyncSession],
-    preview_id: uuid.UUID,
-    preview_config: DeployConfig,
-    owner_user_id: uuid.UUID,
+    body: RunFromSourceRequest,
     project_id: uuid.UUID,
+    resolved_volumes: list,
+    user_id: uuid.UUID,
     orchestrator: ContainerOrchestrator,
     traffic_router: TrafficRouter,
+    image_builder: DefaultImageBuilder,
+    access_token: str,
+    route_label_prefix: str,
+    preview_id: uuid.UUID,
 ) -> None:
-    """Deploy a preview with secrets disabled and a ``pr-`` route prefix."""
-    try:
-        async with session_factory() as session:
-            config = await runtime_config_with_secrets(
-                session, preview_config, owner_user_id=owner_user_id,
-                project_id=project_id, allow_secrets=False,
-            )
-            config = await apply_public_route_to_deploy_config(
-                config, traffic_router, label_prefix="pr-"
-            )
-            await registry.set_phase(job_id, "starting", config.image)
-            info = await orchestrator.deploy(config)
-            route_host = config.route_host or ""
-            await register_route_for_deployed_container(
-                traffic_router=traffic_router,
-                container_info=info,
-                route_host=route_host,
-                path_prefix=config.route_path_prefix,
-                backend_port=backend_port_for_route(config),
-                tls_enabled=config.route_tls,
-            )
-            _, scheme, _ = read_public_route_settings()
-            public_url = build_public_url(
-                scheme=scheme, host=route_host, path_prefix=config.route_path_prefix
-            )
-            row = await session.get(PreviewDeploy, preview_id)
-            if row is not None:
-                row.container_id = info.id
-                row.container_name = info.name
-                row.route_host = route_host
-                row.public_url = public_url
-                row.status = "deployed"
-                await session.commit()
-            await registry.complete_success(job_id, {"public_url": public_url})
-    except Exception as exc:
-        await registry.complete_failure(job_id, classify_deploy_error(exc))
-        async with session_factory() as session:
-            row = await session.get(PreviewDeploy, preview_id)
-            if row is not None:
-                row.status = "failed"
-                await session.commit()
+    """Run the shared source worker, then mirror its outcome onto the preview row."""
+    await _run_container_deploy_worker(
+        registry, job_id, session_factory, body, project_id, resolved_volumes,
+        user_id, orchestrator, traffic_router, image_builder,
+        access_token, route_label_prefix,
+    )
+    job = await registry.get(job_id)
+    async with session_factory() as session:
+        row = await session.get(PreviewDeploy, preview_id)
+        if row is None:
+            return
+        if job is not None and job.status == "succeeded":
+            result = job.result or {}
+            container = result.get("container") or {}
+            row.container_id = container.get("id")
+            row.container_name = container.get("name")
+            row.public_url = result.get("public_url")
+            row.status = "deployed"
+        else:
+            row.status = "failed"
+        await session.commit()
 
 
 async def _teardown_preview_row(
