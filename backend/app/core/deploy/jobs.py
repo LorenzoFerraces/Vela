@@ -35,7 +35,6 @@ TERMINAL_JOB_TTL = 300  # seconds a terminal job stays visible to pollers
 # Retain terminal rows longer than the poller window so the 24h deploy-success
 # metric in prometheus.py sees outcomes that have aged out of ``active()``.
 OUTCOME_RETENTION_HOURS = 24
-ABANDONED_JOB_CUTOFF = timedelta(minutes=30)
 ABANDONED_JOB_ERROR: dict[str, Any] = {
     "code": "deploy_failed",
     "detail": "abandoned by restart",
@@ -285,25 +284,26 @@ class DeployJobRegistry:
 async def fail_abandoned_jobs(
     session_factory: async_sessionmaker[AsyncSession],
     *,
-    cutoff: timedelta = ABANDONED_JOB_CUTOFF,
+    boot_time: datetime | None = None,
 ) -> int:
-    """Mark in_progress jobs older than ``cutoff`` failed after a process restart.
+    """Mark in_progress jobs created before this process boot as failed.
 
-    Called only on the replica that owns background loops, so a live worker on
-    another replica is never reaped. Fresh jobs are left untouched.
+    Called once at lifespan startup on the replica that owns background loops,
+    so a live worker on another replica is never reaped. Rows created after boot
+    belong to live workers and are left untouched.
     """
-    threshold = datetime.now(UTC) - cutoff
+    if boot_time is None:
+        boot_time = datetime.now(UTC)
     async with session_factory() as session:
         rows = (await session.execute(
             select(DeployJobRecord).where(
                 DeployJobRecord.status == "in_progress",
-                DeployJobRecord.created_at < threshold,
+                DeployJobRecord.created_at < boot_time,
             )
         )).scalars().all()
-        now = datetime.now(UTC)
         for record in rows:
             record.status = "failed"
             record.error = dict(ABANDONED_JOB_ERROR)
-            record.finished_at = now
+            record.finished_at = boot_time
         await session.commit()
         return len(rows)

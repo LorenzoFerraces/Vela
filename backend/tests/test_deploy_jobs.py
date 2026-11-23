@@ -65,32 +65,37 @@ async def test_create_defaults_and_active_scope(registry: DeployJobRegistry) -> 
     assert await registry.active(project_ids={uuid.uuid4()}) == []
 
 
-async def test_fail_abandoned_jobs_only_reaps_stale_rows(
+async def test_fail_abandoned_jobs_reaps_only_pre_boot_rows(
     registry: DeployJobRegistry,
     db_session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     from app.core.deploy.jobs import fail_abandoned_jobs
 
-    stale = await _job(registry)
-    fresh = await _job(registry)
+    boot_time = datetime.now(UTC)
+    pre_boot = await _job(registry)
+    post_boot = await _job(registry)
     async with db_session_factory() as session:
-        row = await session.get(DeployJobRecord, stale.job_id)
+        row = await session.get(DeployJobRecord, pre_boot.job_id)
         assert row is not None
-        row.created_at = datetime.now(UTC) - timedelta(hours=1)
+        # Created moments before boot — well inside the old 30-minute cutoff.
+        row.created_at = boot_time - timedelta(seconds=30)
+        row = await session.get(DeployJobRecord, post_boot.job_id)
+        assert row is not None
+        row.created_at = boot_time + timedelta(seconds=30)
         await session.commit()
 
-    assert await fail_abandoned_jobs(db_session_factory) == 1
+    assert await fail_abandoned_jobs(db_session_factory, boot_time=boot_time) == 1
 
-    stale_after = await registry.get(stale.job_id)
-    assert stale_after is not None
-    assert stale_after.status == "failed"
-    assert stale_after.error == {"code": "deploy_failed", "detail": "abandoned by restart"}
-    assert stale_after.finished_at is not None
+    pre_boot_after = await registry.get(pre_boot.job_id)
+    assert pre_boot_after is not None
+    assert pre_boot_after.status == "failed"
+    assert pre_boot_after.error == {"code": "deploy_failed", "detail": "abandoned by restart"}
+    assert pre_boot_after.finished_at is not None
 
-    fresh_after = await registry.get(fresh.job_id)
-    assert fresh_after is not None
-    assert fresh_after.status == "in_progress"
-    assert fresh_after.finished_at is None
+    post_boot_after = await registry.get(post_boot.job_id)
+    assert post_boot_after is not None
+    assert post_boot_after.status == "in_progress"
+    assert post_boot_after.finished_at is None
 
 
 async def test_stack_job_service_states_in_order(
