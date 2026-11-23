@@ -63,6 +63,8 @@ from app.core.exceptions import (
     RouteNotFoundError,
     StackCompositionCycleError,
     StackNotFoundError,
+    TeamComputeQuotaError,
+    TeamComputeQuotaExceededError,
     TeamStorageQuotaError,
     TrafficRouterError,
     UnsupportedLanguageError,
@@ -245,6 +247,25 @@ def register_exception_handlers(app) -> None:
         _request: Request, exc: TeamStorageQuotaError
     ) -> JSONResponse:
         """Return a 400 response with the team storage quota message."""
+        return JSONResponse(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            content={"detail": str(exc)},
+        )
+
+    @app.exception_handler(TeamComputeQuotaExceededError)
+    async def team_compute_quota_exceeded_handler(
+        _request: Request, exc: TeamComputeQuotaExceededError
+    ) -> JSONResponse:
+        return JSONResponse(
+            status_code=status.HTTP_409_CONFLICT,
+            content={"detail": str(exc), "code": "team_compute_quota_exceeded"},
+        )
+
+    @app.exception_handler(TeamComputeQuotaError)
+    async def team_compute_quota_error_handler(
+        _request: Request, exc: TeamComputeQuotaError
+    ) -> JSONResponse:
+        """Return a 400 response with the team compute quota message."""
         return JSONResponse(
             status_code=status.HTTP_400_BAD_REQUEST,
             content={"detail": str(exc)},

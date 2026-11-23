@@ -92,6 +92,14 @@ class TeamStorageQuotaError(VelaError):
     """Invalid team storage quota value (e.g. above the platform limit)."""
 
 
+class TeamComputeQuotaExceededError(ResourceLimitError):
+    """A deploy or scale would push the team over its compute quota."""
+
+
+class TeamComputeQuotaError(ResourceLimitError):
+    """A compute quota value is invalid or above the platform ceiling."""
+
+
 class VolumeUploadNotFoundError(VelaError):
     """Referenced volume upload does not exist for this user."""
 

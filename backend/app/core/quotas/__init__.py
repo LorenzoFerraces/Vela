@@ -14,6 +14,14 @@ from app.core.quotas.storage_quota import (
     team_storage_usage,
     usage_from_containers,
 )
+from app.core.quotas.compute_quota import (
+    ComputeQuotaSummary,
+    ComputeQuotaUsage,
+    enforce_team_compute_capacity,
+    environment_compute_ceilings,
+    team_compute_quota_summary,
+    team_compute_usage,
+)
 
 __all__ = [
     "TeamStorageQuotaSummary",
@@ -28,4 +36,10 @@ __all__ = [
     "team_storage_quota_summary",
     "team_storage_usage",
     "usage_from_containers",
+    "ComputeQuotaSummary",
+    "ComputeQuotaUsage",
+    "enforce_team_compute_capacity",
+    "environment_compute_ceilings",
+    "team_compute_quota_summary",
+    "team_compute_usage",
 ]

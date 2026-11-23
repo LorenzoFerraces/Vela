@@ -219,6 +219,10 @@ class Project(Base):
     storage_quota_bytes: Mapped[int | None] = mapped_column(
         BigInteger, nullable=True
     )
+    max_running_containers: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    max_cpu_millicores: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    max_memory_bytes: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    max_deploys_per_hour: Mapped[int | None] = mapped_column(Integer, nullable=True)
     is_personal: Mapped[bool] = mapped_column(nullable=False, default=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=_utcnow
