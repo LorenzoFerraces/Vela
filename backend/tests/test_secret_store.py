@@ -1,6 +1,8 @@
 import uuid
 import pytest
+from pydantic import ValidationError
 from sqlalchemy.exc import IntegrityError
+from app.api.schemas import SecretCreate
 from app.core.exceptions import SecretNotFoundError, SecretVersionNotFoundError
 from app.core.secret_store import create_secret, parse_secret_reference, resolve_secret_reference, set_secret_value
 from app.db.models import Secret, SecretVersion
@@ -30,6 +32,14 @@ async def test_missing_secret_and_version_are_actionable(db_session_factory) -> 
 def test_reference_pattern() -> None:
     assert parse_secret_reference("secret://DB_URL@2") == ("DB_URL", "2")
     assert parse_secret_reference("plain-value") is None
+
+
+def test_secret_name_matches_reference_grammar() -> None:
+    assert SecretCreate(name="DB_URL.v2-1", value="x").name == "DB_URL.v2-1"
+    with pytest.raises(ValidationError):
+        SecretCreate(name="bad name", value="x")
+    with pytest.raises(ValidationError):
+        SecretCreate(name="bad/name", value="x")
 
 
 @pytest.mark.asyncio

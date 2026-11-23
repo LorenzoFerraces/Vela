@@ -1164,7 +1164,9 @@ class SecretPublic(BaseModel):
 
 
 class SecretCreate(BaseModel):
-    name: str = Field(..., min_length=1, max_length=128)
+    name: str = Field(
+        ..., min_length=1, max_length=128, pattern=r"^[A-Za-z0-9_.-]+$"
+    )
     value: str = Field(..., min_length=1)
     project_id: uuid.UUID | None = None
 
