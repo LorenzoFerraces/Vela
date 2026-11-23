@@ -876,6 +876,16 @@ async def upload_volume_folder(
     )
 
 
+async def _best_effort_set_phase(
+    registry: DeployJobRegistry, job_id: str, phase: str
+) -> None:
+    """Progress-only phase write: never fail a job whose container is already up."""
+    try:
+        await registry.set_phase(job_id, phase)
+    except Exception:
+        logger.exception("Could not record %s phase for deploy job %s", phase, job_id)
+
+
 async def _run_container_deploy_worker(
     registry: DeployJobRegistry,
     job_id: str,
@@ -940,7 +950,7 @@ async def _run_container_deploy_worker(
                 info, route_wired, public_url = await _deploy_and_maybe_wire_route(
                     orchestrator, traffic_router, runtime_config
                 )
-                await registry.set_phase(job_id, "routing")
+                await _best_effort_set_phase(registry, job_id, "routing")
                 await _persist_run_deployment(
                     session,
                     user,
@@ -1028,7 +1038,7 @@ async def _run_container_deploy_worker(
                 info, route_wired, public_url = await _deploy_and_maybe_wire_route(
                     orchestrator, traffic_router, runtime_config
                 )
-                await registry.set_phase(job_id, "routing")
+                await _best_effort_set_phase(registry, job_id, "routing")
                 await _persist_run_deployment(
                     session,
                     user,
@@ -1130,7 +1140,7 @@ async def _run_container_deploy_worker(
             info, route_wired, public_url = await _deploy_and_maybe_wire_route(
                 orchestrator, traffic_router, runtime_config
             )
-            await registry.set_phase(job_id, "routing")
+            await _best_effort_set_phase(registry, job_id, "routing")
             await _persist_run_deployment(
                 session,
                 user,

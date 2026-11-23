@@ -296,6 +296,32 @@ def wait_for_deploy(
         time.sleep(0.1)
 
 
+def test_post_deploy_phase_failure_does_not_fail_job(
+    api_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    original_set_phase = DeployJobRegistry.set_phase
+
+    async def flaky_set_phase(
+        self: DeployJobRegistry,
+        job_id: str,
+        phase: str,
+        phase_detail: str | None = None,
+    ) -> None:
+        if phase == "routing":
+            raise RuntimeError("registry write failed")
+        await original_set_phase(self, job_id, phase, phase_detail)
+
+    monkeypatch.setattr(DeployJobRegistry, "set_phase", flaky_set_phase)
+    accepted = api_client.post(
+        "/api/containers/run",
+        json={"source_kind": "image", "image_ref": "nginx:alpine"},
+    )
+    assert accepted.status_code == 202, accepted.text
+    job = wait_for_deploy(api_client, accepted.json()["job_id"])
+    assert job["status"] == "succeeded", job
+
+
 def test_run_returns_202_and_job_completes_with_run_response_shape(
     api_client: TestClient,
     fake_orchestrator: FakeContainerOrchestrator,
