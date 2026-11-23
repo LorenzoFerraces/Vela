@@ -54,7 +54,11 @@ export async function waitForJob(
     if (job.phase !== lastPhase) {
       const detail = job.phase_detail ? ` ${job.phase_detail}` : ""
       const progress = `[${job.phase}]${detail}`
-      emit(progress, () => progress)
+      if (process.env.VELA_OUTPUT_JSON === "1") {
+        if (process.env.VELA_OUTPUT_QUIET !== "1") console.error(progress)
+      } else {
+        emit(progress, () => progress)
+      }
       lastPhase = job.phase
     }
     if (job.status === "succeeded") return job
@@ -117,7 +121,7 @@ export async function run(argv: string[]): Promise<number> {
   const queued = `Queued deploy ${accepted.job_id}.`
   emit(queued, () => queued)
   if (values["no-wait"]) {
-    console.log(accepted.job_id)
+    emit(accepted, () => accepted.job_id)
     return 0
   }
   const job = await waitForJob(config, accepted.job_id)
