@@ -90,17 +90,22 @@ function formatConfigValue(value: unknown): string {
   return typeof value === 'string' ? value : JSON.stringify(value)
 }
 
-function parseEnvText(text: string): Record<string, string> {
-  const parsed: Record<string, string> = {}
+function parseEnvText(text: string): {
+  entries: Record<string, string>
+  skipped: string[]
+} {
+  const entries: Record<string, string> = {}
+  const skipped: string[] = []
   for (const line of text.split('\n')) {
     const trimmed = line.trim()
     const separator = trimmed.indexOf('=')
     if (separator <= 0) {
+      if (trimmed) skipped.push(trimmed)
       continue
     }
-    parsed[trimmed.slice(0, separator).trim()] = trimmed.slice(separator + 1).trim()
+    entries[trimmed.slice(0, separator).trim()] = trimmed.slice(separator + 1).trim()
   }
-  return parsed
+  return { entries, skipped }
 }
 
 function EnvDiffList({ env }: { env: DeploymentEnvDiff }) {
@@ -220,6 +225,8 @@ export function DeploymentHistorySection({
   } | null>(null)
   const [applyLoading, setApplyLoading] = useState(false)
   const [applyStatus, setApplyStatus] = useState<string | null>(null)
+  const { entries: envEntries, skipped: skippedEnvLines } =
+    parseEnvText(updateEnvText)
 
   const reload = useCallback(async () => {
     setLoading(true)
@@ -265,11 +272,15 @@ export function DeploymentHistorySection({
     if (!rightId) {
       return
     }
+    const { entries, skipped } = parseEnvText(updateEnvText)
+    if (Object.keys(entries).length === 0 || skipped.length > 0) {
+      return
+    }
     setApplyLoading(true)
     setError(null)
     setApplyStatus(null)
     try {
-      const body: DeploymentUpdateRequest = { env_vars: parseEnvText(updateEnvText) }
+      const body: DeploymentUpdateRequest = { env_vars: entries }
       const result = await dryRunDeployment(rightId, body)
       setDryRun(result)
       setReviewed({ id: rightId, body })
@@ -407,7 +418,11 @@ export function DeploymentHistorySection({
               <select
                 className="containers-form__input"
                 value={rightId}
-                onChange={(event) => setRightId(event.target.value)}
+                onChange={(event) => {
+                  setRightId(event.target.value)
+                  setDryRun(null)
+                  setReviewed(null)
+                }}
               >
                 <option value="">Select…</option>
                 {rows.map((row) => (
@@ -431,19 +446,38 @@ export function DeploymentHistorySection({
                 className="containers-form__input"
                 rows={3}
                 value={updateEnvText}
-                onChange={(event) => setUpdateEnvText(event.target.value)}
+                onChange={(event) => {
+                  setUpdateEnvText(event.target.value)
+                  setDryRun(null)
+                  setReviewed(null)
+                }}
                 placeholder="B=2"
               />
             </label>
             <button
               type="button"
               className="btn btn--ghost btn--sm"
-              disabled={!rightId || applyLoading}
+              disabled={
+                !rightId ||
+                applyLoading ||
+                Object.keys(envEntries).length === 0 ||
+                skippedEnvLines.length > 0
+              }
               onClick={() => void onReviewApply()}
             >
               Review &amp; apply
             </button>
           </div>
+          {Object.keys(envEntries).length === 0 ? (
+            <p className="containers-muted">
+              Enter at least one KEY=value line to review an update.
+            </p>
+          ) : null}
+          {skippedEnvLines.length > 0 ? (
+            <p className="containers-banner containers-banner--err" role="alert">
+              Ignored lines (use KEY=value): {skippedEnvLines.join(', ')}
+            </p>
+          ) : null}
 
           {diff ? (
             <div className="deployment-history__diff">
