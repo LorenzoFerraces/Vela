@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from contextlib import suppress
 from datetime import UTC, datetime
 
@@ -15,6 +16,8 @@ from app.db.models import PreviewDeploy
 
 PREVIEW_CPU_LIMIT_CORES = 0.5
 PREVIEW_MEMORY_LIMIT_MB = 512
+
+logger = logging.getLogger(__name__)
 
 
 def preview_deploy_config(
@@ -43,10 +46,18 @@ async def collect_expired_previews(
         select(PreviewDeploy).where(PreviewDeploy.expires_at <= now, PreviewDeploy.closed_at.is_(None))
     )).scalars().all()
     for row in rows:
+        # One missing container or route must not wedge the whole sweep: suppress
+        # per-row failures so the commit below always closes every expired row.
         if row.container_id:
-            await orchestrator.remove(row.container_id, force=True)
+            try:
+                await orchestrator.remove(row.container_id, force=True)
+            except Exception:
+                logger.exception("Preview GC could not remove container %s", row.container_id)
         if row.container_name or row.route_host:
-            await traffic_router.remove_route(row.container_name or row.route_host)
+            try:
+                await traffic_router.remove_route(row.container_name or row.route_host)
+            except Exception:
+                logger.exception("Preview GC could not remove route for preview %s", row.id)
         row.status = "expired"
         row.closed_at = now
     await session.commit()

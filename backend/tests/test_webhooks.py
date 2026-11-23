@@ -302,3 +302,78 @@ def test_webhook_routes_are_outside_api(api_client: TestClient) -> None:
     paths = cast(FastAPI, api_client.app).openapi()["paths"]
     assert "/webhooks/github/{project_id}" in paths
     assert not any(path.startswith("/api/webhooks") for path in paths)
+
+
+def test_push_triggers_git_source_deploy(
+    api_client, db_session_factory, seeded_user, monkeypatch
+) -> None:
+    import asyncio
+
+    from app.core.security.secrets import encrypt_secret
+    from app.db.models import GitHubAppInstall, GitHubWebhookConfig
+
+    project_id = uuid.uuid4()
+
+    async def seed() -> None:
+        async with db_session_factory() as session:
+            session.add(
+                GitHubAppInstall(
+                    app_id="123", private_key_encrypted=encrypt_secret("pem"),
+                    webhook_secret_encrypted=encrypt_secret("hook-secret"),
+                )
+            )
+            session.add(
+                GitHubWebhookConfig(
+                    project_id=project_id, repo_full_name="org/repo", enabled=True,
+                    branch_filters=["main"], preview_enabled=False,
+                    preview_ttl_seconds=3600, created_by_user_id=seeded_user.id,
+                )
+            )
+            await session.commit()
+
+    asyncio.run(seed())
+    captured: list[object] = []
+
+    async def fake_token(session, project_id) -> str:
+        return "inst-token-push"
+
+    async def capture_spawn(registry, job_id, worker, *worker_args) -> None:
+        captured.append(worker_args)
+
+    monkeypatch.setattr("app.api.routes.webhooks.installation_token", fake_token)
+    monkeypatch.setattr("app.api.routes.webhooks.spawn_deploy_worker", capture_spawn)
+
+    def push_payload(branch: str) -> dict:
+        return {
+            "repository": {
+                "full_name": "org/repo",
+                "clone_url": "https://github.com/org/repo.git",
+            },
+            "ref": f"refs/heads/{branch}",
+            "after": "abc123def456",
+        }
+
+    url = f"/webhooks/github/{project_id}"
+    ignored = push_payload("dev")
+    assert api_client.post(
+        url,
+        content=json.dumps(ignored, separators=(",", ":")).encode(),
+        headers=_headers(ignored, "hook-secret", "push-dev"),
+    ).json()["status"] == "ignored"
+    assert captured == []
+
+    matching = push_payload("main")
+    assert api_client.post(
+        url,
+        content=json.dumps(matching, separators=(",", ":")).encode(),
+        headers=_headers(matching, "hook-secret", "push-main"),
+    ).json()["status"] == "received"
+    assert len(captured) == 1
+    args = captured[0]
+    assert isinstance(args, tuple)
+    run_body = args[3]
+    assert run_body.source_kind == "git"
+    assert run_body.git_url == "https://github.com/org/repo.git"
+    assert run_body.git_branch == "abc123def456"
+    assert args[10] == "inst-token-push"
+

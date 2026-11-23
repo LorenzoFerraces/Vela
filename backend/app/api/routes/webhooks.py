@@ -37,10 +37,15 @@ from app.core.auth.enums import UserRole
 from app.core.build.default_image_builder import DefaultImageBuilder
 from app.core.containers.orchestrator import ContainerOrchestrator
 from app.core.deploy.jobs import DeployJobRegistry
-from app.core.exceptions import GitHubAppNotConfiguredError, WebhookSignatureError
+from app.core.exceptions import (
+    GitHubAppNotConfiguredError,
+    TeamComputeQuotaExceededError,
+    WebhookSignatureError,
+)
 from app.core.github_app import installation_token, verify_github_signature
 from app.core.previews import preview_deploy_config, teardown_preview
 from app.core.projects.repository import require_owner
+from app.core.quotas import enforce_team_compute_capacity
 from app.core.security.secrets import decrypt_secret, encrypt_secret
 from app.core.traffic.traffic_router import TrafficRouter
 from app.db.models import (
@@ -109,20 +114,44 @@ async def github_webhook(
     if event != "pull_request" and config.branch_filters and branch not in config.branch_filters:
         return {"status": "ignored"}
 
+    repo_full_name = body["repository"]["full_name"]
     pull_request = body.get("pull_request") or {}
     pr_number = pull_request.get("number") if isinstance(pull_request.get("number"), int) else None
     is_fork = bool(((pull_request.get("head") or {}).get("repo") or {}).get("fork", False))
+    action = body.get("action")
+    preview_action = (
+        event == "pull_request" and config.preview_enabled and pr_number is not None
+        and action in {"opened", "synchronize", "reopened"}
+    )
+    push_action = event == "push" and config.enabled
+
+    # Mint before recording the delivery: a transient failure must not leave a
+    # committed delivery that dedups away GitHub's retry.
+    token: str | None = None
+    token_error: Exception | None = None
+    if preview_action or push_action:
+        try:
+            token = await installation_token(session, project_id)
+        except Exception as exc:
+            token_error = exc
+            logger.warning("Installation token unavailable for %s: %s", delivery_id, exc)
+            if not isinstance(exc, GitHubAppNotConfiguredError):
+                await _fail_existing_preview(
+                    session, project_id, repo_full_name, pr_number, exc
+                )
+                return {"status": "failed"}
 
     delivery = GitHubWebhookDelivery(
         delivery_id=delivery_id,
         project_id=project_id,
-        repo_full_name=body["repository"]["full_name"],
+        repo_full_name=repo_full_name,
         event=event,
-        action=body.get("action"),
+        action=action,
         branch=branch,
         pr_number=pr_number,
         is_fork=is_fork,
-        status="received",
+        status="failed" if token_error is not None else "received",
+        error=str(token_error) if token_error is not None else None,
     )
     session.add(delivery)
     # The unique delivery_id constraint backstops the check above: a racing
@@ -132,22 +161,48 @@ async def github_webhook(
     except IntegrityError:
         return {"status": "duplicate"}
 
-    if event == "pull_request" and config.preview_enabled and pr_number is not None:
-        action = body.get("action")
-        repo_full_name = body["repository"]["full_name"]
-        if action in {"opened", "synchronize", "reopened"}:
-            if not await _enqueue_preview(
-                session, background_tasks, registry, session_factory,
-                orchestrator, traffic_router, image_builder, config, project_id,
-                repo_full_name, pr_number, pull_request, delivery,
-            ):
-                return {"status": "failed"}
-        elif action == "closed":
-            await _teardown_preview_row(
-                session, project_id, repo_full_name, pr_number,
-                orchestrator, traffic_router,
-            )
+    if preview_action:
+        assert pr_number is not None
+        if not await _enqueue_preview(
+            session, background_tasks, registry, session_factory,
+            orchestrator, traffic_router, image_builder, config, project_id,
+            repo_full_name, pr_number, pull_request, delivery, token, token_error,
+        ):
+            return {"status": "failed"}
+    elif event == "pull_request" and config.preview_enabled and pr_number is not None and action == "closed":
+        await _teardown_preview_row(
+            session, project_id, repo_full_name, pr_number,
+            orchestrator, traffic_router,
+        )
+    elif push_action:
+        if not await _enqueue_push_deploy(
+            session, background_tasks, registry, session_factory,
+            orchestrator, traffic_router, image_builder, config, project_id,
+            repo_full_name, body, delivery, token, token_error,
+        ):
+            return {"status": "failed"}
     return {"status": "received"}
+
+
+async def _fail_existing_preview(
+    session: AsyncSession, project_id: uuid.UUID, repo_full_name: str,
+    pr_number: int | None, error: Exception,
+) -> None:
+    """Best-effort status update for a preview that already exists on a transient failure."""
+    if pr_number is None:
+        return
+    row = (
+        await session.execute(
+            select(PreviewDeploy).where(
+                PreviewDeploy.project_id == project_id,
+                PreviewDeploy.repo_full_name == repo_full_name,
+                PreviewDeploy.pr_number == pr_number,
+            )
+        )
+    ).scalar_one_or_none()
+    if row is not None:
+        row.status = "failed"
+        await session.commit()
 
 
 async def _enqueue_preview(
@@ -164,6 +219,8 @@ async def _enqueue_preview(
     pr_number: int,
     pull_request: dict,
     delivery: GitHubWebhookDelivery,
+    token: str | None,
+    token_error: Exception | None,
 ) -> bool:
     """Upsert the preview row and deploy the PR head through the source worker."""
     head = pull_request.get("head") or {}
@@ -210,18 +267,24 @@ async def _enqueue_preview(
         row.route_host = None
         row.public_url = None
 
+    if token_error is not None:
+        row.status = "failed"
+        delivery.error = str(token_error)
+        await session.commit()
+        return False
+
     try:
-        token = await installation_token(session, project_id)
-    except GitHubAppNotConfiguredError as exc:
+        await enforce_team_compute_capacity(session, orchestrator, project_id)
+    except TeamComputeQuotaExceededError as exc:
         logger.warning(
-            "Preview deploy for %s #%s has no App installation: %s",
-            repo_full_name, pr_number, exc,
+            "Preview quota gate rejected PR %s #%s: %s", repo_full_name, pr_number, exc
         )
         row.status = "failed"
         delivery.error = str(exc)
         await session.commit()
         return False
     await session.commit()
+    assert token is not None
 
     run_body = RunFromSourceRequest(
         source_kind="git",
@@ -299,6 +362,104 @@ async def _run_preview_worker(
             row.status = "deployed"
         else:
             row.status = "failed"
+        await session.commit()
+
+
+async def _enqueue_push_deploy(
+    session: AsyncSession,
+    background_tasks: BackgroundTasks,
+    registry: DeployJobRegistry,
+    session_factory: async_sessionmaker[AsyncSession],
+    orchestrator: ContainerOrchestrator,
+    traffic_router: TrafficRouter,
+    image_builder: DefaultImageBuilder,
+    config: GitHubWebhookConfig,
+    project_id: uuid.UUID,
+    repo_full_name: str,
+    body: dict,
+    delivery: GitHubWebhookDelivery,
+    token: str | None,
+    token_error: Exception | None,
+) -> bool:
+    """Enqueue a production deploy of the pushed ref through the source worker."""
+    clone_url = str((body.get("repository") or {}).get("clone_url") or "")
+    head_sha = str(body.get("after") or "")
+    if not clone_url or config.created_by_user_id is None:
+        return True
+    if token_error is not None:
+        delivery.error = str(token_error)
+        await session.commit()
+        return False
+
+    run_body = RunFromSourceRequest(
+        source_kind="git",
+        git_url=clone_url,
+        git_branch=head_sha,
+        container_port=80,
+        env_vars={},
+        project_id=project_id,
+    )
+    job = await registry.create(
+        kind="container",
+        project_id=project_id,
+        user_id=config.created_by_user_id,
+        name=repo_full_name,
+        source_label=clone_url,
+    )
+    background_tasks.add_task(
+        spawn_deploy_worker,
+        registry,
+        job.job_id,
+        _run_push_deploy_worker,
+        registry,
+        job.job_id,
+        session_factory,
+        run_body,
+        project_id,
+        [],
+        config.created_by_user_id,
+        orchestrator,
+        traffic_router,
+        image_builder,
+        token,
+        None,
+        delivery.id,
+    )
+    return True
+
+
+async def _run_push_deploy_worker(
+    registry: DeployJobRegistry,
+    job_id: str,
+    session_factory: async_sessionmaker[AsyncSession],
+    body: RunFromSourceRequest,
+    project_id: uuid.UUID,
+    resolved_volumes: list,
+    user_id: uuid.UUID,
+    orchestrator: ContainerOrchestrator,
+    traffic_router: TrafficRouter,
+    image_builder: DefaultImageBuilder,
+    access_token: str,
+    route_label_prefix: str | None,
+    delivery_id: uuid.UUID,
+) -> None:
+    """Deploy the pushed source, then mirror the job outcome onto the delivery."""
+    await _run_container_deploy_worker(
+        registry, job_id, session_factory, body, project_id, resolved_volumes,
+        user_id, orchestrator, traffic_router, image_builder,
+        access_token, route_label_prefix,
+    )
+    job = await registry.get(job_id)
+    async with session_factory() as session:
+        delivery = await session.get(GitHubWebhookDelivery, delivery_id)
+        if delivery is None:
+            return
+        if job is not None and job.status == "succeeded":
+            delivery.status = "deployed"
+        else:
+            delivery.status = "failed"
+            if job is not None and job.error:
+                delivery.error = str(job.error)
         await session.commit()
 
 

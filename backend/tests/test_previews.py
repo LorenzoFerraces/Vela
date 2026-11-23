@@ -10,10 +10,16 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock
 
+import httpx
 import pytest
 from sqlalchemy import select
 
-from app.core.exceptions import PreviewSecretForbiddenError
+from app.core.exceptions import (
+    ContainerNotFoundError,
+    PreviewSecretForbiddenError,
+    RouteNotFoundError,
+    TeamComputeQuotaExceededError,
+)
 from app.core.previews import collect_expired_previews, preview_deploy_config
 from app.db.models import (
     GitHubAppInstall,
@@ -475,4 +481,147 @@ def test_preview_without_app_link_fails_gracefully(
 
     delivery, preview = asyncio.run(get_rows())
     assert "installation" in (delivery.error or "").lower()
+    assert preview.status == "failed"
+
+
+def test_collect_expired_previews_survives_remove_errors(db_session_factory) -> None:
+    async def run() -> dict[str, object]:
+        now = datetime.now(UTC)
+        async with db_session_factory() as session:
+            for pr_number, container, route in (
+                (41, "missing-container", "pr-41-missing"),
+                (42, "ok-container", "pr-42-ok"),
+            ):
+                session.add(
+                    PreviewDeploy(
+                        project_id=uuid.uuid4(), repo_full_name="org/repo",
+                        pr_number=pr_number, head_sha="abc",
+                        container_id=container, container_name=route,
+                        expires_at=now - timedelta(seconds=1),
+                    )
+                )
+            await session.commit()
+
+        orchestrator = AsyncMock()
+        orchestrator.remove.side_effect = [
+            ContainerNotFoundError("missing-container"), None,
+        ]
+        router = AsyncMock()
+        router.remove_route.side_effect = [
+            RouteNotFoundError("pr-41-missing"), None,
+        ]
+        async with db_session_factory() as session:
+            swept = await collect_expired_previews(session, orchestrator, router)
+        async with db_session_factory() as session:
+            rows = (await session.execute(
+                select(PreviewDeploy).order_by(PreviewDeploy.pr_number)
+            )).scalars().all()
+        return {
+            "swept": swept,
+            "statuses": [row.status for row in rows],
+            "closed": [row.closed_at is not None for row in rows],
+        }
+
+    result = asyncio.run(run())
+    assert result["swept"] == 2
+    assert result["statuses"] == ["expired", "expired"]
+    assert result["closed"] == [True, True]
+
+
+def test_token_network_failure_allows_same_delivery_retry(
+    api_client, db_session_factory, seeded_user, monkeypatch
+) -> None:
+    project_id = uuid.uuid4()
+    state = {"fail": True}
+    captured: list[object] = []
+
+    async def flaky_token(session, project_id) -> str:
+        if state["fail"]:
+            raise httpx.ConnectError("connection refused")
+        return "inst-token-xyz"
+
+    async def capture_spawn(registry, job_id, worker, *worker_args) -> None:
+        captured.append(worker_args)
+
+    monkeypatch.setattr("app.api.routes.webhooks.installation_token", flaky_token)
+    monkeypatch.setattr("app.api.routes.webhooks.spawn_deploy_worker", capture_spawn)
+    _seed_webhook(db_session_factory, project_id, seeded_user.id)
+    payload, body = _pr_payload("opened", "aaaabbbbcccc", "feature")
+    headers = _headers(payload, "pull_request", "pr-retry-same-id")
+    url = f"/webhooks/github/{project_id}"
+
+    assert api_client.post(url, content=body, headers=headers).json() == {
+        "status": "failed"
+    }
+
+    async def delivery_count() -> int:
+        async with db_session_factory() as session:
+            return len((await session.execute(
+                select(GitHubWebhookDelivery).where(
+                    GitHubWebhookDelivery.delivery_id == "pr-retry-same-id"
+                )
+            )).scalars().all())
+
+    assert asyncio.run(delivery_count()) == 0
+
+    state["fail"] = False
+    assert api_client.post(url, content=body, headers=headers).json() == {
+        "status": "received"
+    }
+    assert len(captured) == 1
+
+
+def test_preview_quota_gate_fails_row_without_spawning(
+    api_client, db_session_factory, seeded_user, monkeypatch
+) -> None:
+    project_id = uuid.uuid4()
+    captured: list[object] = []
+
+    async def fake_token(session, project_id) -> str:
+        return "inst-token-xyz"
+
+    async def capture_spawn(registry, job_id, worker, *worker_args) -> None:
+        captured.append(worker_args)
+
+    async def over_quota(*args, **kwargs) -> None:
+        raise TeamComputeQuotaExceededError(
+            "Team compute quota exceeded for running containers"
+        )
+
+    monkeypatch.setattr("app.api.routes.webhooks.installation_token", fake_token)
+    monkeypatch.setattr("app.api.routes.webhooks.spawn_deploy_worker", capture_spawn)
+    monkeypatch.setattr(
+        "app.api.routes.webhooks.enforce_team_compute_capacity", over_quota
+    )
+    _seed_webhook(db_session_factory, project_id, seeded_user.id)
+    payload, body = _pr_payload("opened", "ddddeeeeffff", "feature")
+    delivery_id = "pr-over-quota"
+    assert api_client.post(
+        f"/webhooks/github/{project_id}",
+        content=body,
+        headers=_headers(payload, "pull_request", delivery_id),
+    ).json() == {"status": "failed"}
+    assert captured == []
+
+    async def get_rows() -> tuple[GitHubWebhookDelivery, PreviewDeploy]:
+        async with db_session_factory() as session:
+            delivery = (
+                await session.execute(
+                    select(GitHubWebhookDelivery).where(
+                        GitHubWebhookDelivery.delivery_id == delivery_id
+                    )
+                )
+            ).scalar_one()
+            preview = (
+                await session.execute(
+                    select(PreviewDeploy).where(
+                        PreviewDeploy.project_id == project_id,
+                        PreviewDeploy.pr_number == 21,
+                    )
+                )
+            ).scalar_one()
+            return delivery, preview
+
+    delivery, preview = asyncio.run(get_rows())
+    assert "quota" in (delivery.error or "").lower()
     assert preview.status == "failed"
