@@ -1,11 +1,16 @@
 #!/usr/bin/env bun
 import { exitCodeFor, isVelaError, VelaError } from "./client"
 import { login, logout, whoami } from "./commands/auth"
+import { configCommand } from "./commands/config"
+import { completionCommand } from "./commands/completion"
 import { describe, ps } from "./commands/containers"
 import { deploys, run } from "./commands/deploy"
 import { exec } from "./commands/exec"
 import { remove, restart, start, stop } from "./commands/lifecycle"
 import { logs } from "./commands/logs"
+import { auditCommand, metricsCommand, scaleCommand, templatesCommand } from "./commands/ops"
+import { inviteCommand, projectsCommand, stackCommand, teamsCommand } from "./commands/organisation"
+import { githubCommand, imagesCommand, settingsCommand, sourcesCommand } from "./commands/platform"
 import { tokens } from "./commands/tokens"
 import { runTui } from "./tui"
 
@@ -24,11 +29,28 @@ Commands:
   start|stop|restart|rm <name>
   deploys         Deployment history
   tokens <list|create|revoke>
+  stack <list|deploy|rm>          Manage stacks (--project to filter list)
+  projects <list|create>          Manage projects
+  teams <list|create>             Manage teams
+  invite <list|create|cancel>     Manage project invitations (--project <id>)
+  templates <list|create|rm>      Manage Dockerfile templates
+  scale <list|set>                Manage scaling policies
+  metrics <usage|summary>         Show usage and container metrics (--container, --hours)
+  audit <list>                    Show audit log (--global, --limit)
+  images <list|pull>              List images or pull one (--tag)
+  sources <list>                  List deploy sources
+  settings <show|monitoring|github-status>  Show platform settings
+  github <status>                 Show GitHub connection status
+  config <list|use|get|set|clear>  Manage named config profiles
+  completion <bash|zsh|fish|powershell>  Print a shell completion script
   tui             Open the terminal UI (default with no command)
 
 Global options (anywhere before --):
   --server <url>  API base URL (default http://127.0.0.1:8000)
   --token <pat>   Personal access token (default from ~/.vela/config.json)
+  --profile <name> Named config profile to use
+  --json          Print command results as JSON
+  --quiet         Suppress command output
 `
 
 function isParseArgsError(error: unknown): boolean {
@@ -37,8 +59,8 @@ function isParseArgsError(error: unknown): boolean {
   return typeof code === "string" && code.startsWith("ERR_PARSE_ARGS")
 }
 
-// Global --server/--token are honored anywhere before `--` by publishing
-// env overrides that resolveConfig() already prefers over the stored file.
+// Global --server/--token/--profile/--json/--quiet are honored anywhere before
+// `--` by publishing env overrides that resolveConfig()/emit() already prefer.
 function applyGlobalConfig(argv: string[]): string[] {
   const separator = argv.indexOf("--")
   const head = separator >= 0 ? argv.slice(0, separator) : argv
@@ -63,6 +85,27 @@ function applyGlobalConfig(argv: string[]): string[] {
     if (arg.startsWith("--token=")) {
       process.env.VELA_TOKEN = arg.slice("--token=".length)
       continue
+    }
+    if (arg === "--profile") {
+      const value = head[index + 1]
+      if (value === undefined) {
+        throw new VelaError(2, `Missing value for ${arg}.`)
+      }
+      process.env.VELA_PROFILE = value
+      index += 1
+      continue
+    }
+    if (arg.startsWith("--profile=")) {
+      process.env.VELA_PROFILE = arg.slice("--profile=".length); continue
+    }
+    if (arg === "--json" || arg === "--quiet") {
+      process.env[arg === "--json" ? "VELA_OUTPUT_JSON" : "VELA_OUTPUT_QUIET"] = "1"; continue
+    }
+    if (arg.startsWith("--json=")) {
+      process.env.VELA_OUTPUT_JSON = arg.slice("--json=".length); continue
+    }
+    if (arg.startsWith("--quiet=")) {
+      process.env.VELA_OUTPUT_QUIET = arg.slice("--quiet=".length); continue
     }
     rest.push(arg)
   }
@@ -115,6 +158,34 @@ async function main(rawArgv: string[]): Promise<number> {
         return await remove(rest)
       case "tokens":
         return await tokens(rest)
+      case "stack":
+        return await stackCommand(rest)
+      case "projects":
+        return await projectsCommand(rest)
+      case "teams":
+        return await teamsCommand(rest)
+      case "invite":
+        return await inviteCommand(rest)
+      case "templates":
+        return await templatesCommand(rest)
+      case "scale":
+        return await scaleCommand(rest)
+      case "metrics":
+        return await metricsCommand(rest)
+      case "audit":
+        return await auditCommand(rest)
+      case "images":
+        return await imagesCommand(rest)
+      case "sources":
+        return await sourcesCommand(rest)
+      case "settings":
+        return await settingsCommand(rest)
+      case "github":
+        return await githubCommand(rest)
+      case "config":
+        return await configCommand(rest)
+      case "completion":
+        return await completionCommand(rest)
       case "deploys":
         return await deploys(rest)
       case "tui":

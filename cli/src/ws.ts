@@ -1,4 +1,5 @@
 import { request } from "./client"
+import { emit } from "./output"
 
 export function websocketUrl(
   server: string,
@@ -50,11 +51,15 @@ export async function streamLogs(
     const socket = new WebSocket(url)
     socket.binaryType = "arraybuffer"
     socket.onmessage = (event) => {
-      if (typeof event.data === "string") {
-        process.stdout.write(event.data)
-      } else {
-        process.stdout.write(Buffer.from(event.data).toString("utf8"))
+      if (process.env.VELA_OUTPUT_QUIET === "1") return
+      const chunk = typeof event.data === "string"
+        ? event.data
+        : Buffer.from(event.data).toString("utf8")
+      if (process.env.VELA_OUTPUT_JSON === "1") {
+        emit(chunk, () => chunk)
+        return
       }
+      process.stdout.write(chunk)
     }
     socket.onclose = (event?: { code?: number }) => {
       const code = event?.code

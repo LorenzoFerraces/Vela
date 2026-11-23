@@ -23,5 +23,5 @@ test("exit codes map by meaning", () => {
 })
 
 test("requireToken rejects missing credentials", () => {
-  expect(() => requireToken({ server: "http://host" })).toThrow(/vela login/)
+  expect(() => requireToken({ server: "http://host", profile: "default" })).toThrow(/vela login/)
 })

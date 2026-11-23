@@ -9,6 +9,7 @@ import {
   resolveConfig,
   writeStoredConfig,
 } from "../config"
+import { emit } from "../output"
 import { promptHidden, promptLine } from "../prompt"
 
 interface LoginResponse {
@@ -35,7 +36,11 @@ export async function login(argv: string[]): Promise<number> {
     allowPositionals: false,
   })
   const stored = readStoredConfig()
-  const server = (values.server ?? process.env.VELA_API_URL ?? stored?.server ?? DEFAULT_SERVER)
+  const profileName = process.env.VELA_PROFILE || stored?.active || "default"
+  const selectedProfile = stored && Object.hasOwn(stored.profiles, profileName)
+    ? stored.profiles[profileName]
+    : undefined
+  const server = (values.server ?? process.env.VELA_API_URL ?? selectedProfile?.server ?? DEFAULT_SERVER)
     .replace(/\/+$/, "")
 
   const email =
@@ -57,7 +62,14 @@ export async function login(argv: string[]): Promise<number> {
     { name: `cli:${hostname()}` },
   )
 
-  writeStoredConfig({ server, token: token.token, tokenId: token.id })
+  const freshest = readStoredConfig()
+  writeStoredConfig({
+    profiles: {
+      ...(freshest?.profiles ?? {}),
+      [profileName]: { server, token: token.token, tokenId: token.id },
+    },
+    active: freshest?.active ?? "default",
+  })
   console.log(`Logged in to ${server} as ${email}.`)
   return 0
 }
@@ -81,17 +93,9 @@ export async function logout(_argv: string[]): Promise<number> {
 }
 
 export async function whoami(argv: string[]): Promise<number> {
-  const { values } = parseArgs({
-    args: argv,
-    options: { json: { type: "boolean" } },
-    allowPositionals: false,
-  })
+  parseArgs({ args: argv, options: {}, allowPositionals: false })
   const config = requireToken(resolveConfig({}))
   const me = await request<CurrentUser>(config, "GET", "/auth/me")
-  if (values.json) {
-    console.log(JSON.stringify(me, null, 2))
-  } else {
-    console.log(me.display_name ? `${me.display_name} <${me.email}>` : me.email)
-  }
+  emit(me, () => (me.display_name ? `${me.display_name} <${me.email}>` : me.email))
   return 0
 }
