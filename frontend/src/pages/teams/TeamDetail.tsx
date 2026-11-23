@@ -212,7 +212,7 @@ export function TeamDetail({
                 <button
                   type="submit"
                   className="btn btn--primary"
-                  disabled={busy}
+                  disabled={busy || storageQuota === null}
                 >
                   Save
                 </button>
@@ -299,8 +299,8 @@ export function TeamDetail({
                     Memory (GiB)
                     <input
                       type="number"
-                      min="1"
-                      step="0.1"
+                      min="0.01"
+                      step="0.01"
                       className="teams-page__input"
                       value={computeInputs.memory}
                       disabled={busy}
@@ -313,7 +313,7 @@ export function TeamDetail({
                   <button
                     type="submit"
                     className="btn btn--primary"
-                    disabled={busy}
+                    disabled={busy || computeQuota === null}
                   >
                     Apply limits
                   </button>

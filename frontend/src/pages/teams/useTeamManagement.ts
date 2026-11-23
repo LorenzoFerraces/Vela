@@ -103,6 +103,10 @@ export function useTeamManagement() {
     setDetailLoading(true)
     setQuotaError(null)
     setComputeQuotaError(null)
+    setStorageQuota(null)
+    setQuotaInput('')
+    setComputeQuota(null)
+    setComputeInputs({ containers: '', cpu: '', memory: '' })
     void getProjectComputeQuota(project.id)
       .then((quotaRow) => {
         if (detailRequestRef.current !== requestId) {
@@ -352,19 +356,25 @@ export function useTeamManagement() {
       return
     }
     setBanner(null)
+    const projectId = selectedProject.id
+    const selectionGeneration = detailRequestRef.current
     const invalid = [
-      ['Containers', computeInputs.containers],
-      ['CPU', computeInputs.cpu],
-      ['Memory', computeInputs.memory],
-    ].find(
-      ([, value]) =>
-        value.trim() !== '' &&
-        (!Number.isFinite(Number(value)) || Number(value) < 1),
-    )
+      { label: 'Containers', value: computeInputs.containers, scale: 1 },
+      { label: 'CPU', value: computeInputs.cpu, scale: 1 },
+      { label: 'Memory', value: computeInputs.memory, scale: 1024 ** 3 },
+    ].find(({ value, scale }) => {
+      const trimmed = value.trim()
+      if (trimmed === '') return false
+      const number = Number(trimmed)
+      return !Number.isFinite(number) || Math.round(number * scale) < 1
+    })
     if (invalid) {
       setBanner({
         tone: 'err',
-        text: `${invalid[0]} must be at least 1, or clear the field for no limit.`,
+        text:
+          invalid.label === 'Memory'
+            ? 'Memory must be greater than 0 GiB, or clear the field for no limit.'
+            : `${invalid.label} must be at least 1, or clear the field for no limit.`,
       })
       return
     }
@@ -377,10 +387,22 @@ export function useTeamManagement() {
     }
     setBusy(true)
     try {
-      const updated = await updateProjectComputeQuota(selectedProject.id, update)
+      const updated = await updateProjectComputeQuota(projectId, update)
+      if (
+        detailRequestRef.current !== selectionGeneration ||
+        detailLoadedForRef.current !== projectId
+      ) {
+        return
+      }
       setComputeQuota(updated)
       setBanner({ tone: 'ok', text: 'Compute limits updated.' })
     } catch (error) {
+      if (
+        detailRequestRef.current !== selectionGeneration ||
+        detailLoadedForRef.current !== projectId
+      ) {
+        return
+      }
       setBanner({ tone: 'err', text: formatApiError(error) })
     } finally {
       setBusy(false)
