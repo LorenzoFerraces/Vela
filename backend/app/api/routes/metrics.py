@@ -369,7 +369,7 @@ async def get_showback(
 
 @router.get("/showback/export")
 async def export_showback(
-    month: str,
+    month: Annotated[str, Query(pattern=r"^\d{4}-\d{2}$")],
     current_user: Annotated[User, Depends(get_current_user)],
     session: Annotated[AsyncSession, Depends(get_db)],
     orchestrator: Annotated[ContainerOrchestrator, Depends(get_orchestrator)],
