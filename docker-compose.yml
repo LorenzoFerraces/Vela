@@ -122,8 +122,15 @@ services:
     profiles: ["ha"]
     build: { context: ./backend, dockerfile: Dockerfile }
     image: vela/api
-    env_file: .env
+    env_file:
+      - path: .env
+        required: false
     environment:
+      VELA_DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-vela}:${POSTGRES_PASSWORD:-vela}@postgres:5432/${POSTGRES_DB:-Vela}
+      VELA_TRAEFIK_DYNAMIC_FILE: /etc/traefik/dynamic/traefik-http.yml
+      VELA_TRAEFIK_RELOAD_CONTAINER: vela-traefik
+      VELA_DOCKER_NETWORK: vela-workloads
+      FORWARDED_ALLOW_IPS: ${VELA_FORWARDED_ALLOW_IPS:-127.0.0.1,::1,172.16.0.0/12,192.168.0.0/16,10.0.0.0/8}
       VELA_BACKGROUND_LOOPS_ENABLED: "0"
       VELA_TRAFFIC_STATE_BACKEND: postgres
       VELA_OBJECT_STORAGE: r2
@@ -146,8 +153,15 @@ services:
   scheduler:
     profiles: ["ha"]
     image: vela/api
-    env_file: .env
+    env_file:
+      - path: .env
+        required: false
     environment:
+      VELA_DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-vela}:${POSTGRES_PASSWORD:-vela}@postgres:5432/${POSTGRES_DB:-Vela}
+      VELA_TRAEFIK_DYNAMIC_FILE: /etc/traefik/dynamic/traefik-http.yml
+      VELA_TRAEFIK_RELOAD_CONTAINER: vela-traefik
+      VELA_DOCKER_NETWORK: vela-workloads
+      FORWARDED_ALLOW_IPS: ${VELA_FORWARDED_ALLOW_IPS:-127.0.0.1,::1,172.16.0.0/12,192.168.0.0/16,10.0.0.0/8}
       VELA_BACKGROUND_LOOPS_ENABLED: "1"
       VELA_TRAFFIC_STATE_BACKEND: postgres
     volumes:

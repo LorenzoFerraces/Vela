@@ -50,7 +50,7 @@ The default stack starts one `api` with the background loops (monitor, metrics, 
 docker compose --profile ha up -d --build
 ```
 
-This adds `api-ha` (`VELA_API_REPLICAS` stateless replicas, loops disabled via `VELA_BACKGROUND_LOOPS_ENABLED=0`) and one `scheduler` replica that runs the loops. Both force shared state: `VELA_TRAFFIC_STATE_BACKEND=postgres` (deploy jobs, traffic routes, ws tickets) and `VELA_OBJECT_STORAGE=r2`, so R2 credentials must be configured. The default `api` has no profile and stays enabled; in HA mode scale it to zero so the loops run only in `scheduler`.
+This adds `api-ha` (`VELA_API_REPLICAS` stateless replicas) and a single `scheduler`, both forcing shared state: `VELA_TRAFFIC_STATE_BACKEND=postgres` (deploy jobs, traffic routes, ws tickets) and `VELA_OBJECT_STORAGE=r2` (configure R2 credentials). Leave the default `api` running as the traffic server — nginx and `web`'s healthcheck depend on it — and set `VELA_BACKGROUND_LOOPS_ENABLED=0` in `.env` so only `scheduler` owns the loops (set it back to `1` for single-node runs). `api-ha` replicas are healthy and stateless but not yet wired into the compose data path; they're ready for an external load balancer or a future nginx/Traefik upstream switch.
 
 ## Backend
 
