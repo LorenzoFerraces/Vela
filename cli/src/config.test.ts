@@ -1,5 +1,5 @@
 import { expect, test, beforeEach, afterEach } from "bun:test"
-import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs"
+import { chmodSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -93,6 +93,21 @@ test("migrates a legacy flat config into the default profile once", () => {
   const stored = readStoredConfig(configFile)
   expect(stored).toEqual({ profiles: { default: { server: "http://old:8000", token: "pat_old", tokenId: "tid_1" } }, active: "default" })
   expect(JSON.parse(readFileSync(configFile, "utf8")).profiles.default.token).toBe("pat_old")
+})
+
+test("a failed legacy migration write-back still returns the migrated config", () => {
+  writeFileSync(configFile, JSON.stringify({ server: "http://old:8000", token: "pat_old" }))
+  chmodSync(configFile, 0o444)
+  try {
+    const errors: string[] = []
+    const log = console.error; console.error = (message: string) => errors.push(message)
+    try {
+      expect(readStoredConfig(configFile)).toEqual({
+        profiles: { default: { server: "http://old:8000", token: "pat_old" } }, active: "default",
+      })
+      expect(errors.join(" ")).toContain("could not persist migrated config")
+    } finally { console.error = log }
+  } finally { chmodSync(configFile, 0o600) }
 })
 
 test("VELA_PROFILE selects a named profile and env overrides still win", () => {

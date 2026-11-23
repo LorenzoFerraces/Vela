@@ -52,7 +52,11 @@ export function readStoredConfig(path: string = configPath()): StoredConfig | nu
         } },
         active: DEFAULT_PROFILE,
       }
-      writeStoredConfig(migrated, path)
+      try {
+        writeStoredConfig(migrated, path)
+      } catch (error) {
+        console.error(`Warning: could not persist migrated config: ${error instanceof Error ? error.message : String(error)}`)
+      }
       return migrated
     }
     return null
