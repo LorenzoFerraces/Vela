@@ -42,6 +42,16 @@ docker compose up -d --build
 - The API drives the **host** Docker daemon via a bind-mounted socket, so workload containers run on the host engine. Works from Windows (Docker Desktop) or WSL2 — the api entrypoint grants its unprivileged user access to the socket on start.
 - All configuration lives in `.env` — see `.env.example` for the full annotated variable list.
 
+### Multi-replica / HA (opt-in)
+
+The default stack starts one `api` with the background loops (monitor, metrics, scaling, log collector) running in-process. For multi-replica deployments, opt in to the `ha` profile:
+
+```powershell
+docker compose --profile ha up -d --build
+```
+
+This adds `api-ha` (`VELA_API_REPLICAS` stateless replicas, loops disabled via `VELA_BACKGROUND_LOOPS_ENABLED=0`) and one `scheduler` replica that runs the loops. Both force shared state: `VELA_TRAFFIC_STATE_BACKEND=postgres` (deploy jobs, traffic routes, ws tickets) and `VELA_OBJECT_STORAGE=r2`, so R2 credentials must be configured. The default `api` has no profile and stays enabled; in HA mode scale it to zero so the loops run only in `scheduler`.
+
 ## Backend
 
 ```powershell

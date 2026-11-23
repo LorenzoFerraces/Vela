@@ -118,6 +118,46 @@ services:
           cpus: "1.0"
           memory: 1G
 
+  api-ha:
+    profiles: ["ha"]
+    build: { context: ./backend, dockerfile: Dockerfile }
+    image: vela/api
+    env_file: .env
+    environment:
+      VELA_BACKGROUND_LOOPS_ENABLED: "0"
+      VELA_TRAFFIC_STATE_BACKEND: postgres
+      VELA_OBJECT_STORAGE: r2
+    volumes:
+      - ${DOCKER_SOCKET_PATH:-/var/run/docker.sock}:/var/run/docker.sock
+      - ${VELA_VOLUME_UPLOADS_HOST_DIR:-volume_uploads}:${VELA_VOLUME_UPLOADS_DIR:-/data/volume-uploads}
+      - traefik_dynamic:/etc/traefik/dynamic
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+    restart: unless-stopped
+    deploy:
+      replicas: ${VELA_API_REPLICAS:-3}
+
+  scheduler:
+    profiles: ["ha"]
+    image: vela/api
+    env_file: .env
+    environment:
+      VELA_BACKGROUND_LOOPS_ENABLED: "1"
+      VELA_TRAFFIC_STATE_BACKEND: postgres
+    volumes:
+      - ${DOCKER_SOCKET_PATH:-/var/run/docker.sock}:/var/run/docker.sock
+      - ${VELA_VOLUME_UPLOADS_HOST_DIR:-volume_uploads}:${VELA_VOLUME_UPLOADS_DIR:-/data/volume-uploads}
+      - traefik_dynamic:/etc/traefik/dynamic
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+    restart: unless-stopped
+
   web:
     build:
       context: ./frontend

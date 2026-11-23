@@ -70,62 +70,59 @@ async def _lifespan(_application: FastAPI):
     deploy_jobs = DeployJobRegistry(get_db_session_factory())
     _application.state.deploy_jobs = deploy_jobs
 
-    monitor_task = asyncio.create_task(run_monitoring_loop())
+    monitor_task: asyncio.Task[None] | None = None
     metrics_task: asyncio.Task[None] | None = None
     scaling_task: asyncio.Task[None] | None = None
-    try:
-        orchestrator = get_orchestrator()
-    except ProviderConnectionError as exc:
-        logger.warning(
-            "Container provider unavailable at startup (%s); metrics and scaling loops will not run.",
-            exc,
-        )
-    else:
-        metrics_task = asyncio.create_task(run_metrics_collector(orchestrator))
-        try:
-            traffic_router = get_traffic_router()
-        except (ProviderConnectionError, TrafficRouterError) as exc:
-            logger.warning(
-                "Traffic router unavailable at startup (%s); scaling loop will not run.",
-                exc,
-            )
-        else:
-            scaling_task = asyncio.create_task(
-                run_scaling_loop(orchestrator, traffic_router)
-            )
-
     log_collector: LogCollector | None = None
-    if COLLECTOR_ENABLED:
+
+    if os.getenv("VELA_BACKGROUND_LOOPS_ENABLED", "1") == "1":
+        monitor_task = asyncio.create_task(run_monitoring_loop())
         try:
-            log_orchestrator = get_orchestrator()
+            orchestrator = get_orchestrator()
         except ProviderConnectionError as exc:
             logger.warning(
-                "Log collector unavailable at startup (%s); log collection will not run.",
+                "Container provider unavailable at startup (%s); metrics and scaling loops will not run.",
                 exc,
             )
         else:
-            log_collector = LogCollector(log_orchestrator)
-            await log_collector.start()
+            metrics_task = asyncio.create_task(run_metrics_collector(orchestrator))
+            try:
+                traffic_router = get_traffic_router()
+            except (ProviderConnectionError, TrafficRouterError) as exc:
+                logger.warning(
+                    "Traffic router unavailable at startup (%s); scaling loop will not run.",
+                    exc,
+                )
+            else:
+                scaling_task = asyncio.create_task(
+                    run_scaling_loop(orchestrator, traffic_router)
+                )
+
+        if COLLECTOR_ENABLED:
+            try:
+                log_orchestrator = get_orchestrator()
+            except ProviderConnectionError as exc:
+                logger.warning(
+                    "Log collector unavailable at startup (%s); log collection will not run.",
+                    exc,
+                )
+            else:
+                log_collector = LogCollector(log_orchestrator)
+                await log_collector.start()
 
     try:
         yield
     finally:
         await deploy_jobs.cancel_all()
-        monitor_task.cancel()
-        if metrics_task is not None:
-            metrics_task.cancel()
-        if scaling_task is not None:
-            scaling_task.cancel()
+        for task in (monitor_task, metrics_task, scaling_task):
+            if task is not None:
+                task.cancel()
         if log_collector is not None:
             await log_collector.stop()
-        with suppress(asyncio.CancelledError):
-            await monitor_task
-        if metrics_task is not None:
-            with suppress(asyncio.CancelledError):
-                await metrics_task
-        if scaling_task is not None:
-            with suppress(asyncio.CancelledError):
-                await scaling_task
+        for task in (monitor_task, metrics_task, scaling_task):
+            if task is not None:
+                with suppress(asyncio.CancelledError):
+                    await task
 
 
 class SecurityHeadersMiddleware:
