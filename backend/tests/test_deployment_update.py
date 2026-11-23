@@ -9,6 +9,9 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.auth.service import get_user_by_id
+from app.core.deploy.deployment_history import load_deploy_config_snapshot
+from app.core.enums import RestartPolicy
+from app.core.models import DeployConfig
 from app.core.projects.repository import get_personal_project_id
 from app.core.secret_store import create_secret
 from app.db.models import DeploymentRecord
@@ -133,3 +136,41 @@ def test_patch_resolves_secret_refs_only_for_orchestrator(
     assert _all_records(db_session_factory)[-1].env_vars == {
         "DB": "secret://DB_URL@latest"
     }
+
+
+def test_patch_rejects_invalid_restart_policy(api_client: TestClient) -> None:
+    deployment_id = _seed_deployment(api_client)
+
+    response = api_client.patch(
+        f"/api/deployments/{deployment_id}",
+        json={"restart_policy": "bogus"},
+    )
+    assert response.status_code == 422, response.text
+
+
+def test_patch_round_trips_valid_restart_policy(
+    api_client: TestClient,
+    db_session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    deployment_id = _seed_deployment(api_client)
+
+    response = api_client.patch(
+        f"/api/deployments/{deployment_id}",
+        json={"restart_policy": "always"},
+    )
+    assert response.status_code == 200, response.text
+    new_record_id = response.json()["id"]
+    container_id = response.json()["container_id"]
+
+    async def load_snapshot() -> DeployConfig:
+        async with db_session_factory() as session:
+            config = await load_deploy_config_snapshot(session, container_id)
+            assert config is not None
+            return config
+
+    assert asyncio.run(load_snapshot()).restart_policy == RestartPolicy.ALWAYS
+
+    followup = api_client.post(
+        f"/api/deployments/{new_record_id}/dry-run", json={}
+    )
+    assert followup.status_code == 200, followup.text

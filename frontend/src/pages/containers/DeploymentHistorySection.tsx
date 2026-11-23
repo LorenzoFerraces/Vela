@@ -214,7 +214,10 @@ export function DeploymentHistorySection({
   const [diffLoading, setDiffLoading] = useState(false)
   const [updateEnvText, setUpdateEnvText] = useState('')
   const [dryRun, setDryRun] = useState<DeploymentUpdateDryRunResponse | null>(null)
-  const [applyTargetId, setApplyTargetId] = useState('')
+  const [reviewed, setReviewed] = useState<{
+    id: string
+    body: DeploymentUpdateRequest
+  } | null>(null)
   const [applyLoading, setApplyLoading] = useState(false)
   const [applyStatus, setApplyStatus] = useState<string | null>(null)
 
@@ -249,6 +252,7 @@ export function DeploymentHistorySection({
       const result = await getDeploymentDiff(leftId, rightId)
       setDiff(result)
       setDryRun(null)
+      setReviewed(null)
     } catch (compareError) {
       setError(formatApiError(compareError))
       setDiff(null)
@@ -268,29 +272,28 @@ export function DeploymentHistorySection({
       const body: DeploymentUpdateRequest = { env_vars: parseEnvText(updateEnvText) }
       const result = await dryRunDeployment(rightId, body)
       setDryRun(result)
-      setApplyTargetId(rightId)
+      setReviewed({ id: rightId, body })
       setDiff(null)
     } catch (reviewError) {
       setError(formatApiError(reviewError))
       setDryRun(null)
+      setReviewed(null)
     } finally {
       setApplyLoading(false)
     }
   }
 
   async function onConfirmUpdate() {
-    if (!applyTargetId) {
+    if (!reviewed) {
       return
     }
     setApplyLoading(true)
     setError(null)
     try {
-      await updateDeployment(applyTargetId, {
-        env_vars: parseEnvText(updateEnvText),
-      })
+      await updateDeployment(reviewed.id, reviewed.body)
       setApplyStatus('Config applied. A new deployment was recorded.')
       setDryRun(null)
-      setApplyTargetId('')
+      setReviewed(null)
       setLeftId('')
       setRightId('')
       await reload()

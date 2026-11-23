@@ -27,6 +27,7 @@ from app.core.models import (
     ContainerInfo,
     HealthCheckConfig,
     ProjectSource,
+    RestartPolicy,
     ScalingPolicyConfig,
     ScalingPolicyInfo,
     validate_finite_number,
@@ -675,7 +676,11 @@ class DeploymentDiffResponse(BaseModel):
 
 
 class DeploymentUpdateRequest(BaseModel):
-    """Mutable deployment config fields; unknown keys are rejected by the API."""
+    """Mutable deployment config fields.
+
+    Identity/topology fields present in the body are rejected; genuinely
+    unknown keys are ignored by the classifier.
+    """
 
     model_config = ConfigDict(extra="allow")
 
@@ -689,6 +694,7 @@ class DeploymentUpdateRequest(BaseModel):
     route_path_prefix: str | None = None
     route_tls: bool | None = None
     public_route: bool | None = None
+    restart_policy: RestartPolicy | None = None
 
 
 class ConfigFieldDiff(BaseModel):
