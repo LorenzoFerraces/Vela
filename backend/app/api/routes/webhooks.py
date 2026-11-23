@@ -244,6 +244,7 @@ async def _enqueue_preview(
         return True
 
     preview_config = preview_deploy_config(
+        project_id=project_id,
         repo_full_name=repo_full_name,
         pr_number=pr_number,
         head_sha=head_sha,

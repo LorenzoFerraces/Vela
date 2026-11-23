@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import uuid
 from contextlib import suppress
 from datetime import UTC, datetime
 
@@ -21,15 +22,15 @@ logger = logging.getLogger(__name__)
 
 
 def preview_deploy_config(
-    *, repo_full_name: str, pr_number: int, head_sha: str, image: str,
-    env_vars: dict[str, str], ttl_seconds: int,
+    *, project_id: uuid.UUID, repo_full_name: str, pr_number: int, head_sha: str,
+    image: str, env_vars: dict[str, str], ttl_seconds: int,
 ) -> DeployConfig:
     for key, value in env_vars.items():
         if parse_secret_reference(value) is not None:
             raise PreviewSecretForbiddenError(f"Secret reference in env key {key!r} is not allowed for previews")
     return DeployConfig(
         image=image,
-        name=f"pr-{pr_number}-{head_sha[:8]}",
+        name=f"pr-{pr_number}-{head_sha[:8]}-{project_id.hex[:8]}",
         env_vars={"PREVIEW": "true", "PREVIEW_PR": str(pr_number), **env_vars},
         cpu_limit=PREVIEW_CPU_LIMIT_CORES,
         memory_limit=PREVIEW_MEMORY_LIMIT_MB,

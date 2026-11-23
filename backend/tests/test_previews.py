@@ -99,13 +99,19 @@ def _pr_payload(action: str, sha: str, ref: str) -> tuple[dict, bytes]:
 
 
 def test_preview_config_is_capped_and_namespaced() -> None:
+    project_id = uuid.UUID("11111111-2222-3333-4444-555555555555")
     config = preview_deploy_config(
-        repo_full_name="org/repo", pr_number=7, head_sha="abc123",
-        image="nginx:latest", env_vars={"PUBLIC_URL": "https://example.test"},
-        ttl_seconds=600,
+        project_id=project_id, repo_full_name="org/repo", pr_number=7,
+        head_sha="abc123", image="nginx:latest",
+        env_vars={"PUBLIC_URL": "https://example.test"}, ttl_seconds=600,
     )
     assert config.name is not None
-    assert config.name.startswith("pr-7-")
+    assert config.name == f"pr-7-abc123-{project_id.hex[:8]}"
+    other = preview_deploy_config(
+        project_id=uuid.uuid4(), repo_full_name="org/repo", pr_number=7,
+        head_sha="abc123", image="nginx:latest", env_vars={}, ttl_seconds=600,
+    )
+    assert other.name != config.name
     assert config.cpu_limit is not None and config.cpu_limit <= 0.5
     assert config.memory_limit is not None and config.memory_limit <= 512
     assert config.public_route is True
@@ -115,8 +121,9 @@ def test_preview_config_is_capped_and_namespaced() -> None:
 def test_preview_rejects_secret_reference() -> None:
     with pytest.raises(PreviewSecretForbiddenError):
         preview_deploy_config(
-            repo_full_name="org/repo", pr_number=8, head_sha="def", image="nginx",
-            env_vars={"DB": "secret://DB_URL"}, ttl_seconds=600,
+            project_id=uuid.uuid4(), repo_full_name="org/repo", pr_number=8,
+            head_sha="def", image="nginx", env_vars={"DB": "secret://DB_URL"},
+            ttl_seconds=600,
         )
 
 
@@ -222,7 +229,7 @@ def test_webhook_deploys_pr_head_with_installation_token(
     assert run_body.source_kind == "git"
     assert run_body.git_url == "https://github.com/org/repo.git"
     assert run_body.git_branch == "deadbeefcafe"  # pinned to the event's head SHA
-    assert run_body.container_name == "pr-21-deadbeef"
+    assert run_body.container_name == f"pr-21-deadbeef-{project_id.hex[:8]}"
     assert run_body.env_vars["PREVIEW"] == "true"
     assert run_body.cpu_limit == 0.5
     assert run_body.memory_limit == 512
@@ -428,7 +435,7 @@ def test_preview_deploy_then_close_removes_route_by_container_name(
     preview = asyncio.run(get_preview())
     assert preview.status == "deployed"
     assert preview.container_id is not None
-    assert preview.container_name == "pr-21-deadbeef"
+    assert preview.container_name == f"pr-21-deadbeef-{project_id.hex[:8]}"
     assert preview.route_host is None  # mirror never persisted it — the regression
     route_ids = [route.route_id for route in asyncio.run(noop_router.list_routes())]
     assert preview.container_name in route_ids
