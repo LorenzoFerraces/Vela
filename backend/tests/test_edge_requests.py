@@ -1,11 +1,14 @@
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
 
-import app.core.monitoring.edge_requests as edge_requests
-from app.core.monitoring.edge_requests import get_edge_request_rates, reset_edge_request_cache
+from app.core.monitoring import edge_requests
+from app.core.monitoring.edge_requests import (
+    get_edge_request_rates,
+    reset_edge_request_cache,
+)
 
 
 def _line(host: str, when: datetime) -> str:
@@ -24,7 +27,7 @@ def _no_cache_ttl(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_counts_requests_per_host_in_rolling_window(tmp_path: Path, monkeypatch) -> None:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     log = tmp_path / "access.log"
     log.write_text("\n".join([
         _line("a.example", now - timedelta(seconds=5)),
@@ -63,7 +66,7 @@ def test_unreadable_log_is_unavailable_not_zero_traffic(
 
 def test_malformed_lines_are_ignored(tmp_path: Path, monkeypatch) -> None:
     log = tmp_path / "access.log"
-    log.write_text("not json\n" + _line("a.example", datetime.now(timezone.utc)) + "\n", encoding="utf-8")
+    log.write_text("not json\n" + _line("a.example", datetime.now(UTC)) + "\n", encoding="utf-8")
     monkeypatch.setenv("VELA_EDGE_ACCESS_LOG_PATH", str(log))
     reset_edge_request_cache()
     assert list(get_edge_request_rates().rates_by_host) == ["a.example"]
@@ -72,7 +75,7 @@ def test_malformed_lines_are_ignored(tmp_path: Path, monkeypatch) -> None:
 def test_incremental_tail_counts_only_appended_lines(
     tmp_path: Path, monkeypatch
 ) -> None:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     log = tmp_path / "access.log"
     log.write_text(_line("a.example", now) + "\n", encoding="utf-8")
     monkeypatch.setenv("VELA_EDGE_ACCESS_LOG_PATH", str(log))
@@ -91,7 +94,7 @@ def test_incremental_tail_counts_only_appended_lines(
 
 
 def test_truncated_log_resets_and_reparses(tmp_path: Path, monkeypatch) -> None:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     log = tmp_path / "access.log"
     log.write_text(
         _line("a.example", now) + "\n" + _line("a.example", now) + "\n",

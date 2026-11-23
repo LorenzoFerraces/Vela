@@ -3,7 +3,8 @@ from __future__ import annotations
 import os
 import secrets
 from collections import Counter
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, Header, HTTPException, status
 from fastapi.responses import PlainTextResponse
@@ -54,8 +55,8 @@ def _add(
 
 @router.get("/metrics", dependencies=[Depends(require_metrics_token)])
 async def prometheus_metrics(
-    session: AsyncSession = Depends(get_db),
-    orchestrator: ContainerOrchestrator = Depends(get_orchestrator),
+    session: Annotated[AsyncSession, Depends(get_db)],
+    orchestrator: Annotated[ContainerOrchestrator, Depends(get_orchestrator)],
 ) -> PlainTextResponse:
     families: Families = {}
     _add(families, "vela_api_up", "API is serving requests", 1)
@@ -71,8 +72,8 @@ async def prometheus_metrics(
         collector_age_seconds = 0.0
     else:
         if newest.tzinfo is None:
-            newest = newest.replace(tzinfo=timezone.utc)
-        collector_age_seconds = max(0.0, (datetime.now(timezone.utc) - newest).total_seconds())
+            newest = newest.replace(tzinfo=UTC)
+        collector_age_seconds = max(0.0, (datetime.now(UTC) - newest).total_seconds())
     _add(
         families,
         "vela_collector_last_sample_age_seconds",
@@ -91,7 +92,7 @@ async def prometheus_metrics(
             {"state": container_status.value},
         )
 
-    since = datetime.now(timezone.utc) - timedelta(hours=24)
+    since = datetime.now(UTC) - timedelta(hours=24)
     rows = (await session.execute(
         select(DeployJobRecord.status, func.count())
         .where(

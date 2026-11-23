@@ -3,9 +3,9 @@
 Revision ID: 0025_externalized_state
 Revises: 0024_api_token_lifecycle
 """
-from alembic import op
 import sqlalchemy as sa
 
+from alembic import op
 
 revision = "0025_externalized_state"
 down_revision = "0024_api_token_lifecycle"

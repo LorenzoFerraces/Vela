@@ -3,8 +3,9 @@
 Revision ID: 0027_group_c_lifecycle
 Revises: 0026_add_team_compute_quotas
 """
-from alembic import op
 import sqlalchemy as sa
+
+from alembic import op
 
 revision = "0027_group_c_lifecycle"
 down_revision = "0026_add_team_compute_quotas"

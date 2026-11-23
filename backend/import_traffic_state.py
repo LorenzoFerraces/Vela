@@ -8,11 +8,11 @@ from pathlib import Path
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.core.traffic.traffic_models import BackendServer, RouteSpec
 from app.core.traffic.traefik_file_traffic_router import (
     _atomic_write_bytes,
     _build_traefik_document,
 )
+from app.core.traffic.traffic_models import BackendServer, RouteSpec
 from app.db.engine import get_session_factory
 from app.db.models import TrafficRouteRecord
 

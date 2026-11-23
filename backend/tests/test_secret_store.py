@@ -1,12 +1,19 @@
 import uuid
+
 import pytest
 from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
+
 from app.api.schemas import SecretCreate
 from app.core.exceptions import SecretNotFoundError, SecretVersionNotFoundError
+from app.core.secret_store import (
+    create_secret,
+    parse_secret_reference,
+    resolve_secret_reference,
+    set_secret_value,
+)
 from app.core.security.secrets import encrypt_secret
-from app.core.secret_store import create_secret, parse_secret_reference, resolve_secret_reference, set_secret_value
 from app.db.models import Secret, SecretVersion
 
 
@@ -63,9 +70,10 @@ async def test_set_secret_value_retries_version_race(
 ) -> None:
     user_id = uuid.uuid4()
 
-    import app.core.secret_store as store
     from sqlalchemy import func as real_func
     from sqlalchemy import literal
+
+    import app.core.secret_store as store
 
     async with db_session_factory() as session:
         secret = await create_secret(

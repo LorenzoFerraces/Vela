@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 import uuid
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -107,7 +107,7 @@ async def team_compute_usage(
             continue
         cpu_millicores += int((config.cpu_limit or 0.0) * 1000)
         memory_bytes += (config.memory_limit or 0) * 1024**2
-    since = datetime.now(timezone.utc) - timedelta(hours=1)
+    since = datetime.now(UTC) - timedelta(hours=1)
     deploys = (await session.execute(
         select(func.count(DeploymentRecord.id)).where(
             DeploymentRecord.project_id == project_id,

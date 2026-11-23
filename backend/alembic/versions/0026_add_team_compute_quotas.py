@@ -3,8 +3,9 @@
 Revision ID: 0026_add_team_compute_quotas
 Revises: 0025_externalized_state
 """
-from alembic import op
 import sqlalchemy as sa
+
+from alembic import op
 
 revision = "0026_add_team_compute_quotas"
 down_revision = "0025_externalized_state"

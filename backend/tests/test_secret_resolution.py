@@ -1,6 +1,8 @@
 import asyncio
 import uuid
+
 import pytest
+
 from app.core.deploy.secret_resolution import runtime_config_with_secrets
 from app.core.models import DeployConfig
 from app.core.secret_store import create_secret
@@ -20,8 +22,9 @@ def test_runtime_copy_is_resolved_but_original_keeps_reference(db_session_factor
 
 
 def test_previews_reject_secret_references(db_session_factory) -> None:
-    from app.core.exceptions import PreviewSecretForbiddenError
     import asyncio
+
+    from app.core.exceptions import PreviewSecretForbiddenError
     config = DeployConfig(image="nginx", env_vars={"DB": "secret://DB_URL"})
     async def scenario() -> None:
         async with db_session_factory() as session:

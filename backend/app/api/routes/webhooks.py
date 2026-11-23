@@ -144,7 +144,7 @@ async def github_webhook(
     if preview_action or push_action:
         try:
             token = await installation_token(session, project_id)
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 — deliberate boundary: any mint failure becomes a failed delivery, no exception escapes the receiver
             token_error = exc
             logger.warning("Installation token unavailable for %s: %s", delivery_id, exc)
             if not isinstance(exc, GitHubAppNotConfiguredError):
@@ -191,13 +191,12 @@ async def github_webhook(
             session, project_id, repo_full_name, pr_number,
             orchestrator, traffic_router,
         )
-    elif push_action:
-        if not await _enqueue_push_deploy(
-            session, background_tasks, registry, session_factory,
-            orchestrator, traffic_router, image_builder, config, project_id,
-            repo_full_name, body, delivery, token, token_error,
-        ):
-            return {"status": "failed"}
+    elif push_action and not await _enqueue_push_deploy(
+        session, background_tasks, registry, session_factory,
+        orchestrator, traffic_router, image_builder, config, project_id,
+        repo_full_name, body, delivery, token, token_error,
+    ):
+        return {"status": "failed"}
     return {"status": "received"}
 
 

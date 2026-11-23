@@ -80,6 +80,7 @@ def test_webhook_rejects_non_ascii_signature(api_client, db_session_factory) -> 
 def test_webhook_dedups_delivery_ids(api_client, db_session_factory) -> None:
     import asyncio
     import uuid
+
     from app.core.security.secrets import encrypt_secret
     from app.db.models import GitHubAppInstall, GitHubWebhookConfig
 
@@ -175,7 +176,7 @@ def test_webhook_ignores_unlisted_repo_and_branch(api_client, db_session_factory
 def test_app_config_is_admin_only(
     api_client: TestClient, provision_user
 ) -> None:
-    student, token = provision_user("student-webhook@example.com", role="student")
+    _student, token = provision_user("student-webhook@example.com", role="student")
     with TestClient(api_client.app) as client:
         client.headers["Authorization"] = f"Bearer {token}"
         assert client.get("/api/settings/github-app").status_code == 403
@@ -539,6 +540,7 @@ def test_linked_installation_resolves_token_for_pr_event(
     api_client: TestClient, db_session_factory, seeded_user, provision_user, monkeypatch
 ) -> None:
     import asyncio
+
     import httpx
     from cryptography.hazmat.primitives import serialization
     from cryptography.hazmat.primitives.asymmetric import rsa

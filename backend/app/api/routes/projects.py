@@ -60,7 +60,6 @@ from app.core.projects import (
     require_project,
     update_member_role,
 )
-from app.core.traffic.traffic_router import TrafficRouter
 from app.core.quotas import (
     TeamStorageQuotaSummary,
     environment_compute_ceilings,
@@ -69,6 +68,7 @@ from app.core.quotas import (
     team_compute_quota_summary,
     team_storage_quota_summary,
 )
+from app.core.traffic.traffic_router import TrafficRouter
 from app.db.models import PreviewDeploy, User
 
 router = APIRouter()
