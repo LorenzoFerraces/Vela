@@ -19,6 +19,7 @@ from app.core.exceptions import (
     PreviewSecretForbiddenError,
     RouteNotFoundError,
     TeamComputeQuotaExceededError,
+    TeamStorageQuotaExceededError,
 )
 from app.core.previews import collect_expired_previews, preview_deploy_config
 from app.db.models import (
@@ -632,4 +633,59 @@ def test_preview_quota_gate_fails_row_without_spawning(
     delivery, preview = asyncio.run(get_rows())
     assert delivery.status == "failed"
     assert "quota" in (delivery.error or "").lower()
+    assert preview.status == "failed"
+
+
+def test_preview_storage_quota_gate_fails_row_without_spawning(
+    api_client, db_session_factory, seeded_user, monkeypatch
+) -> None:
+    project_id = uuid.uuid4()
+    captured: list[object] = []
+
+    async def fake_token(session, project_id) -> str:
+        return "inst-token-xyz"
+
+    async def capture_spawn(registry, job_id, worker, *worker_args) -> None:
+        captured.append(worker_args)
+
+    async def over_storage(*args, **kwargs) -> None:
+        raise TeamStorageQuotaExceededError("Team storage quota exceeded")
+
+    monkeypatch.setattr("app.api.routes.webhooks.installation_token", fake_token)
+    monkeypatch.setattr("app.api.routes.webhooks.spawn_deploy_worker", capture_spawn)
+    monkeypatch.setattr(
+        "app.api.routes.webhooks.enforce_team_storage_capacity", over_storage
+    )
+    _seed_webhook(db_session_factory, project_id, seeded_user.id)
+    payload, body = _pr_payload("opened", "eeeeffff0000", "feature")
+    delivery_id = "pr-storage-quota"
+    assert api_client.post(
+        f"/webhooks/github/{project_id}",
+        content=body,
+        headers=_headers(payload, "pull_request", delivery_id),
+    ).json() == {"status": "failed"}
+    assert captured == []
+
+    async def get_rows() -> tuple[GitHubWebhookDelivery, PreviewDeploy]:
+        async with db_session_factory() as session:
+            delivery = (
+                await session.execute(
+                    select(GitHubWebhookDelivery).where(
+                        GitHubWebhookDelivery.delivery_id == delivery_id
+                    )
+                )
+            ).scalar_one()
+            preview = (
+                await session.execute(
+                    select(PreviewDeploy).where(
+                        PreviewDeploy.project_id == project_id,
+                        PreviewDeploy.pr_number == 21,
+                    )
+                )
+            ).scalar_one()
+            return delivery, preview
+
+    delivery, preview = asyncio.run(get_rows())
+    assert delivery.status == "failed"
+    assert "storage quota" in (delivery.error or "").lower()
     assert preview.status == "failed"

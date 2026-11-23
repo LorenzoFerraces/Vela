@@ -291,7 +291,8 @@ async def _enqueue_preview(
         await enforce_team_compute_capacity(
             session, orchestrator, project_id, pending=preview_config
         )
-    except TeamComputeQuotaExceededError as exc:
+        await enforce_team_storage_capacity(session, orchestrator, project_id)
+    except (TeamComputeQuotaExceededError, TeamStorageQuotaExceededError) as exc:
         logger.warning(
             "Preview quota gate rejected PR %s #%s: %s", repo_full_name, pr_number, exc
         )
