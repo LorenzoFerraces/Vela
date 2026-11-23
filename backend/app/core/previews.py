@@ -10,7 +10,11 @@ from datetime import UTC, datetime
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.exceptions import PreviewSecretForbiddenError
+from app.core.exceptions import (
+    ContainerNotFoundError,
+    PreviewSecretForbiddenError,
+    RouteNotFoundError,
+)
 from app.core.models import DeployConfig
 from app.core.secret_store import parse_secret_reference
 from app.db.models import PreviewDeploy
@@ -47,18 +51,28 @@ async def collect_expired_previews(
         select(PreviewDeploy).where(PreviewDeploy.expires_at <= now, PreviewDeploy.closed_at.is_(None))
     )).scalars().all()
     for row in rows:
-        # One missing container or route must not wedge the whole sweep: suppress
-        # per-row failures so the commit below always closes every expired row.
+        # A missing container/route is already clean; a real removal failure
+        # leaves the row open so the next sweep retries it. One bad row must
+        # not wedge the rest of the sweep.
+        cleanup_ok = True
         if row.container_id:
             try:
                 await orchestrator.remove(row.container_id, force=True)
+            except ContainerNotFoundError:
+                pass
             except Exception:
                 logger.exception("Preview GC could not remove container %s", row.container_id)
+                cleanup_ok = False
         if row.container_name or row.route_host:
             try:
                 await traffic_router.remove_route(row.container_name or row.route_host)
+            except RouteNotFoundError:
+                pass
             except Exception:
                 logger.exception("Preview GC could not remove route for preview %s", row.id)
+                cleanup_ok = False
+        if not cleanup_ok:
+            continue
         row.status = "expired"
         row.closed_at = now
     await session.commit()

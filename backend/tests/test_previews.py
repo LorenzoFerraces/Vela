@@ -614,6 +614,69 @@ def test_collect_expired_previews_survives_remove_errors(db_session_factory) -> 
     assert result["closed"] == [True, True]
 
 
+def test_collect_expired_previews_retries_failed_removals(db_session_factory) -> None:
+    async def run() -> dict[str, object]:
+        now = datetime.now(UTC)
+        async with db_session_factory() as session:
+            for pr_number, container in ((51, "stuck-container"), (52, "ok-container")):
+                session.add(
+                    PreviewDeploy(
+                        project_id=uuid.uuid4(), repo_full_name="org/repo",
+                        pr_number=pr_number, head_sha="abc",
+                        container_id=container, container_name=f"pr-{pr_number}-abc",
+                        expires_at=now - timedelta(seconds=1),
+                    )
+                )
+            await session.commit()
+
+        state = {"fail": True}
+
+        async def maybe_fail_remove(container_id: str, *, force: bool = False) -> None:
+            if container_id == "stuck-container" and state["fail"]:
+                raise RuntimeError("provider down")
+
+        orchestrator = AsyncMock()
+        orchestrator.remove.side_effect = maybe_fail_remove
+        router = AsyncMock()
+        async with db_session_factory() as session:
+            first_swept = await collect_expired_previews(session, orchestrator, router)
+
+        async def read_rows() -> dict[int, PreviewDeploy]:
+            async with db_session_factory() as session:
+                rows = (await session.execute(
+                    select(PreviewDeploy).where(PreviewDeploy.pr_number.in_([51, 52]))
+                )).scalars().all()
+                return {row.pr_number: row for row in rows}
+
+        after_first = await read_rows()
+        snapshot = {
+            "first_swept": first_swept,
+            "stuck_closed": after_first[51].closed_at is not None,
+            "stuck_status": after_first[51].status,
+            "ok_closed": after_first[52].closed_at is not None,
+            "ok_status": after_first[52].status,
+        }
+
+        state["fail"] = False
+        async with db_session_factory() as session:
+            second_swept = await collect_expired_previews(session, orchestrator, router)
+        after_second = await read_rows()
+        snapshot["second_swept"] = second_swept
+        snapshot["stuck_closed_after_retry"] = after_second[51].closed_at is not None
+        snapshot["stuck_status_after_retry"] = after_second[51].status
+        return snapshot
+
+    result = asyncio.run(run())
+    assert result["first_swept"] == 2
+    assert result["stuck_closed"] is False
+    assert result["stuck_status"] == "pending"
+    assert result["ok_closed"] is True
+    assert result["ok_status"] == "expired"
+    assert result["second_swept"] == 1
+    assert result["stuck_closed_after_retry"] is True
+    assert result["stuck_status_after_retry"] == "expired"
+
+
 def test_token_network_failure_allows_same_delivery_retry(
     api_client, db_session_factory, seeded_user, monkeypatch
 ) -> None:
