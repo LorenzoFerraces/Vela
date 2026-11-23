@@ -1114,3 +1114,27 @@ class TeamShowback(BaseModel):
 class ShowbackSummary(BaseModel):
     month: str
     teams: list[TeamShowback]
+
+
+# ---------------------------------------------------------------------------
+# Secrets (write-only values)
+# ---------------------------------------------------------------------------
+
+
+class SecretPublic(BaseModel):
+    id: uuid.UUID
+    name: str
+    project_id: uuid.UUID | None
+    has_value: bool
+    latest_version: int
+    created_at: datetime
+
+
+class SecretCreate(BaseModel):
+    name: str = Field(..., min_length=1, max_length=128)
+    value: str = Field(..., min_length=1)
+    project_id: uuid.UUID | None = None
+
+
+class SecretValueUpdate(BaseModel):
+    value: str = Field(..., min_length=1)

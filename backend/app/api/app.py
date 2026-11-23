@@ -32,6 +32,7 @@ from app.api.routes import (
     prometheus,
     projects,
     scaling,
+    secrets,
     settings,
     stacks,
     tokens,
@@ -317,6 +318,11 @@ def create_app() -> FastAPI:
         metrics.router,
         prefix=f"{API_PREFIX}/metrics",
         tags=["metrics"],
+    )
+    application.include_router(
+        secrets.router,
+        prefix=f"{API_PREFIX}/secrets",
+        tags=["secrets"],
     )
 
     application.include_router(prometheus.router, tags=["prometheus"])

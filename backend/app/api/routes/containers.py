@@ -98,6 +98,7 @@ from app.core.deploy.jobs import (
     DeployJobRegistry,
     classify_deploy_error,
 )
+from app.core.deploy.secret_resolution import runtime_config_with_secrets
 from app.core.enums import ContainerStatus, RestartPolicy
 from app.core.exceptions import (
     CloneError,
@@ -135,6 +136,7 @@ from app.core.quotas import (
     team_storage_usage,
 )
 from app.core.scaling.policy_repository import upsert_policy
+from app.core.secret_store import parse_secret_reference
 from app.core.traffic.public_route_host import (
     apply_public_route_to_deploy_config,
     build_public_url,
@@ -353,7 +355,10 @@ _DEPLOYMENT_ENV_VALUE_REDACTED = "<REDACTED>"
 
 
 def _redacted_env_vars_for_history(env_vars: dict[str, str]) -> dict[str, str]:
-    return {key: _DEPLOYMENT_ENV_VALUE_REDACTED for key in env_vars}
+    return {
+        key: value if parse_secret_reference(value) is not None else _DEPLOYMENT_ENV_VALUE_REDACTED
+        for key, value in env_vars.items()
+    }
 
 
 async def _persist_run_deployment(
@@ -782,8 +787,11 @@ async def deploy(
         project_id=project_id,
     )
     config = await apply_public_route_to_deploy_config(config, traffic_router)
+    runtime_config = await runtime_config_with_secrets(
+        session, config, owner_user_id=current_user.id, project_id=project_id,
+    )
     info, route_wired, public_url = await _deploy_and_maybe_wire_route(
-        orchestrator, traffic_router, config
+        orchestrator, traffic_router, runtime_config
     )
     await emit_audit_log(
         session,
@@ -918,8 +926,11 @@ async def _run_container_deploy_worker(
                 )
                 cfg = await apply_public_route_to_deploy_config(cfg, traffic_router)
                 await registry.set_phase(job_id, "starting", image_ref)
+                runtime_config = await runtime_config_with_secrets(
+                    session, cfg, owner_user_id=user.id, project_id=project_id,
+                )
                 info, route_wired, public_url = await _deploy_and_maybe_wire_route(
-                    orchestrator, traffic_router, cfg
+                    orchestrator, traffic_router, runtime_config
                 )
                 await registry.set_phase(job_id, "routing")
                 await _persist_run_deployment(
@@ -1003,8 +1014,11 @@ async def _run_container_deploy_worker(
                 )
                 cfg = await apply_public_route_to_deploy_config(cfg, traffic_router)
                 await registry.set_phase(job_id, "starting", build_result.image_tag)
+                runtime_config = await runtime_config_with_secrets(
+                    session, cfg, owner_user_id=user.id, project_id=project_id,
+                )
                 info, route_wired, public_url = await _deploy_and_maybe_wire_route(
-                    orchestrator, traffic_router, cfg
+                    orchestrator, traffic_router, runtime_config
                 )
                 await registry.set_phase(job_id, "routing")
                 await _persist_run_deployment(
@@ -1100,8 +1114,11 @@ async def _run_container_deploy_worker(
             )
             cfg = await apply_public_route_to_deploy_config(cfg, traffic_router)
             await registry.set_phase(job_id, "starting", build_result.image_tag)
+            runtime_config = await runtime_config_with_secrets(
+                session, cfg, owner_user_id=user.id, project_id=project_id,
+            )
             info, route_wired, public_url = await _deploy_and_maybe_wire_route(
-                orchestrator, traffic_router, cfg
+                orchestrator, traffic_router, runtime_config
             )
             await registry.set_phase(job_id, "routing")
             await _persist_run_deployment(
