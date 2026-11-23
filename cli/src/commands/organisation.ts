@@ -12,7 +12,7 @@ export async function stackCommand(argv: string[]): Promise<number> {
   const action = argv[0] ?? "list"
   const { positionals, values } = parseArgs({
     args: argv.slice(1),
-    options: { project: { type: "string" }, manifest: { type: "string" } },
+    options: { project: { type: "string" } },
     allowPositionals: true,
   })
   const config = requireToken(resolveConfig({}))
