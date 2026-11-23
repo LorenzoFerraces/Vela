@@ -13,6 +13,8 @@ from app.api.schemas import (
     IncomingProjectInvitationPublic,
     InvitableRoleLiteral,
     MyProjectRolePublic,
+    ProjectComputeQuotaPublic,
+    ProjectComputeQuotaUpdate,
     ProjectCreate,
     ProjectInvitationCreate,
     ProjectInvitationPublic,
@@ -25,7 +27,11 @@ from app.api.schemas import (
 )
 from app.core.audit.service import emit_audit_log
 from app.core.containers.orchestrator import ContainerOrchestrator
-from app.core.exceptions import ProjectAccessDeniedError, TeamStorageQuotaError
+from app.core.exceptions import (
+    ProjectAccessDeniedError,
+    TeamComputeQuotaError,
+    TeamStorageQuotaError,
+)
 from app.core.projects import (
     ProjectRole,
     accept_invitation,
@@ -47,8 +53,10 @@ from app.core.projects import (
 )
 from app.core.quotas import (
     TeamStorageQuotaSummary,
+    environment_compute_ceilings,
     environment_quota_bytes,
     format_gib,
+    team_compute_quota_summary,
     team_storage_quota_summary,
 )
 from app.db.models import User
@@ -256,6 +264,69 @@ async def update_project_storage_quota(
     await session.refresh(project)
     summary = await team_storage_quota_summary(session, orchestrator, project)
     return _storage_quota_public(summary)
+
+
+@router.get("/{project_id}/compute-quota", response_model=ProjectComputeQuotaPublic)
+async def get_project_compute_quota(
+    project_id: uuid.UUID,
+    orchestrator: Annotated[ContainerOrchestrator, Depends(get_orchestrator)],
+    current_user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[AsyncSession, Depends(get_db)],
+) -> ProjectComputeQuotaPublic:
+    """Return the team's compute quota usage and ceilings (members only)."""
+    membership = await get_membership(
+        session, project_id=project_id, user_id=current_user.id
+    )
+    if membership is None:
+        raise ProjectAccessDeniedError(
+            "You must be a member of this team to view its compute quota."
+        )
+    project = await require_project(session, project_id)
+    summary = await team_compute_quota_summary(session, orchestrator, project)
+    return ProjectComputeQuotaPublic(
+        max_running_containers=project.max_running_containers,
+        max_cpu_millicores=project.max_cpu_millicores,
+        max_memory_bytes=project.max_memory_bytes,
+        max_deploys_per_hour=project.max_deploys_per_hour,
+        used_running_containers=summary.usage.running_containers,
+        used_cpu_millicores=summary.usage.cpu_millicores,
+        used_memory_bytes=summary.usage.memory_bytes,
+        used_deploys_per_hour=summary.usage.deploys_per_hour,
+        platform_ceiling=summary.ceilings,
+    )
+
+
+@router.patch(
+    "/{project_id}/compute-quota", response_model=ProjectComputeQuotaPublic
+)
+async def update_project_compute_quota(
+    project_id: uuid.UUID,
+    body: ProjectComputeQuotaUpdate,
+    orchestrator: Annotated[ContainerOrchestrator, Depends(get_orchestrator)],
+    current_user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[AsyncSession, Depends(get_db)],
+) -> ProjectComputeQuotaPublic:
+    """Set team compute quotas (owner only), clamped to the platform ceilings."""
+    membership = await require_membership(
+        session, project_id=project_id, user_id=current_user.id
+    )
+    if ProjectRole(membership.role) != ProjectRole.OWNER:
+        raise ProjectAccessDeniedError(
+            "Only the team owner can change compute quotas."
+        )
+    project = await require_project(session, project_id)
+    ceilings = environment_compute_ceilings()
+    for field, value in body.model_dump().items():
+        if value is None:
+            continue
+        ceiling = ceilings[field.replace("max_", "")]
+        if ceiling is not None and value > ceiling:
+            raise TeamComputeQuotaError(
+                f"{field} cannot exceed the platform ceiling of {ceiling}"
+            )
+        setattr(project, field, value)
+    await session.commit()
+    return await get_project_compute_quota(project_id, orchestrator, current_user, session)
 
 
 @router.get("/{project_id}/members", response_model=list[ProjectMemberPublic])

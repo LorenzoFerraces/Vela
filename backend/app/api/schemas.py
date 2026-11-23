@@ -607,6 +607,29 @@ class ProjectStorageQuotaUpdate(BaseModel):
     )
 
 
+class ProjectComputeQuotaPublic(BaseModel):
+    """Team compute quota, current usage, and the platform ceilings."""
+
+    max_running_containers: int | None
+    max_cpu_millicores: int | None
+    max_memory_bytes: int | None
+    max_deploys_per_hour: int | None
+    used_running_containers: int
+    used_cpu_millicores: int
+    used_memory_bytes: int
+    used_deploys_per_hour: int
+    platform_ceiling: dict[str, int | None]
+
+
+class ProjectComputeQuotaUpdate(BaseModel):
+    """Request to set one or more team compute quotas."""
+
+    max_running_containers: int | None = Field(default=None, ge=1)
+    max_cpu_millicores: int | None = Field(default=None, ge=1)
+    max_memory_bytes: int | None = Field(default=None, ge=1)
+    max_deploys_per_hour: int | None = Field(default=None, ge=1)
+
+
 # ---------------------------------------------------------------------------
 # Deployment history
 # ---------------------------------------------------------------------------

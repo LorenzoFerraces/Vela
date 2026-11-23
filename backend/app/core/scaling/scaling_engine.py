@@ -17,6 +17,7 @@ from app.core.exceptions import (
     RouteNotFoundError,
 )
 from app.core.models import ContainerInfo, DeployConfig
+from app.core.quotas import enforce_team_compute_capacity
 from app.core.scaling.policy_repository import (
     ScalingPolicyRuntime,
     list_enabled_policies,
@@ -153,9 +154,14 @@ async def _scale_up(
     base_spec: RouteSpec,
     current_replica_count: int,
     base_config: DeployConfig,
+    session: AsyncSession,
 ) -> None:
     """Add one replica and register it with Traefik."""
     next_index = current_replica_count + 1
+    if base_config.project_id is not None:
+        await enforce_team_compute_capacity(
+            session, orchestrator, base_config.project_id
+        )
     try:
         replica_info = await orchestrator.deploy_replica(base_config, next_index)
     except (OrchestratorError, ProviderConnectionError) as exc:
@@ -321,6 +327,7 @@ async def _evaluate_policy(
             base_spec,
             current_replica_count,
             base_config,
+            session,
         )
         await record_scale_event(session, base_name)
         return

@@ -129,6 +129,7 @@ from app.core.projects.enums import ProjectRole, can_write
 from app.core.projects.repository import get_personal_project_id, require_membership
 from app.core.quotas import (
     effective_quota_bytes,
+    enforce_team_compute_capacity,
     enforce_team_storage_capacity,
     format_gib,
     team_storage_usage,
@@ -774,6 +775,7 @@ async def deploy(
         session, current_user, config.project_id
     )
     await enforce_team_storage_capacity(session, orchestrator, project_id)
+    await enforce_team_compute_capacity(session, orchestrator, project_id)
     config = _apply_deploy_labels(
         config,
         owner_id=str(current_user.id),
@@ -1183,6 +1185,7 @@ async def run_from_user_source(
 
     project_id = await _resolve_deploy_project_id(session, current_user, body)
     await enforce_team_storage_capacity(session, orchestrator, project_id)
+    await enforce_team_compute_capacity(session, orchestrator, project_id)
     if body.public_route:
         read_public_route_settings_or_raise_for_public_deploy()
     resolved_volumes = _resolve_deploy_volumes(current_user.id, body.volumes)
