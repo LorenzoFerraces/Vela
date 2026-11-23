@@ -5,6 +5,7 @@ import uuid
 from datetime import UTC, datetime
 
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import SecretNotFoundError, SecretVersionNotFoundError
@@ -34,16 +35,26 @@ async def create_secret(
 
 
 async def set_secret_value(session: AsyncSession, secret: Secret, value: str) -> SecretVersion:
-    latest = (await session.execute(
-        select(func.max(SecretVersion.version)).where(SecretVersion.secret_id == secret.id)
-    )).scalar() or 0
-    version = SecretVersion(
-        secret_id=secret.id, version=latest + 1, value_encrypted=encrypt_secret(value),
-    )
-    session.add(version)
-    secret.updated_at = datetime.now(UTC)
-    await session.commit()
-    return version
+    secret_id = secret.id  # rollback on a version collision expires the ORM object
+    for attempt in range(2):
+        latest = (await session.execute(
+            select(func.max(SecretVersion.version)).where(SecretVersion.secret_id == secret_id)
+        )).scalar() or 0
+        version = SecretVersion(
+            secret_id=secret_id, version=latest + 1, value_encrypted=encrypt_secret(value),
+        )
+        session.add(version)
+        secret.updated_at = datetime.now(UTC)
+        try:
+            await session.commit()
+        except IntegrityError:
+            await session.rollback()
+            if attempt:
+                raise
+            # Concurrent rotation claimed this version; recompute once.
+            continue
+        return version
+    raise AssertionError("unreachable")
 
 
 async def resolve_secret_reference(
