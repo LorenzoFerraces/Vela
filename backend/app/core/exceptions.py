@@ -469,3 +469,36 @@ class DuplicateStackNameError(StackError):
     def __init__(self, name: str) -> None:
         self.name = name
         super().__init__(f"Stack name already exists: {name}")
+
+
+# ---------------------------------------------------------------------------
+# Secrets, GitHub App / webhooks, and deploy lifecycle errors
+# ---------------------------------------------------------------------------
+
+
+class SecretNotFoundError(VelaError):
+    """A named secret does not exist in the requested scope."""
+
+
+class SecretVersionNotFoundError(VelaError):
+    """The requested immutable secret version does not exist."""
+
+
+class DeploymentConfigChangeRequiresRecreateError(VelaError):
+    """A config update changes an identity/topology field and needs recreation."""
+
+
+class GitHubAppNotConfiguredError(VelaError):
+    """No GitHub App credentials are configured."""
+
+
+class WebhookSignatureError(VelaError):
+    """Webhook HMAC signature is invalid."""
+
+
+class WebhookReplayError(VelaError):
+    """A webhook delivery id was seen before."""
+
+
+class PreviewSecretForbiddenError(VelaError):
+    """A preview deploy attempted to use a production secret or env value."""

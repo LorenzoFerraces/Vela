@@ -30,6 +30,7 @@ from app.core.exceptions import (
     EmailAlreadyRegisteredError,
     GitHubAccountAlreadyLinkedError,
     GitHubAPIError,
+    GitHubAppNotConfiguredError,
     GitHubNotConnectedError,
     GitHubOAuthError,
     GitSourceAnalysisError,
@@ -55,12 +56,15 @@ from app.core.exceptions import (
     ProjectError,
     ProjectMemberNotFoundError,
     ProjectNotFoundError,
+    PreviewSecretForbiddenError,
     ProviderConnectionError,
     RegistrationDisabledError,
     RegistryAccessDeniedError,
     ResourceLimitError,
     RouteConfigurationError,
     RouteNotFoundError,
+    SecretNotFoundError,
+    SecretVersionNotFoundError,
     StackCompositionCycleError,
     StackNotFoundError,
     TeamComputeQuotaError,
@@ -72,6 +76,8 @@ from app.core.exceptions import (
     UserNotRegisteredError,
     VelaError,
     VolumeUploadNotFoundError,
+    WebhookReplayError,
+    WebhookSignatureError,
 )
 
 logger = logging.getLogger(__name__)
@@ -269,6 +275,39 @@ def register_exception_handlers(app) -> None:
         return JSONResponse(
             status_code=status.HTTP_400_BAD_REQUEST,
             content={"detail": str(exc)},
+        )
+
+    @app.exception_handler(SecretNotFoundError)
+    @app.exception_handler(SecretVersionNotFoundError)
+    async def secret_not_found_handler(
+        _request: Request, exc: VelaError
+    ) -> JSONResponse:
+        """Return a 404 for a missing secret or secret version."""
+        return JSONResponse(
+            status_code=status.HTTP_404_NOT_FOUND,
+            content={"detail": str(exc)},
+        )
+
+    @app.exception_handler(PreviewSecretForbiddenError)
+    @app.exception_handler(WebhookSignatureError)
+    @app.exception_handler(WebhookReplayError)
+    async def preview_and_webhook_bad_request_handler(
+        _request: Request, exc: VelaError
+    ) -> JSONResponse:
+        """Return a 400 for forbidden preview secrets and invalid webhooks."""
+        return JSONResponse(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            content={"detail": str(exc)},
+        )
+
+    @app.exception_handler(GitHubAppNotConfiguredError)
+    async def github_app_not_configured_handler(
+        _request: Request, _exc: GitHubAppNotConfiguredError
+    ) -> JSONResponse:
+        """Return 503 when no GitHub App credentials are configured."""
+        return JSONResponse(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            content={"detail": "GitHub App is not configured"},
         )
 
     @app.exception_handler(NeedsBuildOverrideError)
