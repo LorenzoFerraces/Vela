@@ -16,7 +16,8 @@ from app.core.exceptions import (
     ProviderConnectionError,
     RouteNotFoundError,
 )
-from app.core.models import ContainerInfo, DeployConfig
+from app.core.models import ContainerInfo, ContainerStats, DeployConfig
+from app.core.monitoring import edge_requests
 from app.core.quotas import enforce_team_compute_capacity
 from app.core.scaling.policy_repository import (
     ScalingPolicyRuntime,
@@ -25,21 +26,20 @@ from app.core.scaling.policy_repository import (
     update_stabilization_state,
 )
 from app.core.traffic.traffic_models import BackendServer, RouteSpec
-from app.core.traffic.traffic_router import TrafficRouter
+from app.core.traffic.traffic_router import NoopTrafficRouter, TrafficRouter
 
 logger = logging.getLogger(__name__)
 
 _LOOP_INTERVAL_SECONDS = 15
 
 
-async def _measure_metric(
+async def _stats_or_none(
     orchestrator: ContainerOrchestrator,
     container_name: str,
-    metric: ScalingMetric,
-) -> float | None:
-    """Return the current metric value for ``container_name``, or None on failure."""
+) -> ContainerStats | None:
+    """Read container stats, returning None when the provider is unavailable."""
     try:
-        stats = await orchestrator.get_stats(container_name)
+        return await orchestrator.get_stats(container_name)
     except (
         ContainerNotFoundError,
         ProviderConnectionError,
@@ -48,13 +48,32 @@ async def _measure_metric(
         logger.debug("Could not read stats for %s: %s", container_name, exc)
         return None
 
-    match metric:
-        case ScalingMetric.CPU_PERCENT:
-            return stats.cpu_percent
-        case ScalingMetric.REQUESTS_PER_SECOND:
-            # Traefik metrics integration is out of scope for the initial implementation;
-            # fall back to CPU until a Prometheus/Traefik scrape is wired.
-            return stats.cpu_percent
+
+async def _measure_metric(
+    orchestrator: ContainerOrchestrator,
+    container_name: str,
+    metric: ScalingMetric,
+    traffic_router: TrafficRouter,
+) -> float | None:
+    """Return the current metric value for ``container_name``, or None on failure."""
+    if metric is ScalingMetric.REQUESTS_PER_SECOND and not isinstance(
+        traffic_router, NoopTrafficRouter
+    ):
+        signal = edge_requests.get_edge_request_rates()
+        if not signal.available:
+            return None
+        try:
+            route = await traffic_router.get_route(container_name)
+        except RouteNotFoundError:
+            return None
+        if route.host not in signal.rates_by_host:
+            return None
+        return signal.rates_by_host[route.host]
+    stats = await _stats_or_none(orchestrator, container_name)
+    if stats is None:
+        return None
+    # ponytail: noop router has no request signal; CPU is an explicit, documented proxy.
+    return float(stats.cpu_percent)
 
 
 def _is_in_cooldown(runtime: ScalingPolicyRuntime) -> bool:
@@ -256,7 +275,9 @@ async def _evaluate_policy(
     now = datetime.now(UTC)
     in_cooldown = _is_in_cooldown(runtime)
 
-    metric_value = await _measure_metric(orchestrator, base_name, policy.metric)
+    metric_value = await _measure_metric(
+        orchestrator, base_name, policy.metric, traffic_router
+    )
     if metric_value is None:
         return
 

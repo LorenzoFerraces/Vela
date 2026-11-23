@@ -2,18 +2,21 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime
+from types import SimpleNamespace
 
 import pytest
 from pydantic import ValidationError
 
 from app.core.containers.docker_orchestrator import VELA_PROJECT_LABEL
 from app.core.containers.fake_orchestrator import FakeContainerOrchestrator
-from app.core.enums import ContainerStatus
+from app.core.enums import ContainerStatus, ScalingMetric
 from app.core.exceptions import TeamComputeQuotaExceededError
 from app.core.models import ContainerInfo, DeployConfig, VolumeMount
+from app.core.monitoring import edge_requests
 from app.core.scaling.models import ScalingPolicy
-from app.core.scaling.scaling_engine import _scale_up
+from app.core.scaling.scaling_engine import _measure_metric, _scale_up
 from app.core.traffic.traffic_models import BackendServer, RouteSpec
 from app.core.traffic.traffic_router import NoopTrafficRouter
 
@@ -142,3 +145,46 @@ def test_scaling_policy_min_instances_zero_raises() -> None:
         ScalingPolicy(
             user_id="u1", target_cpu_min=70.0, max_instances=2, min_instances=0
         )
+
+
+class _Stats:
+    cpu_percent = 42.0
+
+
+class _Orchestrator:
+    async def get_stats(self, name: str) -> _Stats:
+        return _Stats()
+
+
+class _EdgeRouter:
+    async def get_route(self, name: str) -> object:
+        return SimpleNamespace(host="web.example")
+
+
+def test_noop_router_keeps_cpu_proxy() -> None:
+    result = asyncio.run(_measure_metric(
+        _Orchestrator(), "web", ScalingMetric.REQUESTS_PER_SECOND, NoopTrafficRouter(),  # type: ignore[arg-type]
+    ))
+    assert result == 42.0
+
+
+def test_rps_uses_edge_counter(monkeypatch) -> None:
+    monkeypatch.setattr(
+        edge_requests, "get_edge_request_rates",
+        lambda: edge_requests.EdgeRequestRates({"web.example": 12.0}, True),
+    )
+    result = asyncio.run(_measure_metric(
+        _Orchestrator(), "web", ScalingMetric.REQUESTS_PER_SECOND, _EdgeRouter(),  # type: ignore[arg-type]
+    ))
+    assert result == 12.0
+
+
+def test_rps_fails_closed_when_signal_unavailable(monkeypatch) -> None:
+    monkeypatch.setattr(
+        edge_requests, "get_edge_request_rates",
+        lambda: edge_requests.EdgeRequestRates({}, False),
+    )
+    result = asyncio.run(_measure_metric(
+        _Orchestrator(), "web", ScalingMetric.REQUESTS_PER_SECOND, _EdgeRouter(),  # type: ignore[arg-type]
+    ))
+    assert result is None

@@ -376,3 +376,4 @@ class ScalingPolicyInfo(BaseModel):
     last_scaled_at: datetime | None
     created_at: datetime
     updated_at: datetime
+    signal_unavailable: bool = False
