@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from datetime import UTC, datetime
 from types import SimpleNamespace
 
@@ -12,7 +13,6 @@ from pydantic import ValidationError
 from app.core.containers.docker_orchestrator import VELA_PROJECT_LABEL
 from app.core.containers.fake_orchestrator import FakeContainerOrchestrator
 from app.core.enums import ContainerStatus, ScalingMetric
-from app.core.exceptions import TeamComputeQuotaExceededError
 from app.core.models import ContainerInfo, DeployConfig, VolumeMount
 from app.core.monitoring import edge_requests
 from app.core.scaling.models import ScalingPolicy
@@ -69,9 +69,9 @@ async def test_scale_up_copies_base_container_volumes(db_session_factory) -> Non
 
 
 async def test_scale_up_blocked_when_team_compute_quota_full(
-    db_session_factory,
+    db_session_factory, caplog,
 ) -> None:
-    """A full team compute quota stops replica deployment before the orchestrator call."""
+    """A full team compute quota stops deployment with a quiet warning, no traceback."""
     from app.db.models import Organization, Project
 
     async with db_session_factory() as session:
@@ -106,7 +106,7 @@ async def test_scale_up_blocked_when_team_compute_quota_full(
         )
         await traffic_router.upsert_route(base_spec)
 
-        with pytest.raises(TeamComputeQuotaExceededError):
+        with caplog.at_level(logging.WARNING):
             await _scale_up(
                 orchestrator,
                 traffic_router,
@@ -121,6 +121,8 @@ async def test_scale_up_blocked_when_team_compute_quota_full(
             )
 
     assert orchestrator.last_deploy_config is None
+    assert "compute quota" in caplog.text.lower()
+    assert "Traceback" not in caplog.text
 
 
 def test_scaling_policy_min_equal_to_max_is_accepted() -> None:
@@ -183,6 +185,28 @@ def test_rps_fails_closed_when_signal_unavailable(monkeypatch) -> None:
     monkeypatch.setattr(
         edge_requests, "get_edge_request_rates",
         lambda: edge_requests.EdgeRequestRates({}, False),
+    )
+    result = asyncio.run(_measure_metric(
+        _Orchestrator(), "web", ScalingMetric.REQUESTS_PER_SECOND, _EdgeRouter(),  # type: ignore[arg-type]
+    ))
+    assert result is None
+
+
+def test_rps_idle_routed_host_is_zero_when_signal_flowing(monkeypatch) -> None:
+    monkeypatch.setattr(
+        edge_requests, "get_edge_request_rates",
+        lambda: edge_requests.EdgeRequestRates({"other.example": 5.0}, True),
+    )
+    result = asyncio.run(_measure_metric(
+        _Orchestrator(), "web", ScalingMetric.REQUESTS_PER_SECOND, _EdgeRouter(),  # type: ignore[arg-type]
+    ))
+    assert result == 0.0
+
+
+def test_rps_empty_rate_map_fails_closed(monkeypatch) -> None:
+    monkeypatch.setattr(
+        edge_requests, "get_edge_request_rates",
+        lambda: edge_requests.EdgeRequestRates({}, True),
     )
     result = asyncio.run(_measure_metric(
         _Orchestrator(), "web", ScalingMetric.REQUESTS_PER_SECOND, _EdgeRouter(),  # type: ignore[arg-type]

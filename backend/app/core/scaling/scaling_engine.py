@@ -15,6 +15,7 @@ from app.core.exceptions import (
     OrchestratorError,
     ProviderConnectionError,
     RouteNotFoundError,
+    TeamComputeQuotaExceededError,
 )
 from app.core.models import ContainerInfo, ContainerStats, DeployConfig
 from app.core.monitoring import edge_requests
@@ -60,15 +61,15 @@ async def _measure_metric(
         traffic_router, NoopTrafficRouter
     ):
         signal = edge_requests.get_edge_request_rates()
-        if not signal.available:
+        # ponytail: an empty map means logs rotated/lagged, not zero traffic — fail closed.
+        if not signal.available or not signal.rates_by_host:
             return None
         try:
             route = await traffic_router.get_route(container_name)
         except RouteNotFoundError:
             return None
-        if route.host not in signal.rates_by_host:
-            return None
-        return signal.rates_by_host[route.host]
+        # A routed host absent from a flowing signal is genuinely idle (scale-down case).
+        return signal.rates_by_host.get(route.host, 0.0)
     stats = await _stats_or_none(orchestrator, container_name)
     if stats is None:
         return None
@@ -178,9 +179,13 @@ async def _scale_up(
     """Add one replica and register it with Traefik."""
     next_index = current_replica_count + 1
     if base_config.project_id is not None:
-        await enforce_team_compute_capacity(
-            session, orchestrator, base_config.project_id
-        )
+        try:
+            await enforce_team_compute_capacity(
+                session, orchestrator, base_config.project_id
+            )
+        except TeamComputeQuotaExceededError as exc:
+            logger.warning("Scale-up blocked by compute quota for %s: %s", base_name, exc)
+            return
     try:
         replica_info = await orchestrator.deploy_replica(base_config, next_index)
     except (OrchestratorError, ProviderConnectionError) as exc:

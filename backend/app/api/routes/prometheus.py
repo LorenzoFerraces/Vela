@@ -15,7 +15,7 @@ from app.core.containers.orchestrator import ContainerOrchestrator
 from app.core.enums import ContainerStatus
 from app.core.exceptions import NotAuthenticatedError
 from app.core.monitoring.edge_requests import get_edge_request_rates
-from app.db.models import DeployJobRecord
+from app.db.models import ContainerMetric, DeployJobRecord
 
 router = APIRouter()
 
@@ -63,6 +63,22 @@ async def prometheus_metrics(
     _add(families, "vela_edge_signal_available", "Edge request signal is available", 1 if edge.available else 0)
     for host, rate in sorted(edge.rates_by_host.items()):
         _add(families, "vela_edge_requests_per_second", "Requests per second at the edge", rate, {"host": host})
+
+    newest = (await session.execute(
+        select(func.max(ContainerMetric.timestamp))
+    )).scalar_one_or_none()
+    if newest is None:
+        collector_age_seconds = 0.0
+    else:
+        if newest.tzinfo is None:
+            newest = newest.replace(tzinfo=timezone.utc)
+        collector_age_seconds = max(0.0, (datetime.now(timezone.utc) - newest).total_seconds())
+    _add(
+        families,
+        "vela_collector_last_sample_age_seconds",
+        "Seconds since the newest stored container metric sample (0 when none exist)",
+        collector_age_seconds,
+    )
 
     containers = await orchestrator.list()
     states = Counter(str(info.status) for info in containers)

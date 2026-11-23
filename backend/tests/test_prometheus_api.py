@@ -1,14 +1,14 @@
 import asyncio
 import json
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from fastapi.testclient import TestClient
 
 from app.api.routes.prometheus import require_metrics_token
 from app.core.enums import ContainerStatus
 from app.core.monitoring.edge_requests import reset_edge_request_cache
-from app.db.models import DeployJobRecord
+from app.db.models import ContainerMetric, DeployJobRecord
 
 
 def test_metrics_requires_configured_token(api_client, monkeypatch) -> None:
@@ -91,3 +91,50 @@ def test_edge_host_label_values_are_escaped(api_client, monkeypatch, tmp_path) -
         "/metrics", headers={"Authorization": "Bearer scrape-secret"},
     ).text
     assert 'host="bad\\"host\\\\name\\nnext"' in body
+
+
+def test_metrics_reports_collector_sample_age_with_no_samples(api_client, monkeypatch) -> None:
+    monkeypatch.setenv("VELA_METRICS_TOKEN", "scrape-secret")
+    body = TestClient(api_client.app).get(
+        "/metrics", headers={"Authorization": "Bearer scrape-secret"},
+    ).text
+    assert (
+        "# HELP vela_collector_last_sample_age_seconds "
+        "Seconds since the newest stored container metric sample (0 when none exist)"
+    ) in body
+    assert "# TYPE vela_collector_last_sample_age_seconds gauge" in body
+    age_line = next(
+        line for line in body.splitlines()
+        if line.startswith("vela_collector_last_sample_age_seconds ")
+    )
+    assert float(age_line.split()[1]) == 0.0
+
+
+def test_metrics_collector_age_reflects_stored_samples(
+    api_client, monkeypatch, db_session_factory
+) -> None:
+    monkeypatch.setenv("VELA_METRICS_TOKEN", "scrape-secret")
+
+    async def seed() -> None:
+        async with db_session_factory() as session:
+            session.add(ContainerMetric(
+                container_id="collected-container",
+                timestamp=datetime.now(UTC) - timedelta(minutes=5),
+                cpu_percent=1.0,
+                memory_usage_bytes=1024,
+                memory_limit_bytes=2048,
+                memory_percent=50.0,
+                network_rx_bytes=0,
+                network_tx_bytes=0,
+            ))
+            await session.commit()
+
+    asyncio.run(seed())
+    body = TestClient(api_client.app).get(
+        "/metrics", headers={"Authorization": "Bearer scrape-secret"},
+    ).text
+    age_line = next(
+        line for line in body.splitlines()
+        if line.startswith("vela_collector_last_sample_age_seconds ")
+    )
+    assert 295 <= float(age_line.split()[1]) <= 305
