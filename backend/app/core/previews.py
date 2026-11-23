@@ -45,7 +45,7 @@ async def collect_expired_previews(
     for row in rows:
         if row.container_id:
             await orchestrator.remove(row.container_id, force=True)
-        if row.route_host:
+        if row.container_name or row.route_host:
             await traffic_router.remove_route(row.container_name or row.route_host)
         row.status = "expired"
         row.closed_at = now
@@ -61,7 +61,7 @@ async def teardown_preview(
     if row.container_id:
         with suppress(Exception):
             await orchestrator.remove(row.container_id, force=True)
-    if row.route_host:
+    if row.container_name or row.route_host:
         with suppress(Exception):
             await traffic_router.remove_route(row.container_name or row.route_host)
     row.status = status

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Annotated
@@ -51,6 +52,7 @@ from app.db.models import (
 )
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 @router.post("/webhooks/github/{project_id}")
@@ -134,11 +136,12 @@ async def github_webhook(
         action = body.get("action")
         repo_full_name = body["repository"]["full_name"]
         if action in {"opened", "synchronize", "reopened"}:
-            await _enqueue_preview(
+            if not await _enqueue_preview(
                 session, background_tasks, registry, session_factory,
                 orchestrator, traffic_router, image_builder, config, project_id,
-                repo_full_name, pr_number, pull_request,
-            )
+                repo_full_name, pr_number, pull_request, delivery,
+            ):
+                return {"status": "failed"}
         elif action == "closed":
             await _teardown_preview_row(
                 session, project_id, repo_full_name, pr_number,
@@ -160,14 +163,15 @@ async def _enqueue_preview(
     repo_full_name: str,
     pr_number: int,
     pull_request: dict,
-) -> None:
+    delivery: GitHubWebhookDelivery,
+) -> bool:
     """Upsert the preview row and deploy the PR head through the source worker."""
     head = pull_request.get("head") or {}
     head_sha = str(head.get("sha") or "")
     head_ref = str(head.get("ref") or head_sha)
     clone_url = str((head.get("repo") or {}).get("clone_url") or "")
     if not clone_url or config.created_by_user_id is None:
-        return
+        return True
 
     preview_config = preview_deploy_config(
         repo_full_name=repo_full_name,
@@ -177,7 +181,6 @@ async def _enqueue_preview(
         env_vars={},
         ttl_seconds=config.preview_ttl_seconds,
     )
-    token = await installation_token(session, project_id)
     now = datetime.now(UTC)
     expires_at = now + timedelta(seconds=config.preview_ttl_seconds)
     row = (
@@ -206,6 +209,18 @@ async def _enqueue_preview(
         row.container_name = None
         row.route_host = None
         row.public_url = None
+
+    try:
+        token = await installation_token(session, project_id)
+    except GitHubAppNotConfiguredError as exc:
+        logger.warning(
+            "Preview deploy for %s #%s has no App installation: %s",
+            repo_full_name, pr_number, exc,
+        )
+        row.status = "failed"
+        delivery.error = str(exc)
+        await session.commit()
+        return False
     await session.commit()
 
     run_body = RunFromSourceRequest(
@@ -246,6 +261,7 @@ async def _enqueue_preview(
         "pr-",
         row.id,
     )
+    return True
 
 
 async def _run_preview_worker(

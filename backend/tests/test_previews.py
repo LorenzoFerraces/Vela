@@ -15,7 +15,13 @@ from sqlalchemy import select
 
 from app.core.exceptions import PreviewSecretForbiddenError
 from app.core.previews import collect_expired_previews, preview_deploy_config
-from app.db.models import GitHubAppInstall, GitHubWebhookConfig, PreviewDeploy, User
+from app.db.models import (
+    GitHubAppInstall,
+    GitHubWebhookConfig,
+    GitHubWebhookDelivery,
+    PreviewDeploy,
+    User,
+)
 
 WEBHOOK_SECRET = "preview-hook-secret"
 
@@ -342,3 +348,131 @@ def test_previews_endpoint_returns_member_rows(
     assert len(entries) == 1
     assert entries[0]["pr_number"] == 31
     assert entries[0]["public_url"] == "https://pr-31.example.test/"
+
+
+def test_preview_deploy_then_close_removes_route_by_container_name(
+    api_client, db_session_factory, seeded_user, monkeypatch, noop_router,
+    fake_orchestrator,
+) -> None:
+    from app.core.enums import BuildStrategy, SupportedLanguage
+    from app.core.models import BuildResult, ProjectInfo
+
+    monkeypatch.setenv("VELA_PUBLIC_ROUTE_DOMAIN", "example.test")
+
+    async def fake_token(session, project_id) -> str:
+        return "inst-token-xyz"
+
+    monkeypatch.setattr("app.api.routes.webhooks.installation_token", fake_token)
+
+    async def inline_spawn(registry, job_id, worker, *worker_args) -> None:
+        await worker(*worker_args)
+
+    monkeypatch.setattr("app.api.routes.webhooks.spawn_deploy_worker", inline_spawn)
+
+    async def fake_build(self, source, *, tag, access_token=None, override=None, on_phase=None):
+        assert access_token == "inst-token-xyz"
+        assert source.git_url == "https://github.com/org/repo.git"
+        return BuildResult(
+            image_id="sha256:fake", image_tag=tag,
+            strategy=BuildStrategy.GENERATED_DOCKERFILE, build_log="",
+            project_info=ProjectInfo(language=SupportedLanguage.PYTHON),
+        )
+
+    monkeypatch.setattr(
+        "app.core.build.default_image_builder.DefaultImageBuilder.build_from_source",
+        fake_build,
+    )
+
+    removed_containers: list[str] = []
+    removed_routes: list[str] = []
+    original_container_remove = fake_orchestrator.remove
+    original_route_remove = noop_router.remove_route
+
+    async def spy_container_remove(container_id: str, *, force: bool = False) -> None:
+        removed_containers.append(container_id)
+        await original_container_remove(container_id, force=force)
+
+    async def spy_route_remove(route_id: str) -> None:
+        removed_routes.append(route_id)
+        await original_route_remove(route_id)
+
+    monkeypatch.setattr(fake_orchestrator, "remove", spy_container_remove)
+    monkeypatch.setattr(noop_router, "remove_route", spy_route_remove)
+
+    project_id = uuid.uuid4()
+    _seed_webhook(db_session_factory, project_id, seeded_user.id)
+    opened, opened_body = _pr_payload("opened", "deadbeefcafe", "feature")
+    assert api_client.post(
+        f"/webhooks/github/{project_id}",
+        content=opened_body,
+        headers=_headers(opened, "pull_request", "pr-e2e-open"),
+    ).json()["status"] == "received"
+
+    async def get_preview() -> PreviewDeploy:
+        async with db_session_factory() as session:
+            return (
+                await session.execute(
+                    select(PreviewDeploy).where(
+                        PreviewDeploy.project_id == project_id,
+                        PreviewDeploy.pr_number == 21,
+                    )
+                )
+            ).scalar_one()
+
+    preview = asyncio.run(get_preview())
+    assert preview.status == "deployed"
+    assert preview.container_id is not None
+    assert preview.container_name == "pr-21-deadbeef"
+    assert preview.route_host is None  # mirror never persisted it — the regression
+    route_ids = [route.route_id for route in asyncio.run(noop_router.list_routes())]
+    assert preview.container_name in route_ids
+
+    closed, closed_body = _pr_payload("closed", "deadbeefcafe", "feature")
+    assert api_client.post(
+        f"/webhooks/github/{project_id}",
+        content=closed_body,
+        headers=_headers(closed, "pull_request", "pr-e2e-close"),
+    ).json()["status"] == "received"
+
+    assert removed_containers == [preview.container_id]
+    assert removed_routes == [preview.container_name]
+    assert asyncio.run(get_preview()).status == "closed"
+
+
+def test_preview_without_app_link_fails_gracefully(
+    api_client, db_session_factory, seeded_user
+) -> None:
+    project_id = uuid.uuid4()
+    _seed_webhook(db_session_factory, project_id, seeded_user.id)
+    payload, body = _pr_payload("opened", "aaaabbbbcccc", "feature")
+    delivery_id = "pr-no-app-link"
+    response = api_client.post(
+        f"/webhooks/github/{project_id}",
+        content=body,
+        headers=_headers(payload, "pull_request", delivery_id),
+    )
+    assert response.status_code == 200
+    assert response.json() == {"status": "failed"}
+
+    async def get_rows() -> tuple[GitHubWebhookDelivery, PreviewDeploy]:
+        async with db_session_factory() as session:
+            delivery = (
+                await session.execute(
+                    select(GitHubWebhookDelivery).where(
+                        GitHubWebhookDelivery.delivery_id == delivery_id
+                    )
+                )
+            ).scalar_one()
+            preview = (
+                await session.execute(
+                    select(PreviewDeploy).where(
+                        PreviewDeploy.project_id == project_id,
+                        PreviewDeploy.pr_number == 21,
+                    )
+                )
+            ).scalar_one()
+            return delivery, preview
+
+    delivery, preview = asyncio.run(get_rows())
+    assert "installation" in (delivery.error or "").lower()
+    assert preview.status == "failed"
