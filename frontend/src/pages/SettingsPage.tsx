@@ -13,6 +13,7 @@ import {
   patchAiPrefillPreferences,
   type AiPrefillPreferences,
 } from '../api/client'
+import GitHubAppCard from './settings/GitHubAppCard'
 import LlmProviderCard from './settings/LlmProviderCard'
 import ProfileSection from './settings/ProfileSection'
 import { EmailNotificationSettingsCard } from '../components/EmailNotificationSettings'
@@ -207,6 +208,8 @@ export default function SettingsPage() {
           <DisconnectedGithubCard onConnect={handleConnect} busy={busy} />
         )}
       </div>
+
+      {user?.role === 'admin' ? <GitHubAppCard /> : null}
 
       <LlmProviderCard
         onChanged={() => setAiStatusVersion((version) => version + 1)}

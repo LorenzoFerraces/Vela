@@ -16,6 +16,7 @@ import {
   teamDescription,
   teamDisplayName,
 } from '../../projects/teamDisplay'
+import WebhookSettings from './WebhookSettings'
 
 function formatGib(bytes: number): string {
   return `${(bytes / 1024 ** 3).toFixed(1)} GiB`
@@ -320,6 +321,7 @@ export function TeamDetail({
               </>
             ) : null}
           </section>
+          {isSelectedOwner ? <WebhookSettings projectId={project.id} /> : null}
           <section className="teams-page__section">
             <h3 className="teams-page__section-title">Members</h3>
             {members.length === 0 ? (

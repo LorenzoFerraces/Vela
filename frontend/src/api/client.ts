@@ -54,6 +54,14 @@ export {
   type DeployServiceState,
 } from './deploys'
 
+export {
+  getGithubAppConfig,
+  getWebhookConfig,
+  listWebhookDeliveries,
+  setGithubAppConfig,
+  setWebhookConfig,
+} from './githubApp'
+
 export { isLlmFallbackError } from './llmErrors'
 
 export { listScalingPolicies } from './scaling'
@@ -233,6 +241,14 @@ export type {
   LlmProviderTestResult,
   LlmProviderUpdate,
 } from './settings'
+
+export type {
+  GitHubAppConfigPublic,
+  GitHubAppConfigUpdate,
+  WebhookConfigPublic,
+  WebhookConfigUpdate,
+  WebhookDeliveryPublic,
+} from './githubApp'
 
 export type {
   AlertHistoryEntry,

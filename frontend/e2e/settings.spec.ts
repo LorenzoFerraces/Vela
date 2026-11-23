@@ -74,6 +74,46 @@ test.describe('Settings page', () => {
     ).toBeVisible()
   })
 
+  test('saves App credentials as admin and shows masked status', async ({
+    authenticatedPage,
+  }) => {
+    const card = authenticatedPage.locator('.settings-card').filter({
+      has: authenticatedPage.getByRole('heading', {
+        name: 'App credentials',
+        level: 3,
+      }),
+    })
+
+    await authenticatedPage.goto('/settings')
+    await expect(card).toBeVisible()
+    await card.getByLabel('App ID').fill('123456')
+    await card.getByLabel('Slug').fill('vela-e2e')
+    await card
+      .getByLabel('Private key')
+      .fill('-----BEGIN PRIVATE KEY-----\ne2e\n-----END PRIVATE KEY-----')
+    await card.getByLabel('Webhook secret').fill('whsec-e2e-example')
+    await card.getByRole('button', { name: 'Save credentials' }).click()
+
+    await expect(
+      card.getByRole('status').filter({ hasText: 'Credentials saved.' }),
+    ).toBeVisible()
+    await expect(
+      card.getByRole('status').filter({ hasText: 'Private key: saved' }),
+    ).toBeVisible()
+    await expect(
+      card.getByRole('status').filter({ hasText: 'Webhook secret: saved' }),
+    ).toBeVisible()
+
+    await authenticatedPage.reload()
+    await expect(card.getByLabel('App ID')).toHaveValue('123456')
+    await expect(card.getByLabel('Slug')).toHaveValue('vela-e2e')
+    await expect(
+      card.getByRole('status').filter({ hasText: 'Private key: saved' }),
+    ).toBeVisible()
+    await expect(card.getByLabel('Private key')).toHaveValue('')
+    await expect(card.getByLabel('Webhook secret')).toHaveValue('')
+  })
+
   test('surfaces the OAuth callback banner on ?github=connected', async ({
     authenticatedPage,
   }) => {
