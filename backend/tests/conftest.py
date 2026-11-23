@@ -337,8 +337,12 @@ def _build_app_with_overrides(
 
     app.dependency_overrides[get_db] = _get_db_override
     app.dependency_overrides[get_db_session_factory] = lambda: db_session_factory
-    if deploy_jobs is not None:
-        app.dependency_overrides[get_deploy_jobs] = lambda: deploy_jobs
+    # Lifespan registry binds to the real engine; db_app/make_authed_client need
+    # one bound to db_session_factory even when no registry is supplied.
+    jobs_registry = (
+        deploy_jobs if deploy_jobs is not None else DeployJobRegistry(db_session_factory)
+    )
+    app.dependency_overrides[get_deploy_jobs] = lambda: jobs_registry
     if orchestrator is not None:
         app.dependency_overrides[get_orchestrator] = lambda: orchestrator
     if image_builder is not None:

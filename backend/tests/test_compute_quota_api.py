@@ -7,7 +7,7 @@ from uuid import UUID, uuid4
 
 from fastapi.testclient import TestClient
 
-from app.db.models import Project
+from app.db.models import Organization, Project, ProjectMembership
 
 
 def _personal_project_id(client: TestClient) -> str:
@@ -32,12 +32,43 @@ def test_owner_can_set_compute_quota_within_ceiling(
     assert response.json()["max_running_containers"] == 5
 
 
-def test_member_cannot_set_compute_quota(other_user_client: TestClient) -> None:
+async def test_member_cannot_set_compute_quota(
+    other_user_client: TestClient,
+    seeded_other_user: Any,
+    db_session_factory: Any,
+) -> None:
+    """A member with a non-owner role is rejected by the owner gate, not by membership."""
+    async with db_session_factory() as session:
+        organization = Organization(name="quota-team")
+        session.add(organization)
+        await session.flush()
+        project = Project(
+            organization_id=organization.id,
+            name="member-gated",
+            max_running_containers=3,
+        )
+        session.add(project)
+        await session.flush()
+        session.add(
+            ProjectMembership(
+                project_id=project.id,
+                user_id=seeded_other_user.id,
+                role="viewer",
+            )
+        )
+        await session.commit()
+        project_id = project.id
+
     response = other_user_client.patch(
-        f"/api/projects/{uuid4()}/compute-quota",
-        json={"max_running_containers": 5},
+        f"/api/projects/{project_id}/compute-quota",
+        json={"max_running_containers": 9},
     )
-    assert response.status_code in (403, 404)
+    assert response.status_code == 403, response.text
+
+    async with db_session_factory() as session:
+        stored = await session.get(Project, project_id)
+        assert stored is not None
+        assert stored.max_running_containers == 3
 
 
 def test_quota_above_ceiling_is_rejected(
