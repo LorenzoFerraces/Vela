@@ -43,7 +43,7 @@ async def list_active_deploy_jobs(
     if project_id is not None and project_id not in accessible:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Project not found.")
 
-    jobs = registry.active(project_ids=accessible)
+    jobs = await registry.active(project_ids=accessible)
     if project_id is not None:
         jobs = [job for job in jobs if job.project_id == project_id]
     return [DeployJobPublic.model_validate(job) for job in jobs]

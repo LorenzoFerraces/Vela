@@ -45,7 +45,11 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def _lifespan(_application: FastAPI):
-    from app.api.deps import get_orchestrator, get_traffic_router
+    from app.api.deps import (
+        get_db_session_factory,
+        get_orchestrator,
+        get_traffic_router,
+    )
     from app.core.auth.bootstrap import ensure_admin_user
     from app.core.exceptions import ProviderConnectionError, TrafficRouterError
     from app.core.logging.collector import COLLECTOR_ENABLED, LogCollector
@@ -63,7 +67,7 @@ async def _lifespan(_application: FastAPI):
         logger.error("Bootstrap admin configuration is invalid: %s", exc)
         raise
 
-    deploy_jobs = DeployJobRegistry()
+    deploy_jobs = DeployJobRegistry(get_db_session_factory())
     _application.state.deploy_jobs = deploy_jobs
 
     monitor_task = asyncio.create_task(run_monitoring_loop())

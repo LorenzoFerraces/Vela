@@ -54,6 +54,7 @@ from app.api.app import create_app
 from app.api.deps import (
     get_db,
     get_db_session_factory,
+    get_deploy_jobs,
     get_image_builder,
     get_object_storage,
     get_orchestrator,
@@ -68,6 +69,7 @@ from app.core.containers.docker_orchestrator import (
     VELA_OWNER_LABEL,
 )
 from app.core.containers.fake_orchestrator import FakeContainerOrchestrator
+from app.core.deploy.jobs import DeployJobRegistry
 from app.core.enums import ContainerStatus, HealthStatus
 from app.core.models import ContainerInfo
 from app.core.storage.memory import InMemoryObjectStorage
@@ -205,6 +207,14 @@ def db_session_factory() -> Iterator[async_sessionmaker[AsyncSession]]:
 
 
 @pytest.fixture
+def deploy_jobs(
+    db_session_factory: async_sessionmaker[AsyncSession],
+) -> DeployJobRegistry:
+    """Deploy job registry backed by the test database."""
+    return DeployJobRegistry(db_session_factory)
+
+
+@pytest.fixture
 def provision_user(
     db_session_factory: async_sessionmaker[AsyncSession],
 ):
@@ -309,6 +319,7 @@ def seeded_other_user(
 def _build_app_with_overrides(
     *,
     db_session_factory: async_sessionmaker[AsyncSession],
+    deploy_jobs: DeployJobRegistry | None = None,
     orchestrator: Any | None = None,
     image_builder: Any | None = None,
     traffic_router: Any | None = None,
@@ -324,6 +335,8 @@ def _build_app_with_overrides(
 
     app.dependency_overrides[get_db] = _get_db_override
     app.dependency_overrides[get_db_session_factory] = lambda: db_session_factory
+    if deploy_jobs is not None:
+        app.dependency_overrides[get_deploy_jobs] = lambda: deploy_jobs
     if orchestrator is not None:
         app.dependency_overrides[get_orchestrator] = lambda: orchestrator
     if image_builder is not None:
@@ -353,6 +366,7 @@ def db_app(
 @pytest.fixture
 def integration_app(
     db_session_factory: async_sessionmaker[AsyncSession],
+    deploy_jobs: DeployJobRegistry,
     fake_orchestrator: FakeContainerOrchestrator,
     image_builder: DefaultImageBuilder,
     noop_router: NoopTrafficRouter,
@@ -366,6 +380,7 @@ def integration_app(
     """
     app = _build_app_with_overrides(
         db_session_factory=db_session_factory,
+        deploy_jobs=deploy_jobs,
         orchestrator=fake_orchestrator,
         image_builder=image_builder,
         traffic_router=noop_router,

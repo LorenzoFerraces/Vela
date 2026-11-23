@@ -881,7 +881,7 @@ async def _run_container_deploy_worker(
         async with session_factory() as session:
             user = await get_user_by_id(session, user_id)
             if user is None:
-                registry.complete_failure(
+                await registry.complete_failure(
                     job_id,
                     {
                         "code": "deploy_failed",
@@ -915,11 +915,11 @@ async def _run_container_deploy_worker(
                     cfg, owner_id=str(user.id), project_id=project_id
                 )
                 cfg = await apply_public_route_to_deploy_config(cfg, traffic_router)
-                registry.set_phase(job_id, "starting", image_ref)
+                await registry.set_phase(job_id, "starting", image_ref)
                 info, route_wired, public_url = await _deploy_and_maybe_wire_route(
                     orchestrator, traffic_router, cfg
                 )
-                registry.set_phase(job_id, "routing")
+                await registry.set_phase(job_id, "routing")
                 await _persist_run_deployment(
                     session,
                     user,
@@ -948,7 +948,7 @@ async def _run_container_deploy_worker(
                     },
                 )
                 await session.commit()
-                registry.complete_success(
+                await registry.complete_success(
                     job_id,
                     RunFromSourceResponse(
                         container=info,
@@ -970,7 +970,7 @@ async def _run_container_deploy_worker(
                     session, user.id, template_id
                 )
                 tag = f"vela/templatebuild:{uuid.uuid4().hex[:12]}"
-                registry.set_phase(job_id, "building", tag)
+                await registry.set_phase(job_id, "building", tag)
                 build_result = await image_builder.build_from_dockerfile_template(
                     template.contents,
                     tag=tag,
@@ -1000,11 +1000,11 @@ async def _run_container_deploy_worker(
                     cfg, owner_id=str(user.id), project_id=project_id
                 )
                 cfg = await apply_public_route_to_deploy_config(cfg, traffic_router)
-                registry.set_phase(job_id, "starting", build_result.image_tag)
+                await registry.set_phase(job_id, "starting", build_result.image_tag)
                 info, route_wired, public_url = await _deploy_and_maybe_wire_route(
                     orchestrator, traffic_router, cfg
                 )
-                registry.set_phase(job_id, "routing")
+                await registry.set_phase(job_id, "routing")
                 await _persist_run_deployment(
                     session,
                     user,
@@ -1035,7 +1035,7 @@ async def _run_container_deploy_worker(
                     },
                 )
                 await session.commit()
-                registry.complete_success(
+                await registry.complete_success(
                     job_id,
                     RunFromSourceResponse(
                         container=info,
@@ -1097,11 +1097,11 @@ async def _run_container_deploy_worker(
                 cfg, owner_id=str(user.id), project_id=project_id
             )
             cfg = await apply_public_route_to_deploy_config(cfg, traffic_router)
-            registry.set_phase(job_id, "starting", build_result.image_tag)
+            await registry.set_phase(job_id, "starting", build_result.image_tag)
             info, route_wired, public_url = await _deploy_and_maybe_wire_route(
                 orchestrator, traffic_router, cfg
             )
-            registry.set_phase(job_id, "routing")
+            await registry.set_phase(job_id, "routing")
             await _persist_run_deployment(
                 session,
                 user,
@@ -1130,7 +1130,7 @@ async def _run_container_deploy_worker(
                 },
             )
             await session.commit()
-            registry.complete_success(
+            await registry.complete_success(
                 job_id,
                 RunFromSourceResponse(
                     container=info,
@@ -1144,7 +1144,7 @@ async def _run_container_deploy_worker(
             )
             return
     except Exception as exc:  # noqa: BLE001
-        registry.complete_failure(job_id, classify_deploy_error(exc))
+        await registry.complete_failure(job_id, classify_deploy_error(exc))
 
 
 @router.post(
@@ -1201,14 +1201,14 @@ async def run_from_user_source(
         source_label = sanitize_url_for_display((body.git_url or "").strip())
     else:
         source_label = ""
-    job = registry.create(
+    job = await registry.create(
         kind="container",
         project_id=project_id,
         user_id=current_user.id,
         name=job_name,
         source_label=source_label,
     )
-    registry.set_phase(job.job_id, "queued")
+    await registry.set_phase(job.job_id, "queued")
     background_tasks.add_task(
         spawn_deploy_worker,
         registry,

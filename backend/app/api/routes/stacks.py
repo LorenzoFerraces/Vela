@@ -290,7 +290,7 @@ async def _run_stack_deploy_worker(
             stack = await get_stack(session, stack_id, user_id)
             user = await get_user_by_id(session, user_id)
             if stack is None or user is None:
-                registry.complete_failure(
+                await registry.complete_failure(
                     job_id,
                     {"code": "deploy_failed", "detail": "Stack not found."},
                 )
@@ -306,7 +306,7 @@ async def _run_stack_deploy_worker(
                 if child:
                     child_stacks.append(child)
 
-            registry.set_services(
+            await registry.set_services(
                 job_id,
                 [s.service_name for s in resolve_composition(stack, child_stacks)],
             )
@@ -324,7 +324,7 @@ async def _run_stack_deploy_worker(
                 ),
             )
     except Exception as exc:  # noqa: BLE001
-        registry.complete_failure(job_id, classify_deploy_error(exc))
+        await registry.complete_failure(job_id, classify_deploy_error(exc))
         return
 
     if result.get("error"):
@@ -338,9 +338,9 @@ async def _run_stack_deploy_worker(
         }
         if failed_service:
             error["failed_service"] = str(failed_service)
-        registry.complete_failure(job_id, error)
+        await registry.complete_failure(job_id, error)
         return
-    registry.complete_success(job_id, result)
+    await registry.complete_success(job_id, result)
 
 
 @router.post(
@@ -385,7 +385,7 @@ async def deploy_user_stack(
             child_stacks.append(child)
 
     services = resolve_composition(stack, child_stacks)
-    job = registry.create(
+    job = await registry.create(
         kind="stack",
         project_id=stack.project_id,
         user_id=current_user.id,
@@ -393,7 +393,7 @@ async def deploy_user_stack(
         source_label=stack.network_name,
         services=[s.service_name for s in services],
     )
-    registry.set_phase(job.job_id, "queued")
+    await registry.set_phase(job.job_id, "queued")
     background_tasks.add_task(
         spawn_deploy_worker,
         registry,
