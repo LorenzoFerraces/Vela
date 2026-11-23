@@ -30,10 +30,14 @@ export async function sourcesCommand(argv: string[]): Promise<number> {
   const action = argv[0] ?? "list"
   if (action !== "list") throw new VelaError(2, `Unknown sources action: ${action}`)
   const config = requireToken(resolveConfig({}))
-  const response = await request<{ suggestions: Array<{ kind: string; name?: string; id?: string; image?: string; git_url?: string }> }>(config, "GET", "/containers/deploy-sources?q=")
-  const label = (suggestion: { kind: string; name?: string; id?: string; image?: string; git_url?: string }): string =>
-    `${suggestion.kind}: ${suggestion.name ?? suggestion.image ?? suggestion.git_url ?? suggestion.id ?? ""}`
-  emit(response, () => response.suggestions.map(label).join("\n"))
+  type SourceSuggestion = {
+    kind: string; name?: string; id?: string; ref?: string; label?: string
+    image?: string; url?: string; git_url?: string
+  }
+  const response = await request<{ suggestions: SourceSuggestion[] }>(config, "GET", "/containers/deploy-sources?q=")
+  const describe = (suggestion: SourceSuggestion): string =>
+    `${suggestion.kind}: ${suggestion.label ?? suggestion.ref ?? suggestion.name ?? suggestion.image ?? suggestion.url ?? suggestion.git_url ?? suggestion.id ?? ""}`
+  emit(response, () => response.suggestions.map(describe).join("\n"))
   return 0
 }
 

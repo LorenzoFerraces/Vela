@@ -37,6 +37,24 @@ test("sources list hits /api/containers/deploy-sources", async () => {
   expect(await sourcesCommand(["list"])).toBe(0)
   expect(calls[0].url).toContain("/api/containers/deploy-sources")
 })
+test("sources list renders image suggestions by ref/label and others by name", async () => {
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    calls.push({ method: "GET", url: String(input) })
+    return new Response(JSON.stringify({ suggestions: [
+      { kind: "image", ref: "nginx:alpine", label: "nginx:alpine" },
+      { kind: "git", url: "https://github.com/o/r.git", name: "r", default_branch: "main" },
+      { kind: "dockerfile_template", id: "tpl_1", name: "tpl" },
+    ] }), { status: 200, headers: { "content-type": "application/json" } })
+  }) as typeof fetch
+  const lines: string[] = []
+  const log = console.log; console.log = (value: string) => lines.push(value)
+  try { expect(await sourcesCommand(["list"])).toBe(0) } finally { console.log = log }
+  const output = lines.join("\n")
+  expect(output).toContain("image: nginx:alpine")
+  expect(output).toContain("git: r")
+  expect(output).toContain("dockerfile_template: tpl")
+})
+
 test("settings show hits /api/settings/ai-prefill", async () => {
   expect(await settingsCommand(["show"])).toBe(0)
   expect(calls[0].url).toContain("/api/settings/ai-prefill")
