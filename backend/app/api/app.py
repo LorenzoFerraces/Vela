@@ -38,6 +38,7 @@ from app.api.routes import (
     tokens,
     traffic,
     users,
+    webhooks,
 )
 from app.core.deploy.jobs import DeployJobRegistry
 
@@ -326,6 +327,9 @@ def create_app() -> FastAPI:
     )
 
     application.include_router(prometheus.router, tags=["prometheus"])
+    # Receiver is outside /api: HMAC is its only auth, so it must not appear in
+    # the anonymous /api auth regression scan. Config routes carry explicit /api.
+    application.include_router(webhooks.router, tags=["webhooks"])
 
     @application.get(f"{API_PREFIX}/health", tags=["health"])
     async def health() -> dict[str, str]:

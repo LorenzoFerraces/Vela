@@ -90,7 +90,7 @@ from app.core.deploy.deployment_history import (
     record_deployment,
 )
 from app.core.deploy.github_auth import (
-    github_token_for_url,
+    github_token_for_project,
     is_github_https_url,
     looks_like_auth_failure,
 )
@@ -1067,7 +1067,11 @@ async def _run_container_deploy_worker(
 
             git_url = (body.git_url or "").strip()
             sanitized_git_url = sanitize_url_for_display(git_url)
-            access_token = await github_token_for_url(session, user, git_url)
+            access_token = (
+                await github_token_for_project(session, project_id, user)
+                if is_github_https_url(git_url)
+                else None
+            )
             tag = f"vela/gitbuild:{uuid.uuid4().hex[:12]}"
             try:
                 build_result = await image_builder.build_from_source(
