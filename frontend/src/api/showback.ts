@@ -1,4 +1,9 @@
-import { apiGet, getAccessToken, getApiBaseUrl } from './core'
+import {
+  apiGet,
+  endSessionForAuthError,
+  getAccessToken,
+  getApiBaseUrl,
+} from './core'
 
 export interface TeamShowback {
   team_name: string
@@ -24,7 +29,10 @@ export async function exportShowbackCsv(month: string): Promise<void> {
     headers.set('Authorization', `Bearer ${token}`)
   }
   const response = await fetch(url, { headers })
-  if (!response.ok) throw new Error('Could not export showback report')
+  if (!response.ok) {
+    endSessionForAuthError(response, await response.text())
+    throw new Error('Could not export showback report')
+  }
   const blob = await response.blob()
   const link = document.createElement('a')
   link.href = URL.createObjectURL(blob)

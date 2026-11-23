@@ -101,7 +101,7 @@ export function isAccountDeactivated(error: unknown): boolean {
   return error instanceof ApiError && hasErrorCode(error.body, 'account_deactivated')
 }
 
-function endSessionForAuthError(
+export function endSessionForAuthError(
   response: Response,
   body: string,
   skipAuth = false
