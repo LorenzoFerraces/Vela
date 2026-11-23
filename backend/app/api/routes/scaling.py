@@ -37,7 +37,10 @@ def _with_signal_status(info: ScalingPolicyInfo) -> ScalingPolicyInfo:
     if info.metric is ScalingMetric.REQUESTS_PER_SECOND and not isinstance(
         get_traffic_router(), NoopTrafficRouter
     ):
-        info.signal_unavailable = not get_edge_request_rates().available
+        rates = get_edge_request_rates()
+        # The scaling engine treats an empty rates map as no signal; mirror that
+        # so the API status reflects when it will actually act.
+        info.signal_unavailable = not (rates.available and rates.rates_by_host)
     return info
 
 

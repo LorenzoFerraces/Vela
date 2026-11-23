@@ -108,6 +108,22 @@ def test_rps_policy_signal_available(api_client: TestClient, monkeypatch) -> Non
     assert created.json()["signal_unavailable"] is False
 
 
+def test_rps_empty_rates_map_marks_signal_unavailable(
+    api_client: TestClient, monkeypatch
+) -> None:
+    """An available but empty signal fails closed, like the scaling engine."""
+    monkeypatch.setattr(scaling, "get_traffic_router", lambda: _EdgeRouter())
+    monkeypatch.setattr(
+        scaling,
+        "get_edge_request_rates",
+        lambda: EdgeRequestRates({}, True),
+    )
+
+    created = api_client.put(POLICY_URL, json=RPS_POLICY)
+    assert created.json()["signal_unavailable"] is True
+    assert api_client.get(POLICY_URL).json()["signal_unavailable"] is True
+
+
 def test_noop_router_keeps_rps_signal_unavailable_false(
     api_client: TestClient, monkeypatch
 ) -> None:
