@@ -25,6 +25,7 @@ from app.core.models import (
     MIN_ENFORCEABLE_CPU_CORES,
     BuildOverride,
     ContainerInfo,
+    HealthCheckConfig,
     ProjectSource,
     ScalingPolicyConfig,
     ScalingPolicyInfo,
@@ -671,6 +672,32 @@ class DeploymentDiffResponse(BaseModel):
     right_id: uuid.UUID
     env: DeploymentEnvDiff
     dockerfile_diff: list[str]
+
+
+class DeploymentUpdateRequest(BaseModel):
+    """Mutable deployment config fields; unknown keys are rejected by the API."""
+
+    model_config = ConfigDict(extra="allow")
+
+    env_vars: dict[str, str] | None = None
+    command: list[str] | None = None
+    labels: dict[str, str] | None = None
+    health_check: HealthCheckConfig | None = None
+    cpu_limit: float | None = None
+    memory_limit: int | None = None
+    route_host: str | None = None
+    route_path_prefix: str | None = None
+    route_tls: bool | None = None
+    public_route: bool | None = None
+
+
+class ConfigFieldDiff(BaseModel):
+    before: object | None = None
+    after: object | None = None
+
+
+class DeploymentUpdateDryRunResponse(DeploymentDiffResponse):
+    config: dict[str, object]
 
 
 class RunAcceptedResponse(BaseModel):

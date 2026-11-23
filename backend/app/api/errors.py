@@ -20,6 +20,7 @@ from app.core.exceptions import (
     ClerkTokenError,
     CloneError,
     ContainerAlreadyRunningError,
+    DeploymentConfigChangeRequiresRecreateError,
     ContainerNotFoundError,
     ContainerNotRunningError,
     DockerfileGenerationError,
@@ -295,6 +296,16 @@ def register_exception_handlers(app) -> None:
         _request: Request, exc: VelaError
     ) -> JSONResponse:
         """Return a 400 for forbidden preview secrets and invalid webhooks."""
+        return JSONResponse(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            content={"detail": str(exc)},
+        )
+
+    @app.exception_handler(DeploymentConfigChangeRequiresRecreateError)
+    async def config_change_requires_recreate_handler(
+        _request: Request, exc: DeploymentConfigChangeRequiresRecreateError
+    ) -> JSONResponse:
+        """Return a 400 listing fields that require recreating the deployment."""
         return JSONResponse(
             status_code=status.HTTP_400_BAD_REQUEST,
             content={"detail": str(exc)},

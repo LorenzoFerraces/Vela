@@ -68,8 +68,10 @@ export {
 
 export {
   analyzeGitSource,
+  dryRunDeployment,
   getDeploymentDiff,
   listDeployments,
+  updateDeployment,
 } from './builds'
 
 export {
@@ -189,9 +191,12 @@ export type {
 export type {
   BuildOverride,
   BuildOverrideLanguage,
+  ConfigFieldDiff,
   DeploymentDiffResponse,
   DeploymentEnvDiff,
   DeploymentRecord,
+  DeploymentUpdateDryRunResponse,
+  DeploymentUpdateRequest,
   GitSourceAnalysis,
 } from './builds'
 

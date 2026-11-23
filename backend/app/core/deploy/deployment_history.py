@@ -12,6 +12,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.schemas import (
+    ConfigFieldDiff,
     DeploymentDiffResponse,
     DeploymentEnvDiff,
     DeploymentRecordPublic,
@@ -109,6 +110,33 @@ async def load_deploy_config_snapshot(
     if decoded is None:
         return None
     return DeployConfig.model_validate(decoded)
+
+
+MUTABLE_FIELDS = frozenset({
+    "env_vars", "command", "labels", "health_check", "cpu_limit", "memory_limit",
+    "route_host", "route_path_prefix", "route_tls", "public_route", "restart_policy",
+})
+
+
+def classify_update(update: dict[str, object]) -> tuple[dict[str, object], list[str]]:
+    """Split a config update into mutable fields and fields needing recreation."""
+    mutable = {key: value for key, value in update.items() if key in MUTABLE_FIELDS}
+    rejected = sorted(
+        key for key, value in update.items()
+        if key not in MUTABLE_FIELDS and key in DeployConfig.model_fields and value is not None
+    )
+    return mutable, rejected
+
+
+def diff_config_fields(
+    before: DeployConfig, after: DeployConfig
+) -> dict[str, ConfigFieldDiff]:
+    """Describe changed mutable fields without ever touching secret values."""
+    return {
+        field: ConfigFieldDiff(before=getattr(before, field), after=getattr(after, field))
+        for field in sorted(MUTABLE_FIELDS)
+        if getattr(before, field) != getattr(after, field)
+    }
 
 
 async def _to_public(

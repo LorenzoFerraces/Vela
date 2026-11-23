@@ -1,4 +1,4 @@
-import { apiGet, apiPost, type RunSourceKind } from './core'
+import { apiGet, apiPatch, apiPost, type RunSourceKind } from './core'
 
 export type BuildOverrideLanguage =
   | 'python'
@@ -79,6 +79,35 @@ export type DeploymentDiffResponse = {
   dockerfile_diff: string[]
 }
 
+export type DeploymentUpdateRequest = {
+  env_vars?: Record<string, string> | null
+  command?: string[] | null
+  labels?: Record<string, string> | null
+  health_check?: {
+    command: string[]
+    interval_s?: number
+    timeout_s?: number
+    retries?: number
+    start_period_s?: number
+  } | null
+  cpu_limit?: number | null
+  memory_limit?: number | null
+  route_host?: string | null
+  route_path_prefix?: string | null
+  route_tls?: boolean | null
+  public_route?: boolean | null
+}
+
+export type ConfigFieldDiff = {
+  before: unknown
+  after: unknown
+}
+
+export type DeploymentUpdateDryRunResponse = DeploymentDiffResponse & {
+  /** Proposed values of changed mutable fields; secret values are never included. */
+  config: Record<string, unknown>
+}
+
 export async function listDeployments(options: {
   container_name?: string
   limit?: number
@@ -102,5 +131,25 @@ export async function getDeploymentDiff(
 ): Promise<DeploymentDiffResponse> {
   return apiGet<DeploymentDiffResponse>(
     `/api/deployments/${encodeURIComponent(leftId)}/diff/${encodeURIComponent(rightId)}`
+  )
+}
+
+export async function dryRunDeployment(
+  id: string,
+  body: DeploymentUpdateRequest
+): Promise<DeploymentUpdateDryRunResponse> {
+  return apiPost<DeploymentUpdateDryRunResponse, DeploymentUpdateRequest>(
+    `/api/deployments/${encodeURIComponent(id)}/dry-run`,
+    body
+  )
+}
+
+export async function updateDeployment(
+  id: string,
+  body: DeploymentUpdateRequest
+): Promise<DeploymentRecord> {
+  return apiPatch<DeploymentRecord, DeploymentUpdateRequest>(
+    `/api/deployments/${encodeURIComponent(id)}`,
+    body
   )
 }
