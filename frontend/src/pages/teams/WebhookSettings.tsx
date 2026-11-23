@@ -42,18 +42,19 @@ export default function WebhookSettings({ projectId }: Props) {
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [configError, setConfigError] = useState<string | null>(null)
+  const [activityError, setActivityError] = useState<string | null>(null)
   const [saved, setSaved] = useState(false)
 
   useEffect(() => {
     let cancelled = false
     setLoading(true)
     setError(null)
-    void Promise.all([
-      getWebhookConfig(projectId),
-      listWebhookDeliveries(projectId),
-      listPreviews(projectId),
-    ])
-      .then(([config, history, previewRows]) => {
+    setConfigError(null)
+    setActivityError(null)
+    setSaved(false)
+    void getWebhookConfig(projectId)
+      .then((config) => {
         if (cancelled) return
         setForm({
           repo: config.repo_full_name ?? '',
@@ -62,14 +63,21 @@ export default function WebhookSettings({ projectId }: Props) {
           previewEnabled: config.preview_enabled,
           ttl: String(config.preview_ttl_seconds),
         })
+      })
+      .catch((loadError: unknown) => {
+        if (!cancelled) setConfigError(formatApiError(loadError))
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false)
+      })
+    void Promise.all([listWebhookDeliveries(projectId), listPreviews(projectId)])
+      .then(([history, previewRows]) => {
+        if (cancelled) return
         setDeliveries(history)
         setPreviews(previewRows)
       })
       .catch((loadError: unknown) => {
-        if (!cancelled) setError(formatApiError(loadError))
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false)
+        if (!cancelled) setActivityError(formatApiError(loadError))
       })
     return () => {
       cancelled = true
@@ -130,6 +138,10 @@ export default function WebhookSettings({ projectId }: Props) {
       <h3 className="teams-page__section-title">Webhook</h3>
       {loading ? (
         <Skeleton className="skeleton--hint-line" />
+      ) : configError ? (
+        <p className="teams-page__hint teams-page__hint--err" role="alert">
+          {configError}
+        </p>
       ) : (
         <>
           {error ? (
@@ -205,6 +217,12 @@ export default function WebhookSettings({ projectId }: Props) {
               {busy ? 'Saving…' : 'Save webhook'}
             </button>
           </form>
+
+          {activityError ? (
+            <p className="teams-page__hint teams-page__hint--err" role="alert">
+              {activityError}
+            </p>
+          ) : null}
 
           <h4 className="teams-page__section-title">Previews</h4>
           {previews.length === 0 ? (
