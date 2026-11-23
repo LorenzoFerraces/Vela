@@ -363,7 +363,8 @@ async def _showback_inputs(
             .distinct()
         )).all()
         for recorded_project_id, container_id in recorded:
-            ids_by_project[recorded_project_id].add(container_id)
+            if recorded_project_id is not None:
+                ids_by_project[recorded_project_id].add(container_id)
 
     return projects, {
         project_id: sorted(ids) for project_id, ids in ids_by_project.items()
