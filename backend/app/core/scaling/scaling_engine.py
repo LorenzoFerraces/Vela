@@ -175,8 +175,8 @@ async def _scale_up(
     current_replica_count: int,
     base_config: DeployConfig,
     session: AsyncSession,
-) -> None:
-    """Add one replica and register it with Traefik."""
+) -> bool:
+    """Add one replica and register it with Traefik. Returns whether it landed."""
     next_index = current_replica_count + 1
     if base_config.project_id is not None:
         try:
@@ -185,14 +185,14 @@ async def _scale_up(
             )
         except TeamComputeQuotaExceededError as exc:
             logger.warning("Scale-up blocked by compute quota for %s: %s", base_name, exc)
-            return
+            return False
     try:
         replica_info = await orchestrator.deploy_replica(base_config, next_index)
     except (OrchestratorError, ProviderConnectionError) as exc:
         logger.warning(
             "Scale-up deploy failed for %s replica %d: %s", base_name, next_index, exc
         )
-        return
+        return False
     live_replicas = await orchestrator.list_replicas(base_name)
     live_replica_names = [
         r.name for r in live_replicas if r.status == ContainerStatus.RUNNING
@@ -206,6 +206,7 @@ async def _scale_up(
         replica_info.name,
         len(live_replica_names),
     )
+    return True
 
 
 async def _scale_down(
@@ -345,7 +346,7 @@ async def _evaluate_policy(
         )
     )
     if ready_to_scale_up:
-        await _scale_up(
+        scaled_up = await _scale_up(
             orchestrator,
             traffic_router,
             base_name,
@@ -355,7 +356,8 @@ async def _evaluate_policy(
             base_config,
             session,
         )
-        await record_scale_event(session, base_name)
+        if scaled_up:
+            await record_scale_event(session, base_name)
         return
 
     if ready_to_scale_down:
