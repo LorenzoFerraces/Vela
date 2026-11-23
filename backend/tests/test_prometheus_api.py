@@ -1,4 +1,14 @@
+import asyncio
+import json
+import uuid
+from datetime import UTC, datetime
+
 from fastapi.testclient import TestClient
+
+from app.api.routes.prometheus import require_metrics_token
+from app.core.enums import ContainerStatus
+from app.core.monitoring.edge_requests import reset_edge_request_cache
+from app.db.models import DeployJobRecord
 
 
 def test_metrics_requires_configured_token(api_client, monkeypatch) -> None:
@@ -19,8 +29,65 @@ def test_metrics_reports_platform_and_project_signals(api_client, monkeypatch) -
     assert "vela_api_up 1" in body
     assert "vela_workloads_by_state" in body
     assert "# TYPE vela_deploy_success_rate gauge" in body
+    type_lines = [line for line in body.splitlines() if line.startswith("# TYPE ")]
+    assert type_lines
+    for line in type_lines:
+        assert body.splitlines().count(line) == 1, f"duplicate metric family: {line}"
+    for container_status in ContainerStatus:
+        assert f'state="{container_status.value}"' in body
 
 
 def test_metrics_disabled_without_token(api_client, monkeypatch) -> None:
     monkeypatch.setenv("VELA_METRICS_TOKEN", "")
     assert TestClient(api_client.app).get("/metrics").status_code == 503
+
+
+def test_metrics_deploy_success_rate_uses_terminal_jobs(
+    api_client, monkeypatch, db_session_factory
+) -> None:
+    monkeypatch.setenv("VELA_METRICS_TOKEN", "scrape-secret")
+    now = datetime.now(UTC)
+
+    async def seed() -> None:
+        async with db_session_factory() as session:
+            for index, job_status in enumerate(("succeeded", "succeeded", "failed")):
+                session.add(DeployJobRecord(
+                    job_id=f"job-{index}",
+                    kind="deploy",
+                    project_id=uuid.uuid4(),
+                    user_id=uuid.uuid4(),
+                    name=f"app-{index}",
+                    status=job_status,
+                    finished_at=now,
+                ))
+            await session.commit()
+
+    asyncio.run(seed())
+    body = TestClient(api_client.app).get(
+        "/metrics", headers={"Authorization": "Bearer scrape-secret"},
+    ).text
+    rate_line = next(
+        line for line in body.splitlines()
+        if line.startswith("vela_deploy_success_rate ")
+    )
+    assert abs(float(rate_line.split()[1]) - 2 / 3) < 1e-6
+
+
+def test_metrics_token_comparison_handles_non_ascii(monkeypatch) -> None:
+    monkeypatch.setenv("VELA_METRICS_TOKEN", "sécrêt-🔑")
+    require_metrics_token("Bearer sécrêt-🔑")
+
+
+def test_edge_host_label_values_are_escaped(api_client, monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("VELA_METRICS_TOKEN", "scrape-secret")
+    log = tmp_path / "access.log"
+    log.write_text(json.dumps({
+        "StartUTC": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+        "RequestHost": 'bad"host\\name\nnext',
+    }) + "\n", encoding="utf-8")
+    monkeypatch.setenv("VELA_EDGE_ACCESS_LOG_PATH", str(log))
+    reset_edge_request_cache()
+    body = TestClient(api_client.app).get(
+        "/metrics", headers={"Authorization": "Bearer scrape-secret"},
+    ).text
+    assert 'host="bad\\"host\\\\name\\nnext"' in body
