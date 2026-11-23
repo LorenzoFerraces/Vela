@@ -11,7 +11,7 @@
 
 | Feature | Decision |
 |---|---|
-| F02 | Pull-style Prometheus `/metrics` on the API, no new compose service; bounded labels only; scrape protected by a static `VELA_METRICS_TOKEN` bearer (not a public endpoint); includes the edge request counter F18 needs. |
+| F02 | Pull-style Prometheus `/metrics` on the API, no new compose service; bounded labels only; scrape protected by a static `VELA_METRICS_TOKEN` bearer (not a public endpoint); includes the edge request counter F18 needs. `vela_deploy_success_rate` = succeeded/(succeeded+failed) over terminal `deploy_jobs` rows in the last 24h (0.0 when none). |
 | F03 | Hard-fail compute quotas at deploy/scale, mirroring storage quotas; team OWNER sets limits within an admin-owned ceiling; lowering a quota never stops or deletes running workloads. |
 | F04 | Full externalization of job state, object storage and traffic state; single-node compose stays the default; multi-replica is opt-in. |
 | F07 | CLI parity commands plus uniform `--json`/`--quiet` scriptable output; respect existing admin/instructor gates. |
