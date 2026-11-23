@@ -90,7 +90,7 @@ from app.core.deploy.deployment_history import (
     record_deployment,
 )
 from app.core.deploy.github_auth import (
-    github_token_for_url,
+    github_token_for_project,
     is_github_https_url,
     looks_like_auth_failure,
 )
@@ -98,6 +98,7 @@ from app.core.deploy.jobs import (
     DeployJobRegistry,
     classify_deploy_error,
 )
+from app.core.deploy.secret_resolution import runtime_config_with_secrets
 from app.core.enums import ContainerStatus, RestartPolicy
 from app.core.exceptions import (
     CloneError,
@@ -129,11 +130,13 @@ from app.core.projects.enums import ProjectRole, can_write
 from app.core.projects.repository import get_personal_project_id, require_membership
 from app.core.quotas import (
     effective_quota_bytes,
+    enforce_team_compute_capacity,
     enforce_team_storage_capacity,
     format_gib,
     team_storage_usage,
 )
 from app.core.scaling.policy_repository import upsert_policy
+from app.core.secret_store import parse_secret_reference
 from app.core.traffic.public_route_host import (
     apply_public_route_to_deploy_config,
     build_public_url,
@@ -142,7 +145,7 @@ from app.core.traffic.public_route_host import (
 )
 from app.core.traffic.traffic_router import TrafficRouter
 from app.core.url_display import sanitize_url_for_display
-from app.db.models import Dockerfile, Project, ProjectMembership, User
+from app.db.models import DeploymentRecord, Dockerfile, Project, ProjectMembership, User
 
 logger = logging.getLogger(__name__)
 
@@ -352,7 +355,10 @@ _DEPLOYMENT_ENV_VALUE_REDACTED = "<REDACTED>"
 
 
 def _redacted_env_vars_for_history(env_vars: dict[str, str]) -> dict[str, str]:
-    return {key: _DEPLOYMENT_ENV_VALUE_REDACTED for key in env_vars}
+    return {
+        key: value if parse_secret_reference(value) is not None else _DEPLOYMENT_ENV_VALUE_REDACTED
+        for key, value in env_vars.items()
+    }
 
 
 async def _persist_run_deployment(
@@ -368,11 +374,11 @@ async def _persist_run_deployment(
     dockerfile_snapshot: str | None,
     public_url: str | None,
     deploy_config: dict,
-) -> None:
+) -> DeploymentRecord | None:
     sanitized_env_vars = _redacted_env_vars_for_history(body.env_vars)
     for attempt in range(3):
         try:
-            await record_deployment(
+            row = await record_deployment(
                 session,
                 user_id=user.id,
                 project_id=project_id,
@@ -396,7 +402,7 @@ async def _persist_run_deployment(
                     deploy_config=deploy_config,
                 ),
             )
-            return
+            return row
         except Exception:
             # In tests, request-session teardown ROLLBACKs on the shared
             # in-memory connection can wipe this INSERT before its COMMIT
@@ -417,6 +423,7 @@ async def _persist_run_deployment(
                     "Could not reset session before persist retry for container %s",
                     info.id,
                 )
+    return None
 
 
 async def _persist_scaling_policy(
@@ -774,14 +781,20 @@ async def deploy(
         session, current_user, config.project_id
     )
     await enforce_team_storage_capacity(session, orchestrator, project_id)
+    await enforce_team_compute_capacity(
+        session, orchestrator, project_id, pending=config
+    )
     config = _apply_deploy_labels(
         config,
         owner_id=str(current_user.id),
         project_id=project_id,
     )
     config = await apply_public_route_to_deploy_config(config, traffic_router)
+    runtime_config = await runtime_config_with_secrets(
+        session, config, owner_user_id=current_user.id, project_id=project_id,
+    )
     info, route_wired, public_url = await _deploy_and_maybe_wire_route(
-        orchestrator, traffic_router, config
+        orchestrator, traffic_router, runtime_config
     )
     await emit_audit_log(
         session,
@@ -864,6 +877,16 @@ async def upload_volume_folder(
     )
 
 
+async def _best_effort_set_phase(
+    registry: DeployJobRegistry, job_id: str, phase: str
+) -> None:
+    """Progress-only phase write: never fail a job whose container is already up."""
+    try:
+        await registry.set_phase(job_id, phase)
+    except Exception:
+        logger.exception("Could not record %s phase for deploy job %s", phase, job_id)
+
+
 async def _run_container_deploy_worker(
     registry: DeployJobRegistry,
     job_id: str,
@@ -875,13 +898,19 @@ async def _run_container_deploy_worker(
     orchestrator: ContainerOrchestrator,
     traffic_router: TrafficRouter,
     image_builder: DefaultImageBuilder,
+    access_token: str | None = None,
+    route_label_prefix: str | None = None,
 ) -> None:
-    """Run the deploy pipeline detached; mirror phases into the job registry."""
+    """Run the deploy pipeline detached; mirror phases into the job registry.
+
+    ``access_token`` and ``route_label_prefix`` are set by webhook-triggered
+    previews, which have no authenticated user and need a dedicated route prefix.
+    """
     try:
         async with session_factory() as session:
             user = await get_user_by_id(session, user_id)
             if user is None:
-                registry.complete_failure(
+                await registry.complete_failure(
                     job_id,
                     {
                         "code": "deploy_failed",
@@ -914,12 +943,15 @@ async def _run_container_deploy_worker(
                 cfg = _apply_deploy_labels(
                     cfg, owner_id=str(user.id), project_id=project_id
                 )
-                cfg = await apply_public_route_to_deploy_config(cfg, traffic_router)
-                registry.set_phase(job_id, "starting", image_ref)
-                info, route_wired, public_url = await _deploy_and_maybe_wire_route(
-                    orchestrator, traffic_router, cfg
+                cfg = await apply_public_route_to_deploy_config(cfg, traffic_router, label_prefix=route_label_prefix)
+                await registry.set_phase(job_id, "starting", image_ref)
+                runtime_config = await runtime_config_with_secrets(
+                    session, cfg, owner_user_id=user.id, project_id=project_id,
                 )
-                registry.set_phase(job_id, "routing")
+                info, route_wired, public_url = await _deploy_and_maybe_wire_route(
+                    orchestrator, traffic_router, runtime_config
+                )
+                await _best_effort_set_phase(registry, job_id, "routing")
                 await _persist_run_deployment(
                     session,
                     user,
@@ -948,7 +980,7 @@ async def _run_container_deploy_worker(
                     },
                 )
                 await session.commit()
-                registry.complete_success(
+                await registry.complete_success(
                     job_id,
                     RunFromSourceResponse(
                         container=info,
@@ -970,7 +1002,7 @@ async def _run_container_deploy_worker(
                     session, user.id, template_id
                 )
                 tag = f"vela/templatebuild:{uuid.uuid4().hex[:12]}"
-                registry.set_phase(job_id, "building", tag)
+                await registry.set_phase(job_id, "building", tag)
                 build_result = await image_builder.build_from_dockerfile_template(
                     template.contents,
                     tag=tag,
@@ -999,12 +1031,15 @@ async def _run_container_deploy_worker(
                 cfg = _apply_deploy_labels(
                     cfg, owner_id=str(user.id), project_id=project_id
                 )
-                cfg = await apply_public_route_to_deploy_config(cfg, traffic_router)
-                registry.set_phase(job_id, "starting", build_result.image_tag)
-                info, route_wired, public_url = await _deploy_and_maybe_wire_route(
-                    orchestrator, traffic_router, cfg
+                cfg = await apply_public_route_to_deploy_config(cfg, traffic_router, label_prefix=route_label_prefix)
+                await registry.set_phase(job_id, "starting", build_result.image_tag)
+                runtime_config = await runtime_config_with_secrets(
+                    session, cfg, owner_user_id=user.id, project_id=project_id,
                 )
-                registry.set_phase(job_id, "routing")
+                info, route_wired, public_url = await _deploy_and_maybe_wire_route(
+                    orchestrator, traffic_router, runtime_config
+                )
+                await _best_effort_set_phase(registry, job_id, "routing")
                 await _persist_run_deployment(
                     session,
                     user,
@@ -1035,7 +1070,7 @@ async def _run_container_deploy_worker(
                     },
                 )
                 await session.commit()
-                registry.complete_success(
+                await registry.complete_success(
                     job_id,
                     RunFromSourceResponse(
                         container=info,
@@ -1051,19 +1086,21 @@ async def _run_container_deploy_worker(
 
             git_url = (body.git_url or "").strip()
             sanitized_git_url = sanitize_url_for_display(git_url)
-            access_token = await github_token_for_url(session, user, git_url)
+            token = access_token
+            if token is None and is_github_https_url(git_url):
+                token = await github_token_for_project(session, project_id, user)
             tag = f"vela/gitbuild:{uuid.uuid4().hex[:12]}"
             try:
                 build_result = await image_builder.build_from_source(
                     ProjectSource(git_url=git_url, branch=body.git_branch),
                     tag=tag,
-                    access_token=access_token,
+                    access_token=token,
                     override=body.build_override,
                     on_phase=lambda phase: registry.set_phase(job_id, phase),
                 )
             except CloneError as exc:
                 if (
-                    access_token is None
+                    token is None
                     and is_github_https_url(git_url)
                     and looks_like_auth_failure(str(exc))
                 ):
@@ -1096,12 +1133,15 @@ async def _run_container_deploy_worker(
             cfg = _apply_deploy_labels(
                 cfg, owner_id=str(user.id), project_id=project_id
             )
-            cfg = await apply_public_route_to_deploy_config(cfg, traffic_router)
-            registry.set_phase(job_id, "starting", build_result.image_tag)
-            info, route_wired, public_url = await _deploy_and_maybe_wire_route(
-                orchestrator, traffic_router, cfg
+            cfg = await apply_public_route_to_deploy_config(cfg, traffic_router, label_prefix=route_label_prefix)
+            await registry.set_phase(job_id, "starting", build_result.image_tag)
+            runtime_config = await runtime_config_with_secrets(
+                session, cfg, owner_user_id=user.id, project_id=project_id,
             )
-            registry.set_phase(job_id, "routing")
+            info, route_wired, public_url = await _deploy_and_maybe_wire_route(
+                orchestrator, traffic_router, runtime_config
+            )
+            await _best_effort_set_phase(registry, job_id, "routing")
             await _persist_run_deployment(
                 session,
                 user,
@@ -1130,7 +1170,7 @@ async def _run_container_deploy_worker(
                 },
             )
             await session.commit()
-            registry.complete_success(
+            await registry.complete_success(
                 job_id,
                 RunFromSourceResponse(
                     container=info,
@@ -1144,7 +1184,7 @@ async def _run_container_deploy_worker(
             )
             return
     except Exception as exc:  # noqa: BLE001
-        registry.complete_failure(job_id, classify_deploy_error(exc))
+        await registry.complete_failure(job_id, classify_deploy_error(exc))
 
 
 @router.post(
@@ -1183,6 +1223,14 @@ async def run_from_user_source(
 
     project_id = await _resolve_deploy_project_id(session, current_user, body)
     await enforce_team_storage_capacity(session, orchestrator, project_id)
+    pending = DeployConfig(
+        image="pending",
+        cpu_limit=body.cpu_limit,
+        memory_limit=body.memory_limit,
+    )
+    await enforce_team_compute_capacity(
+        session, orchestrator, project_id, pending=pending
+    )
     if body.public_route:
         read_public_route_settings_or_raise_for_public_deploy()
     resolved_volumes = _resolve_deploy_volumes(current_user.id, body.volumes)
@@ -1201,14 +1249,14 @@ async def run_from_user_source(
         source_label = sanitize_url_for_display((body.git_url or "").strip())
     else:
         source_label = ""
-    job = registry.create(
+    job = await registry.create(
         kind="container",
         project_id=project_id,
         user_id=current_user.id,
         name=job_name,
         source_label=source_label,
     )
-    registry.set_phase(job.job_id, "queued")
+    await registry.set_phase(job.job_id, "queued")
     background_tasks.add_task(
         spawn_deploy_worker,
         registry,
@@ -1367,6 +1415,9 @@ async def issue_container_ws_ticket(
     current_user: Annotated[User, Depends(get_current_user)],
     session: Annotated[AsyncSession, Depends(get_db)],
     orchestrator: Annotated[ContainerOrchestrator, Depends(get_orchestrator)],
+    session_factory: Annotated[
+        async_sessionmaker[AsyncSession], Depends(get_db_session_factory)
+    ],
 ) -> dict[str, str]:
     """Issue a short-lived single-use ticket for a logs/exec WebSocket."""
     if purpose not in ("logs", "exec"):
@@ -1375,7 +1426,11 @@ async def issue_container_ws_ticket(
         session, orchestrator, current_user, container_id,
         action="read" if purpose == "logs" else "write",
     )
-    return {"ticket": issue_ws_ticket(current_user.id, container_id, purpose)}
+    return {
+        "ticket": await issue_ws_ticket(
+            session_factory, current_user.id, container_id, purpose
+        )
+    }
 
 
 async def _stream_logs_to_websocket(
@@ -1403,10 +1458,13 @@ async def container_logs_stream(
     container_id: str,
     orchestrator: Annotated[ContainerOrchestrator, Depends(get_orchestrator)],
     session: Annotated[AsyncSession, Depends(get_db)],
+    session_factory: Annotated[
+        async_sessionmaker[AsyncSession], Depends(get_db_session_factory)
+    ],
 ) -> None:
     """Stream container logs over WebSocket (binary frames). Authenticate with a short-lived ``ticket``."""
     ticket = websocket.query_params.get("ticket", "")
-    user_id = consume_ws_ticket(ticket, container_id, "logs")
+    user_id = await consume_ws_ticket(session_factory, ticket, container_id, "logs")
     if user_id is None:
         await websocket.close(code=1008, reason="Unauthorized")
         return
@@ -1452,10 +1510,13 @@ async def container_exec_ws(
     container_id: str,
     orchestrator: Annotated[ContainerOrchestrator, Depends(get_orchestrator)],
     session: Annotated[AsyncSession, Depends(get_db)],
+    session_factory: Annotated[
+        async_sessionmaker[AsyncSession], Depends(get_db_session_factory)
+    ],
 ) -> None:
     """Bidirectional exec terminal over WebSocket. Authenticate with a short-lived ``ticket``."""
     ticket = websocket.query_params.get("ticket", "")
-    user_id = consume_ws_ticket(ticket, container_id, "exec")
+    user_id = await consume_ws_ticket(session_factory, ticket, container_id, "exec")
     if user_id is None:
         await websocket.close(code=1008, reason="Unauthorized")
         return

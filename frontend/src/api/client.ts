@@ -54,6 +54,14 @@ export {
   type DeployServiceState,
 } from './deploys'
 
+export {
+  getGithubAppConfig,
+  getWebhookConfig,
+  listWebhookDeliveries,
+  setGithubAppConfig,
+  setWebhookConfig,
+} from './githubApp'
+
 export { isLlmFallbackError } from './llmErrors'
 
 export { listScalingPolicies } from './scaling'
@@ -68,8 +76,10 @@ export {
 
 export {
   analyzeGitSource,
+  dryRunDeployment,
   getDeploymentDiff,
   listDeployments,
+  updateDeployment,
 } from './builds'
 
 export {
@@ -77,6 +87,7 @@ export {
   cancelProjectInvitation,
   createProject,
   createProjectInvitation,
+  getProjectComputeQuota,
   getProjectStorageQuota,
   leaveProject,
   listIncomingInvitations,
@@ -85,6 +96,7 @@ export {
   listProjects,
   removeProjectMember,
   rejectProjectInvitation,
+  updateProjectComputeQuota,
   updateProjectMemberRole,
   updateProjectStorageQuota,
 } from './projects'
@@ -137,6 +149,11 @@ export {
 } from './metrics'
 
 export {
+  exportShowbackCsv,
+  getShowback,
+} from './showback'
+
+export {
   analyzeRepo,
   createStack,
   deleteStack,
@@ -182,15 +199,20 @@ export type {
 export type {
   BuildOverride,
   BuildOverrideLanguage,
+  ConfigFieldDiff,
   DeploymentDiffResponse,
   DeploymentEnvDiff,
   DeploymentRecord,
+  DeploymentUpdateDryRunResponse,
+  DeploymentUpdateRequest,
   GitSourceAnalysis,
 } from './builds'
 
 export type {
+  ComputeQuotaUpdate,
   IncomingProjectInvitation,
   Project,
+  ProjectComputeQuota,
   ProjectInvitation,
   ProjectMember,
   ProjectStorageQuota,
@@ -221,6 +243,14 @@ export type {
 } from './settings'
 
 export type {
+  GitHubAppConfigPublic,
+  GitHubAppConfigUpdate,
+  WebhookConfigPublic,
+  WebhookConfigUpdate,
+  WebhookDeliveryPublic,
+} from './githubApp'
+
+export type {
   AlertHistoryEntry,
   EmailNotificationPreferences,
   EmailNotificationPreferencesUpdate,
@@ -238,6 +268,11 @@ export type {
   ProjectUsage,
   UsageSummary,
 } from './metrics'
+
+export type {
+  ShowbackSummary,
+  TeamShowback,
+} from './showback'
 
 export type {
   AdminUserCreate,

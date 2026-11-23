@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import uuid
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -56,8 +56,8 @@ async def deploy_stack(
     user: User,
     child_stacks: list[Stack],
     *,
-    on_phase: Callable[[str, str | None], None] | None = None,
-    on_service_state: Callable[[str, str], None] | None = None,
+    on_phase: Callable[[str, str | None], Awaitable[None]] | None = None,
+    on_service_state: Callable[[str, str], Awaitable[None]] | None = None,
 ) -> dict[str, object]:
     """Deploy all services in a stack onto a shared network.
 
@@ -83,14 +83,14 @@ async def deploy_stack(
 
     try:
         if on_phase is not None:
-            on_phase("deploying", None)
+            await on_phase("deploying", None)
 
         await orchestrator.create_network(network_name)
 
         for service in services:
             container_name = _container_dns_name(stack, service)
             if on_service_state is not None:
-                on_service_state(service.service_name, "building")
+                await on_service_state(service.service_name, "building")
             image_tag = await _resolve_service_image(
                 session,
                 user,
@@ -106,7 +106,7 @@ async def deploy_stack(
             )
 
             if on_service_state is not None:
-                on_service_state(service.service_name, "starting")
+                await on_service_state(service.service_name, "starting")
             info = await orchestrator.deploy(config)
             deployed_containers.append(info)
 
@@ -143,7 +143,7 @@ async def deploy_stack(
                 )
 
             if on_service_state is not None:
-                on_service_state(service.service_name, "running")
+                await on_service_state(service.service_name, "running")
 
         await _commit_deployment_records(session, deployed_records)
         return {
@@ -159,7 +159,10 @@ async def deploy_stack(
 
     except Exception as exc:
         if on_phase is not None:
-            on_phase("rolling_back", None)
+            try:
+                await on_phase("rolling_back", None)
+            except Exception:
+                logger.exception("Stack rollback phase callback failed")
 
         for container in deployed_containers:
             try:
@@ -178,7 +181,10 @@ async def deploy_stack(
             failed_service = service_names[len(deployed_containers)]
 
         if failed_service is not None and on_service_state is not None:
-            on_service_state(failed_service, "failed")
+            try:
+                await on_service_state(failed_service, "failed")
+            except Exception:
+                logger.exception("Stack failure service-state callback failed")
 
         if isinstance(exc, NeedsBuildOverrideError):
             if failed_service:

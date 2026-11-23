@@ -1,21 +1,24 @@
-"""In-memory registry for async deploy jobs (202 + polled status).
+"""Postgres-backed registry for async deploy jobs (202 + polled status).
 
-Single-process app: the registry lives on ``app.state.deploy_jobs``, is created
-in the app lifespan, and is mutated only from the event loop (workers are
-coroutines; Docker SDK work already runs in the threadpool). Terminal jobs are
-kept ``TERMINAL_JOB_TTL`` seconds (lazy sweep on access) so a 2.5s poller
-always observes the terminal state. Jobs die with the process — same outcome
-as the blocking deploy they replace.
+Jobs are persisted in the ``deploy_jobs`` table so they survive process
+restarts. Terminal rows are retained for ``OUTCOME_RETENTION_HOURS`` (24 h) so
+the deploy-success metric sees its full window, while ``active()`` hides
+terminals older than ``TERMINAL_JOB_TTL`` (300 s) to keep the poller's terminal
+state visible. Detached worker task handles stay on the event loop (workers are
+coroutines; Docker SDK work already runs in the threadpool).
 """
 
 from __future__ import annotations
 
 import asyncio
 import uuid
-from collections.abc import Coroutine
+from collections.abc import Callable, Coroutine
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
-from typing import Any, Literal
+from typing import Any, Literal, cast
+
+from sqlalchemy import delete, or_, select
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.exceptions import (
     ImageBuildError,
@@ -23,14 +26,27 @@ from app.core.exceptions import (
     ProviderConnectionError,
     VelaError,
 )
+from app.db.models import DeployJobRecord
 
 DeployJobKind = Literal["container", "stack"]
 DeployJobStatus = Literal["in_progress", "succeeded", "failed"]
 
 TERMINAL_JOB_TTL = 300  # seconds a terminal job stays visible to pollers
+# Retain terminal rows longer than the poller window so the 24h deploy-success
+# metric in prometheus.py sees outcomes that have aged out of ``active()``.
+OUTCOME_RETENTION_HOURS = 24
+ABANDONED_JOB_ERROR: dict[str, Any] = {
+    "code": "deploy_failed",
+    "detail": "abandoned by restart",
+}
 
 
 GENERIC_DEPLOY_FAILURE_DETAIL = "Deploy failed due to an unexpected error."
+
+
+def _as_utc(value: datetime) -> datetime:
+    """SQLite returns naive datetimes; restore UTC for the public job payload."""
+    return value.replace(tzinfo=UTC) if value.tzinfo is None else value
 
 
 def classify_deploy_error(exc: Exception) -> dict[str, Any]:
@@ -83,11 +99,11 @@ class DeployJob:
 class DeployJobRegistry:
     """Deploy job store and detached-worker task holder (event-loop only)."""
 
-    def __init__(self) -> None:
-        self._jobs: dict[str, DeployJob] = {}
+    def __init__(self, session_factory: async_sessionmaker[AsyncSession]) -> None:
+        self._session_factory = session_factory
         self._tasks: dict[str, asyncio.Task[None]] = {}
 
-    def create(
+    async def create(
         self,
         *,
         kind: DeployJobKind,
@@ -108,60 +124,99 @@ class DeployJobRegistry:
                 for service_name in (services or [])
             ],
         )
-        self._jobs[job.job_id] = job
+        async with self._session_factory() as session:
+            session.add(self._to_record(job))
+            await session.commit()
         return job
 
-    def get(self, job_id: str) -> DeployJob | None:
-        return self._jobs.get(job_id)
+    async def get(self, job_id: str) -> DeployJob | None:
+        async with self._session_factory() as session:
+            record = await session.get(DeployJobRecord, job_id)
+            return self._from_record(record) if record else None
 
-    def set_phase(
+    async def _update(
+        self, job_id: str, change: Callable[[DeployJobRecord], None]
+    ) -> None:
+        async with self._session_factory() as session:
+            record = await session.get(DeployJobRecord, job_id)
+            if record is None:
+                return
+            change(record)
+            await session.commit()
+
+    async def set_phase(
         self, job_id: str, phase: str, phase_detail: str | None = None
     ) -> None:
-        job = self._jobs.get(job_id)
-        if job is None:
-            return
-        job.phase = phase
-        job.phase_detail = phase_detail
+        def change(record: DeployJobRecord) -> None:
+            record.phase = phase
+            record.phase_detail = phase_detail
 
-    def set_services(self, job_id: str, names: list[str]) -> None:
-        job = self._jobs.get(job_id)
-        if job is None:
-            return
-        job.services = [DeployServiceProgress(name=name) for name in names]
+        await self._update(job_id, change)
 
-    def set_service_state(
+    async def set_services(self, job_id: str, names: list[str]) -> None:
+        def change(record: DeployJobRecord) -> None:
+            record.services = [{"name": name, "state": "pending"} for name in names]
+
+        await self._update(job_id, change)
+
+    async def set_service_state(
         self, job_id: str, service_name: str, state: str
     ) -> None:
-        job = self._jobs.get(job_id)
-        if job is None:
-            return
-        for service in job.services:
-            if service.name == service_name:
-                service.state = state
-                return
+        def change(record: DeployJobRecord) -> None:
+            record.services = [
+                {**item, "state": state} if item.get("name") == service_name else item
+                for item in record.services
+            ]
 
-    def complete_success(self, job_id: str, result: dict[str, Any]) -> None:
-        job = self._jobs.get(job_id)
-        if job is None or job.status != "in_progress":
-            return
-        job.status = "succeeded"
-        job.result = result
-        job.finished_at = datetime.now(UTC)
+        await self._update(job_id, change)
 
-    def complete_failure(self, job_id: str, error: dict[str, Any]) -> None:
-        job = self._jobs.get(job_id)
-        if job is None or job.status != "in_progress":
-            return
-        job.status = "failed"
-        job.error = error
-        job.finished_at = datetime.now(UTC)
+    async def complete_success(self, job_id: str, result: dict[str, Any]) -> None:
+        def change(record: DeployJobRecord) -> None:
+            if record.status == "in_progress":
+                record.status, record.result, record.finished_at = (
+                    "succeeded",
+                    result,
+                    datetime.now(UTC),
+                )
 
-    def active(self, *, project_ids: set[uuid.UUID]) -> list[DeployJob]:
-        """Visible jobs for the given projects, sweeping expired terminals."""
-        self._sweep()
-        return [
-            job for job in self._jobs.values() if job.project_id in project_ids
-        ]
+        await self._update(job_id, change)
+
+    async def complete_failure(self, job_id: str, error: dict[str, Any]) -> None:
+        def change(record: DeployJobRecord) -> None:
+            if record.status == "in_progress":
+                record.status, record.error, record.finished_at = (
+                    "failed",
+                    error,
+                    datetime.now(UTC),
+                )
+
+        await self._update(job_id, change)
+
+    async def active(self, *, project_ids: set[uuid.UUID]) -> list[DeployJob]:
+        """Visible jobs for the given projects, sweeping long-expired terminals."""
+        now = datetime.now(UTC)
+        async with self._session_factory() as session:
+            await session.execute(
+                delete(DeployJobRecord).where(
+                    DeployJobRecord.finished_at.is_not(None),
+                    DeployJobRecord.finished_at
+                    < now - timedelta(hours=OUTCOME_RETENTION_HOURS),
+                )
+            )
+            rows = (
+                await session.execute(
+                    select(DeployJobRecord).where(
+                        DeployJobRecord.project_id.in_(project_ids),
+                        or_(
+                            DeployJobRecord.finished_at.is_(None),
+                            DeployJobRecord.finished_at
+                            >= now - timedelta(seconds=TERMINAL_JOB_TTL),
+                        ),
+                    )
+                )
+            ).scalars().all()
+            await session.commit()
+            return [self._from_record(row) for row in rows]
 
     def spawn(self, job_id: str, coro: Coroutine[Any, Any, None]) -> None:
         """Run the worker as a detached task; the registry holds the reference."""
@@ -177,14 +232,78 @@ class DeployJobRegistry:
             await asyncio.gather(*self._tasks.values(), return_exceptions=True)
         self._tasks.clear()
 
-    def _sweep(self) -> None:
-        cutoff = datetime.now(UTC) - timedelta(
-            seconds=TERMINAL_JOB_TTL
+    @staticmethod
+    def _to_record(job: DeployJob) -> DeployJobRecord:
+        return DeployJobRecord(
+            job_id=job.job_id,
+            kind=job.kind,
+            project_id=job.project_id,
+            user_id=job.user_id,
+            name=job.name,
+            source_label=job.source_label,
+            status=job.status,
+            phase=job.phase,
+            phase_detail=job.phase_detail,
+            services=[
+                {"name": service.name, "state": service.state}
+                for service in job.services
+            ],
+            error=job.error,
+            result=job.result,
+            created_at=job.created_at,
+            finished_at=job.finished_at,
         )
-        expired = [
-            job_id
-            for job_id, job in self._jobs.items()
-            if job.finished_at is not None and job.finished_at < cutoff
-        ]
-        for job_id in expired:
-            del self._jobs[job_id]
+
+    @staticmethod
+    def _from_record(record: DeployJobRecord) -> DeployJob:
+        return DeployJob(
+            job_id=record.job_id,
+            kind=cast(DeployJobKind, record.kind),
+            project_id=record.project_id,
+            user_id=record.user_id,
+            name=record.name,
+            source_label=record.source_label,
+            status=cast(DeployJobStatus, record.status),
+            phase=record.phase,
+            phase_detail=record.phase_detail,
+            services=[
+                DeployServiceProgress(name=item["name"], state=item["state"])
+                for item in record.services
+            ],
+            error=record.error,
+            result=record.result,
+            created_at=_as_utc(record.created_at),
+            finished_at=(
+                _as_utc(record.finished_at)
+                if record.finished_at is not None
+                else None
+            ),
+        )
+
+
+async def fail_abandoned_jobs(
+    session_factory: async_sessionmaker[AsyncSession],
+    *,
+    boot_time: datetime | None = None,
+) -> int:
+    """Mark in_progress jobs created before this process boot as failed.
+
+    Called once at lifespan startup on the replica that owns background loops,
+    so a live worker on another replica is never reaped. Rows created after boot
+    belong to live workers and are left untouched.
+    """
+    if boot_time is None:
+        boot_time = datetime.now(UTC)
+    async with session_factory() as session:
+        rows = (await session.execute(
+            select(DeployJobRecord).where(
+                DeployJobRecord.status == "in_progress",
+                DeployJobRecord.created_at < boot_time,
+            )
+        )).scalars().all()
+        for record in rows:
+            record.status = "failed"
+            record.error = dict(ABANDONED_JOB_ERROR)
+            record.finished_at = boot_time
+        await session.commit()
+        return len(rows)

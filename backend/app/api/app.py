@@ -14,6 +14,7 @@ from starlette.middleware.gzip import GZipMiddleware
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from app import bootstrap_env  # loads backend/.env before other app imports.
+from app.api.deps import validate_traffic_router_config
 from app.api.errors import register_exception_handlers
 from app.api.routes import (
     admin,
@@ -29,22 +30,45 @@ from app.api.routes import (
     logs,
     metrics,
     projects,
+    prometheus,
     scaling,
+    secrets,
     settings,
     stacks,
     tokens,
     traffic,
     users,
+    webhooks,
 )
-from app.core.deploy.jobs import DeployJobRegistry
+from app.core.deploy.jobs import DeployJobRegistry, fail_abandoned_jobs
+from app.core.previews import collect_expired_previews
 
 API_PREFIX = "/api"
 logger = logging.getLogger(__name__)
 
 
+async def run_preview_gc_loop(session_factory) -> None:
+    """Sweep expired PR previews once a minute."""
+    from app.api.deps import get_orchestrator, get_traffic_router
+
+    while True:
+        try:
+            async with session_factory() as session:
+                await collect_expired_previews(
+                    session, get_orchestrator(), get_traffic_router(),
+                )
+        except Exception:
+            logger.exception("Preview GC cycle failed")
+        await asyncio.sleep(60)
+
+
 @asynccontextmanager
 async def _lifespan(_application: FastAPI):
-    from app.api.deps import get_orchestrator, get_traffic_router
+    from app.api.deps import (
+        get_db_session_factory,
+        get_orchestrator,
+        get_traffic_router,
+    )
     from app.core.auth.bootstrap import ensure_admin_user
     from app.core.exceptions import ProviderConnectionError, TrafficRouterError
     from app.core.logging.collector import COLLECTOR_ENABLED, LogCollector
@@ -62,65 +86,70 @@ async def _lifespan(_application: FastAPI):
         logger.error("Bootstrap admin configuration is invalid: %s", exc)
         raise
 
-    deploy_jobs = DeployJobRegistry()
+    deploy_jobs = DeployJobRegistry(get_db_session_factory())
     _application.state.deploy_jobs = deploy_jobs
 
-    monitor_task = asyncio.create_task(run_monitoring_loop())
+    monitor_task: asyncio.Task[None] | None = None
     metrics_task: asyncio.Task[None] | None = None
     scaling_task: asyncio.Task[None] | None = None
-    try:
-        orchestrator = get_orchestrator()
-    except ProviderConnectionError as exc:
-        logger.warning(
-            "Container provider unavailable at startup (%s); metrics and scaling loops will not run.",
-            exc,
-        )
-    else:
-        metrics_task = asyncio.create_task(run_metrics_collector(orchestrator))
-        try:
-            traffic_router = get_traffic_router()
-        except (ProviderConnectionError, TrafficRouterError) as exc:
-            logger.warning(
-                "Traffic router unavailable at startup (%s); scaling loop will not run.",
-                exc,
-            )
-        else:
-            scaling_task = asyncio.create_task(
-                run_scaling_loop(orchestrator, traffic_router)
-            )
-
+    preview_gc_task: asyncio.Task[None] | None = None
     log_collector: LogCollector | None = None
-    if COLLECTOR_ENABLED:
+
+    if os.getenv("VELA_BACKGROUND_LOOPS_ENABLED", "1") == "1":
         try:
-            log_orchestrator = get_orchestrator()
+            await fail_abandoned_jobs(get_db_session_factory())
+        except Exception:
+            logger.exception("Could not clean up abandoned deploy jobs")
+        monitor_task = asyncio.create_task(run_monitoring_loop())
+        preview_gc_task = asyncio.create_task(
+            run_preview_gc_loop(get_db_session_factory())
+        )
+        try:
+            orchestrator = get_orchestrator()
         except ProviderConnectionError as exc:
             logger.warning(
-                "Log collector unavailable at startup (%s); log collection will not run.",
+                "Container provider unavailable at startup (%s); metrics and scaling loops will not run.",
                 exc,
             )
         else:
-            log_collector = LogCollector(log_orchestrator)
-            await log_collector.start()
+            metrics_task = asyncio.create_task(run_metrics_collector(orchestrator))
+            try:
+                traffic_router = get_traffic_router()
+            except (ProviderConnectionError, TrafficRouterError) as exc:
+                logger.warning(
+                    "Traffic router unavailable at startup (%s); scaling loop will not run.",
+                    exc,
+                )
+            else:
+                scaling_task = asyncio.create_task(
+                    run_scaling_loop(orchestrator, traffic_router)
+                )
+
+        if COLLECTOR_ENABLED:
+            try:
+                log_orchestrator = get_orchestrator()
+            except ProviderConnectionError as exc:
+                logger.warning(
+                    "Log collector unavailable at startup (%s); log collection will not run.",
+                    exc,
+                )
+            else:
+                log_collector = LogCollector(log_orchestrator)
+                await log_collector.start()
 
     try:
         yield
     finally:
         await deploy_jobs.cancel_all()
-        monitor_task.cancel()
-        if metrics_task is not None:
-            metrics_task.cancel()
-        if scaling_task is not None:
-            scaling_task.cancel()
+        for task in (monitor_task, metrics_task, scaling_task, preview_gc_task):
+            if task is not None:
+                task.cancel()
         if log_collector is not None:
             await log_collector.stop()
-        with suppress(asyncio.CancelledError):
-            await monitor_task
-        if metrics_task is not None:
-            with suppress(asyncio.CancelledError):
-                await metrics_task
-        if scaling_task is not None:
-            with suppress(asyncio.CancelledError):
-                await scaling_task
+        for task in (monitor_task, metrics_task, scaling_task, preview_gc_task):
+            if task is not None:
+                with suppress(asyncio.CancelledError):
+                    await task
 
 
 class SecurityHeadersMiddleware:
@@ -176,6 +205,8 @@ def create_app() -> FastAPI:
     """
     if os.environ.get("VELA_E2E", "").strip() != "1":
         bootstrap_env.require_deployment_secrets()
+
+    validate_traffic_router_config()
 
     application = FastAPI(
         title="Vela API",
@@ -313,6 +344,16 @@ def create_app() -> FastAPI:
         prefix=f"{API_PREFIX}/metrics",
         tags=["metrics"],
     )
+    application.include_router(
+        secrets.router,
+        prefix=f"{API_PREFIX}/secrets",
+        tags=["secrets"],
+    )
+
+    application.include_router(prometheus.router, tags=["prometheus"])
+    # Receiver is outside /api: HMAC is its only auth, so it must not appear in
+    # the anonymous /api auth regression scan. Config routes carry explicit /api.
+    application.include_router(webhooks.router, tags=["webhooks"])
 
     @application.get(f"{API_PREFIX}/health", tags=["health"])
     async def health() -> dict[str, str]:

@@ -25,7 +25,9 @@ from app.core.models import (
     MIN_ENFORCEABLE_CPU_CORES,
     BuildOverride,
     ContainerInfo,
+    HealthCheckConfig,
     ProjectSource,
+    RestartPolicy,
     ScalingPolicyConfig,
     ScalingPolicyInfo,
     validate_finite_number,
@@ -607,6 +609,29 @@ class ProjectStorageQuotaUpdate(BaseModel):
     )
 
 
+class ProjectComputeQuotaPublic(BaseModel):
+    """Team compute quota, current usage, and the platform ceilings."""
+
+    max_running_containers: int | None
+    max_cpu_millicores: int | None
+    max_memory_bytes: int | None
+    max_deploys_per_hour: int | None
+    used_running_containers: int
+    used_cpu_millicores: int
+    used_memory_bytes: int
+    used_deploys_per_hour: int
+    platform_ceiling: dict[str, int | None]
+
+
+class ProjectComputeQuotaUpdate(BaseModel):
+    """Request to set one or more team compute quotas."""
+
+    max_running_containers: int | None = Field(default=None, ge=1)
+    max_cpu_millicores: int | None = Field(default=None, ge=1)
+    max_memory_bytes: int | None = Field(default=None, ge=1)
+    max_deploys_per_hour: int | None = Field(default=None, ge=1)
+
+
 # ---------------------------------------------------------------------------
 # Deployment history
 # ---------------------------------------------------------------------------
@@ -648,6 +673,37 @@ class DeploymentDiffResponse(BaseModel):
     right_id: uuid.UUID
     env: DeploymentEnvDiff
     dockerfile_diff: list[str]
+
+
+class DeploymentUpdateRequest(BaseModel):
+    """Mutable deployment config fields.
+
+    Identity/topology fields present in the body are rejected; genuinely
+    unknown keys are ignored by the classifier.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    env_vars: dict[str, str] | None = None
+    command: list[str] | None = None
+    labels: dict[str, str] | None = None
+    health_check: HealthCheckConfig | None = None
+    cpu_limit: float | None = None
+    memory_limit: int | None = None
+    route_host: str | None = None
+    route_path_prefix: str | None = None
+    route_tls: bool | None = None
+    public_route: bool | None = None
+    restart_policy: RestartPolicy | None = None
+
+
+class ConfigFieldDiff(BaseModel):
+    before: object | None = None
+    after: object | None = None
+
+
+class DeploymentUpdateDryRunResponse(DeploymentDiffResponse):
+    config: dict[str, object]
 
 
 class RunAcceptedResponse(BaseModel):
@@ -1078,3 +1134,120 @@ class UsageSummary(BaseModel):
     total_cpu_percent: float
     total_memory_usage_bytes: int
     running_containers: int
+
+
+class TeamShowback(BaseModel):
+    team_name: str
+    cpu_seconds: float
+    memory_gib_hours: float
+    storage_gib_days: float
+    cost_currency: None = None
+
+
+class ShowbackSummary(BaseModel):
+    month: str
+    teams: list[TeamShowback]
+
+
+# ---------------------------------------------------------------------------
+# Secrets (write-only values)
+# ---------------------------------------------------------------------------
+
+
+class SecretPublic(BaseModel):
+    id: uuid.UUID
+    name: str
+    project_id: uuid.UUID | None
+    has_value: bool
+    latest_version: int
+    created_at: datetime
+
+
+class SecretCreate(BaseModel):
+    name: str = Field(
+        ..., min_length=1, max_length=128, pattern=r"^[A-Za-z0-9_.-]+$"
+    )
+    value: str = Field(..., min_length=1)
+    project_id: uuid.UUID | None = None
+
+
+class SecretValueUpdate(BaseModel):
+    value: str = Field(..., min_length=1)
+
+
+# ---------------------------------------------------------------------------
+# GitHub App and webhooks (secrets are write-only; responses are metadata only)
+# ---------------------------------------------------------------------------
+
+
+class GitHubAppConfigSet(BaseModel):
+    app_id: str = Field(..., min_length=1, max_length=64)
+    slug: str | None = Field(default=None, max_length=128)
+    private_key: str = Field(..., min_length=1)
+    webhook_secret: str = Field(..., min_length=1)
+
+
+class GitHubAppConfigGet(BaseModel):
+    configured: bool
+    app_id: str | None
+    slug: str | None
+    has_private_key: bool
+    has_webhook_secret: bool
+    connected_at: datetime | None
+
+
+class GitHubAppInstallationLinkSet(BaseModel):
+    installation_id: str = Field(..., min_length=1, max_length=64)
+    account_login: str | None = Field(default=None, max_length=128)
+
+
+class GitHubAppInstallationLinkGet(BaseModel):
+    project_id: uuid.UUID
+    installation_id: str
+    account_login: str | None
+
+
+class GitHubWebhookConfigSet(BaseModel):
+    repo_full_name: str = Field(..., min_length=1, max_length=256)
+    enabled: bool = False
+    branch_filters: list[str] = Field(default_factory=list)
+    preview_enabled: bool = False
+    preview_ttl_seconds: int = Field(default=3600, ge=60)
+
+
+class GitHubWebhookConfigGet(BaseModel):
+    project_id: uuid.UUID
+    repo_full_name: str | None
+    enabled: bool
+    branch_filters: list[str]
+    preview_enabled: bool
+    preview_ttl_seconds: int
+
+
+class GitHubWebhookDeliveryEntry(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    delivery_id: str
+    repo_full_name: str | None
+    event: str
+    action: str | None
+    branch: str | None
+    pr_number: int | None
+    is_fork: bool
+    status: str
+    received_at: datetime
+    error: str | None
+
+
+class PreviewPublic(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    repo_full_name: str
+    pr_number: int
+    head_sha: str
+    public_url: str | None
+    route_host: str | None
+    expires_at: datetime
+    status: str
+    closed_at: datetime | None

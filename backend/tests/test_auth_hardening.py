@@ -1,14 +1,16 @@
 import uuid
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.auth import rate_limit
 from app.core.auth.tokens import create_access_token, decode_access_token
 from app.core.auth.ws_tickets import consume_ws_ticket, issue_ws_ticket
 from app.core.containers.fake_orchestrator import FakeContainerOrchestrator
 from app.core.models import ContainerInfo, ContainerStatus
-from app.db.models import User
+from app.db.models import User, WsTicketRecord
 
 
 def test_rate_limit_blocks_eleventh_attempt() -> None:
@@ -33,14 +35,17 @@ def test_jwt_carries_and_verifies_issuer_audience() -> None:
     assert claims.audience == "vela-api"
 
 
-def test_ws_ticket_is_single_use_and_scoped() -> None:
+@pytest.mark.asyncio
+async def test_ws_ticket_is_single_use_and_scoped(
+    db_session_factory: async_sessionmaker[AsyncSession],
+) -> None:
     user_id, container_id = uuid.uuid4(), "cid-1"
-    ticket = issue_ws_ticket(user_id, container_id, "logs")
-    assert consume_ws_ticket(ticket, container_id, "logs") == user_id
-    assert consume_ws_ticket(ticket, container_id, "logs") is None
-    other = issue_ws_ticket(user_id, container_id, "logs")
-    assert consume_ws_ticket(other, "cid-2", "logs") is None
-    assert consume_ws_ticket(other, container_id, "exec") is None
+    ticket = await issue_ws_ticket(db_session_factory, user_id, container_id, "logs")
+    assert await consume_ws_ticket(db_session_factory, ticket, container_id, "logs") == user_id
+    assert await consume_ws_ticket(db_session_factory, ticket, container_id, "logs") is None
+    other = await issue_ws_ticket(db_session_factory, user_id, container_id, "logs")
+    assert await consume_ws_ticket(db_session_factory, other, "cid-2", "logs") is None
+    assert await consume_ws_ticket(db_session_factory, other, container_id, "exec") is None
 
 
 def test_ws_ticket_endpoint_requires_auth(
@@ -62,20 +67,29 @@ def test_ws_ticket_endpoint_requires_auth(
     assert api_client.post(url).status_code == 200
 
 
-def test_expired_unconsumed_ws_ticket_is_swept(monkeypatch: pytest.MonkeyPatch) -> None:
-    from types import SimpleNamespace
+@pytest.mark.asyncio
+async def test_expired_unconsumed_ws_ticket_is_swept(
+    db_session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    old_ticket = f"{'a' * 43}.{uuid.uuid4().hex}"
+    fresh_ticket = await issue_ws_ticket(db_session_factory, uuid.uuid4(), "cid-1", "logs")
+    async with db_session_factory() as session:
+        session.add(
+            WsTicketRecord(
+                ticket=old_ticket,
+                container_id="cid-1",
+                purpose="logs",
+                created_at=datetime.now(UTC) - timedelta(seconds=120),
+            )
+        )
+        await session.commit()
 
-    from app.core.auth import ws_tickets
-
-    ws_tickets.reset_for_tests()
-    clock = {"now": 1000.0}
-    monkeypatch.setattr(ws_tickets, "time", SimpleNamespace(monotonic=lambda: clock["now"]))
-    old = ws_tickets.issue_ws_ticket(uuid.uuid4(), "cid-1", "logs")
-    assert old in ws_tickets._tickets
-    clock["now"] += ws_tickets._TICKET_TTL_SECONDS + 1
-    ws_tickets.issue_ws_ticket(uuid.uuid4(), "cid-1", "logs")
-    assert old not in ws_tickets._tickets
-    assert len(ws_tickets._tickets) == 1
+    # Consuming a fresh ticket lazily sweeps the expired row.
+    assert await consume_ws_ticket(
+        db_session_factory, fresh_ticket, "cid-1", "logs"
+    ) is not None
+    async with db_session_factory() as session:
+        assert await session.get(WsTicketRecord, old_ticket) is None
 
 
 def test_login_throttled(anonymous_client: TestClient) -> None:

@@ -219,6 +219,10 @@ class Project(Base):
     storage_quota_bytes: Mapped[int | None] = mapped_column(
         BigInteger, nullable=True
     )
+    max_running_containers: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    max_cpu_millicores: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    max_memory_bytes: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    max_deploys_per_hour: Mapped[int | None] = mapped_column(Integer, nullable=True)
     is_personal: Mapped[bool] = mapped_column(nullable=False, default=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=_utcnow
@@ -689,3 +693,147 @@ class ApiToken(Base):
     )
 
     user: Mapped[User] = relationship(back_populates="api_tokens")
+
+
+class DeployJobRecord(Base):
+    __tablename__ = "deploy_jobs"
+
+    job_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    kind: Mapped[str] = mapped_column(String(16), nullable=False)
+    project_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), index=True, nullable=False)
+    user_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), nullable=False)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    source_label: Mapped[str] = mapped_column(String(512), nullable=False, default="")
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="in_progress")
+    phase: Mapped[str] = mapped_column(String(64), nullable=False, default="queued")
+    phase_detail: Mapped[str | None] = mapped_column(Text, nullable=True)
+    services: Mapped[list[dict[str, str]]] = mapped_column(JSON, nullable=False, default=list)
+    error: Mapped[dict[str, object] | None] = mapped_column(JSON, nullable=True)
+    result: Mapped[dict[str, object] | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+
+
+class TrafficRouteRecord(Base):
+    __tablename__ = "traffic_routes"
+
+    route_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    host: Mapped[str] = mapped_column(String(255), nullable=False)
+    path_prefix: Mapped[str] = mapped_column(String(512), nullable=False, default="/")
+    backend_servers: Mapped[list[dict[str, object]]] = mapped_column(JSON, nullable=False, default=list)
+    tls_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    entrypoints: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+
+
+class WsTicketRecord(Base):
+    __tablename__ = "ws_tickets"
+
+    ticket: Mapped[str] = mapped_column(String(128), primary_key=True)
+    container_id: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    purpose: Mapped[str] = mapped_column(String(16), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
+
+
+# ---------------------------------------------------------------------------
+# Group C: secrets, GitHub App / webhooks, preview deploys
+# ---------------------------------------------------------------------------
+
+
+class Secret(Base):
+    __tablename__ = "secrets"
+    __table_args__ = (
+        UniqueConstraint("owner_user_id", "name"),
+        UniqueConstraint("project_id", "name"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    owner_user_id: Mapped[uuid.UUID | None] = mapped_column(Uuid(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=True)
+    project_id: Mapped[uuid.UUID | None] = mapped_column(Uuid(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=True)
+    name: Mapped[str] = mapped_column(String(128), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
+
+
+class SecretVersion(Base):
+    __tablename__ = "secret_versions"
+    __table_args__ = (UniqueConstraint("secret_id", "version"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    secret_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("secrets.id", ondelete="CASCADE"), nullable=False)
+    version: Mapped[int] = mapped_column(Integer, nullable=False)
+    value_encrypted: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
+
+
+class GitHubAppInstall(Base):
+    __tablename__ = "github_app_installs"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    app_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    slug: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    private_key_encrypted: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    webhook_secret_encrypted: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    connected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
+
+
+class GitHubAppInstallationId(Base):
+    __tablename__ = "github_app_installation_ids"
+    __table_args__ = (UniqueConstraint("app_install_id", "project_id"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    app_install_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("github_app_installs.id", ondelete="CASCADE"), nullable=False)
+    project_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
+    installation_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    account_login: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    installed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
+
+
+class GitHubWebhookConfig(Base):
+    __tablename__ = "github_webhook_configs"
+
+    project_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), primary_key=True)
+    repo_full_name: Mapped[str] = mapped_column(String(256), nullable=False)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    branch_filters: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    preview_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    preview_ttl_seconds: Mapped[int] = mapped_column(Integer, nullable=False, default=3600)
+    created_by_user_id: Mapped[uuid.UUID | None] = mapped_column(Uuid(as_uuid=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
+
+
+class GitHubWebhookDelivery(Base):
+    __tablename__ = "github_webhook_deliveries"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    delivery_id: Mapped[str] = mapped_column(String(128), nullable=False, unique=True, index=True)
+    project_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
+    repo_full_name: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    event: Mapped[str] = mapped_column(String(64), nullable=False)
+    action: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    branch: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    pr_number: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    is_fork: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="received")
+    received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow, index=True)
+    sender_timestamp: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class PreviewDeploy(Base):
+    __tablename__ = "preview_deploys"
+    __table_args__ = (UniqueConstraint("project_id", "repo_full_name", "pr_number"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    project_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
+    repo_full_name: Mapped[str] = mapped_column(String(256), nullable=False)
+    pr_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    head_sha: Mapped[str] = mapped_column(String(64), nullable=False)
+    container_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    container_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    route_host: Mapped[str | None] = mapped_column(String(253), nullable=True)
+    public_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
+    closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

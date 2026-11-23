@@ -116,4 +116,57 @@ test.describe('Dashboard page', () => {
         .first(),
     ).toBeVisible()
   })
+
+  test('reviews and applies a deployment config update', async ({
+    authenticatedPage,
+  }) => {
+    const first = await deployImageContainer(
+      authenticatedPage,
+      'nginx:alpine',
+      `dash-update-old-${Date.now()}`,
+    )
+    expect(first.ok()).toBeTruthy()
+    const second = await deployImageContainer(
+      authenticatedPage,
+      'nginx:alpine',
+      `dash-update-new-${Date.now()}`,
+    )
+    expect(second.ok()).toBeTruthy()
+
+    await authenticatedPage.goto('/dashboard')
+    const history = authenticatedPage.locator('.deployment-history')
+    await history
+      .getByRole('button', { name: 'Deploy history', exact: true })
+      .click()
+    const newerSelect = history.getByLabel('Newer')
+    await expect(newerSelect).toBeVisible()
+    const newestValue = await newerSelect
+      .locator('option')
+      .nth(1)
+      .getAttribute('value')
+    expect(newestValue).toBeTruthy()
+    await newerSelect.selectOption(newestValue!)
+
+    await history.getByLabel('New env (KEY=value per line)').fill('B=2')
+    await history.getByRole('button', { name: 'Review & apply' }).click()
+    await expect(history.getByText('Review update')).toBeVisible()
+    await expect(history.getByText(/Environment:.*B/)).toBeVisible()
+
+    await history.getByRole('button', { name: 'Confirm update' }).click()
+    await expect(
+      history.getByText('Config applied. A new deployment was recorded.'),
+    ).toBeVisible()
+  })
+
+  test('showback page lists team resource-time columns', async ({
+    authenticatedPage,
+  }) => {
+    await authenticatedPage.goto('/showback')
+    await expect(
+      authenticatedPage.getByRole('heading', { name: '[ SHOWBACK ]', level: 1 }),
+    ).toBeVisible()
+    await expect(
+      authenticatedPage.getByRole('columnheader', { name: 'Team' }),
+    ).toBeVisible()
+  })
 })

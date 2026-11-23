@@ -1,10 +1,9 @@
 import {
   ApiError,
   apiGet,
-  clearAccessToken,
+  endSessionForAuthError,
   getAccessToken,
   getApiBaseUrl,
-  notifyUnauthorized,
 } from './core'
 
 export type LogEntry = {
@@ -63,10 +62,7 @@ export async function exportLogs(params: Partial<LogQueryParams> = {}) {
   const response = await fetch(url, { headers })
   if (!response.ok) {
     const body = await response.text()
-    if (response.status === 401) {
-      clearAccessToken()
-      notifyUnauthorized()
-    }
+    endSessionForAuthError(response, body)
     throw new ApiError(
       `Export failed: ${response.status} ${response.statusText}`,
       response.status,

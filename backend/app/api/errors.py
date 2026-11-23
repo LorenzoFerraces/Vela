@@ -22,6 +22,7 @@ from app.core.exceptions import (
     ContainerAlreadyRunningError,
     ContainerNotFoundError,
     ContainerNotRunningError,
+    DeploymentConfigChangeRequiresRecreateError,
     DockerfileGenerationError,
     DockerfileTemplateNotFoundError,
     DuplicateDockerfileNameError,
@@ -30,6 +31,7 @@ from app.core.exceptions import (
     EmailAlreadyRegisteredError,
     GitHubAccountAlreadyLinkedError,
     GitHubAPIError,
+    GitHubAppNotConfiguredError,
     GitHubNotConnectedError,
     GitHubOAuthError,
     GitSourceAnalysisError,
@@ -51,6 +53,7 @@ from app.core.exceptions import (
     ObjectStorageError,
     OrchestratorError,
     PermissionDeniedError,
+    PreviewSecretForbiddenError,
     ProjectAccessDeniedError,
     ProjectError,
     ProjectMemberNotFoundError,
@@ -61,8 +64,12 @@ from app.core.exceptions import (
     ResourceLimitError,
     RouteConfigurationError,
     RouteNotFoundError,
+    SecretNotFoundError,
+    SecretVersionNotFoundError,
     StackCompositionCycleError,
     StackNotFoundError,
+    TeamComputeQuotaError,
+    TeamComputeQuotaExceededError,
     TeamStorageQuotaError,
     TrafficRouterError,
     UnsupportedLanguageError,
@@ -70,6 +77,8 @@ from app.core.exceptions import (
     UserNotRegisteredError,
     VelaError,
     VolumeUploadNotFoundError,
+    WebhookReplayError,
+    WebhookSignatureError,
 )
 
 logger = logging.getLogger(__name__)
@@ -248,6 +257,68 @@ def register_exception_handlers(app) -> None:
         return JSONResponse(
             status_code=status.HTTP_400_BAD_REQUEST,
             content={"detail": str(exc)},
+        )
+
+    @app.exception_handler(TeamComputeQuotaExceededError)
+    async def team_compute_quota_exceeded_handler(
+        _request: Request, exc: TeamComputeQuotaExceededError
+    ) -> JSONResponse:
+        return JSONResponse(
+            status_code=status.HTTP_409_CONFLICT,
+            content={"detail": str(exc), "code": "team_compute_quota_exceeded"},
+        )
+
+    @app.exception_handler(TeamComputeQuotaError)
+    async def team_compute_quota_error_handler(
+        _request: Request, exc: TeamComputeQuotaError
+    ) -> JSONResponse:
+        """Return a 400 response with the team compute quota message."""
+        return JSONResponse(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            content={"detail": str(exc)},
+        )
+
+    @app.exception_handler(SecretNotFoundError)
+    @app.exception_handler(SecretVersionNotFoundError)
+    async def secret_not_found_handler(
+        _request: Request, exc: VelaError
+    ) -> JSONResponse:
+        """Return a 404 for a missing secret or secret version."""
+        return JSONResponse(
+            status_code=status.HTTP_404_NOT_FOUND,
+            content={"detail": str(exc)},
+        )
+
+    @app.exception_handler(PreviewSecretForbiddenError)
+    @app.exception_handler(WebhookSignatureError)
+    @app.exception_handler(WebhookReplayError)
+    async def preview_and_webhook_bad_request_handler(
+        _request: Request, exc: VelaError
+    ) -> JSONResponse:
+        """Return a 400 for forbidden preview secrets and invalid webhooks."""
+        return JSONResponse(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            content={"detail": str(exc)},
+        )
+
+    @app.exception_handler(DeploymentConfigChangeRequiresRecreateError)
+    async def config_change_requires_recreate_handler(
+        _request: Request, exc: DeploymentConfigChangeRequiresRecreateError
+    ) -> JSONResponse:
+        """Return a 400 listing fields that require recreating the deployment."""
+        return JSONResponse(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            content={"detail": str(exc)},
+        )
+
+    @app.exception_handler(GitHubAppNotConfiguredError)
+    async def github_app_not_configured_handler(
+        _request: Request, _exc: GitHubAppNotConfiguredError
+    ) -> JSONResponse:
+        """Return 503 when no GitHub App credentials are configured."""
+        return JSONResponse(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            content={"detail": "GitHub App is not configured"},
         )
 
     @app.exception_handler(NeedsBuildOverrideError)

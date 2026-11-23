@@ -5,6 +5,7 @@ type ContainersRunScalingFieldsProps = {
   scalingPolicy: ScalingPolicyRequest | null
   onScalingPolicyChange: (policy: ScalingPolicyRequest | null) => void
   validationError?: string | null
+  signalUnavailable?: boolean
 }
 
 const DEFAULT_POLICY: ScalingPolicyRequest = {
@@ -28,6 +29,7 @@ export function ContainersRunScalingFields({
   scalingPolicy,
   onScalingPolicyChange,
   validationError = null,
+  signalUnavailable = false,
 }: ContainersRunScalingFieldsProps) {
   const enabled = scalingPolicy !== null
   const thresholdBounds = scalingPolicy
@@ -122,6 +124,12 @@ export function ContainersRunScalingFields({
               </option>
             ))}
           </select>
+
+          {scalingPolicy?.metric === 'requests_per_second' && signalUnavailable ? (
+            <p className="containers-muted containers-form__hint" role="status">
+              RPS signal unavailable — scaling paused
+            </p>
+          ) : null}
 
           <div className="containers-scaling-row">
             <div className="containers-scaling-field">

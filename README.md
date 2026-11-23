@@ -42,6 +42,16 @@ docker compose up -d --build
 - The API drives the **host** Docker daemon via a bind-mounted socket, so workload containers run on the host engine. Works from Windows (Docker Desktop) or WSL2 — the api entrypoint grants its unprivileged user access to the socket on start.
 - All configuration lives in `.env` — see `.env.example` for the full annotated variable list.
 
+### Multi-replica / HA (opt-in)
+
+The default stack starts one `api` with the background loops (monitor, metrics, scaling, log collector) running in-process. For multi-replica deployments, opt in to the `ha` profile:
+
+```powershell
+docker compose --profile ha up -d --build
+```
+
+This adds `api-ha` (`VELA_API_REPLICAS` stateless replicas) and a single `scheduler`, both forcing shared state: `VELA_TRAFFIC_STATE_BACKEND=postgres` (deploy jobs, traffic routes, ws tickets) and `VELA_OBJECT_STORAGE=r2` (configure R2 credentials). Leave the default `api` running as the traffic server — nginx and `web`'s healthcheck depend on it — and set `VELA_BACKGROUND_LOOPS_ENABLED=0` in `.env` so only `scheduler` owns the loops (set it back to `1` for single-node runs). `api-ha` replicas are healthy and stateless but not yet wired into the compose data path; they're ready for an external load balancer or a future nginx/Traefik upstream switch.
+
 ## Backend
 
 ```powershell
@@ -87,7 +97,7 @@ The repo-root `.env` is the official config (docker compose reads it; direct run
 | `VELA_ADMIN_EMAIL` | Bootstrap admin email; creates the admin on first startup if missing |
 | `VELA_ADMIN_PASSWORD` | Password for bootstrap admin (required on first create) |
 | `VELA_AUTH_ACCESS_TOKEN_TTL_MINUTES` | Optional; access token lifetime in minutes (default sensible if omitted) |
-| `VELA_TRAFFIC_ROUTER` | `noop` (default), `traefik_file`, or `kubernetes` |
+| `VELA_TRAFFIC_ROUTER` | `noop` (default) or `traefik_file` |
 | `VELA_TRAEFIK_DYNAMIC_FILE` | Absolute path to the dynamic YAML file Traefik loads (if using `traefik_file`) |
 | `VELA_TRAEFIK_RELOAD_CONTAINER` | Optional Docker **container name** (as in `docker ps`) for Traefik; after each route write, Vela sends **SIGHUP** so Traefik reloads the file when fsnotify misses changes (typical on Docker Desktop) |
 | `VELA_DOCKER_NETWORK` | Docker network name so Traefik can reach workload containers |

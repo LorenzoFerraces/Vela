@@ -85,11 +85,14 @@ async def allocate_public_hostname(
 async def apply_public_route_to_deploy_config(
     config: DeployConfig,
     traffic_router: TrafficRouter,
+    *,
+    label_prefix: str | None = None,
 ) -> DeployConfig:
     """If ``config.public_route`` is set, fill ``route_host`` / ``route_tls`` from env and allocation."""
     if not config.public_route:
         return config
-    domain, scheme, prefix = read_public_route_settings_or_raise_for_public_deploy()
+    domain, scheme, env_prefix = read_public_route_settings_or_raise_for_public_deploy()
+    prefix = env_prefix if label_prefix is None else label_prefix
     host = await allocate_public_hostname(traffic_router, base_domain=domain, label_prefix=prefix)
     tls = scheme == "https"
     return config.model_copy(update={"route_host": host, "route_tls": tls})

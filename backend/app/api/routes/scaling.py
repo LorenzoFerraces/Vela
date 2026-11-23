@@ -7,9 +7,16 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_current_user, get_db, get_orchestrator
+from app.api.deps import (
+    get_current_user,
+    get_db,
+    get_orchestrator,
+    get_traffic_router,
+)
 from app.core.containers.orchestrator import ContainerOrchestrator
+from app.core.enums import ScalingMetric
 from app.core.models import ScalingPolicyConfig, ScalingPolicyInfo
+from app.core.monitoring.edge_requests import get_edge_request_rates
 from app.core.projects.access import (
     list_accessible_project_ids,
     require_container_access,
@@ -19,9 +26,22 @@ from app.core.scaling.policy_repository import (
     list_policies_for_container_names,
     upsert_policy,
 )
+from app.core.traffic.traffic_router import NoopTrafficRouter
 from app.db.models import User
 
 router = APIRouter()
+
+
+def _with_signal_status(info: ScalingPolicyInfo) -> ScalingPolicyInfo:
+    """Flag RPS policies whose request-rate signal is unavailable."""
+    if info.metric is ScalingMetric.REQUESTS_PER_SECOND and not isinstance(
+        get_traffic_router(), NoopTrafficRouter
+    ):
+        rates = get_edge_request_rates()
+        # The scaling engine treats an empty rates map as no signal; mirror that
+        # so the API status reflects when it will actually act.
+        info.signal_unavailable = not (rates.available and rates.rates_by_host)
+    return info
 
 
 async def _require_accessible_container_name(
@@ -80,7 +100,8 @@ async def list_scaling_policies(
         user_id=current_user.id,
     )
     container_names = {container.name for container in containers}
-    return await list_policies_for_container_names(session, container_names)
+    policies = await list_policies_for_container_names(session, container_names)
+    return [_with_signal_status(info) for info in policies]
 
 
 @router.get(
@@ -103,7 +124,7 @@ async def get_scaling_policy(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"No scaling policy found for container '{container_name}'.",
         )
-    return policy
+    return _with_signal_status(policy)
 
 
 @router.put(
@@ -124,4 +145,4 @@ async def update_scaling_policy(
     await require_container_write_access(
         session, orchestrator, current_user, container_name
     )
-    return await upsert_policy(session, container_name, body)
+    return _with_signal_status(await upsert_policy(session, container_name, body))

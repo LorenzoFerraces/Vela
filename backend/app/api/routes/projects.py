@@ -5,14 +5,24 @@ from __future__ import annotations
 import uuid
 from typing import Annotated, cast
 
-from fastapi import APIRouter, Depends, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_current_user, get_db, get_orchestrator, require_instructor
+from app.api.deps import (
+    get_current_user,
+    get_db,
+    get_orchestrator,
+    get_traffic_router,
+    require_instructor,
+)
 from app.api.schemas import (
     IncomingProjectInvitationPublic,
     InvitableRoleLiteral,
     MyProjectRolePublic,
+    PreviewPublic,
+    ProjectComputeQuotaPublic,
+    ProjectComputeQuotaUpdate,
     ProjectCreate,
     ProjectInvitationCreate,
     ProjectInvitationPublic,
@@ -25,7 +35,12 @@ from app.api.schemas import (
 )
 from app.core.audit.service import emit_audit_log
 from app.core.containers.orchestrator import ContainerOrchestrator
-from app.core.exceptions import ProjectAccessDeniedError, TeamStorageQuotaError
+from app.core.exceptions import (
+    ProjectAccessDeniedError,
+    TeamComputeQuotaError,
+    TeamStorageQuotaError,
+)
+from app.core.previews import teardown_preview
 from app.core.projects import (
     ProjectRole,
     accept_invitation,
@@ -47,11 +62,14 @@ from app.core.projects import (
 )
 from app.core.quotas import (
     TeamStorageQuotaSummary,
+    environment_compute_ceilings,
     environment_quota_bytes,
     format_gib,
+    team_compute_quota_summary,
     team_storage_quota_summary,
 )
-from app.db.models import User
+from app.core.traffic.traffic_router import TrafficRouter
+from app.db.models import PreviewDeploy, User
 
 router = APIRouter()
 
@@ -258,6 +276,68 @@ async def update_project_storage_quota(
     return _storage_quota_public(summary)
 
 
+@router.get("/{project_id}/compute-quota", response_model=ProjectComputeQuotaPublic)
+async def get_project_compute_quota(
+    project_id: uuid.UUID,
+    orchestrator: Annotated[ContainerOrchestrator, Depends(get_orchestrator)],
+    current_user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[AsyncSession, Depends(get_db)],
+) -> ProjectComputeQuotaPublic:
+    """Return the team's compute quota usage and ceilings (members only)."""
+    membership = await get_membership(
+        session, project_id=project_id, user_id=current_user.id
+    )
+    if membership is None:
+        raise ProjectAccessDeniedError(
+            "You must be a member of this team to view its compute quota."
+        )
+    project = await require_project(session, project_id)
+    summary = await team_compute_quota_summary(session, orchestrator, project)
+    return ProjectComputeQuotaPublic(
+        max_running_containers=project.max_running_containers,
+        max_cpu_millicores=project.max_cpu_millicores,
+        max_memory_bytes=project.max_memory_bytes,
+        max_deploys_per_hour=project.max_deploys_per_hour,
+        used_running_containers=summary.usage.running_containers,
+        used_cpu_millicores=summary.usage.cpu_millicores,
+        used_memory_bytes=summary.usage.memory_bytes,
+        used_deploys_per_hour=summary.usage.deploys_per_hour,
+        platform_ceiling=summary.ceilings,
+    )
+
+
+@router.patch(
+    "/{project_id}/compute-quota", response_model=ProjectComputeQuotaPublic
+)
+async def update_project_compute_quota(
+    project_id: uuid.UUID,
+    body: ProjectComputeQuotaUpdate,
+    orchestrator: Annotated[ContainerOrchestrator, Depends(get_orchestrator)],
+    current_user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[AsyncSession, Depends(get_db)],
+) -> ProjectComputeQuotaPublic:
+    """Set team compute quotas (owner only), clamped to the platform ceilings."""
+    membership = await require_membership(
+        session, project_id=project_id, user_id=current_user.id
+    )
+    if ProjectRole(membership.role) != ProjectRole.OWNER:
+        raise ProjectAccessDeniedError(
+            "Only the team owner can change compute quotas."
+        )
+    project = await require_project(session, project_id)
+    ceilings = environment_compute_ceilings()
+    for field, value in body.model_dump(exclude_unset=True).items():
+        if value is not None:
+            ceiling = ceilings[field.replace("max_", "")]
+            if ceiling is not None and value > ceiling:
+                raise TeamComputeQuotaError(
+                    f"{field} cannot exceed the platform ceiling of {ceiling}"
+                )
+        setattr(project, field, value)
+    await session.commit()
+    return await get_project_compute_quota(project_id, orchestrator, current_user, session)
+
+
 @router.get("/{project_id}/members", response_model=list[ProjectMemberPublic])
 async def list_project_members(
     project_id: uuid.UUID,
@@ -292,6 +372,45 @@ async def get_my_project_role(
         project_id=project_id,
         role=ProjectRole(membership.role).value,
     )
+
+
+@router.get("/{project_id}/previews", response_model=list[PreviewPublic])
+async def list_project_previews(
+    project_id: uuid.UUID,
+    current_user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[AsyncSession, Depends(get_db)],
+) -> list[PreviewPublic]:
+    await require_membership(
+        session, project_id=project_id, user_id=current_user.id
+    )
+    rows = (await session.execute(
+        select(PreviewDeploy)
+        .where(PreviewDeploy.project_id == project_id)
+        .order_by(PreviewDeploy.created_at.desc())
+    )).scalars().all()
+    return [PreviewPublic.model_validate(row) for row in rows]
+
+
+@router.delete(
+    "/{project_id}/previews/{preview_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def revoke_project_preview(
+    project_id: uuid.UUID,
+    preview_id: uuid.UUID,
+    current_user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[AsyncSession, Depends(get_db)],
+    orchestrator: Annotated[ContainerOrchestrator, Depends(get_orchestrator)],
+    traffic_router: Annotated[TrafficRouter, Depends(get_traffic_router)],
+) -> None:
+    await require_membership(
+        session, project_id=project_id, user_id=current_user.id
+    )
+    row = await session.get(PreviewDeploy, preview_id)
+    if row is None or row.project_id != project_id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Preview not found.")
+    await teardown_preview(session, row, orchestrator, traffic_router, status="closed")
+    await session.commit()
 
 
 @router.patch(

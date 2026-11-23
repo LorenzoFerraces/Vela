@@ -1,1 +1,1 @@
-"""Traffic routing: Traefik file provider, Kubernetes, and public host helpers."""
+"""Traffic routing: Traefik file provider and public host helpers."""

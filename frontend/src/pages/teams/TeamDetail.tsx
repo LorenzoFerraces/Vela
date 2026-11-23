@@ -1,6 +1,7 @@
 import type { FormEvent } from 'react'
 import type {
   Project,
+  ProjectComputeQuota,
   ProjectInvitation,
   ProjectMember,
   ProjectStorageQuota,
@@ -15,9 +16,14 @@ import {
   teamDescription,
   teamDisplayName,
 } from '../../projects/teamDisplay'
+import WebhookSettings from './WebhookSettings'
 
 function formatGib(bytes: number): string {
   return `${(bytes / 1024 ** 3).toFixed(1)} GiB`
+}
+
+function usagePercent(used: number, limit: number): number {
+  return limit === 0 ? 0 : Math.min(100, (used / limit) * 100)
 }
 
 type TeamDetailProps = {
@@ -28,12 +34,20 @@ type TeamDetailProps = {
   storageQuota: ProjectStorageQuota | null
   quotaError: string | null
   quotaInput: string
+  computeQuota: ProjectComputeQuota | null
+  computeQuotaError: string | null
+  computeInputs: { containers: string; cpu: string; memory: string }
   members: ProjectMember[]
   pendingInvitations: ProjectInvitation[]
   inviteEmail: string
   inviteRole: 'viewer' | 'operator'
   onQuotaInputChange: (value: string) => void
   onSaveQuota: (event: FormEvent) => void
+  onComputeInputChange: (
+    field: 'containers' | 'cpu' | 'memory',
+    value: string,
+  ) => void
+  onSaveComputeLimits: (event: FormEvent) => void
   onInviteEmailChange: (email: string) => void
   onInviteRoleChange: (role: 'viewer' | 'operator') => void
   onInvite: (event: FormEvent) => void
@@ -51,12 +65,17 @@ export function TeamDetail({
   storageQuota,
   quotaError,
   quotaInput,
+  computeQuota,
+  computeQuotaError,
+  computeInputs,
   members,
   pendingInvitations,
   inviteEmail,
   inviteRole,
   onQuotaInputChange,
   onSaveQuota,
+  onComputeInputChange,
+  onSaveComputeLimits,
   onInviteEmailChange,
   onInviteRoleChange,
   onInvite,
@@ -65,6 +84,32 @@ export function TeamDetail({
   onRemoveMember,
   onLeaveTeam,
 }: TeamDetailProps) {
+  const computeRows = computeQuota
+    ? [
+        {
+          label: 'Containers',
+          used: computeQuota.used_running_containers,
+          limit: computeQuota.max_running_containers,
+          ceiling: computeQuota.platform_ceiling.running_containers,
+          display: (value: number) => String(value),
+        },
+        {
+          label: 'CPU',
+          used: computeQuota.used_cpu_millicores,
+          limit: computeQuota.max_cpu_millicores,
+          ceiling: computeQuota.platform_ceiling.cpu_millicores,
+          display: (value: number) => `${value} mCPU`,
+        },
+        {
+          label: 'Memory',
+          used: computeQuota.used_memory_bytes,
+          limit: computeQuota.max_memory_bytes,
+          ceiling: computeQuota.platform_ceiling.memory_bytes,
+          display: formatGib,
+        },
+      ]
+    : []
+
   return (
     <div className="teams-page__detail">
       <div className="teams-page__detail-header">
@@ -167,13 +212,116 @@ export function TeamDetail({
                 <button
                   type="submit"
                   className="btn btn--primary"
-                  disabled={busy}
+                  disabled={busy || storageQuota === null}
                 >
                   Save
                 </button>
               </form>
             ) : null}
           </section>
+          <section className="teams-page__section">
+            <h3 className="teams-page__section-title">Compute</h3>
+            {computeQuota === null ? (
+              computeQuotaError ? (
+                <p className="teams-page__hint teams-page__hint--err" role="alert">
+                  {computeQuotaError}
+                </p>
+              ) : (
+                <p className="teams-page__muted">Loading compute…</p>
+              )
+            ) : (
+              <div className="teams-page__compute-usage">
+                {computeRows.map((row) => (
+                  <div key={row.label} className="teams-page__compute-row">
+                    <p className="teams-page__muted" role="status">
+                      {row.label}:{' '}
+                      {row.limit === null
+                        ? row.ceiling === null
+                          ? `${row.display(row.used)} used · Unlimited`
+                          : `${row.display(row.used)} used · ${row.display(row.ceiling)} (platform default)`
+                        : `${row.display(row.used)} of ${row.display(row.limit)}`}
+                    </p>
+                    {row.limit !== null ? (
+                      <div className="teams-page__storage-bar">
+                        <div
+                          className={
+                            row.used > row.limit
+                              ? 'teams-page__storage-bar-fill teams-page__storage-bar-fill--over'
+                              : 'teams-page__storage-bar-fill'
+                          }
+                          style={{ width: `${usagePercent(row.used, row.limit)}%` }}
+                        />
+                      </div>
+                    ) : null}
+                  </div>
+                ))}
+              </div>
+            )}
+            {isSelectedOwner ? (
+              <>
+                <h4 className="teams-page__section-title">Compute limits</h4>
+                <form
+                  className="teams-page__quota-form"
+                  onSubmit={onSaveComputeLimits}
+                  noValidate
+                >
+                  <label className="teams-page__field">
+                    Containers
+                    <input
+                      type="number"
+                      min="1"
+                      step="1"
+                      className="teams-page__input"
+                      value={computeInputs.containers}
+                      disabled={busy}
+                      onChange={(event) =>
+                        onComputeInputChange('containers', event.target.value)
+                      }
+                      placeholder="Platform default"
+                    />
+                  </label>
+                  <label className="teams-page__field">
+                    CPU (millicores)
+                    <input
+                      type="number"
+                      min="1"
+                      step="1"
+                      className="teams-page__input"
+                      value={computeInputs.cpu}
+                      disabled={busy}
+                      onChange={(event) =>
+                        onComputeInputChange('cpu', event.target.value)
+                      }
+                      placeholder="Platform default"
+                    />
+                  </label>
+                  <label className="teams-page__field">
+                    Memory (GiB)
+                    <input
+                      type="number"
+                      min="0.01"
+                      step="0.01"
+                      className="teams-page__input"
+                      value={computeInputs.memory}
+                      disabled={busy}
+                      onChange={(event) =>
+                        onComputeInputChange('memory', event.target.value)
+                      }
+                      placeholder="Platform default"
+                    />
+                  </label>
+                  <button
+                    type="submit"
+                    className="btn btn--primary"
+                    disabled={busy || computeQuota === null}
+                  >
+                    Apply limits
+                  </button>
+                </form>
+              </>
+            ) : null}
+          </section>
+          {isSelectedOwner ? <WebhookSettings projectId={project.id} /> : null}
           <section className="teams-page__section">
             <h3 className="teams-page__section-title">Members</h3>
             {members.length === 0 ? (

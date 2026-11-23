@@ -1,187 +1,161 @@
-# Platform features — design catalog (spec only)
+# Platform features — active design spec (12 features)
 
-- **Status:** Spec written and approved in chat (2026-11-20). **No feature in this document is implemented in the current work.** Each entry is a candidate for its own future brainstorm → plan → implementation cycle.
-- **Purpose:** Capture the useful-but-absent or half-built capabilities surfaced by the full-project review, with enough structure to prioritise later without pretending details are settled.
-- **Sources:** `.subagent-reports/review-cli-infra-product.md` (Part C, P1–P11), `.subagent-reports/review-backend.md` (§4 feature gaps), and the delivery specs in `docs/entrega-*.md` for intended product scope.
-- **Conventions:** Effort is a rough S/M/L. Layer is backend / frontend / CLI / infra / combinations. Dependencies point at other entries in this catalog. Every entry ends with `Status: Deferred — not implemented.`
-
----
-
-## Recommended build order (dependency-driven)
-
-1. **F04 Externalized state** — prerequisite for real HA and for reliable backup/restore of job state.
-2. **F01 Backups + restore** — once state is externalizable, a restore drill is meaningful.
-3. **F02 Metrics export** — the data source for quotas, showback and SLOs.
-4. **F03 Compute quotas** — depends on usage data; protects a shared cluster.
-5. **F13 Container config update** and **F12 Rollback** — deployment lifecycle basics, both built on deployment records.
-6. **F05 Canary / rolling deploys** and **F10 PR previews** — need health gates plus the traffic router.
-7. **F14 Secret store**, **F15 Webhooks**, **F06 SBOM/CVE**, **F17 K8s router**, **F18 RPS scaling**.
-8. **F07 CLI parity**, **F11 CLI DX**, **F08 Alert digests**, **F09 Showback**, **F16 Volume-upload management** — independent, can be slotted in anytime.
+- **Status:** Design approved in chat 2026-11-22. No feature below is implemented by this spec; each group gets its own implementation plan (A–D).
+- **Supersedes:** the 18-entry catalog dated 2026-11-20. The six features not selected for this cycle live in `docs/specs/2026-11-22-deferred-platform-features.md`.
+- **Context:** the catalog was committed as `17c90bb`; current HEAD is `f379842` (32 later commits). Open questions were researched in `.subagent-reports/catalog-open-questions-research.md` (untracked). Stale catalog premises to keep in mind: F11's `--no-wait` is already shipped (`e436487`); deploy history now stores a full Fernet-encrypted `DeployConfig` snapshot with a loader (`3f8e3b4`), so F13/F14 have a real source of truth; F05's backtick-injection concern was already fixed (`c0b99c1`); F16 upload hardening landed; F17 docs are half-corrected (`.env.example` says "scaffold", README still advertises it as normal).
+- **Conventions:** Effort S/M/L. Dependencies point at other features in this spec. Every group ends with its own plan.
 
 ---
 
-## F01 — Scheduled backups + one-click restore
+## Locked decisions
 
-- **Value:** A self-hosted PaaS holds real workloads; today there is no disaster-recovery path for Postgres, Traefik certs, or uploaded folders.
-- **Effort / layer:** M · infra + backend.
-- **Approach:** Scheduled `pg_dump` + cert/upload archival with local rotation and optional S3/R2 destination; an admin "Restore" action with a dry-run preview; documented restore drill.
-- **Dependencies:** F04 (state externalization simplifies consistency).
-- **Open questions:** Restore atomicity across DB and object storage; retention policy defaults; whether restore is self-service or admin-only.
-- **Status: Deferred — not implemented.**
+| Feature | Decision |
+|---|---|
+| F02 | Pull-style Prometheus `/metrics` on the API, no new compose service; bounded labels only; scrape protected by a static `VELA_METRICS_TOKEN` bearer (not a public endpoint); includes the edge request counter F18 needs. `vela_deploy_success_rate` = succeeded/(succeeded+failed) over terminal `deploy_jobs` rows in the last 24h (0.0 when none). |
+| F03 | Hard-fail compute quotas at deploy/scale, mirroring storage quotas; team OWNER sets limits within an admin-owned ceiling; lowering a quota never stops or deletes running workloads. |
+| F04 | Full externalization of job state, object storage and traffic state; single-node compose stays the default; multi-replica is opt-in. |
+| F07 | CLI parity commands plus uniform `--json`/`--quiet` scriptable output; respect existing admin/instructor gates. |
+| F09 | Raw resource-time showback only (CPU-seconds, memory GiB-hours, storage GiB-days); no invented currency; team members see their own team, admins see all. |
+| F10 | Explicit repo opt-in; existing health endpoint + monitor for readiness (no F05/canary); low fixed caps and short TTL; no production secrets or `secret://` references in previews. |
+| F11 | Named profiles in the existing config file (`{profiles, active}`), `VELA_PROFILE` override, legacy flat-shape migration; completions. `--no-wait` already done. |
+| F13 | `PATCH` that redeploys through the existing pipeline/history; mutable fields in place, identity/topology fields require recreation; dry-run returns the existing diff shape extended with non-secret fields. |
+| F14 | Write-only named secrets encrypted with the existing Fernet helper; immutable versions; `secret://name@version` or `latest` resolved at deploy time; history stores references only. |
+| F15 | **GitHub App installation** model (chosen over a per-project HMAC secret): App credentials plus per-installation tokens, signature verification over the raw body plus per-delivery-id dedup (unique constraint), with a server-side freshness check on `received_at`, branch filters, delivery history. |
+| F17 | Remove `kubernetes` from README and `.env.example`, reject the value at config load with a clear error, and delete the dead adapter. No Kubernetes implementation. |
+| F18 | Target-RPS scaling from F02's edge request counter with cooldowns; fail closed to "no scale action" plus "signal unavailable" status; `noop` router keeps its documented CPU proxy. |
 
-## F02 — Prometheus / OpenTelemetry export and external alerting
+## Dependency order
 
-- **Value:** `/api/metrics` is SPA-only JSON and `/api/health` is a bare status string; operators cannot plug Vela into Grafana/Alertmanager/PagerDuty.
-- **Effort / layer:** M · backend + infra.
-- **Approach:** Add a Prometheus-format `/metrics` scrape endpoint and OTLP export; define a small set of platform SLO signals (API up, collectors healthy, deploy success rate, workload count by state).
-- **Dependencies:** none; feeds F03 and F09.
-- **Open questions:** Pull vs push in the default compose stack; metric cardinality for per-workload labels.
-- **Status: Deferred — not implemented.**
+```
+B (F04) ────────────────────────────┐
+A (F02) ──┬── F03                   │
+          ├── F09                   ├──> F10 (in C)
+          └── F18                   │
+C: F14 ──┬──> F13                   │
+         └──> F10 <─────────────────┘
+   F15 ──────> F10
+D: F11, F07 — independent of the backend groups
+F17 — documentation/config only
+```
 
-## F03 — Per-team compute quotas and fair limits
+Implementation order: **D** (isolated, may overlap one backend group), **B** (foundation), **A**, **C**, with F10 last in C because it waits on F04, F14 and F15. Plans may be written separately and in parallel; implementation stays sequential per `AGENTS.md`.
 
-- **Value:** Storage quotas and per-container memory limits exist, but nothing caps container count, aggregate CPU/RAM, or deploy rate — one account can starve a shared teaching cluster.
-- **Effort / layer:** L · backend + frontend.
-- **Approach:** Enforceable per-team compute quotas evaluated at deploy/scale time, with a usage-vs-quota panel and clear 402/409-style errors.
-- **Dependencies:** F02 (reliable usage data).
-- **Open questions:** Hard vs soft limits; who sets quotas (platform admin vs team owner); behaviour of existing workloads when a quota is lowered.
-- **Status: Deferred — not implemented.**
+---
 
-## F04 — HA-ready externalizable state
+## Group A — Observability & limits (backend + frontend)
 
-- **Value:** Deploy jobs, object storage and traffic state are in-process or on local disk, so the API cannot run more than one replica — a hard production ceiling for an orchestration platform.
-- **Effort / layer:** L · infra + backend.
-- **Approach:** Move deploy job state to Postgres/Redis, avatars/uploads to S3-compatible storage by default in compose, and traffic state to a shared store; make the API stateless so `replicas: >1` works behind Traefik.
-- **Dependencies:** none — this is the foundation.
-- **Open questions:** Redis vs Postgres for job state; migration path for existing local state; whether the default single-node compose stays simple.
-- **Status: Deferred — not implemented.**
+### F02 — Prometheus export and edge request counter
 
-## F05 — Progressive delivery: rolling / blue-green / canary
+- Add a Prometheus-format `GET /metrics` scrape endpoint on the API. Pull model; no collector service in the default compose stack.
+- Protect the endpoint with a static bearer token from `VELA_METRICS_TOKEN`; it is not a public route. The token is required only when the endpoint is enabled.
+- Export bounded series only: platform signals (`api_up`, collector health, deploy success rate, workloads by state) and per-project aggregates (project id/name). No per-container labels by default — detailed per-container data stays behind the existing authenticated JSON endpoints.
+- Add an edge request counter sourced from Traefik access logs, counted per router/hostname in a rolling window, and expose the derived request rate through `/metrics` as a bounded per-project signal for F18. Reuse the existing access-log location from the compose stack; if the default router emits no usable log, make the counter opt-in and F18 reports "signal unavailable".
+- Reuse the existing metrics collector and access-scoping helpers rather than introducing a new metrics library.
 
-- **Value:** Every deploy swaps the live container immediately with no canary slice, no automatic health gate and no traffic percentage — bad deploys reach all users.
-- **Effort / layer:** L · backend + frontend + infra.
-- **Approach:** A deploy-strategy selector (recreate / rolling / canary %) with automatic abort on failed healthchecks and traffic shifting through the existing Traefik router.
-- **Dependencies:** F04 (shared state for multi-replica routing), traffic router work, healthcheck reliability.
-- **Open questions:** Canary metric source (Vela health vs external signals); rollback interaction (F12); how to represent partial traffic in `traefik_file`.
-- **Status: Deferred — not implemented.**
+### F03 — Per-team compute quotas and fair limits
 
-## F06 — Vulnerability / SBOM scanning at deploy time
+- Enforceable per-team limits at deploy/scale time: running container count, aggregate CPU limit (millicores), aggregate memory limit (bytes), and deploys per rolling hour.
+- Admission is hard: reject with a clear 409-style error naming the exhausted quota; never kill running workloads.
+- Two-tier ownership: platform admin owns the ceiling (env config); team OWNER sets the team's limits within that ceiling; members may read only.
+- Lowering a quota leaves existing workloads running and blocks further growth; show a warning banner when usage is at or over quota.
+- Add a usage-vs-quota panel to the frontend and reuse the existing alert path for over-quota state.
+- Evaluate quotas at the same admission points as `enforce_team_storage_capacity()` so deploys, scales and uploads share one gate.
 
-- **Value:** Arbitrary images and Git URLs can be deployed straight to a public route with no scanning — high risk on a teaching platform where students deploy untrusted code.
-- **Effort / layer:** M · backend + infra.
-- **Approach:** A pipeline stage that generates an SBOM and runs a CVE scan (Trivy/Grype) with a configurable fail threshold and a per-deploy report shown in the UI.
-- **Dependencies:** none.
-- **Open questions:** Scanner deployment model (sidecar vs service); blocking vs advisory mode; database refresh cadence.
-- **Status: Deferred — not implemented.**
+### F09 — Cost / showback dashboard per team
 
-## F07 — CLI parity with backend surface
+- Report raw resource-time only: CPU-seconds, memory GiB-hours, storage GiB-days, grouped by team. No currency, no hardcoded rates.
+- Data comes from the existing `ContainerMetric` rows and storage-quota usage; reuse the same project/team access scoping as `/api/metrics/usage`.
+- Team members see their own team's figures; platform admins may see all teams; no cross-team self-service browsing.
+- Frontend dashboard with a per-team breakdown and an exportable monthly report (CSV).
 
-- **Value:** Stacks, projects/teams, Dockerfile templates, scaling policies, metrics, audit and image discovery are first-class backend features with no terminal access, so they cannot be scripted in CI.
-- **Effort / layer:** M · CLI.
-- **Approach:** Add `vela stack`, `vela projects`/`vela teams`/`vela invite`, `vela templates`, `vela scale`, `vela metrics`, `vela audit`, `vela images`/`vela sources`, `vela settings`/`vela github status`; add `--project` to read commands and a `logs` HTTP-snapshot fallback for stopped containers.
-- **Dependencies:** none.
-- **Open questions:** Which commands need admin/instructor rights; interactive vs scriptable output modes.
-- **Status: Deferred — not implemented.**
+### F18 — Real RPS-based auto-scaling
 
-## F08 — Alert digests and quiet hours
+- `ScalingMetric.REQUESTS_PER_SECOND` reads the edge request rate exposed by F02 instead of mapping to CPU.
+- Target-RPS policies with the existing cooldown/stabilization gates.
+- Fail closed: if the chosen signal is unavailable, do no scale action and surface "signal unavailable" in policy status/UI — never silently substitute CPU.
+- The `noop` traffic router keeps its current CPU-proxy behaviour, explicitly documented as a proxy.
 
-- **Value:** Alerts are immediate-only; operators are paged for every transient restart. `docs/entrega-3-historias-de-usuario.md:53` explicitly deferred digests.
-- **Effort / layer:** S–M · backend + frontend.
-- **Approach:** Daily/weekly digest schedules and per-team quiet hours on top of the existing alert + dedup system.
-- **Dependencies:** none.
-- **Open questions:** Timezone source (team vs user); digest content when there are no incidents.
-- **Status: Deferred — not implemented.**
+---
 
-## F09 — Cost / showback dashboard per team
+## Group B — State & routing (infra + backend)
 
-- **Value:** Usage data already exists (`metrics.py` usage endpoints, storage-quota usage); no one can see estimated cost or per-team attribution.
-- **Effort / layer:** M · backend + frontend.
-- **Approach:** Surface estimated CPU/RAM/storage cost and per-team breakdowns with exportable monthly reports.
-- **Dependencies:** F02 (normalized usage data), F03 (quota context).
-- **Open questions:** Cost model (raw resource-time vs arbitrary rates); who may see other teams' figures.
-- **Status: Deferred — not implemented.**
+### F04 — HA-ready externalizable state
 
-## F10 — Preview environments per pull request
+- Deploy job state: replace the in-process `dict` with a Postgres table; keep the existing 300 s TTL sweep. No job migration is needed — jobs already die on restart.
+- Object storage: make the compose default use the S3/R2-compatible backend (`boto3` is already a dependency). Keep the in-memory backend for dev/tests and local runs.
+- Traffic state: move off the local `.vela-traffic-state.json` into a shared store (Postgres), with a one-shot importer for existing local state files.
+- Make the API stateless so `replicas: > 1` works behind Traefik; expose multi-replica as an opt-in profile, not the default.
+- Keep the default single-node compose profile unchanged in shape (one API, one Postgres, one Traefik, one web).
 
-- **Value:** GitHub OAuth and Git-source deploys already exist; auto-deploying a namespaced, TTL-bound preview per PR with a commented URL is a high developer-UX payoff.
-- **Effort / layer:** L · backend + frontend + infra.
-- **Approach:** Webhook-driven preview deploys, unique hostname via the traffic router, TTL expiry and garbage collection on PR close.
-- **Dependencies:** F15 (webhooks), F05 (routing/health gates), F04 (state for lifecycle tracking).
-- **Open questions:** Repo opt-in; resource caps for previews; secret injection for preview builds.
-- **Status: Deferred — not implemented.**
+### F17 — Drop the Kubernetes router option
 
-## F11 — CLI DX: config, completions, non-blocking run
+- Remove `kubernetes` from README and `.env.example` (including the "(scaffold)" mention).
+- Reject `VELA_TRAFFIC_ROUTER=kubernetes` at config load with a clear "unsupported router" error listing supported values.
+- Delete the dead `kubernetes_traffic_router` adapter and remove its wiring from the router factory. No Ingress/Route implementation.
 
-- **Value:** Repeated friction for daily users — no way to switch server/token non-interactively, no completion scripts, and `vela run` always blocks.
-- **Effort / layer:** S · CLI.
-- **Approach:** `vela config get|set`, shell completion generation, and a bounded `--no-wait` run that prints the job id.
-- **Dependencies:** none (the `--no-wait` half overlaps a defect-wave CLI fix).
-- **Open questions:** Where to store multiple server profiles.
-- **Status: Deferred — not implemented.**
+---
 
-## F12 — Deploy rollback / redeploy previous version
+## Group C — Deploy lifecycle & secrets (backend + frontend + infra)
 
-- **Value:** Deployment history and diff exist but cannot be applied, so recovery from a bad deploy is manual.
-- **Effort / layer:** M · backend + frontend.
-- **Approach:** A "Redeploy" action on a history entry that reconstructs the recorded source/image/env/command/port and starts a new deploy; keep env secrets redacted via F14.
-- **Dependencies:** F13 (config update path), F14 (secret references).
-- **Open questions:** Whether a rollback is a new history entry; behaviour when the original image tag no longer exists.
-- **Status: Deferred — not implemented.**
+Order within group: F14 first, then F13 and F15; F10 last.
 
-## F13 — Update a running container's configuration
+### F14 — Secret store / env references
 
-- **Value:** Only create/start/stop/restart/remove exist today; changing env, image tag, resources or command requires delete+recreate downtime.
-- **Effort / layer:** M · backend + frontend + CLI.
-- **Approach:** A PATCH-style endpoint that applies a new deploy config to an existing container as a redeploy, reusing the existing deploy pipeline and history recording.
-- **Dependencies:** none.
-- **Open questions:** Which fields are in-place vs require recreation; how to surface the diff before applying.
-- **Status: Deferred — not implemented.**
+- Named secrets encrypted with the existing Fernet helper; scoped per user or team following existing ownership rules.
+- Write-only: create/update returns name and metadata only; reads never return plaintext (matching deploy-history redaction and the LLM-key `has_key` precedent).
+- Immutable versions: rotation creates a new version. Deploy configs reference `secret://name@version`, or `secret://name@latest` resolved at deploy time. Running workloads keep the version they were deployed with until redeployed.
+- Resolve references at deploy time; deploy history stores references, never values, so configs are shareable and restorable without leaking secrets.
+- Secrets introduced here are available to F13's config update and usable by F15/F10 only under F10's preview restriction.
 
-## F14 — Secret store / env references
+### F13 — Update a running container's configuration
 
-- **Value:** Env vars are supplied inline and redacted to `<REDACTED>` in history, so configs cannot be shared or restored — the security-correct choice left a product hole.
-- **Effort / layer:** M · backend + frontend.
-- **Approach:** Encrypted per-user/per-team secrets with `secret://name` references in deploy configs, resolved at deploy time; history stores references, not values.
-- **Dependencies:** none.
-- **Open questions:** Rotation semantics; whether secrets are readable after creation or write-only.
-- **Status: Deferred — not implemented.**
+- Add a `PATCH`-style endpoint that applies a new deploy config through the existing deploy pipeline and writes a normal history entry.
+- Runtime-mutable fields (env, command, labels, `health_check`, route fields, cpu/memory limits where the engine allows update) redeploy in place.
+- Identity/topology fields (name, image, ports, volumes, network, network aliases) require recreation; return a clear error rather than silently recreating.
+- Add a dry-run endpoint returning the existing `DeploymentDiffResponse` shape, extended with the non-secret `DeployConfig` fields. Secret values stay `<REDACTED>` and are never echoed back.
+- Reuse the encrypted `DeployConfig` snapshot loader as the source of truth, and reuse the existing review/diff UI panel.
 
-## F15 — Git webhooks / push-to-deploy
+### F15 — Git webhooks / push-to-deploy via GitHub App
 
-- **Value:** Deploys are user-initiated only; push-to-deploy is a standard expectation for a platform already wired to GitHub OAuth and Git sources.
-- **Effort / layer:** M · backend + infra.
-- **Approach:** Per-project webhook endpoint with signature verification, branch filters and a deploy trigger reusing the Git-source pipeline; surface delivery history.
-- **Dependencies:** none.
-- **Open questions:** Shared-secret vs GitHub App; replay protection; secrets for private repos.
-- **Status: Deferred — not implemented.**
+- Use a GitHub App installation as the integration model: store the App id, encrypted private key and webhook secret; track installation ids per project; derive short-lived installation access tokens for deploys.
+- Per-project webhook endpoint with signature verification using the App webhook secret.
+- Replay protection: signature verification over the raw body plus per-delivery-id dedup (unique constraint), with a server-side freshness check on `received_at`, mirroring the existing alert-dedup pattern.
+- Branch filters per project; trigger a deploy that reuses the Git-source pipeline, using the installation token for private-repo clones (no PAT in the deploy form).
+- Surface webhook delivery history in the UI.
+- Admin/instructor gating: only project OWNER (or platform admin) may configure webhooks and view/manage App credentials.
 
-## F16 — Volume-upload management endpoint
+### F10 — Preview environments per pull request
 
-- **Value:** Users can upload up to 150 MB of volume files but cannot list or delete them, so the quota can only be reclaimed by deleting the container.
-- **Effort / layer:** S · backend + frontend.
-- **Approach:** `GET`/`DELETE /api/containers/volume-uploads` with ownership checks and an accompanying UI list.
-- **Dependencies:** none.
-- **Open questions:** Whether deletion is blocked while a container is running.
-- **Status: Deferred — not implemented.**
+- Explicit per-repository opt-in as a project setting; never auto-enable on every connected repo.
+- Webhook-driven (F15) deploy of a namespaced preview with a unique hostname from the existing traffic router.
+- Resource caps: a low fixed CPU/memory ceiling and a short TTL, enforced at admission and reusing the team quota gate so previews do not silently consume production quota.
+- Readiness and status from the existing container health endpoint and background monitor; abort/mark failed on stopped/unhealthy previews. No canary or traffic-percentage work — F05 remains deferred.
+- Never inject production secrets into previews. `secret://` references and production env values are denied for preview deploys, especially fork PRs; previews get a dedicated, clearly named env set.
+- Garbage-collect previews on PR close (or TTL expiry) and on project/repo opt-out.
 
-## F17 — Finish the Kubernetes traffic router
+---
 
-- **Value:** `VELA_TRAFFIC_ROUTER=kubernetes` is advertised in the README and `.env.example`, but every method raises "not implemented yet" — a config option that fails at runtime.
-- **Effort / layer:** M · backend + infra.
-- **Approach:** Implement Ingress/Route resource generation against the Kubernetes API (or remove the option from docs if the platform stays Docker-only).
-- **Dependencies:** none.
-- **Open questions:** Is Kubernetes a supported deploy target at all, or only an ingress backend? Cluster credentials model.
-- **Status: Deferred — not implemented.**
+## Group D — CLI (isolated in `cli/`)
 
-## F18 — Real RPS-based auto-scaling
+### F11 — CLI DX: config, completions, non-blocking run
 
-- **Value:** `REQUESTS_PER_SECOND` currently maps to CPU with a TODO, so the advertised policy does not respond to load.
-- **Effort / layer:** M · backend.
-- **Approach:** Feed an actual request-rate signal (edge/ingress metrics or app instrumentation) into the scaling engine with target-RPS policies and cooldowns.
-- **Dependencies:** F02 (metrics pipeline).
-- **Open questions:** Signal source per traffic router; behaviour when no traffic signal is available.
-- **Status: Deferred — not implemented.**
+- Change config to named profiles in the existing file: `{ "profiles": {...}, "active": "..." }` at `~/.vela/config.json` (or `VELA_CONFIG`), still written `0600`.
+- Add `VELA_PROFILE` override for the active profile, and migrate the legacy flat `{server, token, tokenId}` shape on first load.
+- Add `vela config get|set|use` and shell completion generation (bash/zsh/fish/PowerShell).
+- `run --no-wait` already exists; keep it. No change to bounded polling.
 
-## Cross-cutting note: dependency vulnerabilities
+### F07 — CLI parity with backend surface
 
-`npm ci` in this worktree reports 16 vulnerabilities (7 moderate, 9 high) from the locked dependency tree, including deprecated `xterm`/`xterm-addon-fit`. Triage (safe in-range upgrades vs major migrations) is tracked with the defect-remediation work rather than as a product feature; any change must keep `package.json` on exact versions per `AGENTS.md`.
+- Add commands for existing backend features: `vela stack`, `vela projects` / `vela teams` / `vela invite`, `vela templates`, `vela scale`, `vela metrics`, `vela audit`, `vela images` / `vela sources`, `vela settings` / `vela github status`.
+- Add `--project` to read commands and a `logs` HTTP-snapshot fallback for stopped containers.
+- Add a uniform `--json` / `--quiet` scriptable output mode with stable machine-readable fields; keep the TUI opt-in and bound human table columns.
+- Mirror backend rights: image/build/route/admin commands are admin-only; project member/invitation mutations are instructor-or-owner; ordinary deploy/stack/metrics/audit commands stay at normal user scope.
+
+---
+
+## Cross-cutting
+
+- **Specs location:** `docs/specs/` in the worktree at `C:\Users\lolo\.local\share\opencode\worktree\ab1b01\defect-remediation`, committed on the current branch.
+- **Verification:** per `AGENTS.md` — backend pytest, frontend Playwright E2E, lint/typecheck, and `docker compose config` + up/smoke/down after substantive changes. CLI changes get their own tests.
+- **No new dependencies by default** except where a locked decision requires one (GitHub App support in F15). Keep existing exact-version pinning in `frontend/package.json`.
+- **Out of scope here:** F01, F05, F06, F08, F12, F16 (see `2026-11-22-deferred-platform-features.md`). The npm vulnerability triage noted in the old catalog is tracked with defect remediation, not as a product feature.

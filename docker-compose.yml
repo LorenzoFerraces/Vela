@@ -85,6 +85,14 @@ services:
       FORWARDED_ALLOW_IPS: ${VELA_FORWARDED_ALLOW_IPS:-127.0.0.1,::1,172.16.0.0/12,192.168.0.0/16,10.0.0.0/8}
       VELA_VOLUME_UPLOADS_DIR: ${VELA_VOLUME_UPLOADS_DIR:-/data/volume-uploads}
       VELA_VOLUME_UPLOADS_HOST_DIR: ${VELA_VOLUME_UPLOADS_HOST_DIR:-}
+      VELA_OBJECT_STORAGE: ${VELA_OBJECT_STORAGE:-r2}
+      VELA_R2_ACCOUNT_ID: ${VELA_R2_ACCOUNT_ID:-}
+      VELA_R2_ACCESS_KEY_ID: ${VELA_R2_ACCESS_KEY_ID:-}
+      VELA_R2_SECRET_ACCESS_KEY: ${VELA_R2_SECRET_ACCESS_KEY:-}
+      VELA_R2_BUCKET: ${VELA_R2_BUCKET:-}
+      VELA_R2_PUBLIC_BASE_URL: ${VELA_R2_PUBLIC_BASE_URL:-}
+      VELA_EDGE_ACCESS_LOG_PATH: /var/log/traefik/access.log
+      VELA_METRICS_TOKEN: ${VELA_METRICS_TOKEN:-}
     volumes:
       - ${DOCKER_SOCKET_PATH:-/var/run/docker.sock}:/var/run/docker.sock
       # Named volume by default: a fresh Linux host no longer creates a
@@ -93,6 +101,7 @@ services:
       # backend advertises (see .env.example).
       - ${VELA_VOLUME_UPLOADS_HOST_DIR:-volume_uploads}:${VELA_VOLUME_UPLOADS_DIR:-/data/volume-uploads}
       - traefik_dynamic:/etc/traefik/dynamic
+      - traefik_logs:/var/log/traefik
     depends_on:
       postgres:
         condition: service_healthy
@@ -111,6 +120,60 @@ services:
         limits:
           cpus: "1.0"
           memory: 1G
+
+  api-ha:
+    profiles: ["ha"]
+    build: { context: ./backend, dockerfile: Dockerfile }
+    image: vela/api
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      VELA_DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-vela}:${POSTGRES_PASSWORD:-vela}@postgres:5432/${POSTGRES_DB:-Vela}
+      VELA_TRAEFIK_DYNAMIC_FILE: /etc/traefik/dynamic/traefik-http.yml
+      VELA_TRAEFIK_RELOAD_CONTAINER: vela-traefik
+      VELA_DOCKER_NETWORK: vela-workloads
+      FORWARDED_ALLOW_IPS: ${VELA_FORWARDED_ALLOW_IPS:-127.0.0.1,::1,172.16.0.0/12,192.168.0.0/16,10.0.0.0/8}
+      VELA_BACKGROUND_LOOPS_ENABLED: "0"
+      VELA_TRAFFIC_STATE_BACKEND: postgres
+      VELA_OBJECT_STORAGE: r2
+    volumes:
+      - ${DOCKER_SOCKET_PATH:-/var/run/docker.sock}:/var/run/docker.sock
+      - ${VELA_VOLUME_UPLOADS_HOST_DIR:-volume_uploads}:${VELA_VOLUME_UPLOADS_DIR:-/data/volume-uploads}
+      - traefik_dynamic:/etc/traefik/dynamic
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+    restart: unless-stopped
+    deploy:
+      replicas: ${VELA_API_REPLICAS:-3}
+
+  scheduler:
+    profiles: ["ha"]
+    image: vela/api
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      VELA_DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-vela}:${POSTGRES_PASSWORD:-vela}@postgres:5432/${POSTGRES_DB:-Vela}
+      VELA_TRAEFIK_DYNAMIC_FILE: /etc/traefik/dynamic/traefik-http.yml
+      VELA_TRAEFIK_RELOAD_CONTAINER: vela-traefik
+      VELA_DOCKER_NETWORK: vela-workloads
+      FORWARDED_ALLOW_IPS: ${VELA_FORWARDED_ALLOW_IPS:-127.0.0.1,::1,172.16.0.0/12,192.168.0.0/16,10.0.0.0/8}
+      VELA_BACKGROUND_LOOPS_ENABLED: "1"
+      VELA_TRAFFIC_STATE_BACKEND: postgres
+    volumes:
+      - ${DOCKER_SOCKET_PATH:-/var/run/docker.sock}:/var/run/docker.sock
+      - ${VELA_VOLUME_UPLOADS_HOST_DIR:-volume_uploads}:${VELA_VOLUME_UPLOADS_DIR:-/data/volume-uploads}
+      - traefik_dynamic:/etc/traefik/dynamic
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+    restart: unless-stopped
 
   web:
     build:
@@ -162,6 +225,9 @@ services:
     command:
       - --providers.file.directory=/etc/traefik/dynamic
       - --providers.file.watch=true
+      - --accesslog=true
+      - --accesslog.filepath=/var/log/traefik/access.log
+      - --accesslog.format=json
       - --entrypoints.web.address=:80
       - --entrypoints.websecure.address=:443
       # HSTS belongs at the TLS-terminating edge: nginx sees internal HTTP, so
@@ -190,6 +256,7 @@ services:
       - traefik_dynamic:/etc/traefik/dynamic
       - ./traefik/static/spa.yaml:/etc/traefik/dynamic/spa.yaml:ro
       - traefik_certs:/letsencrypt
+      - traefik_logs:/var/log/traefik
     tmpfs:
       - /tmp
     read_only: true
@@ -215,6 +282,7 @@ volumes:
   postgres_data:
   traefik_dynamic:
   traefik_certs:
+  traefik_logs:
   volume_uploads:
 
 networks:
