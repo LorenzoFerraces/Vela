@@ -8,6 +8,7 @@ import hmac
 import json
 import uuid
 from datetime import UTC, datetime, timedelta
+from typing import cast
 from unittest.mock import AsyncMock
 
 import httpx
@@ -316,7 +317,9 @@ def test_preview_worker_tears_down_row_closed_mid_build(
     orchestrator.remove = spy_remove
     router = AsyncMock()
     router.remove_route = spy_remove_route
-    registry = SimpleNamespace(
+    from app.core.deploy.jobs import DeployJobRegistry
+
+    registry = cast(DeployJobRegistry, SimpleNamespace(
         get=AsyncMock(return_value=SimpleNamespace(
             status="succeeded",
             result={
@@ -324,7 +327,7 @@ def test_preview_worker_tears_down_row_closed_mid_build(
                 "public_url": "https://pr.example.test/",
             },
         ))
-    )
+    ))
     body = RunFromSourceRequest(
         source_kind="git", git_url="https://github.com/org/repo.git", git_branch="abc"
     )
