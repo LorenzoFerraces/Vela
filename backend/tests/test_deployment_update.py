@@ -3,14 +3,20 @@
 from __future__ import annotations
 
 import asyncio
+import uuid
+from typing import Any
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from app.api.schemas import DeploymentRecordPublic
 from app.core.auth.service import get_user_by_id
+from app.core.auth.tokens import decode_access_token
 from app.core.deploy.deployment_history import load_deploy_config_snapshot
 from app.core.enums import RestartPolicy
+from app.core.exceptions import TeamComputeQuotaExceededError
 from app.core.models import DeployConfig
 from app.core.projects.repository import get_personal_project_id
 from app.core.secret_store import create_secret
@@ -174,3 +180,143 @@ def test_patch_round_trips_valid_restart_policy(
         f"/api/deployments/{new_record_id}/dry-run", json={}
     )
     assert followup.status_code == 200, followup.text
+
+
+def test_patch_response_is_the_created_record(
+    api_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    db_session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    deployment_id = _seed_deployment(api_client)
+    stale = api_client.get(f"/api/deployments/{deployment_id}").json()
+
+    async def concurrent_head(*args: object, **kwargs: object) -> list[DeploymentRecordPublic]:
+        return [DeploymentRecordPublic.model_validate(stale)]
+
+    monkeypatch.setattr(
+        "app.api.routes.deployments.deployment_history.list_deployments",
+        concurrent_head,
+    )
+    response = api_client.patch(
+        f"/api/deployments/{deployment_id}", json={"env_vars": {"B": "2"}}
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["id"] != stale["id"]
+    assert response.json()["id"] == str(_all_records(db_session_factory)[-1].id)
+
+
+def test_patch_preserves_git_branch_and_build_override(
+    api_client: TestClient,
+    db_session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    deployment_id = _seed_deployment(api_client)
+
+    async def mark_as_git() -> None:
+        async with db_session_factory() as session:
+            row = (await session.execute(
+                select(DeploymentRecord).where(
+                    DeploymentRecord.id == uuid.UUID(deployment_id)
+                )
+            )).scalar_one()
+            row.source_kind = "git"
+            row.source_ref = "https://github.com/acme/app"
+            row.git_branch = "feature-branch"
+            row.build_override = {"language": "python"}
+            await session.commit()
+
+    asyncio.run(mark_as_git())
+    response = api_client.patch(
+        f"/api/deployments/{deployment_id}", json={"env_vars": {"B": "2"}}
+    )
+    assert response.status_code == 200, response.text
+    created = _all_records(db_session_factory)[-1]
+    assert created.git_branch == "feature-branch"
+    assert created.build_override is not None
+    assert created.build_override["language"] == "python"
+
+
+def test_patch_is_quota_gated(
+    api_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    db_session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    deployment_id = _seed_deployment(api_client)
+    before = len(_all_records(db_session_factory))
+
+    async def over_quota(*args: object, **kwargs: object) -> None:
+        raise TeamComputeQuotaExceededError(
+            "Team compute quota exceeded for memory bytes"
+        )
+
+    monkeypatch.setattr(
+        "app.api.routes.deployments.enforce_team_compute_capacity", over_quota
+    )
+    response = api_client.patch(
+        f"/api/deployments/{deployment_id}", json={"env_vars": {"B": "2"}}
+    )
+    assert response.status_code == 409, response.text
+    assert len(_all_records(db_session_factory)) == before
+
+
+def test_patch_rejects_config_that_fails_deploy_validation(
+    api_client: TestClient,
+) -> None:
+    deployment_id = _seed_deployment(api_client)
+    response = api_client.patch(
+        f"/api/deployments/{deployment_id}", json={"cpu_limit": 0}
+    )
+    assert response.status_code == 422, response.text
+
+
+def test_viewer_cannot_redeploy_their_deployment(
+    integration_app: Any,
+    register_user_client: Any,
+) -> None:
+    with TestClient(integration_app) as owner_client, TestClient(integration_app) as viewer_client:
+        owner_token = register_user_client(
+            "patch-owner@example.com", role="instructor"
+        )
+        owner_client.headers.update({"Authorization": f"Bearer {owner_token}"})
+        project_id = owner_client.get("/api/projects/").json()[0]["id"]
+
+        viewer_email = "patch-viewer@example.com"
+        viewer_token = register_user_client(viewer_email)
+        viewer_client.headers.update({"Authorization": f"Bearer {viewer_token}"})
+        viewer_id = str(decode_access_token(viewer_token).user_id)
+
+        invitation = owner_client.post(
+            f"/api/projects/{project_id}/invitations",
+            json={"email": viewer_email, "role": "operator"},
+        )
+        assert invitation.status_code == 201, invitation.text
+        incoming = viewer_client.get("/api/projects/invitations/incoming").json()
+        invitation_id = next(
+            row["id"] for row in incoming if row["project_id"] == project_id
+        )
+        assert viewer_client.post(
+            f"/api/projects/invitations/{invitation_id}/accept"
+        ).status_code == 200
+
+        accepted = viewer_client.post(
+            "/api/containers/run",
+            json={
+                "source_kind": "image",
+                "image_ref": "nginx:alpine",
+                "project_id": project_id,
+            },
+        )
+        assert accepted.status_code == 202, accepted.text
+        job = wait_for_deploy(viewer_client, accepted.json()["job_id"])
+        assert job["status"] == "succeeded", job
+        deployment_id = viewer_client.get("/api/deployments/").json()[0]["id"]
+
+        downgrade = owner_client.patch(
+            f"/api/projects/{project_id}/members/{viewer_id}",
+            json={"role": "viewer"},
+        )
+        assert downgrade.status_code == 200, downgrade.text
+
+        response = viewer_client.patch(
+            f"/api/deployments/{deployment_id}", json={"env_vars": {"B": "2"}}
+        )
+        assert response.status_code == 403, response.text

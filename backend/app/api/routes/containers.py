@@ -145,7 +145,7 @@ from app.core.traffic.public_route_host import (
 )
 from app.core.traffic.traffic_router import TrafficRouter
 from app.core.url_display import sanitize_url_for_display
-from app.db.models import Dockerfile, Project, ProjectMembership, User
+from app.db.models import DeploymentRecord, Dockerfile, Project, ProjectMembership, User
 
 logger = logging.getLogger(__name__)
 
@@ -374,11 +374,11 @@ async def _persist_run_deployment(
     dockerfile_snapshot: str | None,
     public_url: str | None,
     deploy_config: dict,
-) -> None:
+) -> DeploymentRecord | None:
     sanitized_env_vars = _redacted_env_vars_for_history(body.env_vars)
     for attempt in range(3):
         try:
-            await record_deployment(
+            row = await record_deployment(
                 session,
                 user_id=user.id,
                 project_id=project_id,
@@ -402,7 +402,7 @@ async def _persist_run_deployment(
                     deploy_config=deploy_config,
                 ),
             )
-            return
+            return row
         except Exception:
             # In tests, request-session teardown ROLLBACKs on the shared
             # in-memory connection can wipe this INSERT before its COMMIT
@@ -423,6 +423,7 @@ async def _persist_run_deployment(
                     "Could not reset session before persist retry for container %s",
                     info.id,
                 )
+    return None
 
 
 async def _persist_scaling_policy(
