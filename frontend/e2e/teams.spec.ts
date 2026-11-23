@@ -51,6 +51,25 @@ test.describe('teams page', () => {
     await expect(alert).toContainText('at least 1 GiB')
   })
 
+  test('saves the compute limits as the team owner', async ({
+    instructorPage,
+  }) => {
+    await instructorPage.goto(`${baseURL}/teams`)
+    await expect(
+      instructorPage.getByRole('heading', { name: 'Compute limits' }),
+    ).toBeVisible()
+    await instructorPage.getByLabel('Containers', { exact: true }).fill('5')
+    await instructorPage.getByRole('button', { name: 'Apply limits' }).click()
+    await expect(
+      instructorPage
+        .getByRole('status')
+        .filter({ hasText: 'Compute limits updated.' }),
+    ).toBeVisible()
+    await expect(
+      instructorPage.getByText(/Containers: \d+ of 5/),
+    ).toBeVisible()
+  })
+
   test('keeps students outside team management', async ({
     instructorPage,
     authenticatedPageNoGithub,

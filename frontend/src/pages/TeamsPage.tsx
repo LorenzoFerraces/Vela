@@ -27,6 +27,11 @@ export default function TeamsPage() {
     quotaInput,
     setQuotaInput,
     onSaveQuota,
+    computeQuota,
+    computeQuotaError,
+    computeInputs,
+    setComputeInput,
+    onSaveComputeLimits,
     members,
     pendingInvitations,
     inviteEmail,
@@ -130,6 +135,11 @@ export default function TeamsPage() {
               quotaInput={quotaInput}
               onQuotaInputChange={setQuotaInput}
               onSaveQuota={onSaveQuota}
+              computeQuota={computeQuota}
+              computeQuotaError={computeQuotaError}
+              computeInputs={computeInputs}
+              onComputeInputChange={setComputeInput}
+              onSaveComputeLimits={onSaveComputeLimits}
               members={members}
               pendingInvitations={pendingInvitations}
               inviteEmail={inviteEmail}

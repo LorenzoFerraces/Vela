@@ -77,6 +77,7 @@ export {
   cancelProjectInvitation,
   createProject,
   createProjectInvitation,
+  getProjectComputeQuota,
   getProjectStorageQuota,
   leaveProject,
   listIncomingInvitations,
@@ -85,6 +86,7 @@ export {
   listProjects,
   removeProjectMember,
   rejectProjectInvitation,
+  updateProjectComputeQuota,
   updateProjectMemberRole,
   updateProjectStorageQuota,
 } from './projects'
@@ -189,8 +191,10 @@ export type {
 } from './builds'
 
 export type {
+  ComputeQuotaUpdate,
   IncomingProjectInvitation,
   Project,
+  ProjectComputeQuota,
   ProjectInvitation,
   ProjectMember,
   ProjectStorageQuota,

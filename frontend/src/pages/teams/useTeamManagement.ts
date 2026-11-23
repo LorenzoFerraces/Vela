@@ -6,19 +6,23 @@ import {
   createProject,
   createProjectInvitation,
   formatApiError,
+  getProjectComputeQuota,
   getProjectStorageQuota,
   leaveProject,
   listIncomingInvitations,
   listProjectInvitations,
   listProjectMembers,
   listProjects,
+  type ComputeQuotaUpdate,
   type IncomingProjectInvitation,
   type Project,
+  type ProjectComputeQuota,
   type ProjectInvitation,
   type ProjectMember,
   type ProjectStorageQuota,
   rejectProjectInvitation,
   removeProjectMember,
+  updateProjectComputeQuota,
   updateProjectMemberRole,
   updateProjectStorageQuota,
 } from '../../api/client'
@@ -40,6 +44,15 @@ export function useTeamManagement() {
   )
   const [quotaInput, setQuotaInput] = useState('')
   const [quotaError, setQuotaError] = useState<string | null>(null)
+  const [computeQuota, setComputeQuota] = useState<ProjectComputeQuota | null>(
+    null,
+  )
+  const [computeQuotaError, setComputeQuotaError] = useState<string | null>(null)
+  const [computeInputs, setComputeInputs] = useState({
+    containers: '',
+    cpu: '',
+    memory: '',
+  })
   const [pendingInvitations, setPendingInvitations] = useState<ProjectInvitation[]>(
     []
   )
@@ -89,6 +102,34 @@ export function useTeamManagement() {
     detailRequestRef.current = requestId
     setDetailLoading(true)
     setQuotaError(null)
+    setComputeQuotaError(null)
+    void getProjectComputeQuota(project.id)
+      .then((quotaRow) => {
+        if (detailRequestRef.current !== requestId) {
+          return
+        }
+        setComputeQuota(quotaRow)
+        setComputeInputs({
+          containers:
+            quotaRow.max_running_containers === null
+              ? ''
+              : String(quotaRow.max_running_containers),
+          cpu:
+            quotaRow.max_cpu_millicores === null
+              ? ''
+              : String(quotaRow.max_cpu_millicores),
+          memory:
+            quotaRow.max_memory_bytes === null
+              ? ''
+              : String(quotaRow.max_memory_bytes / 1024 ** 3),
+        })
+      })
+      .catch((error) => {
+        if (detailRequestRef.current !== requestId) {
+          return
+        }
+        setComputeQuotaError(formatApiError(error))
+      })
     void getProjectStorageQuota(project.id)
       .then((quotaRow) => {
         if (detailRequestRef.current !== requestId) {
@@ -305,6 +346,54 @@ export function useTeamManagement() {
     }
   }
 
+  async function onSaveComputeLimits(event: React.FormEvent) {
+    event.preventDefault()
+    if (!selectedProject) {
+      return
+    }
+    setBanner(null)
+    const invalid = [
+      ['Containers', computeInputs.containers],
+      ['CPU', computeInputs.cpu],
+      ['Memory', computeInputs.memory],
+    ].find(
+      ([, value]) =>
+        value.trim() !== '' &&
+        (!Number.isFinite(Number(value)) || Number(value) < 1),
+    )
+    if (invalid) {
+      setBanner({
+        tone: 'err',
+        text: `${invalid[0]} must be at least 1, or clear the field for no limit.`,
+      })
+      return
+    }
+    const toLimit = (value: string, scale = 1): number | null =>
+      value.trim() === '' ? null : Math.round(Number(value) * scale)
+    const update: ComputeQuotaUpdate = {
+      max_running_containers: toLimit(computeInputs.containers),
+      max_cpu_millicores: toLimit(computeInputs.cpu),
+      max_memory_bytes: toLimit(computeInputs.memory, 1024 ** 3),
+    }
+    setBusy(true)
+    try {
+      const updated = await updateProjectComputeQuota(selectedProject.id, update)
+      setComputeQuota(updated)
+      setBanner({ tone: 'ok', text: 'Compute limits updated.' })
+    } catch (error) {
+      setBanner({ tone: 'err', text: formatApiError(error) })
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const setComputeInput = useCallback(
+    (field: keyof typeof computeInputs, value: string) => {
+      setComputeInputs((current) => ({ ...current, [field]: value }))
+    },
+    [],
+  )
+
   const onAcceptInvitation = useCallback(
     async (invitationId: string) => {
       setBusy(true)
@@ -461,6 +550,11 @@ export function useTeamManagement() {
     quotaInput,
     setQuotaInput,
     onSaveQuota,
+    computeQuota,
+    computeQuotaError,
+    computeInputs,
+    setComputeInput,
+    onSaveComputeLimits,
     members,
     pendingInvitations,
     inviteEmail,

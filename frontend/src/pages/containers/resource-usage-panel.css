@@ -53,3 +53,39 @@
 .resource-usage__value {
   color: var(--text-muted);
 }
+
+.resource-usage__compute {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0 0 12px;
+}
+
+.resource-usage__compute-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 4px 8px;
+  font-size: 12px;
+}
+
+.resource-usage__compute-label {
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.resource-usage__compute-bar {
+  grid-column: 1 / -1;
+  height: 4px;
+  background: var(--border);
+  overflow: hidden;
+}
+
+.resource-usage__compute-bar-fill {
+  height: 100%;
+  background: var(--accent);
+}
+
+.resource-usage__compute-bar-fill--over {
+  background: var(--error);
+}
