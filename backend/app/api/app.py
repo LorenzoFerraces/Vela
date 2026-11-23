@@ -29,6 +29,7 @@ from app.api.routes import (
     images,
     logs,
     metrics,
+    prometheus,
     projects,
     scaling,
     settings,
@@ -317,6 +318,8 @@ def create_app() -> FastAPI:
         prefix=f"{API_PREFIX}/metrics",
         tags=["metrics"],
     )
+
+    application.include_router(prometheus.router, tags=["prometheus"])
 
     @application.get(f"{API_PREFIX}/health", tags=["health"])
     async def health() -> dict[str, str]:
