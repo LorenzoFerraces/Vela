@@ -159,7 +159,10 @@ async def deploy_stack(
 
     except Exception as exc:
         if on_phase is not None:
-            await on_phase("rolling_back", None)
+            try:
+                await on_phase("rolling_back", None)
+            except Exception:
+                logger.exception("Stack rollback phase callback failed")
 
         for container in deployed_containers:
             try:
@@ -178,7 +181,10 @@ async def deploy_stack(
             failed_service = service_names[len(deployed_containers)]
 
         if failed_service is not None and on_service_state is not None:
-            await on_service_state(failed_service, "failed")
+            try:
+                await on_service_state(failed_service, "failed")
+            except Exception:
+                logger.exception("Stack failure service-state callback failed")
 
         if isinstance(exc, NeedsBuildOverrideError):
             if failed_service:
