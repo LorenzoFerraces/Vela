@@ -376,9 +376,17 @@ async def _run_preview_worker(
             container = result.get("container") or {}
             row.container_id = container.get("id")
             row.container_name = container.get("name")
+            if row.closed_at is not None:
+                # Closed mid-build (TTL/PR close): tear down what just landed,
+                # keep the row terminal so GC never sees it again.
+                closed_at = row.closed_at
+                await teardown_preview(session, row, orchestrator, traffic_router)
+                row.closed_at = closed_at
+                await session.commit()
+                return
             row.public_url = result.get("public_url")
             row.status = "deployed"
-        else:
+        elif row.closed_at is None:
             row.status = "failed"
         await session.commit()
 

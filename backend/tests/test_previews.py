@@ -273,6 +273,84 @@ def test_preview_worker_delegates_to_source_worker(
     assert forwarded["prefix"] == "pr-"
 
 
+def test_preview_worker_tears_down_row_closed_mid_build(
+    db_session_factory, monkeypatch
+) -> None:
+    from types import SimpleNamespace
+
+    from app.api.routes import webhooks
+    from app.api.schemas import RunFromSourceRequest
+
+    async def noop_source_worker(*args, **kwargs) -> None:
+        return None
+
+    monkeypatch.setattr(webhooks, "_run_container_deploy_worker", noop_source_worker)
+
+    project_id = uuid.uuid4()
+    preview_id = uuid.uuid4()
+    closed_at = datetime.now(UTC) - timedelta(minutes=1)
+
+    async def seed() -> None:
+        async with db_session_factory() as session:
+            session.add(
+                PreviewDeploy(
+                    id=preview_id, project_id=project_id, repo_full_name="org/repo",
+                    pr_number=21, head_sha="abc", expires_at=datetime.now(UTC),
+                    status="closed", closed_at=closed_at,
+                )
+            )
+            await session.commit()
+
+    asyncio.run(seed())
+
+    removed: list[str] = []
+    removed_routes: list[str] = []
+
+    async def spy_remove(container_id: str, *, force: bool = False) -> None:
+        removed.append(container_id)
+
+    async def spy_remove_route(route_id: str) -> None:
+        removed_routes.append(route_id)
+
+    orchestrator = AsyncMock()
+    orchestrator.remove = spy_remove
+    router = AsyncMock()
+    router.remove_route = spy_remove_route
+    registry = SimpleNamespace(
+        get=AsyncMock(return_value=SimpleNamespace(
+            status="succeeded",
+            result={
+                "container": {"id": "fresh-container", "name": "pr-21-abc-fresh"},
+                "public_url": "https://pr.example.test/",
+            },
+        ))
+    )
+    body = RunFromSourceRequest(
+        source_kind="git", git_url="https://github.com/org/repo.git", git_branch="abc"
+    )
+    asyncio.run(
+        webhooks._run_preview_worker(
+            registry, "job", db_session_factory, body, project_id, [],
+            uuid.uuid4(), orchestrator, router, AsyncMock(), "inst-token-xyz",
+            "pr-", preview_id,
+        )
+    )
+
+    assert removed == ["fresh-container"]
+    assert removed_routes == ["pr-21-abc-fresh"]
+
+    async def read_row() -> PreviewDeploy:
+        async with db_session_factory() as session:
+            row = await session.get(PreviewDeploy, preview_id)
+            assert row is not None
+            return row
+
+    row = asyncio.run(read_row())
+    assert row.status == "closed"
+    assert row.closed_at == closed_at.replace(tzinfo=None)  # SQLite drops tzinfo
+    assert row.public_url is None
+
+
 def test_synchronize_previews_teardown_then_redeploy(
     api_client, db_session_factory, seeded_user, monkeypatch, fake_orchestrator
 ) -> None:
