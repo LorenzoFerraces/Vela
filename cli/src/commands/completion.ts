@@ -16,7 +16,7 @@ export async function completionCommand(argv: string[]): Promise<number> {
   if (shell === "bash") {
     console.log(`_vela() { COMPREPLY=( $(compgen -W "${words}" -- "\${COMP_WORDS[COMP_CWORD]}") ); }\ncomplete -F _vela vela`)
   } else if (shell === "zsh") {
-    console.log(`#compdef vela\n_arguments '1: :(${words})'`)
+    console.log(`#compdef vela\n_vela() {\n  _arguments '1: :(${words})'\n}\ncompdef _vela vela`)
   } else if (shell === "fish") {
     console.log(`complete -c vela -f -a '${words}'`)
   } else {
