@@ -41,9 +41,25 @@ from app.api.routes import (
     webhooks,
 )
 from app.core.deploy.jobs import DeployJobRegistry
+from app.core.previews import collect_expired_previews
 
 API_PREFIX = "/api"
 logger = logging.getLogger(__name__)
+
+
+async def run_preview_gc_loop(session_factory) -> None:
+    """Sweep expired PR previews once a minute."""
+    from app.api.deps import get_orchestrator, get_traffic_router
+
+    while True:
+        try:
+            async with session_factory() as session:
+                await collect_expired_previews(
+                    session, get_orchestrator(), get_traffic_router(),
+                )
+        except Exception:
+            logger.exception("Preview GC cycle failed")
+        await asyncio.sleep(60)
 
 
 @asynccontextmanager
@@ -76,10 +92,14 @@ async def _lifespan(_application: FastAPI):
     monitor_task: asyncio.Task[None] | None = None
     metrics_task: asyncio.Task[None] | None = None
     scaling_task: asyncio.Task[None] | None = None
+    preview_gc_task: asyncio.Task[None] | None = None
     log_collector: LogCollector | None = None
 
     if os.getenv("VELA_BACKGROUND_LOOPS_ENABLED", "1") == "1":
         monitor_task = asyncio.create_task(run_monitoring_loop())
+        preview_gc_task = asyncio.create_task(
+            run_preview_gc_loop(get_db_session_factory())
+        )
         try:
             orchestrator = get_orchestrator()
         except ProviderConnectionError as exc:
@@ -117,12 +137,12 @@ async def _lifespan(_application: FastAPI):
         yield
     finally:
         await deploy_jobs.cancel_all()
-        for task in (monitor_task, metrics_task, scaling_task):
+        for task in (monitor_task, metrics_task, scaling_task, preview_gc_task):
             if task is not None:
                 task.cancel()
         if log_collector is not None:
             await log_collector.stop()
-        for task in (monitor_task, metrics_task, scaling_task):
+        for task in (monitor_task, metrics_task, scaling_task, preview_gc_task):
             if task is not None:
                 with suppress(asyncio.CancelledError):
                     await task

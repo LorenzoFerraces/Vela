@@ -5,14 +5,22 @@ from __future__ import annotations
 import uuid
 from typing import Annotated, cast
 
-from fastapi import APIRouter, Depends, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_current_user, get_db, get_orchestrator, require_instructor
+from app.api.deps import (
+    get_current_user,
+    get_db,
+    get_orchestrator,
+    get_traffic_router,
+    require_instructor,
+)
 from app.api.schemas import (
     IncomingProjectInvitationPublic,
     InvitableRoleLiteral,
     MyProjectRolePublic,
+    PreviewPublic,
     ProjectComputeQuotaPublic,
     ProjectComputeQuotaUpdate,
     ProjectCreate,
@@ -32,6 +40,7 @@ from app.core.exceptions import (
     TeamComputeQuotaError,
     TeamStorageQuotaError,
 )
+from app.core.previews import teardown_preview
 from app.core.projects import (
     ProjectRole,
     accept_invitation,
@@ -51,6 +60,7 @@ from app.core.projects import (
     require_project,
     update_member_role,
 )
+from app.core.traffic.traffic_router import TrafficRouter
 from app.core.quotas import (
     TeamStorageQuotaSummary,
     environment_compute_ceilings,
@@ -59,7 +69,7 @@ from app.core.quotas import (
     team_compute_quota_summary,
     team_storage_quota_summary,
 )
-from app.db.models import User
+from app.db.models import PreviewDeploy, User
 
 router = APIRouter()
 
@@ -362,6 +372,45 @@ async def get_my_project_role(
         project_id=project_id,
         role=ProjectRole(membership.role).value,
     )
+
+
+@router.get("/{project_id}/previews", response_model=list[PreviewPublic])
+async def list_project_previews(
+    project_id: uuid.UUID,
+    current_user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[AsyncSession, Depends(get_db)],
+) -> list[PreviewPublic]:
+    await require_membership(
+        session, project_id=project_id, user_id=current_user.id
+    )
+    rows = (await session.execute(
+        select(PreviewDeploy)
+        .where(PreviewDeploy.project_id == project_id)
+        .order_by(PreviewDeploy.created_at.desc())
+    )).scalars().all()
+    return [PreviewPublic.model_validate(row) for row in rows]
+
+
+@router.delete(
+    "/{project_id}/previews/{preview_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def revoke_project_preview(
+    project_id: uuid.UUID,
+    preview_id: uuid.UUID,
+    current_user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[AsyncSession, Depends(get_db)],
+    orchestrator: Annotated[ContainerOrchestrator, Depends(get_orchestrator)],
+    traffic_router: Annotated[TrafficRouter, Depends(get_traffic_router)],
+) -> None:
+    await require_membership(
+        session, project_id=project_id, user_id=current_user.id
+    )
+    row = await session.get(PreviewDeploy, preview_id)
+    if row is None or row.project_id != project_id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Preview not found.")
+    await teardown_preview(session, row, orchestrator, traffic_router, status="closed")
+    await session.commit()
 
 
 @router.patch(

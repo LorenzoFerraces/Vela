@@ -7,6 +7,7 @@ import {
   type WebhookDeliveryPublic,
 } from '../../api/client'
 import { Skeleton } from '../../components/Skeleton'
+import { listPreviews, revokePreview, type PreviewPublic } from '../../api/previews'
 import './webhook-settings.css'
 
 type Props = {
@@ -37,6 +38,7 @@ function formatReceivedAt(iso: string): string {
 export default function WebhookSettings({ projectId }: Props) {
   const [form, setForm] = useState<FormState>(initialForm)
   const [deliveries, setDeliveries] = useState<WebhookDeliveryPublic[]>([])
+  const [previews, setPreviews] = useState<PreviewPublic[]>([])
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -49,8 +51,9 @@ export default function WebhookSettings({ projectId }: Props) {
     void Promise.all([
       getWebhookConfig(projectId),
       listWebhookDeliveries(projectId),
+      listPreviews(projectId),
     ])
-      .then(([config, history]) => {
+      .then(([config, history, previewRows]) => {
         if (cancelled) return
         setForm({
           repo: config.repo_full_name ?? '',
@@ -60,6 +63,7 @@ export default function WebhookSettings({ projectId }: Props) {
           ttl: String(config.preview_ttl_seconds),
         })
         setDeliveries(history)
+        setPreviews(previewRows)
       })
       .catch((loadError: unknown) => {
         if (!cancelled) setError(formatApiError(loadError))
@@ -105,6 +109,19 @@ export default function WebhookSettings({ projectId }: Props) {
       setError(formatApiError(saveError))
     } finally {
       setBusy(false)
+    }
+  }
+
+  async function handleRevoke(preview: PreviewPublic) {
+    try {
+      await revokePreview(projectId, preview.id)
+      setPreviews((previous) =>
+        previous.map((row) =>
+          row.id === preview.id ? { ...row, status: 'closed' } : row,
+        ),
+      )
+    } catch (revokeError: unknown) {
+      setError(formatApiError(revokeError))
     }
   }
 
@@ -188,6 +205,56 @@ export default function WebhookSettings({ projectId }: Props) {
               {busy ? 'Saving…' : 'Save webhook'}
             </button>
           </form>
+
+          <h4 className="teams-page__section-title">Previews</h4>
+          {previews.length === 0 ? (
+            <p className="teams-page__muted">No previews yet.</p>
+          ) : (
+            <div className="webhook-deliveries__wrap">
+              <table className="webhook-deliveries">
+                <thead>
+                  <tr>
+                    <th scope="col">PR</th>
+                    <th scope="col">URL</th>
+                    <th scope="col">Expires</th>
+                    <th scope="col">Status</th>
+                    <th scope="col">Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {previews.map((preview) => (
+                    <tr key={preview.id}>
+                      <td>#{preview.pr_number}</td>
+                      <td>
+                        {preview.public_url ? (
+                          <a href={preview.public_url} target="_blank" rel="noreferrer">
+                            {preview.public_url}
+                          </a>
+                        ) : (
+                          '—'
+                        )}
+                      </td>
+                      <td>{formatReceivedAt(preview.expires_at)}</td>
+                      <td>{preview.status}</td>
+                      <td>
+                        {preview.status === 'closed' || preview.status === 'expired' ? (
+                          '—'
+                        ) : (
+                          <button
+                            type="button"
+                            className="btn btn--ghost"
+                            onClick={() => void handleRevoke(preview)}
+                          >
+                            Revoke
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
 
           <h4 className="teams-page__section-title">Recent deliveries</h4>
           {deliveries.length === 0 ? (

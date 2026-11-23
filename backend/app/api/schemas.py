@@ -1224,3 +1224,17 @@ class GitHubWebhookDeliveryEntry(BaseModel):
     status: str
     received_at: datetime
     error: str | None
+
+
+class PreviewPublic(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    repo_full_name: str
+    pr_number: int
+    head_sha: str
+    public_url: str | None
+    route_host: str | None
+    expires_at: datetime
+    status: str
+    closed_at: datetime | None

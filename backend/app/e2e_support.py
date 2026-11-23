@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import uuid
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING
 from urllib.parse import unquote, urlparse
@@ -19,7 +20,7 @@ from app.core.projects.bootstrap import ensure_personal_workspace
 from app.core.security.secrets import encrypt_secret
 from app.db.base import Base
 from app.db.engine import get_engine
-from app.db.models import StackService, User, UserOAuthIdentity
+from app.db.models import PreviewDeploy, StackService, User, UserOAuthIdentity
 
 if TYPE_CHECKING:
     from app.api.schemas import GitSourceAnalysis
@@ -379,3 +380,26 @@ async def ensure_e2e_database() -> None:
                 )
             )
             await session.commit()
+
+        instructor = await session.get(User, E2E_INSTRUCTOR_ID)
+        if instructor is not None and instructor.personal_project_id is not None:
+            existing_preview = await session.scalar(
+                select(PreviewDeploy).where(
+                    PreviewDeploy.project_id == instructor.personal_project_id,
+                    PreviewDeploy.pr_number == 7,
+                )
+            )
+            if existing_preview is None:
+                session.add(
+                    PreviewDeploy(
+                        project_id=instructor.personal_project_id,
+                        repo_full_name="org/repo",
+                        pr_number=7,
+                        head_sha="abc12345",
+                        public_url="https://pr-7-abc12345.preview.example.test/",
+                        route_host="pr-7-abc12345.preview.example.test",
+                        expires_at=datetime.now(UTC) + timedelta(days=1),
+                        status="deployed",
+                    )
+                )
+                await session.commit()
