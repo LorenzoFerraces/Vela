@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import csv
+import io
 import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query
+from fastapi.responses import StreamingResponse
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -16,20 +19,25 @@ from app.api.schemas import (
     MetricPoint,
     MetricSummary,
     ProjectUsage,
+    ShowbackSummary,
+    TeamShowback,
     UsageSummary,
 )
+from app.core.auth.enums import UserRole
 from app.core.containers.docker_orchestrator import (
     VELA_PROJECT_LABEL,
 )
 from app.core.containers.orchestrator import ContainerOrchestrator
 from app.core.enums import ContainerStatus
 from app.core.models import ContainerInfo
+from app.core.monitoring.metrics_collector import METRICS_INTERVAL_SECONDS
 from app.core.projects.access import (
     list_accessible_project_ids,
     require_container_access,
 )
 from app.core.quotas import (
     effective_quota_bytes,
+    team_storage_usage,
     usage_from_containers,
 )
 from app.db.models import (
@@ -290,3 +298,97 @@ async def latest_metric_by_container(
     )
     rows = (await session.execute(stmt)).scalars().all()
     return {row.container_id: row for row in rows}
+
+
+async def _resource_time(
+    session: AsyncSession, container_ids: list[str], days: int
+) -> tuple[float, float]:
+    """Integrate stored samples into CPU-seconds and memory GiB-hours."""
+    since = datetime.now(UTC) - timedelta(days=days)
+    cpu_seconds = 0.0
+    memory_gib_seconds = 0.0
+    if container_ids:
+        rows = (await session.execute(
+            select(ContainerMetric).where(
+                ContainerMetric.timestamp >= since,
+                ContainerMetric.container_id.in_(container_ids),
+            )
+        )).scalars().all()
+        for row in rows:
+            cpu_seconds += (row.cpu_percent / 100) * METRICS_INTERVAL_SECONDS
+            memory_gib_seconds += (row.memory_usage_bytes / 1024**3) * METRICS_INTERVAL_SECONDS
+    return cpu_seconds, memory_gib_seconds / 3600
+
+
+@router.get("/showback", response_model=ShowbackSummary)
+async def get_showback(
+    current_user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[AsyncSession, Depends(get_db)],
+    orchestrator: Annotated[ContainerOrchestrator, Depends(get_orchestrator)],
+) -> ShowbackSummary:
+    """Raw resource-time for every team the caller can see, scoped to access."""
+    if current_user.role == UserRole.ADMIN:
+        project_ids = set((await session.execute(select(Project.id))).scalars().all())
+        containers = await orchestrator.list()
+    else:
+        project_ids = await list_accessible_project_ids(session, current_user.id)
+        containers = await orchestrator.list(
+            project_ids=project_ids, user_id=current_user.id
+        )
+    ids_by_project: dict[uuid.UUID, list[str]] = {}
+    for info in containers:
+        raw_project_id = info.labels.get(VELA_PROJECT_LABEL)
+        try:
+            ids_by_project.setdefault(uuid.UUID(raw_project_id), []).append(info.id)
+        except (TypeError, ValueError):
+            continue
+    projects = (
+        (await session.execute(select(Project).where(Project.id.in_(project_ids))))
+        .scalars()
+        .all()
+    )
+    teams: list[TeamShowback] = []
+    for project in projects:
+        cpu_seconds, memory_gib_hours = await _resource_time(
+            session, ids_by_project.get(project.id, []), 30
+        )
+        disk_bytes, uploads_bytes = await team_storage_usage(
+            session, orchestrator, project.id
+        )
+        storage_gib = (disk_bytes + uploads_bytes) / 1024**3
+        teams.append(TeamShowback(
+            team_name=project.name,
+            cpu_seconds=cpu_seconds,
+            memory_gib_hours=memory_gib_hours,
+            # ponytail: current storage × 30 days; no storage time series exists yet.
+            storage_gib_days=storage_gib * 30,
+        ))
+    since = datetime.now(UTC) - timedelta(days=30)
+    return ShowbackSummary(month=since.strftime("%Y-%m"), teams=teams)
+
+
+@router.get("/showback/export")
+async def export_showback(
+    month: str,
+    current_user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[AsyncSession, Depends(get_db)],
+    orchestrator: Annotated[ContainerOrchestrator, Depends(get_orchestrator)],
+) -> StreamingResponse:
+    summary = await get_showback(current_user, session, orchestrator)
+    buffer = io.StringIO()
+    writer = csv.writer(buffer)
+    writer.writerow(["team", "cpu_seconds", "memory_gib_hours", "storage_gib_days"])
+    for team in summary.teams:
+        writer.writerow([
+            team.team_name,
+            team.cpu_seconds,
+            team.memory_gib_hours,
+            team.storage_gib_days,
+        ])
+    return StreamingResponse(
+        iter([buffer.getvalue()]),
+        media_type="text/csv",
+        headers={
+            "Content-Disposition": f'attachment; filename="vela-showback-{month}.csv"'
+        },
+    )

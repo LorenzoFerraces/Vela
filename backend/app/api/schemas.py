@@ -1101,3 +1101,16 @@ class UsageSummary(BaseModel):
     total_cpu_percent: float
     total_memory_usage_bytes: int
     running_containers: int
+
+
+class TeamShowback(BaseModel):
+    team_name: str
+    cpu_seconds: float
+    memory_gib_hours: float
+    storage_gib_days: float
+    cost_currency: None = None
+
+
+class ShowbackSummary(BaseModel):
+    month: str
+    teams: list[TeamShowback]
