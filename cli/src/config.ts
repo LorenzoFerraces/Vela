@@ -2,6 +2,8 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync, chmodSync }
 import { dirname, join } from "node:path"
 import { homedir } from "node:os"
 
+import { VelaError } from "./client"
+
 export const DEFAULT_SERVER = "http://127.0.0.1:8000"
 const DEFAULT_PROFILE = "default"
 
@@ -72,14 +74,18 @@ export function resolveConfig(
   env: NodeJS.ProcessEnv = process.env,
   stored: StoredConfig | null = readStoredConfig(),
 ): ResolvedConfig {
-  const profileName = flags.profile ?? env.VELA_PROFILE ?? stored?.active ?? DEFAULT_PROFILE
-  const profile = stored?.profiles[profileName] ?? stored?.profiles[stored.active] ?? null
+  const explicitProfile = flags.profile ?? (env.VELA_PROFILE || undefined)
+  const profileName = explicitProfile ?? stored?.active ?? DEFAULT_PROFILE
+  if (explicitProfile !== undefined && !Object.hasOwn(stored?.profiles ?? {}, profileName)) {
+    throw new VelaError(2, `Unknown profile: ${profileName}`)
+  }
+  const profile = stored?.profiles[profileName] ?? null
   const server = (flags.server ?? env.VELA_API_URL ?? profile?.server ?? DEFAULT_SERVER).replace(/\/+$/, "")
   const fromOverride = flags.token !== undefined || env.VELA_TOKEN !== undefined
   return {
     server,
     token: flags.token ?? env.VELA_TOKEN ?? profile?.token,
     tokenId: fromOverride ? undefined : profile?.tokenId,
-    profile: stored?.profiles[profileName] ? profileName : (stored?.active ?? DEFAULT_PROFILE),
+    profile: profileName,
   }
 }

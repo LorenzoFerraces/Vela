@@ -113,9 +113,13 @@ test("flags.profile overrides the active profile and keeps its tokenId", () => {
     .toEqual({ server: "http://school:8000", token: "pat_school", tokenId: "tid_school", profile: "school" })
 })
 
-test("unknown profile falls back to active and a corrupt file is still null", () => {
+test("an explicit unknown profile is a usage error before any request", () => {
   writeStoredConfig({ profiles: { default: { server: "http://d:8000", token: "t" } }, active: "default" }, configFile)
-  expect(resolveConfig({ profile: "missing" }, {}, readStoredConfig(configFile)!).profile).toBe("default")
+  const stored = readStoredConfig(configFile)!
+  expect(() => resolveConfig({ profile: "missing" }, {}, stored)).toThrow(/Unknown profile: missing/)
+  expect(() => resolveConfig({}, { VELA_PROFILE: "missing" }, stored)).toThrow(/Unknown profile: missing/)
+  expect(() => resolveConfig({ profile: "missing" }, {}, null)).toThrow(/Unknown profile: missing/)
+  expect(resolveConfig({}, { VELA_PROFILE: "" }, stored).profile).toBe("default")
   writeFileSync(configFile, "{not json")
   expect(readStoredConfig(configFile)).toBeNull()
 })

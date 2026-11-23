@@ -86,8 +86,14 @@ function applyGlobalConfig(argv: string[]): string[] {
       process.env.VELA_TOKEN = arg.slice("--token=".length)
       continue
     }
-    if (arg === "--profile" && index + 1 < head.length) {
-      process.env.VELA_PROFILE = head[index + 1]; index += 1; continue
+    if (arg === "--profile") {
+      const value = head[index + 1]
+      if (value === undefined) {
+        throw new VelaError(2, `Missing value for ${arg}.`)
+      }
+      process.env.VELA_PROFILE = value
+      index += 1
+      continue
     }
     if (arg.startsWith("--profile=")) {
       process.env.VELA_PROFILE = arg.slice("--profile=".length); continue
