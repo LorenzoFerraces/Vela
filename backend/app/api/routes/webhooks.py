@@ -9,6 +9,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Request
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db, get_deploy_jobs, require_admin
@@ -93,7 +94,12 @@ async def github_webhook(
         status="received",
     )
     session.add(delivery)
-    await session.commit()
+    # The unique delivery_id constraint backstops the check above: a racing
+    # duplicate loses the insert, so report it as a duplicate instead of 500.
+    try:
+        await session.commit()
+    except IntegrityError:
+        return {"status": "duplicate"}
     return {"status": "received"}
 
 

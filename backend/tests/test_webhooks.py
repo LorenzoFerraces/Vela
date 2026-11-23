@@ -44,6 +44,38 @@ def test_webhook_rejects_bad_signature(api_client, db_session_factory) -> None:
     assert response.status_code == 400
 
 
+def test_webhook_rejects_non_ascii_signature(api_client, db_session_factory) -> None:
+    import asyncio
+
+    from app.core.security.secrets import encrypt_secret
+    from app.db.models import GitHubAppInstall
+
+    async def seed() -> None:
+        async with db_session_factory() as session:
+            session.add(
+                GitHubAppInstall(
+                    app_id="123",
+                    private_key_encrypted=encrypt_secret("pem"),
+                    webhook_secret_encrypted=encrypt_secret("hook-secret"),
+                )
+            )
+            await session.commit()
+
+    asyncio.run(seed())
+    # Raw bytes -> Starlette decodes the header as latin-1 into a non-ASCII str,
+    # the case that used to raise TypeError inside hmac.compare_digest.
+    response = api_client.post(
+        "/webhooks/github/00000000-0000-0000-0000-000000000001",
+        content=b"{}",
+        headers={
+            "X-Hub-Signature-256": b"sha256=\xff\xff",
+            "X-GitHub-Delivery": "d-non-ascii",
+            "X-GitHub-Event": "push",
+        },
+    )
+    assert response.status_code == 400
+
+
 def test_webhook_dedups_delivery_ids(api_client, db_session_factory) -> None:
     import asyncio
     import uuid

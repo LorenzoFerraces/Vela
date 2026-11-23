@@ -24,7 +24,11 @@ def verify_github_signature(
     if signature is None or not signature.startswith("sha256="):
         return False
     expected = hmac.new(secret.encode(), payload, hashlib.sha256).hexdigest()
-    return hmac.compare_digest(signature.removeprefix("sha256="), expected)
+    # Compare bytes: non-ASCII header values are valid latin-1 str but raise
+    # TypeError in the str form of compare_digest (unauthenticated 500).
+    return hmac.compare_digest(
+        signature.removeprefix("sha256=").encode("utf-8"), expected.encode("utf-8")
+    )
 
 
 async def installation_token(session: AsyncSession, project_id: uuid.UUID) -> str:
