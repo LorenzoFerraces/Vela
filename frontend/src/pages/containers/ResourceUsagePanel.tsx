@@ -16,23 +16,24 @@ function formatGib(bytes: number): string {
 }
 
 function computeRows(quota: ProjectComputeQuota) {
+  const ceiling = quota.platform_ceiling
   return [
     {
       label: 'Containers',
       used: quota.used_running_containers,
-      limit: quota.max_running_containers,
+      limit: quota.max_running_containers ?? ceiling.running_containers,
       display: (value: number) => String(value),
     },
     {
       label: 'CPU',
       used: quota.used_cpu_millicores,
-      limit: quota.max_cpu_millicores,
+      limit: quota.max_cpu_millicores ?? ceiling.cpu_millicores,
       display: (value: number) => `${value} mCPU`,
     },
     {
       label: 'Memory',
       used: quota.used_memory_bytes,
-      limit: quota.max_memory_bytes,
+      limit: quota.max_memory_bytes ?? ceiling.memory_bytes,
       display: formatGib,
     },
   ]
