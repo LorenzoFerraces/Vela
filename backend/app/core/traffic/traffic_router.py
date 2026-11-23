@@ -9,7 +9,7 @@ from app.core.traffic.traffic_models import RouteInfo, RouteSpec
 
 
 class TrafficRouter(ABC):
-    """Abstract edge proxy integration (Traefik file provider, Kubernetes Ingress, etc.)."""
+    """Abstract edge proxy integration (Traefik file provider, noop, etc.)."""
 
     @abstractmethod
     async def upsert_route(self, spec: RouteSpec) -> RouteInfo:

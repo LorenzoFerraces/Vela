@@ -6,11 +6,13 @@ const config = { server: "http://127.0.0.1:8000", token: "pat-token" }
 const captured = { fetchUrls: [] as string[], fetchInit: [] as RequestInit[], wsUrls: [] as string[] }
 let originalFetch: typeof fetch
 let originalWebSocket: typeof WebSocket
+let queuedMessage: string | null = null
 
 beforeEach(() => {
   captured.fetchUrls = []
   captured.fetchInit = []
   captured.wsUrls = []
+  queuedMessage = null
   originalFetch = globalThis.fetch
   originalWebSocket = globalThis.WebSocket
 
@@ -31,7 +33,10 @@ beforeEach(() => {
 
     constructor(url: string) {
       captured.wsUrls.push(url)
-      queueMicrotask(() => this.onclose?.())
+      queueMicrotask(() => {
+        if (queuedMessage !== null) this.onmessage?.({ data: queuedMessage })
+        this.onclose?.()
+      })
     }
     send() {}
     close() {}
@@ -65,4 +70,42 @@ test("WS streaming mints a single-use ticket and never sends access_token", asyn
 
   expect(await mintWsTicket(config, "container-1", "exec")).toBe("tkt-123")
   expect(captured.fetchUrls[1]).toContain("purpose=exec")
+})
+
+test("streamed chunks honor quiet and json output modes", async () => {
+  const savedQuiet = process.env.VELA_OUTPUT_QUIET
+  const savedJson = process.env.VELA_OUTPUT_JSON
+  const originalWrite = process.stdout.write
+  const log = console.log
+  const stdout: string[] = []
+  const jsonLines: string[] = []
+  queuedMessage = "hello\n"
+  delete process.env.VELA_OUTPUT_QUIET
+  delete process.env.VELA_OUTPUT_JSON
+  process.stdout.write = ((chunk: string | Uint8Array) => {
+    stdout.push(String(chunk))
+    return true
+  }) as typeof process.stdout.write
+  console.log = (value: string) => jsonLines.push(value)
+  try {
+    await streamLogs(config, "container-1", { tail: 20, follow: false })
+    expect(stdout).toEqual(["hello\n"])
+
+    stdout.length = 0
+    process.env.VELA_OUTPUT_QUIET = "1"
+    await streamLogs(config, "container-1", { tail: 20, follow: false })
+    expect(stdout).toEqual([])
+
+    delete process.env.VELA_OUTPUT_QUIET
+    process.env.VELA_OUTPUT_JSON = "1"
+    await streamLogs(config, "container-1", { tail: 20, follow: false })
+    expect(jsonLines).toEqual(['"hello\\n"'])
+    expect(stdout).toEqual([])
+  } finally {
+    process.stdout.write = originalWrite
+    console.log = log
+    queuedMessage = null
+    if (savedQuiet === undefined) delete process.env.VELA_OUTPUT_QUIET; else process.env.VELA_OUTPUT_QUIET = savedQuiet
+    if (savedJson === undefined) delete process.env.VELA_OUTPUT_JSON; else process.env.VELA_OUTPUT_JSON = savedJson
+  }
 })

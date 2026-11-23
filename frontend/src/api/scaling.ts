@@ -29,6 +29,7 @@ export interface ScalingPolicyInfo {
   last_scaled_at: string | null
   created_at: string
   updated_at: string
+  signal_unavailable: boolean
 }
 
 export async function listScalingPolicies(): Promise<ScalingPolicyInfo[]> {

@@ -14,6 +14,7 @@ from app.core.security.outbound_url import validate_git_remote
 from app.e2e_support import e2e_git_shallow_clone_if_enabled
 
 _CREDENTIALS_IN_URL = re.compile(r"(https?://)([^/@:\s]+:)?[^/@\s]+@", re.IGNORECASE)
+_FULL_SHA_RE = re.compile(r"^[0-9a-f]{40}$", re.IGNORECASE)
 _ALLOWED_SCHEMES = ("https://", "http://", "ssh://", "git://", "git@")
 
 
@@ -60,31 +61,53 @@ async def git_shallow_clone(
     _validate_git_url(url)
     url = _guard_git_url(url)
 
-    cmd = _build_clone_command(url=url, branch=branch, dest=dest, access_token=access_token)
+    # ``git clone --branch`` only accepts refs, not raw commit SHAs. Pinned refs
+    # (PR previews, push deploys) are 40-hex SHAs, so fetch the commit directly.
+    if _FULL_SHA_RE.fullmatch(branch):
+        commands = _build_fetch_commands(
+            url=url, sha=branch, dest=dest, access_token=access_token
+        )
+    else:
+        commands = [
+            _build_clone_command(
+                url=url, branch=branch, dest=dest, access_token=access_token
+            )
+        ]
 
     def _run() -> None:
         dest.parent.mkdir(parents=True, exist_ok=True)
-        try:
-            proc = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                check=False,
-                timeout=600,
-            )
-        except FileNotFoundError as exc:
-            raise CloneError(
-                url,
-                "git executable not found — install Git and ensure it is on PATH.",
-            ) from exc
-        except subprocess.TimeoutExpired as exc:
-            raise CloneError(url, "git clone timed out after 600s.") from exc
+        for cmd in commands:
+            try:
+                proc = subprocess.run(
+                    cmd,
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                    timeout=600,
+                )
+            except FileNotFoundError as exc:
+                raise CloneError(
+                    url,
+                    "git executable not found — install Git and ensure it is on PATH.",
+                ) from exc
+            except subprocess.TimeoutExpired as exc:
+                raise CloneError(url, "git clone timed out after 600s.") from exc
 
-        if proc.returncode != 0:
-            err = (proc.stderr or proc.stdout or "").strip() or f"exit {proc.returncode}"
-            raise CloneError(url, _sanitize_message(err))
+            if proc.returncode != 0:
+                err = (proc.stderr or proc.stdout or "").strip() or f"exit {proc.returncode}"
+                raise CloneError(url, _sanitize_message(err))
 
     await asyncio.to_thread(_run)
+
+
+def _auth_args(*, url: str, access_token: str | None) -> list[str]:
+    if access_token and url.lower().startswith("https://"):
+        # Send credentials via header so the URL stays clean. ``x-access-token``
+        # is GitHub's documented username for OAuth/PAT Basic auth.
+        token_pair = f"x-access-token:{access_token}".encode()
+        encoded = base64.b64encode(token_pair).decode("ascii")
+        return ["-c", f"http.extraheader=Authorization: Basic {encoded}"]
+    return []
 
 
 def _build_clone_command(
@@ -94,13 +117,7 @@ def _build_clone_command(
     dest: Path,
     access_token: str | None,
 ) -> list[str]:
-    cmd: list[str] = ["git"]
-    if access_token and url.lower().startswith("https://"):
-        # Send credentials via header so the URL stays clean. ``x-access-token``
-        # is GitHub's documented username for OAuth/PAT Basic auth.
-        token_pair = f"x-access-token:{access_token}".encode()
-        encoded = base64.b64encode(token_pair).decode("ascii")
-        cmd.extend(["-c", f"http.extraheader=Authorization: Basic {encoded}"])
+    cmd: list[str] = ["git", *_auth_args(url=url, access_token=access_token)]
     cmd.extend(
         [
             "clone",
@@ -113,6 +130,23 @@ def _build_clone_command(
         ]
     )
     return cmd
+
+
+def _build_fetch_commands(
+    *,
+    url: str,
+    sha: str,
+    dest: Path,
+    access_token: str | None,
+) -> list[list[str]]:
+    """Build the init/remote/fetch/checkout sequence for a pinned commit SHA."""
+    auth = _auth_args(url=url, access_token=access_token)
+    return [
+        ["git", "init", str(dest)],
+        ["git", "-C", str(dest), "remote", "add", "origin", url],
+        ["git", *auth, "-C", str(dest), "fetch", "--depth", "1", "origin", sha],
+        ["git", "-C", str(dest), "checkout", "--detach", "FETCH_HEAD"],
+    ]
 
 
 def _sanitize_message(message: str) -> str:

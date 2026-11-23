@@ -3,35 +3,91 @@
 from __future__ import annotations
 
 import secrets
-import time
 import uuid
+from datetime import UTC, datetime, timedelta
+from typing import cast
 
-_TICKET_TTL_SECONDS = 60.0
-_tickets: dict[str, tuple[uuid.UUID, str, str, float]] = {}
+from sqlalchemy import delete
+from sqlalchemy.engine import CursorResult
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+from app.db.models import WsTicketRecord
+
+_TICKET_TTL = timedelta(seconds=60)
 
 
-def issue_ws_ticket(user_id: uuid.UUID, container_id: str, purpose: str) -> str:
-    now = time.monotonic()
-    # Sweep stale tickets on issue so unused ones cannot accumulate indefinitely.
-    for key, (_, _, _, expires_at) in list(_tickets.items()):
-        if expires_at <= now:
-            del _tickets[key]
-    ticket = secrets.token_urlsafe(32)
-    _tickets[ticket] = (user_id, container_id, purpose, now + _TICKET_TTL_SECONDS)
+def _make_ticket(user_id: uuid.UUID) -> str:
+    # The table stores no user_id column, so the self-describing ticket carries
+    # it. The random prefix stays unguessable; the suffix is only trusted after
+    # an exact-PK delete proves the row was minted by us.
+    return f"{secrets.token_urlsafe(32)}.{user_id.hex}"
+
+
+def _user_id_from_ticket(ticket: str) -> uuid.UUID | None:
+    try:
+        _, user_hex = ticket.rsplit(".", 1)
+        return uuid.UUID(hex=user_hex)
+    except ValueError:
+        return None
+
+
+async def issue_ws_ticket(
+    session_factory: async_sessionmaker[AsyncSession],
+    user_id: uuid.UUID,
+    container_id: str,
+    purpose: str,
+) -> str:
+    ticket = _make_ticket(user_id)
+    async with session_factory() as session:
+        session.add(
+            WsTicketRecord(
+                ticket=ticket,
+                container_id=container_id,
+                purpose=purpose,
+                created_at=datetime.now(UTC),
+            )
+        )
+        await session.commit()
     return ticket
 
 
-def consume_ws_ticket(ticket: str, container_id: str, purpose: str) -> uuid.UUID | None:
-    entry = _tickets.pop(ticket, None)
-    if entry is None:
-        return None
-    user_id, expected_container, expected_purpose, expires_at = entry
-    if time.monotonic() > expires_at:
-        return None
-    if (expected_container, expected_purpose) != (container_id, purpose):
-        return None
-    return user_id
+async def consume_ws_ticket(
+    session_factory: async_sessionmaker[AsyncSession],
+    ticket: str,
+    container_id: str,
+    purpose: str,
+) -> uuid.UUID | None:
+    cutoff = datetime.now(UTC) - _TICKET_TTL
+    async with session_factory() as session:
+        # Lazy sweep so unused tickets cannot accumulate (as with deploy jobs).
+        await session.execute(
+            delete(WsTicketRecord).where(WsTicketRecord.created_at < cutoff)
+        )
+        # Conditional delete is the one-shot guarantee: only one caller can
+        # flip a matching row from present to gone.
+        matched = cast(
+            CursorResult,
+            await session.execute(
+                delete(WsTicketRecord).where(
+                    WsTicketRecord.ticket == ticket,
+                    WsTicketRecord.container_id == container_id,
+                    WsTicketRecord.purpose == purpose,
+                    WsTicketRecord.created_at >= cutoff,
+                )
+            ),
+        )
+        consumed = matched.rowcount == 1
+        if not consumed:
+            # Burn a presented ticket whose scope or TTL is wrong, matching the
+            # old ``dict.pop`` behaviour.
+            await session.execute(
+                delete(WsTicketRecord).where(WsTicketRecord.ticket == ticket)
+            )
+        await session.commit()
+    return _user_id_from_ticket(ticket) if consumed else None
 
 
-def reset_for_tests() -> None:
-    _tickets.clear()
+async def reset_for_tests(session_factory: async_sessionmaker[AsyncSession]) -> None:
+    async with session_factory() as session:
+        await session.execute(delete(WsTicketRecord))
+        await session.commit()

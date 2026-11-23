@@ -3,6 +3,7 @@ import { parseArgs } from "node:util"
 import { request, requireToken, VelaError } from "../client"
 import { resolveConfig } from "../config"
 import { formatTable } from "../format"
+import { emit } from "../output"
 import type { DeploymentRecord, DeployJob } from "../types"
 
 interface RunAccepted {
@@ -52,7 +53,12 @@ export async function waitForJob(
     }
     if (job.phase !== lastPhase) {
       const detail = job.phase_detail ? ` ${job.phase_detail}` : ""
-      console.log(`[${job.phase}]${detail}`)
+      const progress = `[${job.phase}]${detail}`
+      if (process.env.VELA_OUTPUT_JSON === "1") {
+        if (process.env.VELA_OUTPUT_QUIET !== "1") console.error(progress)
+      } else {
+        emit(progress, () => progress)
+      }
       lastPhase = job.phase
     }
     if (job.status === "succeeded") return job
@@ -75,7 +81,6 @@ export async function run(argv: string[]): Promise<number> {
       branch: { type: "string" },
       template: { type: "string" },
       project: { type: "string" },
-      json: { type: "boolean" },
       "no-wait": { type: "boolean" },
     },
     allowPositionals: true,
@@ -113,60 +118,52 @@ export async function run(argv: string[]): Promise<number> {
 
   const config = requireToken(resolveConfig({}))
   const accepted = await request<RunAccepted>(config, "POST", "/containers/run", body)
-  console.log(`Queued deploy ${accepted.job_id}.`)
+  const queued = `Queued deploy ${accepted.job_id}.`
+  emit(queued, () => queued)
   if (values["no-wait"]) {
-    console.log(accepted.job_id)
+    emit(accepted, () => accepted.job_id)
     return 0
   }
   const job = await waitForJob(config, accepted.job_id)
 
-  if (values.json) {
-    console.log(JSON.stringify(job, null, 2))
-    return 0
-  }
-  console.log(`Deployed ${job.name}.`)
-  const result =
-    typeof job.result === "object" && job.result !== null
-      ? (job.result as Record<string, unknown>)
-      : null
-  const urlCandidates = [
-    result?.access_url,
-    result?.public_url,
-    result?.url,
-    (result?.container as Record<string, unknown> | undefined)?.access_url,
-    (result?.container as Record<string, unknown> | undefined)?.public_url,
-  ]
-  for (const candidate of urlCandidates) {
-    if (typeof candidate === "string" && candidate) {
-      console.log(candidate)
-      break
+  emit(job, () => {
+    let text = `Deployed ${job.name}.`
+    const result =
+      typeof job.result === "object" && job.result !== null
+        ? (job.result as Record<string, unknown>)
+        : null
+    const urlCandidates = [
+      result?.access_url,
+      result?.public_url,
+      result?.url,
+      (result?.container as Record<string, unknown> | undefined)?.access_url,
+      (result?.container as Record<string, unknown> | undefined)?.public_url,
+    ]
+    for (const candidate of urlCandidates) {
+      if (typeof candidate === "string" && candidate) {
+        text += `\n${candidate}`
+        break
+      }
     }
-  }
+    return text
+  })
   return 0
 }
 
 export async function deploys(argv: string[]): Promise<number> {
-  const { values } = parseArgs({
-    args: argv,
-    options: { json: { type: "boolean" } },
-    allowPositionals: false,
-  })
+  parseArgs({ args: argv, options: {}, allowPositionals: false })
   const config = requireToken(resolveConfig({}))
   const records = await request<DeploymentRecord[]>(config, "GET", "/deployments/")
-  if (values.json) {
-    console.log(JSON.stringify(records, null, 2))
-    return 0
-  }
-  const rows = records.map((record) => [
-    record.container_name ?? record.image_tag,
-    record.source_kind,
-    record.source_ref,
-    record.git_branch ?? "",
-    record.public_url ?? "",
-    record.created_at,
-  ])
-  console.log(
-    formatTable(["NAME", "SOURCE", "REF", "BRANCH", "URL", "CREATED"], rows),
-  )
+  emit(records, () => {
+    const rows = records.map((record) => [
+      record.container_name ?? record.image_tag,
+      record.source_kind,
+      record.source_ref,
+      record.git_branch ?? "",
+      record.public_url ?? "",
+      record.created_at,
+    ])
+    return formatTable(["NAME", "SOURCE", "REF", "BRANCH", "URL", "CREATED"], rows)
+  })
   return 0
 }

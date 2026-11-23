@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import uuid
 from urllib.parse import urlparse
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.exceptions import GitHubAppNotConfiguredError
+from app.core.github_app import installation_token
 from app.core.oauth import decrypt_identity_token, get_github_identity
 from app.db.models import User
 
@@ -32,6 +35,16 @@ async def github_token_for_url(
     if identity is None:
         return None
     return decrypt_identity_token(identity)
+
+
+async def github_token_for_project(
+    session: AsyncSession, project_id: uuid.UUID, user: User
+) -> str | None:
+    """Prefer the project's App installation token, fall back to the user's PAT."""
+    try:
+        return await installation_token(session, project_id)
+    except GitHubAppNotConfiguredError:
+        return await github_token_for_url(session, user, "https://github.com/")
 
 
 def looks_like_auth_failure(error_message: str) -> bool:

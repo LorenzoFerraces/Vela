@@ -43,6 +43,43 @@ export async function updateProjectStorageQuota(
   )
 }
 
+export interface ProjectComputeQuota {
+  max_running_containers: number | null
+  max_cpu_millicores: number | null
+  max_memory_bytes: number | null
+  max_deploys_per_hour: number | null
+  used_running_containers: number
+  used_cpu_millicores: number
+  used_memory_bytes: number
+  used_deploys_per_hour: number
+  platform_ceiling: Record<string, number | null>
+}
+
+export type ComputeQuotaUpdate = Partial<
+  Pick<
+    ProjectComputeQuota,
+    'max_running_containers' | 'max_cpu_millicores' | 'max_memory_bytes' | 'max_deploys_per_hour'
+  >
+>
+
+export async function getProjectComputeQuota(
+  projectId: string,
+): Promise<ProjectComputeQuota> {
+  return apiGet<ProjectComputeQuota>(
+    `/api/projects/${encodeURIComponent(projectId)}/compute-quota`,
+  )
+}
+
+export async function updateProjectComputeQuota(
+  projectId: string,
+  update: ComputeQuotaUpdate,
+): Promise<ProjectComputeQuota> {
+  return apiPatch<ProjectComputeQuota, ComputeQuotaUpdate>(
+    `/api/projects/${encodeURIComponent(projectId)}/compute-quota`,
+    update,
+  )
+}
+
 export type ProjectMember = {
   user_id: string
   email: string

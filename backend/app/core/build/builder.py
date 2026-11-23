@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 
 from app.core.models import BuildOverride, BuildResult, ProjectInfo, ProjectSource
 
@@ -22,7 +22,7 @@ class ImageBuilder(ABC):
         tag: str,
         access_token: str | None = None,
         override: BuildOverride | None = None,
-        on_phase: Callable[[str], None] | None = None,
+        on_phase: Callable[[str], Awaitable[None]] | None = None,
     ) -> BuildResult:
         """Full pipeline: clone → analyse → generate/detect Dockerfile → build.
 

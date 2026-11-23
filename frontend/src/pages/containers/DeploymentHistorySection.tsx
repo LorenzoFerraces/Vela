@@ -1,10 +1,15 @@
 import { useCallback, useEffect, useState } from 'react'
 import {
+  dryRunDeployment,
   formatApiError,
   getDeploymentDiff,
   listDeployments,
+  updateDeployment,
   type DeploymentDiffResponse,
+  type DeploymentEnvDiff,
   type DeploymentRecord,
+  type DeploymentUpdateDryRunResponse,
+  type DeploymentUpdateRequest,
 } from '../../api/client'
 import { deploySourceImageLabel } from './deploySourceDisplay'
 import { Skeleton } from '../../components/Skeleton'
@@ -65,6 +70,101 @@ function EnvDiffValue({
   )
 }
 
+type HistoryDiff = DeploymentDiffResponse & { config?: Record<string, unknown> }
+
+const CONFIG_FIELD_LABELS: Record<string, string> = {
+  command: 'Command',
+  cpu_limit: 'CPU limit',
+  env_vars: 'Environment',
+  health_check: 'Health check',
+  labels: 'Labels',
+  memory_limit: 'Memory limit',
+  public_route: 'Public route',
+  restart_policy: 'Restart policy',
+  route_host: 'Route host',
+  route_path_prefix: 'Path prefix',
+  route_tls: 'Route TLS',
+}
+
+function formatConfigValue(value: unknown): string {
+  return typeof value === 'string' ? value : JSON.stringify(value)
+}
+
+function parseEnvText(text: string): {
+  entries: Record<string, string>
+  skipped: string[]
+} {
+  const entries: Record<string, string> = {}
+  const skipped: string[] = []
+  for (const line of text.split('\n')) {
+    const trimmed = line.trim()
+    const separator = trimmed.indexOf('=')
+    if (separator <= 0) {
+      if (trimmed) skipped.push(trimmed)
+      continue
+    }
+    entries[trimmed.slice(0, separator).trim()] = trimmed.slice(separator + 1).trim()
+  }
+  return { entries, skipped }
+}
+
+function EnvDiffList({ env }: { env: DeploymentEnvDiff }) {
+  if (
+    Object.keys(env.added).length === 0 &&
+    Object.keys(env.removed).length === 0 &&
+    Object.keys(env.changed).length === 0
+  ) {
+    return <p className="containers-muted">No env changes.</p>
+  }
+  return (
+    <ul className="deployment-history__env-diff">
+      {Object.entries(env.added).map(([key, value]) => (
+        <EnvDiffLine
+          key={`add-${key}`}
+          lineKey={`add-${key}`}
+          prefix="+"
+          envKey={key}
+          value={value}
+        />
+      ))}
+      {Object.entries(env.removed).map(([key, value]) => (
+        <EnvDiffLine
+          key={`remove-${key}`}
+          lineKey={`remove-${key}`}
+          prefix="-"
+          envKey={key}
+          value={value}
+        />
+      ))}
+      {Object.entries(env.changed).map(([key, change]) => (
+        <EnvChangeLine
+          key={`change-${key}`}
+          lineKey={`change-${key}`}
+          envKey={key}
+          before={change.before}
+          after={change.after}
+        />
+      ))}
+    </ul>
+  )
+}
+
+function ConfigDiff({ config }: { config: Record<string, unknown> }) {
+  const entries = Object.entries(config)
+  if (entries.length === 0) {
+    return <p className="containers-muted">No config changes.</p>
+  }
+  return (
+    <ul className="deployment-history__env-diff">
+      {entries.map(([field, value]) => (
+        <li key={field}>
+          ~ {CONFIG_FIELD_LABELS[field] ?? field}: {formatConfigValue(value)}
+        </li>
+      ))}
+    </ul>
+  )
+}
+
 function EnvDiffLine({
   lineKey,
   prefix,
@@ -115,8 +215,18 @@ export function DeploymentHistorySection({
   const [error, setError] = useState<string | null>(null)
   const [leftId, setLeftId] = useState<string>('')
   const [rightId, setRightId] = useState<string>('')
-  const [diff, setDiff] = useState<DeploymentDiffResponse | null>(null)
+  const [diff, setDiff] = useState<HistoryDiff | null>(null)
   const [diffLoading, setDiffLoading] = useState(false)
+  const [updateEnvText, setUpdateEnvText] = useState('')
+  const [dryRun, setDryRun] = useState<DeploymentUpdateDryRunResponse | null>(null)
+  const [reviewed, setReviewed] = useState<{
+    id: string
+    body: DeploymentUpdateRequest
+  } | null>(null)
+  const [applyLoading, setApplyLoading] = useState(false)
+  const [applyStatus, setApplyStatus] = useState<string | null>(null)
+  const { entries: envEntries, skipped: skippedEnvLines } =
+    parseEnvText(updateEnvText)
 
   const reload = useCallback(async () => {
     setLoading(true)
@@ -144,14 +254,64 @@ export function DeploymentHistorySection({
     }
     setDiffLoading(true)
     setError(null)
+    setApplyStatus(null)
     try {
       const result = await getDeploymentDiff(leftId, rightId)
       setDiff(result)
+      setDryRun(null)
+      setReviewed(null)
     } catch (compareError) {
       setError(formatApiError(compareError))
       setDiff(null)
     } finally {
       setDiffLoading(false)
+    }
+  }
+
+  async function onReviewApply() {
+    if (!rightId) {
+      return
+    }
+    const { entries, skipped } = parseEnvText(updateEnvText)
+    if (Object.keys(entries).length === 0 || skipped.length > 0) {
+      return
+    }
+    setApplyLoading(true)
+    setError(null)
+    setApplyStatus(null)
+    try {
+      const body: DeploymentUpdateRequest = { env_vars: entries }
+      const result = await dryRunDeployment(rightId, body)
+      setDryRun(result)
+      setReviewed({ id: rightId, body })
+      setDiff(null)
+    } catch (reviewError) {
+      setError(formatApiError(reviewError))
+      setDryRun(null)
+      setReviewed(null)
+    } finally {
+      setApplyLoading(false)
+    }
+  }
+
+  async function onConfirmUpdate() {
+    if (!reviewed) {
+      return
+    }
+    setApplyLoading(true)
+    setError(null)
+    try {
+      await updateDeployment(reviewed.id, reviewed.body)
+      setApplyStatus('Config applied. A new deployment was recorded.')
+      setDryRun(null)
+      setReviewed(null)
+      setLeftId('')
+      setRightId('')
+      await reload()
+    } catch (updateError) {
+      setError(formatApiError(updateError))
+    } finally {
+      setApplyLoading(false)
     }
   }
 
@@ -182,6 +342,11 @@ export function DeploymentHistorySection({
         {error ? (
           <p className="containers-banner containers-banner--err" role="alert">
             {error}
+          </p>
+        ) : null}
+        {applyStatus ? (
+          <p className="containers-banner containers-banner--ok" role="status">
+            {applyStatus}
           </p>
         ) : null}
 
@@ -253,7 +418,11 @@ export function DeploymentHistorySection({
               <select
                 className="containers-form__input"
                 value={rightId}
-                onChange={(event) => setRightId(event.target.value)}
+                onChange={(event) => {
+                  setRightId(event.target.value)
+                  setDryRun(null)
+                  setReviewed(null)
+                }}
               >
                 <option value="">Select…</option>
                 {rows.map((row) => (
@@ -271,46 +440,49 @@ export function DeploymentHistorySection({
             >
               {diffLoading ? 'Comparing…' : 'Compare'}
             </button>
+            <label className="deployment-history__compare-field">
+              <span className="containers-form__label">New env (KEY=value per line)</span>
+              <textarea
+                className="containers-form__input"
+                rows={3}
+                value={updateEnvText}
+                onChange={(event) => {
+                  setUpdateEnvText(event.target.value)
+                  setDryRun(null)
+                  setReviewed(null)
+                }}
+                placeholder="B=2"
+              />
+            </label>
+            <button
+              type="button"
+              className="btn btn--ghost btn--sm"
+              disabled={
+                !rightId ||
+                applyLoading ||
+                Object.keys(envEntries).length === 0 ||
+                skippedEnvLines.length > 0
+              }
+              onClick={() => void onReviewApply()}
+            >
+              Review &amp; apply
+            </button>
           </div>
+          {Object.keys(envEntries).length === 0 ? (
+            <p className="containers-muted">
+              Enter at least one KEY=value line to review an update.
+            </p>
+          ) : null}
+          {skippedEnvLines.length > 0 ? (
+            <p className="containers-banner containers-banner--err" role="alert">
+              Ignored lines (use KEY=value): {skippedEnvLines.join(', ')}
+            </p>
+          ) : null}
 
           {diff ? (
             <div className="deployment-history__diff">
               <h4 className="deployment-history__diff-heading">Environment changes</h4>
-              {Object.keys(diff.env.added).length === 0 &&
-              Object.keys(diff.env.removed).length === 0 &&
-              Object.keys(diff.env.changed).length === 0 ? (
-                <p className="containers-muted">No env changes.</p>
-              ) : (
-                <ul className="deployment-history__env-diff">
-                  {Object.entries(diff.env.added).map(([key, value]) => (
-                    <EnvDiffLine
-                      key={`add-${key}`}
-                      lineKey={`add-${key}`}
-                      prefix="+"
-                      envKey={key}
-                      value={value}
-                    />
-                  ))}
-                  {Object.entries(diff.env.removed).map(([key, value]) => (
-                    <EnvDiffLine
-                      key={`remove-${key}`}
-                      lineKey={`remove-${key}`}
-                      prefix="-"
-                      envKey={key}
-                      value={value}
-                    />
-                  ))}
-                  {Object.entries(diff.env.changed).map(([key, change]) => (
-                    <EnvChangeLine
-                      key={`change-${key}`}
-                      lineKey={`change-${key}`}
-                      envKey={key}
-                      before={change.before}
-                      after={change.after}
-                    />
-                  ))}
-                </ul>
-              )}
+              <EnvDiffList env={diff.env} />
               <h4 className="deployment-history__diff-heading">Dockerfile diff</h4>
               {diff.dockerfile_diff.length === 0 ? (
                 <p className="containers-muted">No Dockerfile diff.</p>
@@ -319,6 +491,30 @@ export function DeploymentHistorySection({
                   {diff.dockerfile_diff.join('\n')}
                 </pre>
               )}
+              {diff.config ? (
+                <>
+                  <h4 className="deployment-history__diff-heading">Config changes</h4>
+                  <ConfigDiff config={diff.config} />
+                </>
+              ) : null}
+            </div>
+          ) : null}
+
+          {dryRun ? (
+            <div className="deployment-history__diff" role="status">
+              <h4 className="deployment-history__diff-heading">Review update</h4>
+              <h4 className="deployment-history__diff-heading">Environment changes</h4>
+              <EnvDiffList env={dryRun.env} />
+              <h4 className="deployment-history__diff-heading">Config changes</h4>
+              <ConfigDiff config={dryRun.config} />
+              <button
+                type="button"
+                className="btn btn--ghost btn--sm"
+                disabled={applyLoading}
+                onClick={() => void onConfirmUpdate()}
+              >
+                {applyLoading ? 'Applying…' : 'Confirm update'}
+              </button>
             </div>
           ) : null}
         </div>

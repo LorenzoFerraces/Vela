@@ -19,6 +19,7 @@ const AuditLogPage = lazy(() => import('./pages/AuditLogPage'))
 const StacksPage = lazy(() => import('./pages/StacksPage'))
 const StackBuilderPage = lazy(() => import('./pages/stacks/StackBuilderPage'))
 const ResourceDashboardPage = lazy(() => import('./pages/ResourceDashboardPage'))
+const ShowbackPage = lazy(() => import('./pages/ShowbackPage'))
 export default function App() {
   return (
     <Suspense
@@ -50,6 +51,14 @@ export default function App() {
             element={
               <RequireAuth>
                 <ResourceDashboardPage />
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/showback"
+            element={
+              <RequireAuth>
+                <ShowbackPage />
               </RequireAuth>
             }
           />

@@ -1,4 +1,4 @@
-"""Tests for the in-memory deploy job registry and /api/deploys/active."""
+"""Tests for the DB-backed deploy job registry and /api/deploys/active."""
 
 from __future__ import annotations
 
@@ -7,10 +7,10 @@ import time
 import uuid
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 import pytest
-from fastapi import FastAPI
+import pytest_asyncio
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -18,7 +18,9 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.containers.fake_orchestrator import FakeContainerOrchestrator
 from app.core.deploy.jobs import (
+    OUTCOME_RETENTION_HOURS,
     TERMINAL_JOB_TTL,
+    DeployJob,
     DeployJobRegistry,
     classify_deploy_error,
 )
@@ -28,17 +30,20 @@ from app.core.exceptions import (
     ProjectAccessDeniedError,
     ProviderConnectionError,
 )
-from app.db.models import DeploymentRecord, User
+from app.db.models import DeployJobRecord, DeploymentRecord, User
 
 PROJECT_ID = uuid.uuid4()
 USER_ID = uuid.uuid4()
 
 
-def _registry() -> DeployJobRegistry:
-    return DeployJobRegistry()
+@pytest_asyncio.fixture
+async def registry(
+    db_session_factory: async_sessionmaker[AsyncSession],
+) -> DeployJobRegistry:
+    return DeployJobRegistry(db_session_factory)
 
 
-def _job(registry: DeployJobRegistry, **overrides: Any):
+async def _job(registry: DeployJobRegistry, **overrides: Any) -> DeployJob:
     params: dict[str, Any] = {
         "kind": "container",
         "project_id": PROJECT_ID,
@@ -47,63 +52,137 @@ def _job(registry: DeployJobRegistry, **overrides: Any):
         "source_label": "nginx:alpine",
     }
     params.update(overrides)
-    return registry.create(**params)
+    return await registry.create(**params)
 
 
-def test_create_defaults_and_active_scope() -> None:
-    registry = _registry()
-    job = _job(registry)
+async def test_create_defaults_and_active_scope(registry: DeployJobRegistry) -> None:
+    job = await _job(registry)
     assert job.status == "in_progress"
     assert job.phase == "queued"
     assert job.services == []
-    assert registry.active(project_ids={PROJECT_ID}) == [job]
-    assert registry.active(project_ids={uuid.uuid4()}) == []
+    active = await registry.active(project_ids={PROJECT_ID})
+    assert [item.job_id for item in active] == [job.job_id]
+    assert await registry.active(project_ids={uuid.uuid4()}) == []
 
 
-def test_stack_job_service_states_in_order() -> None:
-    registry = _registry()
-    job = _job(registry, kind="stack", services=["web", "api"])
+async def test_fail_abandoned_jobs_reaps_only_pre_boot_rows(
+    registry: DeployJobRegistry,
+    db_session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    from app.core.deploy.jobs import fail_abandoned_jobs
+
+    boot_time = datetime.now(UTC)
+    pre_boot = await _job(registry)
+    post_boot = await _job(registry)
+    async with db_session_factory() as session:
+        row = await session.get(DeployJobRecord, pre_boot.job_id)
+        assert row is not None
+        # Created moments before boot — well inside the old 30-minute cutoff.
+        row.created_at = boot_time - timedelta(seconds=30)
+        row = await session.get(DeployJobRecord, post_boot.job_id)
+        assert row is not None
+        row.created_at = boot_time + timedelta(seconds=30)
+        await session.commit()
+
+    assert await fail_abandoned_jobs(db_session_factory, boot_time=boot_time) == 1
+
+    pre_boot_after = await registry.get(pre_boot.job_id)
+    assert pre_boot_after is not None
+    assert pre_boot_after.status == "failed"
+    assert pre_boot_after.error == {"code": "deploy_failed", "detail": "abandoned by restart"}
+    assert pre_boot_after.finished_at is not None
+
+    post_boot_after = await registry.get(post_boot.job_id)
+    assert post_boot_after is not None
+    assert post_boot_after.status == "in_progress"
+    assert post_boot_after.finished_at is None
+
+
+async def test_stack_job_service_states_in_order(
+    registry: DeployJobRegistry,
+) -> None:
+    job = await _job(registry, kind="stack", services=["web", "api"])
     assert [(s.name, s.state) for s in job.services] == [
         ("web", "pending"),
         ("api", "pending"),
     ]
-    registry.set_phase(job.job_id, "deploying")
-    registry.set_service_state(job.job_id, "web", "building")
-    registry.set_service_state(job.job_id, "web", "running")
-    registry.set_service_state(job.job_id, "api", "failed")
-    registry.complete_failure(
+    await registry.set_phase(job.job_id, "deploying")
+    await registry.set_service_state(job.job_id, "web", "building")
+    await registry.set_service_state(job.job_id, "web", "running")
+    await registry.set_service_state(job.job_id, "api", "failed")
+    await registry.complete_failure(
         job.job_id, {"code": "deploy_failed", "detail": "boom", "failed_service": "api"}
     )
-    assert job.status == "failed"
-    assert job.finished_at is not None
-    assert [(s.name, s.state) for s in job.services] == [
+    stored = await registry.get(job.job_id)
+    assert stored is not None
+    assert stored.status == "failed"
+    assert stored.finished_at is not None
+    assert stored.phase == "deploying"
+    assert [(s.name, s.state) for s in stored.services] == [
         ("web", "running"),
         ("api", "failed"),
     ]
-    assert registry.active(project_ids={PROJECT_ID}) == [job]
+    active = await registry.active(project_ids={PROJECT_ID})
+    assert [item.job_id for item in active] == [job.job_id]
 
 
-def test_terminal_jobs_swept_after_ttl() -> None:
-    registry = _registry()
-    job = _job(registry)
-    registry.complete_failure(job.job_id, {"code": "deploy_failed", "detail": "boom"})
-    job.finished_at = datetime.now(UTC) - timedelta(
-        seconds=TERMINAL_JOB_TTL + 1
+async def test_terminal_jobs_hidden_after_ttl_but_retained_for_metrics(
+    registry: DeployJobRegistry,
+    db_session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    job = await _job(registry)
+    await registry.complete_failure(
+        job.job_id, {"code": "deploy_failed", "detail": "boom"}
     )
-    assert registry.active(project_ids={PROJECT_ID}) == []
-    assert registry.get(job.job_id) is None
+    async with db_session_factory() as session:
+        record = await session.get(DeployJobRecord, job.job_id)
+        assert record is not None
+        # Older than the poller window but inside the outcome retention window.
+        record.finished_at = datetime.now(UTC) - timedelta(
+            seconds=TERMINAL_JOB_TTL + 1
+        )
+        await session.commit()
+    assert await registry.active(project_ids={PROJECT_ID}) == []
+    # get() still sees the row so the 24h success-rate metric can count it.
+    assert await registry.get(job.job_id) is not None
 
 
-def test_terminal_transition_is_idempotent() -> None:
-    registry = _registry()
-    job = _job(registry)
-    registry.complete_failure(job.job_id, {"code": "deploy_failed", "detail": "first"})
-    registry.complete_failure(job.job_id, {"code": "deploy_failed", "detail": "second"})
-    registry.complete_success(job.job_id, {"ok": True})
-    assert job.status == "failed"
-    assert job.error is not None
-    assert job.error["detail"] == "first"
-    assert job.result is None
+async def test_terminal_jobs_swept_after_retention(
+    registry: DeployJobRegistry,
+    db_session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    job = await _job(registry)
+    await registry.complete_failure(
+        job.job_id, {"code": "deploy_failed", "detail": "boom"}
+    )
+    async with db_session_factory() as session:
+        record = await session.get(DeployJobRecord, job.job_id)
+        assert record is not None
+        record.finished_at = datetime.now(UTC) - timedelta(
+            hours=OUTCOME_RETENTION_HOURS + 1
+        )
+        await session.commit()
+    assert await registry.active(project_ids={PROJECT_ID}) == []
+    assert await registry.get(job.job_id) is None
+
+
+async def test_terminal_transition_is_idempotent(
+    registry: DeployJobRegistry,
+) -> None:
+    job = await _job(registry)
+    await registry.complete_failure(
+        job.job_id, {"code": "deploy_failed", "detail": "first"}
+    )
+    await registry.complete_failure(
+        job.job_id, {"code": "deploy_failed", "detail": "second"}
+    )
+    await registry.complete_success(job.job_id, {"ok": True})
+    stored = await registry.get(job.job_id)
+    assert stored is not None
+    assert stored.status == "failed"
+    assert stored.error is not None
+    assert stored.error["detail"] == "first"
+    assert stored.result is None
 
 
 def test_classify_deploy_error_known_types() -> None:
@@ -130,27 +209,24 @@ def test_classify_deploy_error_known_types() -> None:
     }
 
 
-def test_spawn_runs_coroutine_and_cancel_all_stops_workers() -> None:
-    async def main() -> None:
-        registry = _registry()
-        job = _job(registry)
-        started = asyncio.Event()
+async def test_spawn_runs_coroutine_and_cancel_all_stops_workers(
+    registry: DeployJobRegistry,
+) -> None:
+    job = await _job(registry)
+    started = asyncio.Event()
 
-        async def worker() -> None:
-            started.set()
-            await asyncio.sleep(5)
+    async def worker() -> None:
+        started.set()
+        await asyncio.sleep(5)
 
-        registry.spawn(job.job_id, worker())
-        await asyncio.wait_for(started.wait(), timeout=1)
-        await registry.cancel_all()
-
-    asyncio.run(main())
+    registry.spawn(job.job_id, worker())
+    await asyncio.wait_for(started.wait(), timeout=1)
+    await registry.cancel_all()
 
 
-def _create_job(
-    api_client: TestClient, seeded_user: User, **overrides: Any
-):
-    fastapi_app = cast(FastAPI, api_client.app)
+async def _create_job(
+    registry: DeployJobRegistry, seeded_user: User, **overrides: Any
+) -> DeployJob:
     project_id = seeded_user.personal_project_id
     assert project_id is not None
     params: dict[str, Any] = {
@@ -161,17 +237,17 @@ def _create_job(
         "source_label": "nginx:alpine",
     }
     params.update(overrides)
-    return fastapi_app.state.deploy_jobs.create(**params)
+    return await registry.create(**params)
 
 
 def test_active_deploys_requires_auth(anonymous_client: TestClient) -> None:
     assert anonymous_client.get("/api/deploys/active").status_code == 401
 
 
-def test_active_deploys_lists_in_progress_job(
-    api_client: TestClient, seeded_user: User
+async def test_active_deploys_lists_in_progress_job(
+    api_client: TestClient, seeded_user: User, deploy_jobs: DeployJobRegistry
 ) -> None:
-    job = _create_job(api_client, seeded_user)
+    job = await _create_job(deploy_jobs, seeded_user)
     listed = api_client.get("/api/deploys/active")
     assert listed.status_code == 200
     jobs = listed.json()
@@ -187,11 +263,11 @@ def test_active_deploys_lists_in_progress_job(
     assert jobs[0]["finished_at"] is None
 
 
-def test_active_deploys_keeps_terminal_job_visible(
-    api_client: TestClient, seeded_user: User
+async def test_active_deploys_keeps_terminal_job_visible(
+    api_client: TestClient, seeded_user: User, deploy_jobs: DeployJobRegistry
 ) -> None:
-    job = _create_job(api_client, seeded_user)
-    cast(FastAPI, api_client.app).state.deploy_jobs.complete_failure(
+    job = await _create_job(deploy_jobs, seeded_user)
+    await deploy_jobs.complete_failure(
         job.job_id, {"code": "deploy_failed", "detail": "boom"}
     )
     jobs = api_client.get("/api/deploys/active").json()
@@ -200,12 +276,13 @@ def test_active_deploys_keeps_terminal_job_visible(
     assert jobs[0]["error"] == {"code": "deploy_failed", "detail": "boom"}
 
 
-def test_active_deploys_scoped_to_caller_projects(
+async def test_active_deploys_scoped_to_caller_projects(
     api_client: TestClient,
     other_user_client: TestClient,
     seeded_user: User,
+    deploy_jobs: DeployJobRegistry,
 ) -> None:
-    job = _create_job(api_client, seeded_user)
+    job = await _create_job(deploy_jobs, seeded_user)
     mine = {
         entry["job_id"] for entry in api_client.get("/api/deploys/active").json()
     }
@@ -222,11 +299,11 @@ def test_active_deploys_unknown_project_404(api_client: TestClient) -> None:
     assert response.status_code == 404
 
 
-def test_active_deploys_echoes_stack_services(
-    api_client: TestClient, seeded_user: User
+async def test_active_deploys_echoes_stack_services(
+    api_client: TestClient, seeded_user: User, deploy_jobs: DeployJobRegistry
 ) -> None:
-    job = _create_job(
-        api_client, seeded_user, kind="stack", name="my-stack", services=["web", "api"]
+    job = await _create_job(
+        deploy_jobs, seeded_user, kind="stack", name="my-stack", services=["web", "api"]
     )
     jobs = api_client.get("/api/deploys/active").json()
     assert jobs[0]["kind"] == "stack"
@@ -272,6 +349,32 @@ def wait_for_deploy(
                 f"deploy job {job_id} did not finish in {timeout}s; last={last}"
             )
         time.sleep(0.1)
+
+
+def test_post_deploy_phase_failure_does_not_fail_job(
+    api_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    original_set_phase = DeployJobRegistry.set_phase
+
+    async def flaky_set_phase(
+        self: DeployJobRegistry,
+        job_id: str,
+        phase: str,
+        phase_detail: str | None = None,
+    ) -> None:
+        if phase == "routing":
+            raise RuntimeError("registry write failed")
+        await original_set_phase(self, job_id, phase, phase_detail)
+
+    monkeypatch.setattr(DeployJobRegistry, "set_phase", flaky_set_phase)
+    accepted = api_client.post(
+        "/api/containers/run",
+        json={"source_kind": "image", "image_ref": "nginx:alpine"},
+    )
+    assert accepted.status_code == 202, accepted.text
+    job = wait_for_deploy(api_client, accepted.json()["job_id"])
+    assert job["status"] == "succeeded", job
 
 
 def test_run_returns_202_and_job_completes_with_run_response_shape(
