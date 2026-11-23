@@ -10,6 +10,7 @@ from typing import cast
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from sqlalchemy import select
 
 from app.db.models import User
 
@@ -376,4 +377,160 @@ def test_push_triggers_git_source_deploy(
     assert run_body.git_url == "https://github.com/org/repo.git"
     assert run_body.git_branch == "abc123def456"
     assert args[10] == "inst-token-push"
+
+
+def test_tag_push_is_ignored_without_branch_filters(
+    api_client, db_session_factory, seeded_user, monkeypatch
+) -> None:
+    import asyncio
+
+    from app.core.security.secrets import encrypt_secret
+    from app.db.models import GitHubAppInstall, GitHubWebhookConfig
+
+    project_id = uuid.uuid4()
+
+    async def seed() -> None:
+        async with db_session_factory() as session:
+            session.add(
+                GitHubAppInstall(
+                    app_id="123", private_key_encrypted=encrypt_secret("pem"),
+                    webhook_secret_encrypted=encrypt_secret("hook-secret"),
+                )
+            )
+            session.add(
+                GitHubWebhookConfig(
+                    project_id=project_id, repo_full_name="org/repo", enabled=True,
+                    branch_filters=[], preview_enabled=False,
+                    preview_ttl_seconds=3600, created_by_user_id=seeded_user.id,
+                )
+            )
+            await session.commit()
+
+    asyncio.run(seed())
+    captured: list[object] = []
+
+    async def fake_token(session, project_id) -> str:
+        return "inst-token-push"
+
+    async def capture_spawn(registry, job_id, worker, *worker_args) -> None:
+        captured.append(worker_args)
+
+    monkeypatch.setattr("app.api.routes.webhooks.installation_token", fake_token)
+    monkeypatch.setattr("app.api.routes.webhooks.spawn_deploy_worker", capture_spawn)
+
+    payload = {
+        "repository": {
+            "full_name": "org/repo",
+            "clone_url": "https://github.com/org/repo.git",
+        },
+        "ref": "refs/tags/v1",
+        "after": "abc123def456",
+    }
+    response = api_client.post(
+        f"/webhooks/github/{project_id}",
+        content=json.dumps(payload, separators=(",", ":")).encode(),
+        headers=_headers(payload, "hook-secret", "push-tag"),
+    )
+    assert response.json()["status"] == "ignored"
+    assert captured == []
+
+
+def test_push_quota_gates_block_deploy(
+    api_client, db_session_factory, seeded_user, monkeypatch
+) -> None:
+    import asyncio
+
+    from app.core.exceptions import (
+        TeamComputeQuotaExceededError,
+        TeamStorageQuotaExceededError,
+    )
+    from app.core.security.secrets import encrypt_secret
+    from app.db.models import (
+        GitHubAppInstall,
+        GitHubWebhookConfig,
+        GitHubWebhookDelivery,
+    )
+
+    project_id = uuid.uuid4()
+
+    async def seed() -> None:
+        async with db_session_factory() as session:
+            session.add(
+                GitHubAppInstall(
+                    app_id="123", private_key_encrypted=encrypt_secret("pem"),
+                    webhook_secret_encrypted=encrypt_secret("hook-secret"),
+                )
+            )
+            session.add(
+                GitHubWebhookConfig(
+                    project_id=project_id, repo_full_name="org/repo", enabled=True,
+                    branch_filters=[], preview_enabled=False,
+                    preview_ttl_seconds=3600, created_by_user_id=seeded_user.id,
+                )
+            )
+            await session.commit()
+
+    asyncio.run(seed())
+    captured: list[object] = []
+
+    async def fake_token(session, project_id) -> str:
+        return "inst-token-push"
+
+    async def capture_spawn(registry, job_id, worker, *worker_args) -> None:
+        captured.append(worker_args)
+
+    monkeypatch.setattr("app.api.routes.webhooks.installation_token", fake_token)
+    monkeypatch.setattr("app.api.routes.webhooks.spawn_deploy_worker", capture_spawn)
+
+    payload = {
+        "repository": {
+            "full_name": "org/repo",
+            "clone_url": "https://github.com/org/repo.git",
+        },
+        "ref": "refs/heads/main",
+        "after": "abc123def456",
+    }
+    url = f"/webhooks/github/{project_id}"
+    body = json.dumps(payload, separators=(",", ":")).encode()
+
+    async def over_compute(*args, **kwargs) -> None:
+        raise TeamComputeQuotaExceededError("Team compute quota exceeded for running containers")
+
+    monkeypatch.setattr(
+        "app.api.routes.webhooks.enforce_team_compute_capacity", over_compute
+    )
+    assert api_client.post(
+        url, content=body, headers=_headers(payload, "hook-secret", "push-compute-quota")
+    ).json() == {"status": "failed"}
+
+    async def restore_compute(*args, **kwargs) -> None:
+        return None
+
+    async def over_storage(*args, **kwargs) -> None:
+        raise TeamStorageQuotaExceededError("Team storage quota exceeded")
+
+    monkeypatch.setattr(
+        "app.api.routes.webhooks.enforce_team_compute_capacity", restore_compute
+    )
+    monkeypatch.setattr(
+        "app.api.routes.webhooks.enforce_team_storage_capacity", over_storage
+    )
+    assert api_client.post(
+        url, content=body, headers=_headers(payload, "hook-secret", "push-storage-quota")
+    ).json() == {"status": "failed"}
+    assert captured == []
+
+    async def delivery_errors() -> list[tuple[str, str | None]]:
+        async with db_session_factory() as session:
+            rows = (await session.execute(
+                select(GitHubWebhookDelivery).where(
+                    GitHubWebhookDelivery.delivery_id.in_(
+                        ["push-compute-quota", "push-storage-quota"]
+                    )
+                )
+            )).scalars().all()
+            return [(row.status, row.error) for row in rows]
+
+    assert all("quota" in (error or "").lower() for _, error in asyncio.run(delivery_errors()))
+    assert all(status == "failed" for status, _ in asyncio.run(delivery_errors()))
 

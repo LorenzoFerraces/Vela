@@ -550,9 +550,9 @@ def test_token_network_failure_allows_same_delivery_retry(
     headers = _headers(payload, "pull_request", "pr-retry-same-id")
     url = f"/webhooks/github/{project_id}"
 
-    assert api_client.post(url, content=body, headers=headers).json() == {
-        "status": "failed"
-    }
+    first = api_client.post(url, content=body, headers=headers)
+    assert first.status_code == 503
+    assert first.json()["status"] == "failed"
 
     async def delivery_count() -> int:
         async with db_session_factory() as session:
@@ -623,5 +623,6 @@ def test_preview_quota_gate_fails_row_without_spawning(
             return delivery, preview
 
     delivery, preview = asyncio.run(get_rows())
+    assert delivery.status == "failed"
     assert "quota" in (delivery.error or "").lower()
     assert preview.status == "failed"

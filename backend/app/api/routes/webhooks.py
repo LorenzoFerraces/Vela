@@ -9,6 +9,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Annotated
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Request
+from fastapi.responses import JSONResponse
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -40,12 +41,16 @@ from app.core.deploy.jobs import DeployJobRegistry
 from app.core.exceptions import (
     GitHubAppNotConfiguredError,
     TeamComputeQuotaExceededError,
+    TeamStorageQuotaExceededError,
     WebhookSignatureError,
 )
 from app.core.github_app import installation_token, verify_github_signature
 from app.core.previews import preview_deploy_config, teardown_preview
 from app.core.projects.repository import require_owner
-from app.core.quotas import enforce_team_compute_capacity
+from app.core.quotas import (
+    enforce_team_compute_capacity,
+    enforce_team_storage_capacity,
+)
 from app.core.security.secrets import decrypt_secret, encrypt_secret
 from app.core.traffic.traffic_router import TrafficRouter
 from app.db.models import (
@@ -60,7 +65,7 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 
-@router.post("/webhooks/github/{project_id}")
+@router.post("/webhooks/github/{project_id}", response_model=None)
 async def github_webhook(
     project_id: uuid.UUID,
     request: Request,
@@ -73,7 +78,7 @@ async def github_webhook(
     orchestrator: Annotated[ContainerOrchestrator, Depends(get_orchestrator)],
     traffic_router: Annotated[TrafficRouter, Depends(get_traffic_router)],
     image_builder: Annotated[DefaultImageBuilder, Depends(get_image_builder)],
-) -> dict[str, str]:
+) -> dict[str, str] | JSONResponse:
     """Verify the HMAC, record the delivery and accept configured push / PR events."""
     payload = await request.body()
     delivery_id = request.headers.get("X-GitHub-Delivery", "")
@@ -110,7 +115,10 @@ async def github_webhook(
     if config is None:
         return {"status": "ignored"}
 
-    branch = body.get("ref", "").removeprefix("refs/heads/")
+    raw_ref = str(body.get("ref") or "")
+    if event == "push" and not raw_ref.startswith("refs/heads/"):
+        return {"status": "ignored"}
+    branch = raw_ref.removeprefix("refs/heads/")
     if event != "pull_request" and config.branch_filters and branch not in config.branch_filters:
         return {"status": "ignored"}
 
@@ -139,7 +147,12 @@ async def github_webhook(
                 await _fail_existing_preview(
                     session, project_id, repo_full_name, pr_number, exc
                 )
-                return {"status": "failed"}
+                # No delivery row exists yet: a 5xx lets GitHub auto-redeliver
+                # without a committed delivery deduping the retry away.
+                return JSONResponse(
+                    status_code=503,
+                    content={"status": "failed", "detail": f"GitHub token unavailable: {exc}"},
+                )
 
     delivery = GitHubWebhookDelivery(
         delivery_id=delivery_id,
@@ -280,6 +293,7 @@ async def _enqueue_preview(
             "Preview quota gate rejected PR %s #%s: %s", repo_full_name, pr_number, exc
         )
         row.status = "failed"
+        delivery.status = "failed"
         delivery.error = str(exc)
         await session.commit()
         return False
@@ -387,7 +401,18 @@ async def _enqueue_push_deploy(
     if not clone_url or config.created_by_user_id is None:
         return True
     if token_error is not None:
+        delivery.status = "failed"
         delivery.error = str(token_error)
+        await session.commit()
+        return False
+
+    try:
+        await enforce_team_compute_capacity(session, orchestrator, project_id)
+        await enforce_team_storage_capacity(session, orchestrator, project_id)
+    except (TeamComputeQuotaExceededError, TeamStorageQuotaExceededError) as exc:
+        logger.warning("Push quota gate rejected %s: %s", repo_full_name, exc)
+        delivery.status = "failed"
+        delivery.error = str(exc)
         await session.commit()
         return False
 
