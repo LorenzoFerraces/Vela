@@ -85,6 +85,12 @@ services:
       FORWARDED_ALLOW_IPS: ${VELA_FORWARDED_ALLOW_IPS:-127.0.0.1,::1,172.16.0.0/12,192.168.0.0/16,10.0.0.0/8}
       VELA_VOLUME_UPLOADS_DIR: ${VELA_VOLUME_UPLOADS_DIR:-/data/volume-uploads}
       VELA_VOLUME_UPLOADS_HOST_DIR: ${VELA_VOLUME_UPLOADS_HOST_DIR:-}
+      VELA_OBJECT_STORAGE: ${VELA_OBJECT_STORAGE:-r2}
+      VELA_R2_ACCOUNT_ID: ${VELA_R2_ACCOUNT_ID:-}
+      VELA_R2_ACCESS_KEY_ID: ${VELA_R2_ACCESS_KEY_ID:-}
+      VELA_R2_SECRET_ACCESS_KEY: ${VELA_R2_SECRET_ACCESS_KEY:-}
+      VELA_R2_BUCKET: ${VELA_R2_BUCKET:-}
+      VELA_R2_PUBLIC_BASE_URL: ${VELA_R2_PUBLIC_BASE_URL:-}
     volumes:
       - ${DOCKER_SOCKET_PATH:-/var/run/docker.sock}:/var/run/docker.sock
       # Named volume by default: a fresh Linux host no longer creates a

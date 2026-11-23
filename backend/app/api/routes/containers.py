@@ -1367,6 +1367,9 @@ async def issue_container_ws_ticket(
     current_user: Annotated[User, Depends(get_current_user)],
     session: Annotated[AsyncSession, Depends(get_db)],
     orchestrator: Annotated[ContainerOrchestrator, Depends(get_orchestrator)],
+    session_factory: Annotated[
+        async_sessionmaker[AsyncSession], Depends(get_db_session_factory)
+    ],
 ) -> dict[str, str]:
     """Issue a short-lived single-use ticket for a logs/exec WebSocket."""
     if purpose not in ("logs", "exec"):
@@ -1375,7 +1378,11 @@ async def issue_container_ws_ticket(
         session, orchestrator, current_user, container_id,
         action="read" if purpose == "logs" else "write",
     )
-    return {"ticket": issue_ws_ticket(current_user.id, container_id, purpose)}
+    return {
+        "ticket": await issue_ws_ticket(
+            session_factory, current_user.id, container_id, purpose
+        )
+    }
 
 
 async def _stream_logs_to_websocket(
@@ -1403,10 +1410,13 @@ async def container_logs_stream(
     container_id: str,
     orchestrator: Annotated[ContainerOrchestrator, Depends(get_orchestrator)],
     session: Annotated[AsyncSession, Depends(get_db)],
+    session_factory: Annotated[
+        async_sessionmaker[AsyncSession], Depends(get_db_session_factory)
+    ],
 ) -> None:
     """Stream container logs over WebSocket (binary frames). Authenticate with a short-lived ``ticket``."""
     ticket = websocket.query_params.get("ticket", "")
-    user_id = consume_ws_ticket(ticket, container_id, "logs")
+    user_id = await consume_ws_ticket(session_factory, ticket, container_id, "logs")
     if user_id is None:
         await websocket.close(code=1008, reason="Unauthorized")
         return
@@ -1452,10 +1462,13 @@ async def container_exec_ws(
     container_id: str,
     orchestrator: Annotated[ContainerOrchestrator, Depends(get_orchestrator)],
     session: Annotated[AsyncSession, Depends(get_db)],
+    session_factory: Annotated[
+        async_sessionmaker[AsyncSession], Depends(get_db_session_factory)
+    ],
 ) -> None:
     """Bidirectional exec terminal over WebSocket. Authenticate with a short-lived ``ticket``."""
     ticket = websocket.query_params.get("ticket", "")
-    user_id = consume_ws_ticket(ticket, container_id, "exec")
+    user_id = await consume_ws_ticket(session_factory, ticket, container_id, "exec")
     if user_id is None:
         await websocket.close(code=1008, reason="Unauthorized")
         return

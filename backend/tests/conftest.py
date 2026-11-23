@@ -86,11 +86,13 @@ os.environ["VELA_METRICS_INTERVAL_SECONDS"] = "3600"
 
 
 @pytest.fixture(autouse=True)
-def reset_in_process_auth_state() -> None:
+def reset_in_process_auth_state(
+    db_session_factory: async_sessionmaker[AsyncSession],
+) -> None:
     from app.core.auth import rate_limit, ws_tickets
 
     rate_limit.reset_for_tests()
-    ws_tickets.reset_for_tests()
+    asyncio.run(ws_tickets.reset_for_tests(db_session_factory))
 
 
 def make_container_info(
