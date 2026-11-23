@@ -1,6 +1,7 @@
 import { parseArgs } from "node:util"
-import { readStoredConfig, writeStoredConfig, clearStoredConfig, configPath } from "../config"
+import { DEFAULT_SERVER, readStoredConfig, writeStoredConfig, clearStoredConfig, configPath } from "../config"
 import { VelaError } from "../client"
+import { emit } from "../output"
 
 export async function configCommand(argv: string[]): Promise<number> {
   const action = argv[0] ?? "list"
@@ -15,7 +16,8 @@ export async function configCommand(argv: string[]): Promise<number> {
 
   if (action === "list") {
     for (const [name, profile] of Object.entries(stored.profiles)) {
-      console.log(`${name === stored.active ? "*" : " "} ${name}  ${profile.server}`)
+      emit({ name, server: profile.server, active: name === stored.active }, () =>
+        `${name === stored.active ? "*" : " "} ${name}  ${profile.server}`)
     }
     return 0
   }
@@ -23,17 +25,25 @@ export async function configCommand(argv: string[]): Promise<number> {
     const name = positionals[0]
     if (!name || !Object.hasOwn(stored.profiles, name)) throw new VelaError(2, `Unknown profile: ${name ?? "(none)"}`)
     writeStoredConfig({ ...stored, active: name }, path)
-    console.log(`Active profile: ${name}`)
+    emit({ active: name }, () => `Active profile: ${name}`)
     return 0
   }
   if (action === "get") {
     const key = positionals[0]
     const profile = Object.hasOwn(stored.profiles, profileName) ? stored.profiles[profileName] : null
     if (!profile) throw new VelaError(2, `Unknown profile: ${profileName}`)
-    if (!key || key === "server") { console.log(profile.server); return 0 }
-    if (key === "token") { console.log(profile.token ? "<set>" : "<unset>"); return 0 }
-    if (key === "tokenId") { console.log(profile.tokenId ?? "<unset>"); return 0 }
-    if (key === "active") { console.log(stored.active); return 0 }
+    if (!key || key === "server") { emit(profile.server, () => profile.server); return 0 }
+    if (key === "token") {
+      const marker = profile.token ? "<set>" : "<unset>"
+      emit(marker, () => marker)
+      return 0
+    }
+    if (key === "tokenId") {
+      const tokenId = profile.tokenId ?? "<unset>"
+      emit(tokenId, () => tokenId)
+      return 0
+    }
+    if (key === "active") { emit(stored.active, () => stored.active); return 0 }
     throw new VelaError(2, `Unknown key: ${key}`)
   }
   if (action === "set") {
@@ -41,16 +51,18 @@ export async function configCommand(argv: string[]): Promise<number> {
     const value = positionals[1]
     if (!key || value === undefined) throw new VelaError(2, "Usage: vela config set <server|token> <value> [--profile <name>]")
     if (key !== "server" && key !== "token") throw new VelaError(2, `Unknown key: ${key}`)
-    const current = Object.hasOwn(stored.profiles, profileName) ? stored.profiles[profileName] : { server: "", token: "" }
+    const current = Object.hasOwn(stored.profiles, profileName)
+      ? stored.profiles[profileName]
+      : { server: DEFAULT_SERVER, token: "" }
     const next = { ...current, [key]: value }
     if (key === "token") delete next.tokenId
     writeStoredConfig({ profiles: { ...stored.profiles, [profileName]: next }, active: stored.active }, path)
-    console.log(`Updated ${key} in profile ${profileName}`)
+    emit({ profile: profileName, key }, () => `Updated ${key} in profile ${profileName}`)
     return 0
   }
   if (action === "clear") {
     clearStoredConfig(path)
-    console.log("Config removed")
+    emit({ cleared: true }, () => "Config removed")
     return 0
   }
   throw new VelaError(2, `Unknown config action: ${action}`)
