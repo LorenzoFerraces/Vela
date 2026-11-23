@@ -1,7 +1,8 @@
 import { parseArgs } from "node:util"
 
-import { requireToken } from "../client"
+import { request, requireToken } from "../client"
 import { resolveConfig } from "../config"
+import { emit } from "../output"
 import { resolveContainerFromApi } from "../resolve"
 import { streamLogs } from "../ws"
 
@@ -27,6 +28,14 @@ export async function logs(argv: string[]): Promise<number> {
 
   const config = requireToken(resolveConfig({}))
   const container = await resolveContainerFromApi(config, query)
-  await streamLogs(config, container.id, { tail, follow: values.follow ?? false })
+  try {
+    await streamLogs(config, container.id, { tail, follow: values.follow ?? false })
+  } catch {
+    if (values.follow) console.error("Stream unavailable; showing a snapshot instead")
+    const snapshot = await request<{ logs: string }>(
+      config, "GET", `/containers/${encodeURIComponent(container.id)}/logs?tail=${tail ?? 100}`,
+    )
+    emit(snapshot, () => snapshot.logs)
+  }
   return 0
 }
