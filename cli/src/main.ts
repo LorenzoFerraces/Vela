@@ -10,6 +10,7 @@ import { remove, restart, start, stop } from "./commands/lifecycle"
 import { logs } from "./commands/logs"
 import { auditCommand, metricsCommand, scaleCommand, templatesCommand } from "./commands/ops"
 import { inviteCommand, projectsCommand, stackCommand, teamsCommand } from "./commands/organisation"
+import { githubCommand, imagesCommand, settingsCommand, sourcesCommand } from "./commands/platform"
 import { tokens } from "./commands/tokens"
 import { runTui } from "./tui"
 
@@ -36,6 +37,10 @@ Commands:
   scale <list|set>                Manage scaling policies
   metrics <usage|summary>         Show usage and container metrics (--container, --hours)
   audit <list>                    Show audit log (--global, --limit)
+  images <list|pull>              List images or pull one (--tag)
+  sources <list>                  List deploy sources
+  settings <show|monitoring|github-status>  Show platform settings
+  github <status>                 Show GitHub connection status
   config <list|use|get|set|clear>  Manage named config profiles
   completion <bash|zsh|fish|powershell>  Print a shell completion script
   tui             Open the terminal UI (default with no command)
@@ -163,6 +168,14 @@ async function main(rawArgv: string[]): Promise<number> {
         return await metricsCommand(rest)
       case "audit":
         return await auditCommand(rest)
+      case "images":
+        return await imagesCommand(rest)
+      case "sources":
+        return await sourcesCommand(rest)
+      case "settings":
+        return await settingsCommand(rest)
+      case "github":
+        return await githubCommand(rest)
       case "config":
         return await configCommand(rest)
       case "completion":
