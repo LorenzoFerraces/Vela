@@ -5,10 +5,11 @@ from __future__ import annotations
 import csv
 import io
 import uuid
+from collections import defaultdict
 from datetime import UTC, datetime, timedelta
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -30,18 +31,22 @@ from app.core.containers.docker_orchestrator import (
 from app.core.containers.orchestrator import ContainerOrchestrator
 from app.core.enums import ContainerStatus
 from app.core.models import ContainerInfo
-from app.core.monitoring.metrics_collector import METRICS_INTERVAL_SECONDS
+from app.core.monitoring.metrics_collector import (
+    METRICS_INTERVAL_SECONDS,
+    METRICS_RETENTION_DAYS,
+)
 from app.core.projects.access import (
     list_accessible_project_ids,
     require_container_access,
+    resolve_container_project_id,
 )
 from app.core.quotas import (
     effective_quota_bytes,
-    team_storage_usage,
     usage_from_containers,
 )
 from app.db.models import (
     ContainerMetric,
+    DeploymentRecord,
     Organization,
     Project,
     User,
@@ -301,59 +306,88 @@ async def latest_metric_by_container(
 
 
 async def _resource_time(
-    session: AsyncSession, container_ids: list[str], days: int
+    session: AsyncSession, container_ids: list[str], start: datetime, end: datetime
 ) -> tuple[float, float]:
     """Integrate stored samples into CPU-seconds and memory GiB-hours."""
-    since = datetime.now(UTC) - timedelta(days=days)
-    cpu_seconds = 0.0
-    memory_gib_seconds = 0.0
-    if container_ids:
-        rows = (await session.execute(
-            select(ContainerMetric).where(
-                ContainerMetric.timestamp >= since,
-                ContainerMetric.container_id.in_(container_ids),
-            )
-        )).scalars().all()
-        for row in rows:
-            cpu_seconds += (row.cpu_percent / 100) * METRICS_INTERVAL_SECONDS
-            memory_gib_seconds += (row.memory_usage_bytes / 1024**3) * METRICS_INTERVAL_SECONDS
+    if not container_ids:
+        return 0.0, 0.0
+    cpu_sum, memory_sum = (await session.execute(
+        select(
+            func.coalesce(func.sum(ContainerMetric.cpu_percent), 0.0),
+            func.coalesce(func.sum(ContainerMetric.memory_usage_bytes), 0),
+        ).where(
+            ContainerMetric.timestamp >= start,
+            ContainerMetric.timestamp < end,
+            ContainerMetric.container_id.in_(container_ids),
+        )
+    )).one()
+    cpu_seconds = float(cpu_sum) / 100 * METRICS_INTERVAL_SECONDS
+    memory_gib_seconds = float(memory_sum) / 1024**3 * METRICS_INTERVAL_SECONDS
     return cpu_seconds, memory_gib_seconds / 3600
 
 
-@router.get("/showback", response_model=ShowbackSummary)
-async def get_showback(
-    current_user: Annotated[User, Depends(get_current_user)],
-    session: Annotated[AsyncSession, Depends(get_db)],
-    orchestrator: Annotated[ContainerOrchestrator, Depends(get_orchestrator)],
-) -> ShowbackSummary:
-    """Raw resource-time for every team the caller can see, scoped to access."""
+async def _showback_inputs(
+    session: AsyncSession,
+    orchestrator: ContainerOrchestrator,
+    current_user: User,
+) -> tuple[list[Project], dict[uuid.UUID, list[str]], list[ContainerInfo]]:
+    """Accessible projects, their attributed container ids, and the inventory."""
     if current_user.role == UserRole.ADMIN:
         project_ids = set((await session.execute(select(Project.id))).scalars().all())
         containers = await orchestrator.list()
     else:
-        project_ids = await list_accessible_project_ids(session, current_user.id)
+        project_ids = set(await list_accessible_project_ids(session, current_user.id))
         containers = await orchestrator.list(
             project_ids=project_ids, user_id=current_user.id
         )
-    ids_by_project: dict[uuid.UUID, list[str]] = {}
-    for info in containers:
-        raw_project_id = info.labels.get(VELA_PROJECT_LABEL)
-        try:
-            ids_by_project.setdefault(uuid.UUID(raw_project_id), []).append(info.id)
-        except (TypeError, ValueError):
-            continue
-    projects = (
+
+    projects = list(
         (await session.execute(select(Project).where(Project.id.in_(project_ids))))
-        .scalars()
-        .all()
+        .scalars().all()
+    )
+
+    ids_by_project: dict[uuid.UUID, set[str]] = defaultdict(set)
+    for info in containers:
+        project_id = await resolve_container_project_id(session, info)
+        # Unlabeled containers fall back to their owner's personal project;
+        # never attribute outside the caller's accessible projects.
+        if project_id in project_ids:
+            ids_by_project[project_id].add(info.id)
+
+    # A container may leave the inventory while its samples are still retained.
+    # Recover those ids from deployment records, scoped to the same projects.
+    if project_ids:
+        recorded = (await session.execute(
+            select(DeploymentRecord.project_id, DeploymentRecord.container_id)
+            .where(DeploymentRecord.project_id.in_(project_ids))
+            .distinct()
+        )).all()
+        for recorded_project_id, container_id in recorded:
+            ids_by_project[recorded_project_id].add(container_id)
+
+    return projects, {
+        project_id: sorted(ids) for project_id, ids in ids_by_project.items()
+    }, containers
+
+
+async def _showback_teams(
+    session: AsyncSession,
+    orchestrator: ContainerOrchestrator,
+    current_user: User,
+    *,
+    start: datetime,
+    end: datetime,
+) -> list[TeamShowback]:
+    projects, ids_by_project, containers = await _showback_inputs(
+        session, orchestrator, current_user
     )
     teams: list[TeamShowback] = []
     for project in projects:
         cpu_seconds, memory_gib_hours = await _resource_time(
-            session, ids_by_project.get(project.id, []), 30
+            session, ids_by_project.get(project.id, []), start, end
         )
-        disk_bytes, uploads_bytes = await team_storage_usage(
-            session, orchestrator, project.id
+        disk_bytes, uploads_bytes = await usage_from_containers(
+            session, containers, project.id
         )
         storage_gib = (disk_bytes + uploads_bytes) / 1024**3
         teams.append(TeamShowback(
@@ -363,8 +397,39 @@ async def get_showback(
             # ponytail: current storage × 30 days; no storage time series exists yet.
             storage_gib_days=storage_gib * 30,
         ))
-    since = datetime.now(UTC) - timedelta(days=30)
-    return ShowbackSummary(month=since.strftime("%Y-%m"), teams=teams)
+    return teams
+
+
+@router.get("/showback", response_model=ShowbackSummary)
+async def get_showback(
+    current_user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[AsyncSession, Depends(get_db)],
+    orchestrator: Annotated[ContainerOrchestrator, Depends(get_orchestrator)],
+) -> ShowbackSummary:
+    """Raw resource-time for every team the caller can see, scoped to access."""
+    now = datetime.now(UTC)
+    start = now - timedelta(days=30)
+    return ShowbackSummary(
+        month=start.strftime("%Y-%m"),
+        teams=await _showback_teams(
+            session, orchestrator, current_user, start=start, end=now
+        ),
+    )
+
+
+def _month_bounds(month: str) -> tuple[datetime, datetime]:
+    year, month_number = (int(part) for part in month.split("-"))
+    if not 1 <= month_number <= 12:
+        raise HTTPException(422, detail="Month must be between 01 and 12.")
+    start = datetime(year, month_number, 1, tzinfo=UTC)
+    next_year = year + (month_number == 12)
+    next_month = month_number % 12 + 1
+    return start, datetime(next_year, next_month, 1, tzinfo=UTC)
+
+
+def _csv_safe(text: str) -> str:
+    """Neutralize spreadsheet formula prefixes in untrusted labels."""
+    return "'" + text if text[:1] in {"=", "+", "-", "@"} else text
 
 
 @router.get("/showback/export")
@@ -374,13 +439,22 @@ async def export_showback(
     session: Annotated[AsyncSession, Depends(get_db)],
     orchestrator: Annotated[ContainerOrchestrator, Depends(get_orchestrator)],
 ) -> StreamingResponse:
-    summary = await get_showback(current_user, session, orchestrator)
+    start, end = _month_bounds(month)
+    now = datetime.now(UTC)
+    retention_cutoff = now - timedelta(days=METRICS_RETENTION_DAYS)
+    if start >= now or end <= retention_cutoff:
+        raise HTTPException(
+            404, detail=f"No retained usage data for month {month}."
+        )
+    teams = await _showback_teams(
+        session, orchestrator, current_user, start=start, end=end
+    )
     buffer = io.StringIO()
     writer = csv.writer(buffer)
     writer.writerow(["team", "cpu_seconds", "memory_gib_hours", "storage_gib_days"])
-    for team in summary.teams:
+    for team in teams:
         writer.writerow([
-            team.team_name,
+            _csv_safe(team.team_name),
             team.cpu_seconds,
             team.memory_gib_hours,
             team.storage_gib_days,
