@@ -30,6 +30,7 @@ from app.core.exceptions import (
 from app.core.storage.memory import InMemoryObjectStorage
 from app.core.storage.object_storage import ObjectStorage
 from app.core.storage.r2 import CloudflareR2ObjectStorage
+from app.core.traffic.database_traffic_router import DatabaseTrafficRouter
 from app.core.traffic.traefik_file_traffic_router import TraefikFileTrafficRouter
 from app.core.traffic.traffic_router import NoopTrafficRouter, TrafficRouter
 from app.db.engine import get_session_factory
@@ -73,10 +74,17 @@ def _traffic_router_from_env() -> TrafficRouter:
                 )
             reload_container = os.environ.get(
                 "VELA_TRAEFIK_RELOAD_CONTAINER", ""
-            ).strip()
+            ).strip() or None
+            dynamic_file = Path(path_str)
+            if os.environ.get("VELA_TRAFFIC_STATE_BACKEND", "").strip() == "postgres":
+                return DatabaseTrafficRouter(
+                    session_factory=get_db_session_factory(),
+                    traefik_dynamic_file=dynamic_file,
+                    reload_container=reload_container,
+                )
             return TraefikFileTrafficRouter(
-                traefik_dynamic_file=Path(path_str),
-                reload_container=reload_container or None,
+                traefik_dynamic_file=dynamic_file,
+                reload_container=reload_container,
             )
         case _:
             raise TrafficRouterError(
