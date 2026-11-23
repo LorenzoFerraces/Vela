@@ -31,6 +31,11 @@ DeployJobKind = Literal["container", "stack"]
 DeployJobStatus = Literal["in_progress", "succeeded", "failed"]
 
 TERMINAL_JOB_TTL = 300  # seconds a terminal job stays visible to pollers
+ABANDONED_JOB_CUTOFF = timedelta(minutes=30)
+ABANDONED_JOB_ERROR: dict[str, Any] = {
+    "code": "deploy_failed",
+    "detail": "abandoned by restart",
+}
 
 
 GENERIC_DEPLOY_FAILURE_DETAIL = "Deploy failed due to an unexpected error."
@@ -265,3 +270,30 @@ class DeployJobRegistry:
                 else None
             ),
         )
+
+
+async def fail_abandoned_jobs(
+    session_factory: async_sessionmaker[AsyncSession],
+    *,
+    cutoff: timedelta = ABANDONED_JOB_CUTOFF,
+) -> int:
+    """Mark in_progress jobs older than ``cutoff`` failed after a process restart.
+
+    Called only on the replica that owns background loops, so a live worker on
+    another replica is never reaped. Fresh jobs are left untouched.
+    """
+    threshold = datetime.now(UTC) - cutoff
+    async with session_factory() as session:
+        rows = (await session.execute(
+            select(DeployJobRecord).where(
+                DeployJobRecord.status == "in_progress",
+                DeployJobRecord.created_at < threshold,
+            )
+        )).scalars().all()
+        now = datetime.now(UTC)
+        for record in rows:
+            record.status = "failed"
+            record.error = dict(ABANDONED_JOB_ERROR)
+            record.finished_at = now
+        await session.commit()
+        return len(rows)

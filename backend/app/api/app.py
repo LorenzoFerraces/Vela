@@ -40,7 +40,7 @@ from app.api.routes import (
     users,
     webhooks,
 )
-from app.core.deploy.jobs import DeployJobRegistry
+from app.core.deploy.jobs import DeployJobRegistry, fail_abandoned_jobs
 from app.core.previews import collect_expired_previews
 
 API_PREFIX = "/api"
@@ -96,6 +96,10 @@ async def _lifespan(_application: FastAPI):
     log_collector: LogCollector | None = None
 
     if os.getenv("VELA_BACKGROUND_LOOPS_ENABLED", "1") == "1":
+        try:
+            await fail_abandoned_jobs(get_db_session_factory())
+        except Exception:
+            logger.exception("Could not clean up abandoned deploy jobs")
         monitor_task = asyncio.create_task(run_monitoring_loop())
         preview_gc_task = asyncio.create_task(
             run_preview_gc_loop(get_db_session_factory())
