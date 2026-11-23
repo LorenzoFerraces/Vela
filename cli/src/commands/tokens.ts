@@ -54,7 +54,7 @@ export async function tokens(argv: string[]): Promise<number> {
     )
     if (!match) throw new VelaError(4, `No token matching "${target}".`)
     await request(config, "DELETE", `/tokens/${match.id}`)
-    console.log(`Revoked ${match.name}.`)
+    emit({ revoked: match.name, id: match.id }, () => `Revoked ${match.name}.`)
     return 0
   }
 
