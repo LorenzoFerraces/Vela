@@ -23,6 +23,8 @@ type MetricChartProps = {
   referenceLine?: { value: number; label: string }
   formatValue?: (value: number) => string
   series?: ChartSeries[]
+  /** Render x-axis labels verbatim (categorical data, e.g. team names). */
+  categoricalXAxis?: boolean
 }
 
 // Recharts props cannot read CSS variables; keep these hex values in sync
@@ -54,8 +56,10 @@ export function MetricChart({
   referenceLine,
   formatValue,
   series,
+  categoricalXAxis = false,
 }: MetricChartProps) {
   const formatXAxis = (value: string) => {
+    if (categoricalXAxis) return String(value)
     try {
       const d = new Date(value)
       return new Intl.DateTimeFormat('en-US', {
@@ -116,6 +120,7 @@ export function MetricChart({
             color: CHART_TEXT,
           }}
           labelFormatter={(label) => {
+            if (categoricalXAxis) return String(label)
             const date = new Date(String(label))
             return Number.isNaN(date.getTime())
               ? String(label)

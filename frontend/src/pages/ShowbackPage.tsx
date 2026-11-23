@@ -127,6 +127,7 @@ export default function ShowbackPage() {
               color={CHART_COLORS.accent}
               yAxisLabel="CPU-s"
               formatValue={formatValue}
+              categoricalXAxis
             />
           </div>
         </>
