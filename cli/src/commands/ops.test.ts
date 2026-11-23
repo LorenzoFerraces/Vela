@@ -4,14 +4,16 @@ import { templatesCommand, scaleCommand, metricsCommand, auditCommand } from "./
 const originalFetch = globalThis.fetch
 const originalConfig = process.env.VELA_CONFIG
 const originalToken = process.env.VELA_TOKEN
-const calls: { method: string; url: string }[] = []
+const calls: { method: string; url: string; body?: string }[] = []
 beforeEach(() => {
   calls.length = 0
   process.env.VELA_CONFIG = ""
   process.env.VELA_TOKEN = "pat_test"
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input)
-    calls.push({ method: init?.method ?? "GET", url })
+    const entry: { method: string; url: string; body?: string } = { method: init?.method ?? "GET", url }
+    if (typeof init?.body === "string") entry.body = init.body
+    calls.push(entry)
     const body = url.includes("audit") ? JSON.stringify({ entries: [], total: 0 }) : JSON.stringify([])
     return new Response(body, { status: 200, headers: { "content-type": "application/json" } })
   }) as typeof fetch
@@ -34,6 +36,66 @@ test("metrics usage hits GET /api/metrics/usage", async () => {
   expect(await metricsCommand(["usage"])).toBe(0)
   expect(calls[0].url).toContain("/api/metrics/usage")
 })
+test("scale set merges metric and thresholds into the existing policy", async () => {
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input)
+    const entry: { method: string; url: string; body?: string } = { method: init?.method ?? "GET", url }
+    if (typeof init?.body === "string") entry.body = init.body
+    calls.push(entry)
+    if (init?.method === "GET") {
+      return new Response(JSON.stringify({
+        id: "p1", container_name: "web", enabled: false, min_replicas: 2, max_replicas: 9,
+        metric: "memory_percent", scale_up_threshold: 70, scale_down_threshold: 30,
+        cooldown_seconds: 120, scale_up_stabilization_seconds: 300, scale_down_stabilization_seconds: 240,
+        last_scaled_at: null, created_at: "now", updated_at: "now",
+      }), { status: 200, headers: { "content-type": "application/json" } })
+    }
+    return new Response(JSON.stringify({ container_name: "web" }), {
+      status: 200, headers: { "content-type": "application/json" },
+    })
+  }) as typeof fetch
+  expect(await scaleCommand(["set", "web", "cpu_percent", "80"])).toBe(0)
+  const put = calls.find((call) => call.method === "PUT")!
+  expect(JSON.parse(put.body!)).toEqual({
+    enabled: false, min_replicas: 2, max_replicas: 9, metric: "cpu_percent",
+    scale_up_threshold: 80, scale_down_threshold: 40, cooldown_seconds: 120,
+    scale_up_stabilization_seconds: 300, scale_down_stabilization_seconds: 240,
+  })
+})
+
+test("scale set creates a fresh policy when none exists", async () => {
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input)
+    const entry: { method: string; url: string; body?: string } = { method: init?.method ?? "GET", url }
+    if (typeof init?.body === "string") entry.body = init.body
+    calls.push(entry)
+    if (init?.method === "GET") {
+      return new Response(JSON.stringify({ detail: "No scaling policy found" }), {
+        status: 404, headers: { "content-type": "application/json" },
+      })
+    }
+    return new Response(JSON.stringify({ container_name: "web" }), {
+      status: 200, headers: { "content-type": "application/json" },
+    })
+  }) as typeof fetch
+  expect(await scaleCommand(["set", "web", "cpu_percent", "80"])).toBe(0)
+  const put = calls.find((call) => call.method === "PUT")!
+  expect(JSON.parse(put.body!)).toEqual({ metric: "cpu_percent", scale_up_threshold: 80, scale_down_threshold: 40 })
+})
+
+test("metrics summary resolves a container name to its id", async () => {
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const url = String(input)
+    const entry: { method: string; url: string } = { method: "GET", url }
+    calls.push(entry)
+    return new Response(JSON.stringify({ id: "ctr_1", name: "web", status: "running" }), {
+      status: 200, headers: { "content-type": "application/json" },
+    })
+  }) as typeof fetch
+  expect(await metricsCommand(["summary", "--container", "web", "--hours", "12"])).toBe(0)
+  expect(calls.some((call) => call.url.includes("/metrics/summary?container_id=ctr_1&hours=12"))).toBe(true)
+})
+
 test("audit defaults to the user-scoped log", async () => {
   expect(await auditCommand(["list"])).toBe(0)
   expect(calls[0].url).toContain("/api/audit/log")
